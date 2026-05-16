@@ -2,7 +2,7 @@ import {
   type AlembicFolderNames,
   type PartialAlembicFolderNames,
   resolveFolderNames,
-} from './folder-names.js';
+} from './shared/folder-names.js';
 
 export interface AlembicRuntimeOptions {
   projectRoot: string;

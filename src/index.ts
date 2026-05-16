@@ -11,3 +11,5 @@ export {
   type AlembicRuntimeOptions,
   createAlembicRuntime,
 } from './runtime.js';
+
+export * from './shared/index.js';
