@@ -66,6 +66,58 @@
       "types": "./dist/daemon/*.d.ts",
       "import": "./dist/daemon/*.js"
     },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "import": "./dist/core/index.js"
+    },
+    "./core/analysis": {
+      "types": "./dist/core/analysis/index.d.ts",
+      "import": "./dist/core/analysis/index.js"
+    },
+    "./core/analysis/*": {
+      "types": "./dist/core/analysis/*.d.ts",
+      "import": "./dist/core/analysis/*.js"
+    },
+    "./core/ast": {
+      "types": "./dist/core/ast/index.d.ts",
+      "import": "./dist/core/ast/index.js"
+    },
+    "./core/ast/*": {
+      "types": "./dist/core/ast/*.d.ts",
+      "import": "./dist/core/ast/*.js"
+    },
+    "./core/capability": {
+      "types": "./dist/core/capability/index.d.ts",
+      "import": "./dist/core/capability/index.js"
+    },
+    "./core/capability/*": {
+      "types": "./dist/core/capability/*.d.ts",
+      "import": "./dist/core/capability/*.js"
+    },
+    "./core/discovery": {
+      "types": "./dist/core/discovery/index.d.ts",
+      "import": "./dist/core/discovery/index.js"
+    },
+    "./core/discovery/parsers/*": {
+      "types": "./dist/core/discovery/parsers/*.d.ts",
+      "import": "./dist/core/discovery/parsers/*.js"
+    },
+    "./core/discovery/*": {
+      "types": "./dist/core/discovery/*.d.ts",
+      "import": "./dist/core/discovery/*.js"
+    },
+    "./core/enhancement": {
+      "types": "./dist/core/enhancement/index.d.ts",
+      "import": "./dist/core/enhancement/index.js"
+    },
+    "./core/enhancement/*": {
+      "types": "./dist/core/enhancement/*.d.ts",
+      "import": "./dist/core/enhancement/*.js"
+    },
+    "./core/*": {
+      "types": "./dist/core/*.d.ts",
+      "import": "./dist/core/*.js"
+    },
     "./infrastructure": {
       "types": "./dist/infrastructure/index.d.ts",
       "import": "./dist/infrastructure/index.js"
@@ -258,6 +310,22 @@
       "types": "./dist/types/*.d.ts",
       "import": "./dist/types/*.js"
     },
+    "./workflows/capabilities/planning/dimensions/*": {
+      "types": "./dist/workflows/capabilities/planning/dimensions/*.d.ts",
+      "import": "./dist/workflows/capabilities/planning/dimensions/*.js"
+    },
+    "./workflows/capabilities/presentation/*": {
+      "types": "./dist/workflows/capabilities/presentation/*.d.ts",
+      "import": "./dist/workflows/capabilities/presentation/*.js"
+    },
+    "./workflows/capabilities/project-intelligence": {
+      "types": "./dist/workflows/capabilities/project-intelligence/index.d.ts",
+      "import": "./dist/workflows/capabilities/project-intelligence/index.js"
+    },
+    "./workflows/capabilities/project-intelligence/*": {
+      "types": "./dist/workflows/capabilities/project-intelligence/*.d.ts",
+      "import": "./dist/workflows/capabilities/project-intelligence/*.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"
@@ -265,6 +333,7 @@
   },
   "files": [
     "dist",
+    "resources",
     "README.md"
   ],
   "scripts": {
@@ -286,14 +355,17 @@
   "dependencies": {
     "better-sqlite3": "^12.6.2",
     "drizzle-orm": "^0.45.1",
+    "js-yaml": "^4.1.1",
     "p-limit": "^7.3.0",
     "uuid": "^13.0.0",
+    "web-tree-sitter": "^0.26.8",
     "winston": "^3.19.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
     "@types/better-sqlite3": "^7.6.13",
+    "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.19.18",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
