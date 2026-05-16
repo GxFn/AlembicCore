@@ -58,6 +58,14 @@
       "types": "./dist/domain/*.d.ts",
       "import": "./dist/domain/*.js"
     },
+    "./daemon": {
+      "types": "./dist/daemon/index.d.ts",
+      "import": "./dist/daemon/index.js"
+    },
+    "./daemon/*": {
+      "types": "./dist/daemon/*.d.ts",
+      "import": "./dist/daemon/*.js"
+    },
     "./infrastructure": {
       "types": "./dist/infrastructure/index.d.ts",
       "import": "./dist/infrastructure/index.js"
@@ -90,6 +98,14 @@
       "types": "./dist/infrastructure/database/*.d.ts",
       "import": "./dist/infrastructure/database/*.js"
     },
+    "./infrastructure/event": {
+      "types": "./dist/infrastructure/event/index.d.ts",
+      "import": "./dist/infrastructure/event/index.js"
+    },
+    "./infrastructure/event/*": {
+      "types": "./dist/infrastructure/event/*.d.ts",
+      "import": "./dist/infrastructure/event/*.js"
+    },
     "./infrastructure/io": {
       "types": "./dist/infrastructure/io/index.d.ts",
       "import": "./dist/infrastructure/io/index.js"
@@ -105,6 +121,22 @@
     "./infrastructure/logging/*": {
       "types": "./dist/infrastructure/logging/*.d.ts",
       "import": "./dist/infrastructure/logging/*.js"
+    },
+    "./infrastructure/report": {
+      "types": "./dist/infrastructure/report/index.d.ts",
+      "import": "./dist/infrastructure/report/index.js"
+    },
+    "./infrastructure/report/*": {
+      "types": "./dist/infrastructure/report/*.d.ts",
+      "import": "./dist/infrastructure/report/*.js"
+    },
+    "./infrastructure/signal": {
+      "types": "./dist/infrastructure/signal/index.d.ts",
+      "import": "./dist/infrastructure/signal/index.js"
+    },
+    "./infrastructure/signal/*": {
+      "types": "./dist/infrastructure/signal/*.d.ts",
+      "import": "./dist/infrastructure/signal/*.js"
     },
     "./infrastructure/*": {
       "types": "./dist/infrastructure/*.d.ts",
