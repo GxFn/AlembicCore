@@ -18,12 +18,18 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 - Core 不应直接包含 Codex MCP schema、Codex Skill 文案、CLI 命令交互、Dashboard UI、IDE 文件投递、release 发布壳等宿主 adapter。
 - 如果某个能力是否应进 Core 不确定，先保留完整能力与真实调用链判断，不要为了边界好看先裁掉。
 
+## 被外层仓库接入时
+
+- 外层仓库统一通过 `vendor/AlembicCore` 子仓库接入本仓库，并通过 `@alembic/core: file:vendor/AlembicCore` 使用 npm 包入口。
+- 修改 Core 能力时，优先在 `/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore` 本仓库完成、提交，再由外层仓库更新子仓库指针。
+- 不要在外层仓库把 `vendor/AlembicCore` 当普通目录随手改散；如果确实需要在子仓库内修 Core，也要按独立 Core commit 处理。
+- Core 的 `dist/` 是构建产物，外层仓库可以在接入前构建它，但不得提交 `dist/`。
+
 ## 需要测试时
 
 - `npm run build:check`：TypeScript no-emit 检查。
 - `npm run build`：构建 `dist/`。
-- `npm run boundary:check`：检查 package root-only exports、根导出边界、`dist/` 未被 git 跟踪。
-- `npm run test:unit`：当前等价于 boundary check；不能把它当成完整业务单元测试。
+- 当前 Core 还没有完整业务单元测试配置；迁移阶段必须从 `Alembic` / `AlembicPlugin` 复制真实测试后再声称覆盖。
 - 需要验证真实迁移时，应使用来自 `Alembic` / `AlembicPlugin` 的真实调用数据或 fixtures，不要只造极小样例。
 
 ## 文件存放约定
@@ -46,25 +52,12 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 
 ```text
 src/
-├── analysis
-├── candidate
-├── config
-├── context
-├── discovery
-├── domain
-├── events
-├── guard
-├── jobs
-├── knowledge
-├── repository
-├── scan
-├── search
-├── shared
-├── storage
-├── vector
-├── workflows
-└── workspace
+├── folder-names.ts
+├── index.ts
+└── runtime.ts
 ```
+
+未来迁移出的 `shared/`、`domain/`、`repository/`、`workflows/` 等目录，只有在完整复制真实实现和测试后才加入。
 
 ## 迁移工作规则
 
