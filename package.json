@@ -18,6 +18,46 @@
       "types": "./dist/shared/*.d.ts",
       "import": "./dist/shared/*.js"
     },
+    "./domain": {
+      "types": "./dist/domain/index.d.ts",
+      "import": "./dist/domain/index.js"
+    },
+    "./domain/dimension": {
+      "types": "./dist/domain/dimension/index.d.ts",
+      "import": "./dist/domain/dimension/index.js"
+    },
+    "./domain/dimension/*": {
+      "types": "./dist/domain/dimension/*.d.ts",
+      "import": "./dist/domain/dimension/*.js"
+    },
+    "./domain/evolution/*": {
+      "types": "./dist/domain/evolution/*.d.ts",
+      "import": "./dist/domain/evolution/*.js"
+    },
+    "./domain/knowledge": {
+      "types": "./dist/domain/knowledge/index.d.ts",
+      "import": "./dist/domain/knowledge/index.js"
+    },
+    "./domain/knowledge/values": {
+      "types": "./dist/domain/knowledge/values/index.d.ts",
+      "import": "./dist/domain/knowledge/values/index.js"
+    },
+    "./domain/knowledge/values/*": {
+      "types": "./dist/domain/knowledge/values/*.d.ts",
+      "import": "./dist/domain/knowledge/values/*.js"
+    },
+    "./domain/knowledge/*": {
+      "types": "./dist/domain/knowledge/*.d.ts",
+      "import": "./dist/domain/knowledge/*.js"
+    },
+    "./domain/snippet/*": {
+      "types": "./dist/domain/snippet/*.d.ts",
+      "import": "./dist/domain/snippet/*.js"
+    },
+    "./domain/*": {
+      "types": "./dist/domain/*.d.ts",
+      "import": "./dist/domain/*.js"
+    },
     "./infrastructure": {
       "types": "./dist/infrastructure/index.d.ts",
       "import": "./dist/infrastructure/index.js"
@@ -41,6 +81,14 @@
     "./infrastructure/*": {
       "types": "./dist/infrastructure/*.d.ts",
       "import": "./dist/infrastructure/*.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    },
+    "./types/*": {
+      "types": "./dist/types/*.d.ts",
+      "import": "./dist/types/*.js"
     },
     "./*": {
       "types": "./dist/*.d.ts",
@@ -69,6 +117,7 @@
   "license": "MIT",
   "dependencies": {
     "p-limit": "^7.3.0",
+    "uuid": "^13.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

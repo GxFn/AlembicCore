@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
+import { resolveRecipeDimensionId } from '../src/domain/dimension/index.js';
+import { EvolutionPolicy } from '../src/domain/evolution/EvolutionPolicy.js';
+import {
+  getAgentAdapterFieldSpec,
+  getCursorDeliverySpec,
+} from '../src/domain/knowledge/FieldSpec.js';
 import {
   DEFAULT_FOLDER_NAMES,
   resolveFolderNames,
@@ -26,5 +32,12 @@ describe('Core package baseline', () => {
   it('exposes stage 2 infrastructure entrypoints', () => {
     expect(ConfigLoader).toBeDefined();
     expect(WriteZone).toBeDefined();
+  });
+
+  it('exposes stage 3 domain entrypoints and compatibility aliases', () => {
+    expect(resolveRecipeDimensionId({ dimensionId: 'architecture' })).toBe('architecture');
+    expect(EvolutionPolicy.assessRisk('update', 0.8)).toBe('low');
+    expect(getCursorDeliverySpec).toBe(getAgentAdapterFieldSpec);
+    expect(getCursorDeliverySpec()).toStrictEqual(getAgentAdapterFieldSpec());
   });
 });
