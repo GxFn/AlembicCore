@@ -18,6 +18,30 @@
       "types": "./dist/shared/*.d.ts",
       "import": "./dist/shared/*.js"
     },
+    "./infrastructure": {
+      "types": "./dist/infrastructure/index.d.ts",
+      "import": "./dist/infrastructure/index.js"
+    },
+    "./infrastructure/config": {
+      "types": "./dist/infrastructure/config/index.d.ts",
+      "import": "./dist/infrastructure/config/index.js"
+    },
+    "./infrastructure/config/*": {
+      "types": "./dist/infrastructure/config/*.d.ts",
+      "import": "./dist/infrastructure/config/*.js"
+    },
+    "./infrastructure/io": {
+      "types": "./dist/infrastructure/io/index.d.ts",
+      "import": "./dist/infrastructure/io/index.js"
+    },
+    "./infrastructure/io/*": {
+      "types": "./dist/infrastructure/io/*.d.ts",
+      "import": "./dist/infrastructure/io/*.js"
+    },
+    "./infrastructure/*": {
+      "types": "./dist/infrastructure/*.d.ts",
+      "import": "./dist/infrastructure/*.js"
+    },
     "./*": {
       "types": "./dist/*.d.ts",
       "import": "./dist/*.js"

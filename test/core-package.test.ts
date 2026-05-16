@@ -6,6 +6,8 @@ import {
   resolveFolderNames,
   validateFolderNameSegment,
 } from '../src/index.js';
+import { ConfigLoader } from '../src/infrastructure/config/index.js';
+import { WriteZone } from '../src/infrastructure/io/index.js';
 
 describe('Core package baseline', () => {
   it('exports the initial runtime contract', () => {
@@ -36,5 +38,10 @@ describe('Core package baseline', () => {
 
     expect(first.project.recipes).toBe('recipes-a');
     expect(second.project.recipes).toBe(DEFAULT_FOLDER_NAMES.project.recipes);
+  });
+
+  it('exposes stage 2 infrastructure entrypoints', () => {
+    expect(ConfigLoader).toBeDefined();
+    expect(WriteZone).toBeDefined();
   });
 });
