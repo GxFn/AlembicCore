@@ -5,3 +5,4 @@ export * from './io/index.js';
 export * from './logging/index.js';
 export * from './report/index.js';
 export * from './signal/index.js';
+export * from './vector/index.js';

@@ -190,6 +190,14 @@
       "types": "./dist/infrastructure/signal/*.d.ts",
       "import": "./dist/infrastructure/signal/*.js"
     },
+    "./infrastructure/vector": {
+      "types": "./dist/infrastructure/vector/index.d.ts",
+      "import": "./dist/infrastructure/vector/index.js"
+    },
+    "./infrastructure/vector/*": {
+      "types": "./dist/infrastructure/vector/*.d.ts",
+      "import": "./dist/infrastructure/vector/*.js"
+    },
     "./infrastructure/*": {
       "types": "./dist/infrastructure/*.d.ts",
       "import": "./dist/infrastructure/*.js"
@@ -297,6 +305,22 @@
     "./service/knowledge/*": {
       "types": "./dist/service/knowledge/*.d.ts",
       "import": "./dist/service/knowledge/*.js"
+    },
+    "./service/search": {
+      "types": "./dist/service/search/index.d.ts",
+      "import": "./dist/service/search/index.js"
+    },
+    "./service/search/*": {
+      "types": "./dist/service/search/*.d.ts",
+      "import": "./dist/service/search/*.js"
+    },
+    "./service/vector": {
+      "types": "./dist/service/vector/index.d.ts",
+      "import": "./dist/service/vector/index.js"
+    },
+    "./service/vector/*": {
+      "types": "./dist/service/vector/*.d.ts",
+      "import": "./dist/service/vector/*.js"
     },
     "./service/*": {
       "types": "./dist/service/*.d.ts",
