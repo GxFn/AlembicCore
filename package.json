@@ -390,9 +390,77 @@
       "types": "./dist/types/*.d.ts",
       "import": "./dist/types/*.js"
     },
+    "./workflows": {
+      "types": "./dist/workflows/index.d.ts",
+      "import": "./dist/workflows/index.js"
+    },
+    "./workflows/shared": {
+      "types": "./dist/workflows/shared/index.d.ts",
+      "import": "./dist/workflows/shared/index.js"
+    },
+    "./workflows/shared/*": {
+      "types": "./dist/workflows/shared/*.d.ts",
+      "import": "./dist/workflows/shared/*.js"
+    },
+    "./workflows/cold-start": {
+      "types": "./dist/workflows/cold-start/index.d.ts",
+      "import": "./dist/workflows/cold-start/index.js"
+    },
+    "./workflows/cold-start/*": {
+      "types": "./dist/workflows/cold-start/*.d.ts",
+      "import": "./dist/workflows/cold-start/*.js"
+    },
+    "./workflows/knowledge-rescan": {
+      "types": "./dist/workflows/knowledge-rescan/index.d.ts",
+      "import": "./dist/workflows/knowledge-rescan/index.js"
+    },
+    "./workflows/knowledge-rescan/*": {
+      "types": "./dist/workflows/knowledge-rescan/*.d.ts",
+      "import": "./dist/workflows/knowledge-rescan/*.js"
+    },
+    "./workflows/capabilities": {
+      "types": "./dist/workflows/capabilities/index.d.ts",
+      "import": "./dist/workflows/capabilities/index.js"
+    },
+    "./workflows/capabilities/*": {
+      "types": "./dist/workflows/capabilities/*.d.ts",
+      "import": "./dist/workflows/capabilities/*.js"
+    },
+    "./workflows/capabilities/execution/external": {
+      "types": "./dist/workflows/capabilities/execution/external/index.d.ts",
+      "import": "./dist/workflows/capabilities/execution/external/index.js"
+    },
+    "./workflows/capabilities/execution/external/*": {
+      "types": "./dist/workflows/capabilities/execution/external/*.d.ts",
+      "import": "./dist/workflows/capabilities/execution/external/*.js"
+    },
+    "./workflows/capabilities/persistence": {
+      "types": "./dist/workflows/capabilities/persistence/index.d.ts",
+      "import": "./dist/workflows/capabilities/persistence/index.js"
+    },
+    "./workflows/capabilities/persistence/*": {
+      "types": "./dist/workflows/capabilities/persistence/*.d.ts",
+      "import": "./dist/workflows/capabilities/persistence/*.js"
+    },
+    "./workflows/capabilities/planning/dimensions": {
+      "types": "./dist/workflows/capabilities/planning/dimensions/index.d.ts",
+      "import": "./dist/workflows/capabilities/planning/dimensions/index.js"
+    },
     "./workflows/capabilities/planning/dimensions/*": {
       "types": "./dist/workflows/capabilities/planning/dimensions/*.d.ts",
       "import": "./dist/workflows/capabilities/planning/dimensions/*.js"
+    },
+    "./workflows/capabilities/planning/knowledge": {
+      "types": "./dist/workflows/capabilities/planning/knowledge/index.d.ts",
+      "import": "./dist/workflows/capabilities/planning/knowledge/index.js"
+    },
+    "./workflows/capabilities/planning/knowledge/*": {
+      "types": "./dist/workflows/capabilities/planning/knowledge/*.d.ts",
+      "import": "./dist/workflows/capabilities/planning/knowledge/*.js"
+    },
+    "./workflows/capabilities/presentation": {
+      "types": "./dist/workflows/capabilities/presentation/index.d.ts",
+      "import": "./dist/workflows/capabilities/presentation/index.js"
     },
     "./workflows/capabilities/presentation/*": {
       "types": "./dist/workflows/capabilities/presentation/*.d.ts",
