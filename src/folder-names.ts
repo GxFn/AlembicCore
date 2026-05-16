@@ -37,51 +37,51 @@ export type PartialAlembicFolderNames = {
 
 export const DEFAULT_FOLDER_NAMES: AlembicFolderNames = {
   package: {
-    config: "config",
-    dashboard: "dashboard",
-    injectableSkills: "injectable-skills",
-    internalSkills: "skills",
-    resources: "resources",
-    templates: "templates",
+    config: 'config',
+    dashboard: 'dashboard',
+    injectableSkills: 'injectable-skills',
+    internalSkills: 'skills',
+    resources: 'resources',
+    templates: 'templates',
   },
   dev: {
-    chainRuns: "chain-runs",
-    docs: "docs-dev",
-    scratch: "scratch",
+    chainRuns: 'chain-runs',
+    docs: 'docs-dev',
+    scratch: 'scratch',
   },
   global: {
-    cache: "cache",
-    root: ".asd",
-    snippets: "snippets",
-    workspaces: "workspaces",
+    cache: 'cache',
+    root: '.asd',
+    snippets: 'snippets',
+    workspaces: 'workspaces',
   },
   project: {
-    cache: "cache",
-    candidates: "candidates",
-    context: "context",
-    knowledgeBase: "Alembic",
-    logs: "logs",
-    recipes: "recipes",
-    runtime: ".asd",
-    skills: "skills",
-    wiki: "wiki",
+    cache: 'cache',
+    candidates: 'candidates',
+    context: 'context',
+    knowledgeBase: 'Alembic',
+    logs: 'logs',
+    recipes: 'recipes',
+    runtime: '.asd',
+    skills: 'skills',
+    wiki: 'wiki',
   },
 };
 
 export function validateFolderNameSegment(name: unknown, label: string): string {
-  if (typeof name !== "string") {
+  if (typeof name !== 'string') {
     throw new Error(`${label} must be a string folder name`);
   }
   if (name.trim() !== name || name.length === 0) {
     throw new Error(`${label} must be a non-empty folder name without surrounding whitespace`);
   }
-  if (name === "." || name === "..") {
+  if (name === '.' || name === '..') {
     throw new Error(`${label} must not be a relative path marker`);
   }
-  if (name.includes("/") || name.includes("\\")) {
+  if (name.includes('/') || name.includes('\\')) {
     throw new Error(`${label} must be a single folder name, not a path`);
   }
-  if (name.startsWith("~")) {
+  if (name.startsWith('~')) {
     throw new Error(`${label} must be a folder name, not a home-relative path`);
   }
   return name;
