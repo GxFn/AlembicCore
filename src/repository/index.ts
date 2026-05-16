@@ -1,5 +1,6 @@
 export * from './base/index.js';
 export * from './bootstrap/index.js';
+export * from './code/index.js';
 export * from './evolution/index.js';
 export * from './guard/index.js';
 export * from './knowledge/index.js';

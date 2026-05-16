@@ -222,6 +222,14 @@
       "types": "./dist/repository/bootstrap/*.d.ts",
       "import": "./dist/repository/bootstrap/*.js"
     },
+    "./repository/code": {
+      "types": "./dist/repository/code/index.d.ts",
+      "import": "./dist/repository/code/index.js"
+    },
+    "./repository/code/*": {
+      "types": "./dist/repository/code/*.d.ts",
+      "import": "./dist/repository/code/*.js"
+    },
     "./repository/evolution": {
       "types": "./dist/repository/evolution/index.d.ts",
       "import": "./dist/repository/evolution/index.js"
@@ -298,6 +306,30 @@
       "types": "./dist/service/index.d.ts",
       "import": "./dist/service/index.js"
     },
+    "./service/bootstrap": {
+      "types": "./dist/service/bootstrap/index.d.ts",
+      "import": "./dist/service/bootstrap/index.js"
+    },
+    "./service/bootstrap/*": {
+      "types": "./dist/service/bootstrap/*.d.ts",
+      "import": "./dist/service/bootstrap/*.js"
+    },
+    "./service/candidate": {
+      "types": "./dist/service/candidate/index.d.ts",
+      "import": "./dist/service/candidate/index.js"
+    },
+    "./service/candidate/*": {
+      "types": "./dist/service/candidate/*.d.ts",
+      "import": "./dist/service/candidate/*.js"
+    },
+    "./service/evolution": {
+      "types": "./dist/service/evolution/index.d.ts",
+      "import": "./dist/service/evolution/index.js"
+    },
+    "./service/evolution/*": {
+      "types": "./dist/service/evolution/*.d.ts",
+      "import": "./dist/service/evolution/*.js"
+    },
     "./service/knowledge": {
       "types": "./dist/service/knowledge/index.d.ts",
       "import": "./dist/service/knowledge/index.js"
@@ -305,6 +337,30 @@
     "./service/knowledge/*": {
       "types": "./dist/service/knowledge/*.d.ts",
       "import": "./dist/service/knowledge/*.js"
+    },
+    "./service/panorama": {
+      "types": "./dist/service/panorama/index.d.ts",
+      "import": "./dist/service/panorama/index.js"
+    },
+    "./service/panorama/*": {
+      "types": "./dist/service/panorama/*.d.ts",
+      "import": "./dist/service/panorama/*.js"
+    },
+    "./service/quality": {
+      "types": "./dist/service/quality/index.d.ts",
+      "import": "./dist/service/quality/index.js"
+    },
+    "./service/quality/*": {
+      "types": "./dist/service/quality/*.d.ts",
+      "import": "./dist/service/quality/*.js"
+    },
+    "./service/recipe": {
+      "types": "./dist/service/recipe/index.d.ts",
+      "import": "./dist/service/recipe/index.js"
+    },
+    "./service/recipe/*": {
+      "types": "./dist/service/recipe/*.d.ts",
+      "import": "./dist/service/recipe/*.js"
     },
     "./service/search": {
       "types": "./dist/service/search/index.d.ts",
