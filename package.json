@@ -330,6 +330,14 @@
       "types": "./dist/service/evolution/*.d.ts",
       "import": "./dist/service/evolution/*.js"
     },
+    "./service/guard": {
+      "types": "./dist/service/guard/index.d.ts",
+      "import": "./dist/service/guard/index.js"
+    },
+    "./service/guard/*": {
+      "types": "./dist/service/guard/*.d.ts",
+      "import": "./dist/service/guard/*.js"
+    },
     "./service/knowledge": {
       "types": "./dist/service/knowledge/index.d.ts",
       "import": "./dist/service/knowledge/index.js"
