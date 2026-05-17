@@ -14,9 +14,12 @@
  * @module bootstrap/MissionBriefingBuilder
  */
 
-import { getDimensionSOP, PRE_SUBMIT_CHECKLIST } from '@alembic/core/domain/dimension/DimensionSop';
-import { getCursorDeliverySpec } from '@alembic/core/domain/knowledge/FieldSpec';
-import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '@alembic/core/domain/knowledge/StyleGuide';
+import {
+  getDimensionSOP,
+  PRE_SUBMIT_CHECKLIST,
+} from '../../../../domain/dimension/DimensionSop.js';
+import { getCursorDeliverySpec } from '../../../../domain/knowledge/FieldSpec.js';
+import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../../../../domain/knowledge/StyleGuide.js';
 import type {
   AstCategoryInfo,
   AstProtocolInfo,
@@ -29,7 +32,7 @@ import type {
   GuardViolation,
   IncrementalPlan,
   LocalPackageModule,
-} from '@alembic/core/types/project-snapshot';
+} from '../../../../types/project-snapshot.js';
 import { TierScheduler } from '../../planning/dimensions/TierScheduler.js';
 import { buildEvidenceStarters } from './EvidenceStarterBuilder.js';
 import {

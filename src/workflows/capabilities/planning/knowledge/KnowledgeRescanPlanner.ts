@@ -1,8 +1,8 @@
 import path from 'node:path';
-import { EvolutionPolicy } from '@alembic/core/domain/evolution/EvolutionPolicy';
-import type { RecipeSourceRefRepositoryImpl } from '@alembic/core/repository/sourceref/RecipeSourceRefRepository';
-import type { DimensionDef } from '@alembic/core/types/project-snapshot';
+import { EvolutionPolicy } from '../../../../domain/evolution/EvolutionPolicy.js';
+import type { RecipeSourceRefRepositoryImpl } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
 import type { EvolutionCandidatePlan } from '../../../../service/evolution/RecipeImpactPlanner.js';
+import type { DimensionDef } from '../../../../types/project-snapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import { buildEvolutionPrescreen, type EvolutionPrescreen } from './EvolutionPrescreen.js';
 import {

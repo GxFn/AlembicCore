@@ -12,8 +12,8 @@
  *   ComplianceReport { qualityGate, summary, topViolations, fileHotspots, ruleHealth, trend }
  */
 
-import Logger from '@alembic/core/infrastructure/logging/Logger';
-import { COMPLIANCE_SCORING, QUALITY_GATE } from '@alembic/core/shared/constants';
+import Logger from '../../infrastructure/logging/Logger.js';
+import { COMPLIANCE_SCORING, QUALITY_GATE } from '../../shared/constants.js';
 import { collectSourceFilesWithContent } from './SourceFileCollector.js';
 
 interface ViolationSummary {
@@ -171,7 +171,7 @@ export class ComplianceReporter {
     ruleLearner: RuleLearnerLike | null,
     exclusionManager: ExclusionManagerLike | null,
     qualityGateConfig: QualityGateThresholds = {},
-    signalBus?: import('@alembic/core/infrastructure/signal/SignalBus').SignalBus | null
+    signalBus?: import('../../infrastructure/signal/SignalBus.js').SignalBus | null
   ) {
     this.engine = guardCheckEngine;
     this.violationsStore = violationsStore;
@@ -207,7 +207,7 @@ export class ComplianceReporter {
       return;
     }
     try {
-      const { initEnhancementRegistry } = await import('@alembic/core/core/enhancement');
+      const { initEnhancementRegistry } = await import('../../core/enhancement/index.js');
       const enhReg = await initEnhancementRegistry();
       // 仅注入无框架条件的通用 Pack（有框架条件的由 Bootstrap resolve() 精确注入）
       const allPacks = enhReg.all().filter((pack) => {
@@ -243,7 +243,7 @@ export class ComplianceReporter {
    */
   async #ensureAstPlugins(): Promise<void> {
     try {
-      const { loadPlugins } = await import('@alembic/core/core/ast');
+      const { loadPlugins } = await import('../../core/ast/index.js');
       await loadPlugins();
     } catch {
       /* AST not available — graceful degradation */

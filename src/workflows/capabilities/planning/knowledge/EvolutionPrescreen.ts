@@ -1,7 +1,7 @@
 import {
   recipeBelongsToDimension,
   resolveRecipeDimensionId,
-} from '@alembic/core/domain/dimension/RecipeDimension';
+} from '../../../../domain/dimension/RecipeDimension.js';
 import type { RelevanceAuditResult, RelevanceAuditSummary } from './KnowledgeRescanPlanner.js';
 
 export interface PrescreenNeedsVerification {

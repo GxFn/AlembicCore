@@ -1,4 +1,4 @@
-import { getTestModeConfig } from '@alembic/core/shared/test-mode';
+import { getTestModeConfig } from '../../../../shared/test-mode.js';
 
 export type BootstrapTerminalToolset =
   | 'baseline'

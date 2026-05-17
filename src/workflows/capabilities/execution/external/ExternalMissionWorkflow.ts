@@ -3,9 +3,9 @@ import type {
   DimensionDef,
   MissionBriefingResult,
   ProjectSnapshot,
-} from '@alembic/core/types/project-snapshot';
-import { buildLanguageExtension } from '@alembic/core/workflows/capabilities/presentation/LanguageExtensionBuilder';
+} from '../../../../types/project-snapshot.js';
 import { toSessionCache } from '../../../../types/snapshot-views.js';
+import { buildLanguageExtension } from '../../presentation/LanguageExtensionBuilder.js';
 import { buildMissionBriefing } from './MissionBriefingBuilder.js';
 import type { BriefingProfile, RescanBriefingInput } from './MissionBriefingSupport.js';
 import { getOrCreateSessionManager } from './SessionSupport.js';

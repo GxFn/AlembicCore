@@ -7,12 +7,12 @@
  *   - buildTierReflection(): Tier 级反思聚合（规则化，不需要 AI）
  */
 
-import { DIMENSION_REGISTRY, getDimension } from '@alembic/core/domain/dimension';
 import {
   getDimensionFocusKeywords,
   getDimensionSOP,
-} from '@alembic/core/domain/dimension/DimensionSop';
-import { baseDimensions } from '@alembic/core/workflows/capabilities/planning/dimensions/BaseDimensions';
+} from '../../../../domain/dimension/DimensionSop.js';
+import { DIMENSION_REGISTRY, getDimension } from '../../../../domain/dimension/index.js';
+import { baseDimensions } from './BaseDimensions.js';
 
 // ──────────────────────────────────────────────────────────────────
 // v3.0 维度配置 — 从统一注册表自动生成

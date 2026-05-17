@@ -7,6 +7,8 @@
  * @module types/snapshot-views
  */
 
+import type { EvolutionPrescreen } from '../workflows/capabilities/planning/knowledge/EvolutionPrescreen.js';
+import type { KnowledgeRescanExecutionDecision } from '../workflows/capabilities/planning/knowledge/KnowledgeRescanPlanBuilder.js';
 import type {
   AstSummary,
   BootstrapSessionShape,
@@ -19,9 +21,7 @@ import type {
   ProjectSnapshot,
   SnapshotFile,
   SnapshotTarget,
-} from '@alembic/core/types/project-snapshot';
-import type { EvolutionPrescreen } from '../workflows/capabilities/planning/knowledge/EvolutionPrescreen.js';
-import type { KnowledgeRescanExecutionDecision } from '../workflows/capabilities/planning/knowledge/KnowledgeRescanPlanBuilder.js';
+} from './project-snapshot.js';
 
 // ─── H4: SessionCacheShape ───────────────────────────────────
 

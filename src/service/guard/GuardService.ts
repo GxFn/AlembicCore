@@ -1,7 +1,7 @@
-import Logger from '@alembic/core/infrastructure/logging/Logger';
-import { ConflictError, NotFoundError, ValidationError } from '@alembic/core/shared/errors/index';
-import { unixNow } from '@alembic/core/shared/utils/common';
 import { v4 as uuidv4 } from 'uuid';
+import Logger from '../../infrastructure/logging/Logger.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
+import { unixNow } from '../../shared/utils/common.js';
 
 interface KnowledgeRepositoryLike {
   create(entry: unknown): Promise<{ id: string; title?: string }>;
@@ -103,7 +103,7 @@ export class GuardService {
     try {
       this._validateCreateInput(data);
 
-      const { KnowledgeEntry } = await import('@alembic/core/domain/knowledge/KnowledgeEntry');
+      const { KnowledgeEntry } = await import('../../domain/knowledge/KnowledgeEntry.js');
       const entry = KnowledgeEntry.fromJSON({
         id: uuidv4(),
         title: data.name,

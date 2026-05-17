@@ -5,14 +5,14 @@
  * 支持: 正则模式匹配 + AST 语义规则 + code-level 检查 + 多维度审计
  */
 
-import * as AstAnalyzerModule from '@alembic/core/core/AstAnalyzer';
-import { GUARD_LIFECYCLES } from '@alembic/core/domain/knowledge/Lifecycle';
-import Logger from '@alembic/core/infrastructure/logging/Logger';
-import type { SignalBus } from '@alembic/core/infrastructure/signal/SignalBus';
-import type { KnowledgeRepositoryImpl } from '@alembic/core/repository/knowledge/KnowledgeRepository.impl';
-import type { GuardKnowledgeRepo } from '@alembic/core/repository/search/SearchRepoAdapter';
-import { RawDbGuardAdapter, unwrapRawDb } from '@alembic/core/repository/search/SearchRepoAdapter';
-import { LanguageService } from '@alembic/core/shared/LanguageService';
+import * as AstAnalyzerModule from '../../core/AstAnalyzer.js';
+import { GUARD_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
+import Logger from '../../infrastructure/logging/Logger.js';
+import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
+import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type { GuardKnowledgeRepo } from '../../repository/search/SearchRepoAdapter.js';
+import { RawDbGuardAdapter, unwrapRawDb } from '../../repository/search/SearchRepoAdapter.js';
+import { LanguageService } from '../../shared/LanguageService.js';
 import { runCodeLevelChecks } from './GuardCodeChecks.js';
 import { runCrossFileChecks } from './GuardCrossFileChecks.js';
 import {

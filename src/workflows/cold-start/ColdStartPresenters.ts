@@ -1,4 +1,4 @@
-import { getInternalAgentRequiredFields } from '@alembic/core/domain/knowledge/FieldSpec';
+import { getInternalAgentRequiredFields } from '../../domain/knowledge/FieldSpec.js';
 import type {
   DimensionDef,
   GuardAuditFileEntry,
@@ -6,11 +6,11 @@ import type {
   MissionBriefingResult,
   PhaseReport,
   ProjectSnapshot,
-} from '@alembic/core/types/project-snapshot';
-import { buildLanguageExtension as buildProjectLanguageExtension } from '@alembic/core/workflows/capabilities/presentation/LanguageExtensionBuilder';
-import { inferTargetRole } from '@alembic/core/workflows/capabilities/presentation/TargetClassifier';
+} from '../../types/project-snapshot.js';
 import { buildInternalNextSteps } from '../capabilities/execution/external/MissionBriefingSupport.js';
+import { buildLanguageExtension as buildProjectLanguageExtension } from '../capabilities/presentation/LanguageExtensionBuilder.js';
 import { summarizePanorama as summarizeProjectPanorama } from '../capabilities/presentation/PanoramaSummaryPresenter.js';
+import { inferTargetRole } from '../capabilities/presentation/TargetClassifier.js';
 import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';

@@ -1,8 +1,4 @@
-import type {
-  DimensionDef,
-  GuardAudit,
-  ProjectSnapshot,
-} from '@alembic/core/types/project-snapshot';
+import type { DimensionDef, GuardAudit, ProjectSnapshot } from '../../types/project-snapshot.js';
 import type {
   ExternalRescanEvidencePlan,
   InternalRescanGapPlan,

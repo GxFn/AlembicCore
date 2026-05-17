@@ -67,7 +67,7 @@ export function buildWorkflowReportArtifactManifest(report: WorkflowReport) {
 }
 
 export async function writeWorkflowReportHistoryWithWriteZone(
-  writeZone: import('@alembic/core/infrastructure/io').WriteZone,
+  writeZone: import('../../../infrastructure/io/index.js').WriteZone,
   report: WorkflowReport
 ) {
   const sessionId = getReportSessionId(report);

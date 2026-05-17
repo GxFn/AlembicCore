@@ -7,9 +7,9 @@
  *   3. 集成到 guardAuditFiles MCP handler 和 GuardHandler (FileWatcher)
  */
 
-import Logger from '@alembic/core/infrastructure/logging/Logger';
+import Logger from '../../infrastructure/logging/Logger.js';
 
-import type { SignalBus } from '@alembic/core/infrastructure/signal/SignalBus';
+import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 
 interface ViolationsStoreLike {
   getRunsByFile(filePath: string): { violations: { ruleId: string; fixSuggestion?: string }[] }[];

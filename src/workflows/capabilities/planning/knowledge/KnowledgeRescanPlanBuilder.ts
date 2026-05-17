@@ -1,5 +1,5 @@
-import { recipeBelongsToDimension } from '@alembic/core/domain/dimension/RecipeDimension';
-import type { DimensionDef } from '@alembic/core/types/project-snapshot';
+import { recipeBelongsToDimension } from '../../../../domain/dimension/RecipeDimension.js';
+import type { DimensionDef } from '../../../../types/project-snapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import type { RelevanceAuditResult, RelevanceAuditSummary } from './KnowledgeRescanPlanner.js';
 

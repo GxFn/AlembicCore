@@ -6,12 +6,12 @@
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { WriteZone } from '@alembic/core/infrastructure/io';
-import Logger from '@alembic/core/infrastructure/logging/Logger';
-import type { SignalBus } from '@alembic/core/infrastructure/signal/SignalBus';
-import { RULE_LEARNER } from '@alembic/core/shared/constants';
-import pathGuard from '@alembic/core/shared/PathGuard';
-import { DEFAULT_KNOWLEDGE_BASE_DIR } from '@alembic/core/shared/ProjectMarkers';
+import type { WriteZone } from '../../infrastructure/io/index.js';
+import Logger from '../../infrastructure/logging/Logger.js';
+import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
+import { RULE_LEARNER } from '../../shared/constants.js';
+import pathGuard from '../../shared/PathGuard.js';
+import { DEFAULT_KNOWLEDGE_BASE_DIR } from '../../shared/ProjectMarkers.js';
 
 interface RuleStat {
   triggers: number;
