@@ -1,7 +1,7 @@
 /**
  * Guard immune system integration
  *
- * 覆盖 Guard 免疫闭环中的 uncertainty、反馈确认、反向验证、覆盖率、学习器和合规报告。
+ * 覆盖 Guard 免疫闭环中的 uncertainty、反馈确认、覆盖率、学习器和合规报告。
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -11,14 +11,10 @@ import { ComplianceReporter } from '../src/service/guard/ComplianceReporter.js';
 import { CoverageAnalyzer } from '../src/service/guard/CoverageAnalyzer.js';
 import { GuardCheckEngine } from '../src/service/guard/GuardCheckEngine.js';
 import { GuardFeedbackLoop } from '../src/service/guard/GuardFeedbackLoop.js';
-import { ReverseGuard } from '../src/service/guard/ReverseGuard.js';
 import { RuleLearner } from '../src/service/guard/RuleLearner.js';
 import { UncertaintyCollector } from '../src/service/guard/UncertaintyCollector.js';
 
 type GuardEngineDb = ConstructorParameters<typeof GuardCheckEngine>[0];
-type ReverseGuardKnowledgeRepo = ConstructorParameters<typeof ReverseGuard>[0];
-type ReverseGuardEntityRepo = ConstructorParameters<typeof ReverseGuard>[1];
-type ReverseGuardSourceRefRepo = ConstructorParameters<typeof ReverseGuard>[2];
 type CoverageKnowledgeRepo = ConstructorParameters<typeof CoverageAnalyzer>[0];
 type CoverageViolationRepo = ConstructorParameters<typeof CoverageAnalyzer>[1];
 type RuleLearnerSignalBus = NonNullable<
@@ -87,44 +83,6 @@ describe('Guard immune system integration', () => {
     expect(fixed).toHaveLength(1);
     expect(fixed[0]?.fixRecipeId).toBe('safe-eval-alternative');
     expect(confirmations).toEqual([{ action: 'insert', recipeId: 'safe-eval-alternative' }]);
-  });
-
-  it('runs ReverseGuard end-to-end over active rule recipes', () => {
-    const knowledgeRepo = {
-      findActiveRulesWithContentSync() {
-        return [
-          {
-            id: 'r-old',
-            title: 'Old API Rule',
-            coreCode: 'BDLegacyManager.fetchData()',
-            guardPattern: 'BDLegacyManager',
-            stats: null,
-          },
-        ];
-      },
-      getGuardHitsSync() {
-        return 0;
-      },
-    } as unknown as ReverseGuardKnowledgeRepo;
-    const entityRepo = {
-      existsByName() {
-        return false;
-      },
-    } as unknown as ReverseGuardEntityRepo;
-    const sourceRefRepo = {
-      findByRecipeId() {
-        return [];
-      },
-    } as unknown as ReverseGuardSourceRefRepo;
-
-    const reverseGuard = new ReverseGuard(knowledgeRepo, entityRepo, sourceRefRepo);
-    const results = reverseGuard.auditAllRules([
-      { path: 'a.swift', content: 'let x = BDNewManager.fetchData()' },
-    ]);
-
-    expect(results).toHaveLength(1);
-    expect(results[0]?.recipeId).toBe('r-old');
-    expect(results[0]?.recommendation).toBe('decay');
   });
 
   it('produces coverage matrix from module files and rule languages', () => {

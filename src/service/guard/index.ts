@@ -7,7 +7,6 @@ export * from './GuardCrossFileChecks.js';
 export * from './GuardFeedbackLoop.js';
 export * from './GuardPatternUtils.js';
 export * from './GuardService.js';
-export * from './ReverseGuard.js';
 export * from './RuleLearner.js';
 export * from './SourceFileCollector.js';
 export * from './UncertaintyCollector.js';
