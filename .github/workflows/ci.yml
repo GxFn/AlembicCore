@@ -47,25 +47,7 @@ jobs:
         run: npm run build
 
       - name: Smoke test package entrypoints
-        run: |
-          node --input-type=module <<'EOF'
-          const core = await import('./dist/index.js');
-          const requiredRootExports = [
-            'DEFAULT_FOLDER_NAMES',
-            'KnowledgeRepositoryImpl',
-            'ProjectIntelligenceCapability',
-            'createExternalWorkflowSession',
-          ];
-
-          for (const key of requiredRootExports) {
-            if (!(key in core)) {
-              throw new Error(`Missing root export: ${key}`);
-            }
-          }
-
-          await import('./dist/shared/index.js');
-          await import('./dist/core/ast/index.js');
-          EOF
+        run: npm run smoke:public-api
 
       - name: Verify package contents
         run: npm pack --dry-run

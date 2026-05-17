@@ -10,6 +10,42 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./logging": {
+      "types": "./dist/logging.d.ts",
+      "import": "./dist/logging.js"
+    },
+    "./dimensions": {
+      "types": "./dist/dimensions.d.ts",
+      "import": "./dist/dimensions.js"
+    },
+    "./knowledge": {
+      "types": "./dist/knowledge.d.ts",
+      "import": "./dist/knowledge.js"
+    },
+    "./database": {
+      "types": "./dist/database.d.ts",
+      "import": "./dist/database.js"
+    },
+    "./repositories": {
+      "types": "./dist/repositories.d.ts",
+      "import": "./dist/repositories.js"
+    },
+    "./workspace": {
+      "types": "./dist/workspace.d.ts",
+      "import": "./dist/workspace.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.js"
+    },
+    "./io": {
+      "types": "./dist/io.d.ts",
+      "import": "./dist/io.js"
+    },
+    "./events": {
+      "types": "./dist/events.d.ts",
+      "import": "./dist/events.js"
+    },
     "./shared": {
       "types": "./dist/shared/index.d.ts",
       "import": "./dist/shared/index.js"
@@ -499,9 +535,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "biome check src/ test/ *.ts",
-    "lint:fix": "biome check --fix src/ test/ *.ts",
-    "format": "biome format --write src/ test/ *.ts",
+    "smoke:public-api": "node scripts/smoke-public-api.mjs",
+    "lint": "biome check src/ test/ scripts/ *.ts",
+    "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",
+    "format": "biome format --write src/ test/ scripts/ *.ts",
     "check": "npm run build:check && npm run test && npm run lint"
   },
   "engines": {
