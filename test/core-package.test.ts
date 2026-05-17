@@ -8,8 +8,11 @@ import {
 } from '../src/domain/knowledge/FieldSpec.js';
 import {
   DEFAULT_FOLDER_NAMES,
+  KnowledgeRepositoryImpl,
+  ProjectIntelligenceCapability,
   resolveFolderNames,
   validateFolderNameSegment,
+  createExternalWorkflowSession,
 } from '../src/index.js';
 import { ConfigLoader } from '../src/infrastructure/config/index.js';
 import { WriteZone } from '../src/infrastructure/io/index.js';
@@ -39,5 +42,11 @@ describe('Core package baseline', () => {
     expect(EvolutionPolicy.assessRisk('update', 0.8)).toBe('low');
     expect(getCursorDeliverySpec).toBe(getAgentAdapterFieldSpec);
     expect(getCursorDeliverySpec()).toStrictEqual(getAgentAdapterFieldSpec());
+  });
+
+  it('exposes stage 14 root package entrypoints for outer repository convergence', () => {
+    expect(KnowledgeRepositoryImpl).toBeDefined();
+    expect(ProjectIntelligenceCapability).toBeDefined();
+    expect(createExternalWorkflowSession).toBeDefined();
   });
 });
