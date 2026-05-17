@@ -4,15 +4,15 @@
  * 所有表定义从 active migrations 忠实翻译。
  * DB 列名与 migration 保持一致；实体映射由 repository 层处理。
  *
- * 表清单 (15):
+ * 表清单 (14 个业务表 + schema_migrations):
  *   001: knowledge_entries, knowledge_edges, guard_violations, audit_logs,
  *        sessions, token_usage, semantic_memories, bootstrap_snapshots,
  *        bootstrap_dim_files, code_entities
- *   003: remote_commands（Alembic 远程桥历史表，Core 保留迁移兼容）
  *   004: evolution_proposals (+ knowledge_entries.staging_deadline)
  *   005: recipe_source_refs
+ *   006: lifecycle_transition_events
+ *   008: recipe_warnings
  *   009: knowledge_entries.dimensionId
- *   内联: remote_state
  *   内部: schema_migrations
  *
  * 注: Task 系统为纯内存 + JSONL 信号架构，不使用数据库表。
@@ -364,43 +364,7 @@ export const codeEntities = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 11. remote_commands — 远程指令队列 (migration 003)
-// ═══════════════════════════════════════════════════════════════
-
-export const remoteCommands = sqliteTable(
-  'remote_commands',
-  {
-    id: text('id').primaryKey(),
-    source: text('source').notNull().default('lark'),
-    chatId: text('chat_id'),
-    messageId: text('message_id'),
-    userId: text('user_id'),
-    userName: text('user_name'),
-    command: text('command').notNull(),
-    status: text('status').notNull().default('pending'),
-    result: text('result'),
-    createdAt: integer('created_at').notNull(),
-    claimedAt: integer('claimed_at'),
-    completedAt: integer('completed_at'),
-  },
-  (table) => [
-    index('idx_remote_commands_status').on(table.status),
-    index('idx_remote_commands_created').on(table.createdAt),
-  ]
-);
-
-// ═══════════════════════════════════════════════════════════════
-// 15. remote_state — 远程状态 (路由内联创建)
-// ═══════════════════════════════════════════════════════════════
-
-export const remoteState = sqliteTable('remote_state', {
-  key: text('key').primaryKey(),
-  value: text('value'),
-  updatedAt: integer('updated_at'),
-});
-
-// ═══════════════════════════════════════════════════════════════
-// 16. evolution_proposals — 知识进化提案 (M2 Recipe 治理)
+// 11. evolution_proposals — 知识进化提案 (M2 Recipe 治理)
 // ═══════════════════════════════════════════════════════════════
 
 export const evolutionProposals = sqliteTable(
@@ -430,7 +394,7 @@ export const evolutionProposals = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 17. recipe_source_refs — Recipe 来源引用桥接表 (可信度证据链)
+// 12. recipe_source_refs — Recipe 来源引用桥接表 (可信度证据链)
 // ═══════════════════════════════════════════════════════════════
 
 export const recipeSourceRefs = sqliteTable(
@@ -446,7 +410,7 @@ export const recipeSourceRefs = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 18. lifecycle_transition_events — Recipe 生命周期转移事件 (migration 006)
+// 13. lifecycle_transition_events — Recipe 生命周期转移事件 (migration 006)
 // ═══════════════════════════════════════════════════════════════
 
 export const lifecycleTransitionEvents = sqliteTable(
@@ -470,7 +434,7 @@ export const lifecycleTransitionEvents = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 19. recipe_warnings — 知识新陈代谢警告持久化 (migration 008)
+// 14. recipe_warnings — 知识新陈代谢警告持久化 (migration 008)
 // ═══════════════════════════════════════════════════════════════
 
 export const recipeWarnings = sqliteTable(

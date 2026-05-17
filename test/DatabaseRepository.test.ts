@@ -35,7 +35,7 @@ describe('DatabaseConnection and repository migration integration', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('runs all stage 4 migrations against a real SQLite file', () => {
+  it('runs all active migrations against a real SQLite file', () => {
     const db = connection.getDb();
     const applied = db
       .prepare('SELECT version FROM schema_migrations ORDER BY version')
@@ -44,7 +44,6 @@ describe('DatabaseConnection and repository migration integration', () => {
 
     expect(applied).toEqual([
       '001_initial_schema',
-      '003_add_remote_commands',
       '004_evolution_proposals',
       '005_recipe_source_refs',
       '006_lifecycle_transition_events',
@@ -61,7 +60,8 @@ describe('DatabaseConnection and repository migration integration', () => {
     expect(tables).toContain('knowledge_entries');
     expect(tables).toContain('recipe_source_refs');
     expect(tables).toContain('evolution_proposals');
-    expect(tables).toContain('remote_commands');
+    expect(tables).not.toContain('remote_commands');
+    expect(tables).not.toContain('remote_state');
   });
 
   it('persists and reads a KnowledgeEntry through KnowledgeRepositoryImpl', async () => {
