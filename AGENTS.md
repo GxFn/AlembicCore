@@ -10,7 +10,12 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 
 不要在旧工作区或旧克隆路径下工作；当前统一以本 workspace 内的 Alembic 系列仓库为准。
 
-Core 相关的迁移计划、阶段验收、公开 API 边界、外层接入和删除任务文档，后续统一保存到 workspace 根目录的 `docs/AlembicCore/`。不要再把新的 AlembicCore 长期协作文档散落到 workspace `docs/` 根层级或各外层仓库内。
+## 文档存储提示
+
+- 新建长期迁移、计划、验收、扫描、边界和跨仓库任务文档时，统一写到 workspace 根目录的 `docs/AlembicCore/`，不要散落到各子仓库或 workspace `docs/` 根层级。
+- AlembicCore 迁移手册、公开 API 边界、阶段验收、外层接入和删除任务都属于本仓库长期协作文档，统一写到 `docs/AlembicCore/`。
+- 仓库内 `docs/` 只放随源码长期维护的产品文档、发布文档或用户文档；不要放跨仓库协作临时文档。
+- 长期文档不得写入用户本机绝对路径、API key、token 或其它私密信息。
 
 ## 仓库定位
 
@@ -55,7 +60,7 @@ Core 相关的迁移计划、阶段验收、公开 API 边界、外层接入和�
 - 测试：`test/`。
 - 正式脚本：`scripts/`。
 - 构建产物：`dist/`，必须保持 ignored，不提交。
-- workspace 级 Core 迁移和协作文档保存在 workspace 根目录的 `docs/AlembicCore/`。
+- workspace 级长期协作文档按上方 `文档存储提示` 归档。
 
 当前主要源码分层：
 
