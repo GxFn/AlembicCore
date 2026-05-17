@@ -12,7 +12,6 @@ import {
 
 /* ── Mock Repo ── */
 
-// biome-ignore lint/suspicious/noExplicitAny: test mock
 function mockRepo(rows: Record<string, unknown>[] = []): any {
   return {
     findAllByLifecyclesAndCategory: async (_lifecycles: string[], category: string) =>

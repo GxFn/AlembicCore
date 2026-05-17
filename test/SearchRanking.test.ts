@@ -453,10 +453,10 @@ describe('BM25Scorer incremental', () => {
 
   test('removeDocument updates docFreq correctly', () => {
     // 'vue' should have df=1
-    expect(scorer.docFreq['vue']).toBe(1);
+    expect(scorer.docFreq.vue).toBe(1);
     scorer.removeDocument('d2');
     // 'vue' df should drop to 0 and be deleted
-    expect(scorer.docFreq['vue']).toBeUndefined();
+    expect(scorer.docFreq.vue).toBeUndefined();
   });
 
   test('search correctly skips tombstones', () => {

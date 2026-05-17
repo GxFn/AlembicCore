@@ -9,10 +9,10 @@
  * - Phase 2.2+: ModuleDiscoverer configLayer / readConfigLayers
  * - Phase 2.2+: PanoramaAggregator 传递 configLayers
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   detectConflict,
   loadPreference,
@@ -266,7 +266,6 @@ describe('LayerInferrer — config-based inference', () => {
 
     // 覆盖率仅 1/6 < 50%，应该用拓扑推断
     // 拓扑推断不会使用配置层名，而是用启发式命名
-    const hasConfigName = result.levels.some((l) => l.name === 'Vendors');
     // 拓扑法不一定会产生叫 'Vendors' 的层（取决于启发式匹配）
     // 关键是应该有合理的层级结构
     expect(result.levels.length).toBeGreaterThanOrEqual(2);

@@ -125,6 +125,7 @@ interface AstPatternRecord {
   [key: string]: unknown;
 }
 
+// biome-ignore lint/correctness/noUnusedVariables: 完整复制迁移保留调用点记录结构，后续阶段可能恢复调用链分析。
 interface AstCallSiteRecord {
   [key: string]: unknown;
 }

@@ -1229,7 +1229,6 @@ export async function runAllPhases(
 ) {
   const warnings: string[] = [];
   const materialization = resolveProjectAnalysisMaterialization(options.materialize);
-  const lp = options.logPrefix || 'Bootstrap';
   const report: PhaseReport | null = options.generateReport
     ? { phases: {}, startTime: Date.now() }
     : null;

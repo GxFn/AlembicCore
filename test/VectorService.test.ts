@@ -1,6 +1,6 @@
 /** VectorService — 统一向量服务层 单元测试 */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ── Mock 工厂 ──
 

@@ -176,6 +176,7 @@ export class GoDiscoverer extends ProjectDiscoverer {
   }
 
   /** 发现 Go 标准约定目录: pkg/, internal/, api/ */
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: 完整复制迁移保留 Go 约定目录发现扩展点。
   #discoverConventionDirs(projectRoot: string) {
     const dirs: DiscoveredTarget[] = [];
     const conventionNames = [

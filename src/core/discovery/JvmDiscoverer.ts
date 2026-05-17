@@ -32,6 +32,7 @@ const EXCLUDE_DIRS = new Set([
 ]);
 
 export class JvmDiscoverer extends ProjectDiscoverer {
+  // biome-ignore lint/correctness/noUnusedPrivateClassMembers: 完整复制迁移保留 JVM discoverer 的项目根状态槽位。
   #projectRoot: string | null = null;
   #targets: DiscoveredTarget[] = [];
   #depGraph: DependencyGraph = { nodes: [], edges: [] };

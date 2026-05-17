@@ -12,7 +12,7 @@
  * @module service/vector/SyncCoordinator
  */
 
-import { and, ne } from 'drizzle-orm';
+import { ne } from 'drizzle-orm';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { knowledgeEntries } from '../../infrastructure/database/drizzle/schema.js';
 import type { EventBus } from '../../infrastructure/event/EventBus.js';

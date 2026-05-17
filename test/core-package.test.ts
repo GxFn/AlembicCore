@@ -7,12 +7,12 @@ import {
   getCursorDeliverySpec,
 } from '../src/domain/knowledge/FieldSpec.js';
 import {
+  createExternalWorkflowSession,
   DEFAULT_FOLDER_NAMES,
   KnowledgeRepositoryImpl,
   ProjectIntelligenceCapability,
   resolveFolderNames,
   validateFolderNameSegment,
-  createExternalWorkflowSession,
 } from '../src/index.js';
 import { ConfigLoader } from '../src/infrastructure/config/index.js';
 import { WriteZone } from '../src/infrastructure/io/index.js';

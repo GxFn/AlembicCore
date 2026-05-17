@@ -13,7 +13,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
 import { computeContentHash } from '../../shared/content-hash.js';
 import { LanguageService } from '../../shared/LanguageService.js';
-import { CANDIDATES_DIR, KNOWLEDGE_BASE_DIR } from '../config/Defaults.js';
+import { KNOWLEDGE_BASE_DIR } from '../config/Defaults.js';
 import { BatchEmbedder } from './BatchEmbedder.js';
 import { chunk } from './Chunker.js';
 import type { VectorStore } from './VectorStore.js';

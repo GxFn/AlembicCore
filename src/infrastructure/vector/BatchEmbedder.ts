@@ -51,7 +51,7 @@ export class BatchEmbedder {
     const limit = createLimit(this.#maxConcurrency);
 
     // p-limit 并发控制
-    const batchResults = await Promise.all(
+    await Promise.all(
       batches.map((batch) =>
         limit(async () => {
           const batchResult = await this.#embedBatch(batch);

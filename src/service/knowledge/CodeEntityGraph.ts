@@ -425,7 +425,7 @@ export class CodeEntityGraph {
       // 处理 Relations 对象或扁平数组
       let flatRelations: { type: string; target: string; description?: string }[];
       const rels = candidate.relations as Record<string, unknown>;
-      if (typeof (rels as Record<string, Function>)?.toFlatArray === 'function') {
+      if (typeof (rels as { toFlatArray?: unknown })?.toFlatArray === 'function') {
         flatRelations = (
           rels as unknown as {
             toFlatArray: () => { type: string; target: string; description?: string }[];
@@ -475,12 +475,9 @@ export class CodeEntityGraph {
 
   /** 获取单个实体信息 */
   async getEntity(entityId: string, entityType?: string): Promise<MappedCodeEntity | null> {
-    let entity;
-    if (entityType) {
-      entity = await this.#entityRepo.findByEntityId(entityId, entityType, this.projectRoot);
-    } else {
-      entity = await this.#entityRepo.findByEntityIdOnly(entityId, this.projectRoot);
-    }
+    const entity = entityType
+      ? await this.#entityRepo.findByEntityId(entityId, entityType, this.projectRoot)
+      : await this.#entityRepo.findByEntityIdOnly(entityId, this.projectRoot);
     return entity ? this.#mapRepoEntity(entity) : null;
   }
 

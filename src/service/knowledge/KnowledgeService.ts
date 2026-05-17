@@ -1024,7 +1024,7 @@ export class KnowledgeService {
         ) as Record<string, unknown[]>;
         const merged = {
           ...existingRelations,
-          related: [...(existingRelations['related'] || []), ...relatedItems],
+          related: [...(existingRelations.related || []), ...relatedItems],
         };
         await this.repository.update(id, {
           relations: JSON.stringify(merged),

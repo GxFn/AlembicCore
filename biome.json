@@ -11,6 +11,53 @@
       "*.mts"
     ]
   },
+  "overrides": [
+    {
+      "includes": ["src/core/ast/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "src/core/discovery/**",
+        "src/infrastructure/vector/**",
+        "src/service/panorama/**"
+      ],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["src/core/discovery/DiscovererPreference.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noConsole": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["test/**"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noExplicitAny": "off",
+            "noImplicitAnyLet": "off"
+          }
+        }
+      }
+    }
+  ],
   "formatter": {
     "enabled": true,
     "indentStyle": "space",
@@ -38,6 +85,7 @@
         "noStaticOnlyClass": "off"
       },
       "style": {
+        "noNonNullAssertion": "off",
         "useConst": "error",
         "useTemplate": "error",
         "useBlockStatements": "error",
