@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 export type PublicApiStatus =
   | 'stable-public'
   | 'provisional-public'
@@ -10,85 +12,31 @@ export interface PublicApiClassification {
   reason: string;
 }
 
-export const STABLE_PUBLIC_EXPORTS = new Set<string>(['.']);
-STABLE_PUBLIC_EXPORTS.add('./daemon');
-STABLE_PUBLIC_EXPORTS.add('./database');
-STABLE_PUBLIC_EXPORTS.add('./dimensions');
-STABLE_PUBLIC_EXPORTS.add('./events');
-STABLE_PUBLIC_EXPORTS.add('./guard');
-STABLE_PUBLIC_EXPORTS.add('./host-agent-workflows');
-STABLE_PUBLIC_EXPORTS.add('./io');
-STABLE_PUBLIC_EXPORTS.add('./knowledge');
-STABLE_PUBLIC_EXPORTS.add('./logging');
-STABLE_PUBLIC_EXPORTS.add('./project-intelligence');
-STABLE_PUBLIC_EXPORTS.add('./repositories');
-STABLE_PUBLIC_EXPORTS.add('./search');
-STABLE_PUBLIC_EXPORTS.add('./vector');
-STABLE_PUBLIC_EXPORTS.add('./workspace');
+interface PublicApiBoundaryPolicy {
+  expectedCounts: Record<PublicApiStatus, number>;
+  stablePublicExports: string[];
+  provisionalPublicExports: string[];
+  transitionalInternalExports: string[];
+  wildcardExportStatus: PublicApiStatus;
+}
 
-export const PROVISIONAL_PUBLIC_EXPORTS = new Set<string>([
-  './config',
-  './core/capability',
-  './core/enhancement',
-  './domain',
-  './domain/knowledge/values',
-  './infrastructure',
-  './infrastructure/config',
-  './infrastructure/event',
-  './infrastructure/io',
-  './infrastructure/logging',
-  './infrastructure/report',
-  './infrastructure/signal',
-  './service',
-  './service/bootstrap',
-  './service/candidate',
-  './service/evolution',
-  './service/knowledge',
-  './service/quality',
-  './service/recipe',
-  './shared',
-  './types',
-]);
+function readPublicApiBoundaryPolicy(): PublicApiBoundaryPolicy {
+  return JSON.parse(
+    readFileSync(new URL('../../config/public-api-boundary.json', import.meta.url), 'utf8')
+  );
+}
 
-export const TRANSITIONAL_INTERNAL_EXPORTS = new Set<string>([
-  './core',
-  './core/analysis',
-  './core/ast',
-  './core/discovery',
-  './domain/dimension',
-  './domain/knowledge',
-  './infrastructure/database',
-  './infrastructure/database/drizzle',
-  './infrastructure/vector',
-  './repository',
-  './repository/base',
-  './repository/bootstrap',
-  './repository/code',
-  './repository/evolution',
-  './repository/guard',
-  './repository/knowledge',
-  './repository/memory',
-  './repository/search',
-  './repository/session',
-  './repository/sourceref',
-  './repository/sync',
-  './repository/token',
-  './service/guard',
-  './service/panorama',
-  './service/search',
-  './service/vector',
-  './workflows',
-  './workflows/capabilities',
-  './workflows/cold-start',
-  './workflows/knowledge-rescan',
-  './workflows/shared',
-  './workflows/capabilities/execution/external',
-  './workflows/capabilities/persistence',
-  './workflows/capabilities/planning/dimensions',
-  './workflows/capabilities/planning/knowledge',
-  './workflows/capabilities/presentation',
-  './workflows/capabilities/project-intelligence',
-]);
+export const PUBLIC_API_BOUNDARY_POLICY = readPublicApiBoundaryPolicy();
+
+export const STABLE_PUBLIC_EXPORTS = new Set<string>(
+  PUBLIC_API_BOUNDARY_POLICY.stablePublicExports
+);
+export const PROVISIONAL_PUBLIC_EXPORTS = new Set<string>(
+  PUBLIC_API_BOUNDARY_POLICY.provisionalPublicExports
+);
+export const TRANSITIONAL_INTERNAL_EXPORTS = new Set<string>(
+  PUBLIC_API_BOUNDARY_POLICY.transitionalInternalExports
+);
 
 export function classifyPublicApiExport(exportPath: string): PublicApiClassification | null {
   if (STABLE_PUBLIC_EXPORTS.has(exportPath)) {
@@ -112,7 +60,10 @@ export function classifyPublicApiExport(exportPath: string): PublicApiClassifica
     };
   }
 
-  if (exportPath.includes('*')) {
+  if (
+    exportPath.includes('*') &&
+    PUBLIC_API_BOUNDARY_POLICY.wildcardExportStatus === 'transitional-internal'
+  ) {
     return {
       status: 'transitional-internal',
       reason: '通配导出只保留为迁移期兼容面，不允许作为新增外层依赖的默认入口。',

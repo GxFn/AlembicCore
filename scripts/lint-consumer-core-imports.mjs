@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { classifyCoreImportSpecifier } from './public-api-boundary-policy.mjs';
 
-const CORE_PACKAGE_NAME = '@alembic/core';
+export { classifyCoreImportSpecifier } from './public-api-boundary-policy.mjs';
 
 const SOURCE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts']);
 
@@ -14,48 +15,6 @@ const DEFAULT_IGNORE_GLOBS = [
   'node_modules/**',
   'vendor/**',
 ];
-
-const STABLE_EXPORTS = new Set([
-  '.',
-  './daemon',
-  './database',
-  './dimensions',
-  './events',
-  './guard',
-  './host-agent-workflows',
-  './io',
-  './knowledge',
-  './logging',
-  './project-intelligence',
-  './repositories',
-  './search',
-  './vector',
-  './workspace',
-]);
-
-const PROVISIONAL_EXPORTS = new Set([
-  './config',
-  './core/capability',
-  './core/enhancement',
-  './domain',
-  './domain/knowledge/values',
-  './infrastructure',
-  './infrastructure/config',
-  './infrastructure/event',
-  './infrastructure/io',
-  './infrastructure/logging',
-  './infrastructure/report',
-  './infrastructure/signal',
-  './service',
-  './service/bootstrap',
-  './service/candidate',
-  './service/evolution',
-  './service/knowledge',
-  './service/quality',
-  './service/recipe',
-  './shared',
-  './types',
-]);
 
 const IMPORT_PATTERNS = [
   /\b(?:import|export)\s+(?:type\s+)?[^'";\n]*?\s+from\s*['"](@alembic\/core(?:\/[^'"]+)?)['"]/g,
@@ -178,35 +137,6 @@ function loadConfig(root, configPath) {
     referenceLimits,
     scanRoots: asArray(raw.scanRoots),
   };
-}
-
-function specifierToExportPath(specifier) {
-  if (specifier === CORE_PACKAGE_NAME) {
-    return '.';
-  }
-
-  if (specifier.startsWith(`${CORE_PACKAGE_NAME}/`)) {
-    return `./${specifier.slice(CORE_PACKAGE_NAME.length + 1)}`;
-  }
-
-  return null;
-}
-
-export function classifyCoreImportSpecifier(specifier) {
-  const exportPath = specifierToExportPath(specifier);
-  if (!exportPath) {
-    return undefined;
-  }
-
-  if (STABLE_EXPORTS.has(exportPath)) {
-    return 'stable-public';
-  }
-
-  if (PROVISIONAL_EXPORTS.has(exportPath)) {
-    return 'provisional-public';
-  }
-
-  return 'transitional-internal';
 }
 
 function shouldIgnorePath(relativePath, config) {

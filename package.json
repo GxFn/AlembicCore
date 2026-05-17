@@ -544,9 +544,12 @@
     }
   },
   "files": [
+    "config/public-api-boundary.json",
     "dist",
     "resources",
+    "scripts/check-public-api-boundary.mjs",
     "scripts/lint-consumer-core-imports.mjs",
+    "scripts/public-api-boundary-policy.mjs",
     "README.md"
   ],
   "scripts": {
@@ -557,11 +560,12 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke:public-api": "node scripts/smoke-public-api.mjs",
+    "lint:public-api-boundary": "node scripts/check-public-api-boundary.mjs",
     "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports.mjs",
     "lint": "biome check src/ test/ scripts/ *.ts",
     "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",
     "format": "biome format --write src/ test/ scripts/ *.ts",
-    "check": "npm run build:check && npm run test && npm run lint"
+    "check": "npm run build:check && npm run lint:public-api-boundary && npm run test && npm run lint"
   },
   "engines": {
     "node": ">=22.0.0"

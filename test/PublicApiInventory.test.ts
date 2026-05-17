@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   classifyPublicApiExport,
+  PUBLIC_API_BOUNDARY_POLICY,
   summarizePublicApiExports,
 } from './support/public-api-inventory.js';
 
@@ -32,15 +33,11 @@ describe('public API inventory', () => {
     expect(wildcardPublicExports).toStrictEqual([]);
   });
 
-  it('locks the phase 7 export status summary', () => {
+  it('locks the phase 9 export status summary from policy', () => {
     const exportPaths = Object.keys(readPackageJson().exports);
 
-    expect(summarizePublicApiExports(exportPaths)).toStrictEqual({
-      'stable-public': 15,
-      'provisional-public': 21,
-      'transitional-internal': 98,
-      'internal-only': 0,
-      forbidden: 0,
-    });
+    expect(summarizePublicApiExports(exportPaths)).toStrictEqual(
+      PUBLIC_API_BOUNDARY_POLICY.expectedCounts
+    );
   });
 });
