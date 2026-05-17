@@ -38,6 +38,10 @@
       "types": "./dist/project-intelligence.d.ts",
       "import": "./dist/project-intelligence.js"
     },
+    "./host-agent-workflows": {
+      "types": "./dist/host-agent-workflows.d.ts",
+      "import": "./dist/host-agent-workflows.js"
+    },
     "./database": {
       "types": "./dist/database.d.ts",
       "import": "./dist/database.js"

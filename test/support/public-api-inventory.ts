@@ -16,6 +16,7 @@ STABLE_PUBLIC_EXPORTS.add('./database');
 STABLE_PUBLIC_EXPORTS.add('./dimensions');
 STABLE_PUBLIC_EXPORTS.add('./events');
 STABLE_PUBLIC_EXPORTS.add('./guard');
+STABLE_PUBLIC_EXPORTS.add('./host-agent-workflows');
 STABLE_PUBLIC_EXPORTS.add('./io');
 STABLE_PUBLIC_EXPORTS.add('./knowledge');
 STABLE_PUBLIC_EXPORTS.add('./logging');
@@ -47,15 +48,6 @@ export const PROVISIONAL_PUBLIC_EXPORTS = new Set<string>([
   './service/recipe',
   './shared',
   './types',
-  './workflows',
-  './workflows/cold-start',
-  './workflows/knowledge-rescan',
-  './workflows/shared',
-  './workflows/capabilities/execution/external',
-  './workflows/capabilities/persistence',
-  './workflows/capabilities/planning/dimensions',
-  './workflows/capabilities/planning/knowledge',
-  './workflows/capabilities/presentation',
 ]);
 
 export const TRANSITIONAL_INTERNAL_EXPORTS = new Set<string>([
@@ -85,7 +77,16 @@ export const TRANSITIONAL_INTERNAL_EXPORTS = new Set<string>([
   './service/panorama',
   './service/search',
   './service/vector',
+  './workflows',
   './workflows/capabilities',
+  './workflows/cold-start',
+  './workflows/knowledge-rescan',
+  './workflows/shared',
+  './workflows/capabilities/execution/external',
+  './workflows/capabilities/persistence',
+  './workflows/capabilities/planning/dimensions',
+  './workflows/capabilities/planning/knowledge',
+  './workflows/capabilities/presentation',
   './workflows/capabilities/project-intelligence',
 ]);
 
