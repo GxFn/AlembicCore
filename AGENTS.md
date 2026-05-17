@@ -8,7 +8,9 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 
 当 Agent 的计划涉及删减、替换、降级、延期、只做部分、只搭框架、只保留接口、暂不接入或改变完整范围时，必须先向用户确认。
 
-不要在旧工作区或旧克隆路径下工作；当前统一以本 workspace 内的三个仓库为准。
+不要在旧工作区或旧克隆路径下工作；当前统一以本 workspace 内的 Alembic 系列仓库为准。
+
+Core 相关的迁移计划、阶段验收、公开 API 边界、外层接入和删除任务文档，后续统一保存到 workspace 根目录的 `docs/AlembicCore/`。不要再把新的 AlembicCore 长期协作文档散落到 workspace `docs/` 根层级或各外层仓库内。
 
 ## 仓库定位
 
@@ -53,7 +55,7 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 - 测试：`test/`。
 - 正式脚本：`scripts/`。
 - 构建产物：`dist/`，必须保持 ignored，不提交。
-- workspace 级迁移和协作文档保存在 workspace 根目录的 `docs/`。
+- workspace 级 Core 迁移和协作文档保存在 workspace 根目录的 `docs/AlembicCore/`。
 
 当前主要源码分层：
 

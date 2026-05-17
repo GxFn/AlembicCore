@@ -32,13 +32,13 @@ describe('public API inventory', () => {
     expect(wildcardPublicExports).toStrictEqual([]);
   });
 
-  it('locks the phase 1 export status summary', () => {
+  it('locks the phase 6 export status summary', () => {
     const exportPaths = Object.keys(readPackageJson().exports);
 
     expect(summarizePublicApiExports(exportPaths)).toStrictEqual({
-      'stable-public': 10,
-      'provisional-public': 40,
-      'transitional-internal': 79,
+      'stable-public': 14,
+      'provisional-public': 30,
+      'transitional-internal': 89,
       'internal-only': 0,
       forbidden: 0,
     });

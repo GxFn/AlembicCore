@@ -15,19 +15,19 @@ STABLE_PUBLIC_EXPORTS.add('./daemon');
 STABLE_PUBLIC_EXPORTS.add('./database');
 STABLE_PUBLIC_EXPORTS.add('./dimensions');
 STABLE_PUBLIC_EXPORTS.add('./events');
+STABLE_PUBLIC_EXPORTS.add('./guard');
 STABLE_PUBLIC_EXPORTS.add('./io');
 STABLE_PUBLIC_EXPORTS.add('./knowledge');
 STABLE_PUBLIC_EXPORTS.add('./logging');
+STABLE_PUBLIC_EXPORTS.add('./project-intelligence');
 STABLE_PUBLIC_EXPORTS.add('./repositories');
+STABLE_PUBLIC_EXPORTS.add('./search');
+STABLE_PUBLIC_EXPORTS.add('./vector');
 STABLE_PUBLIC_EXPORTS.add('./workspace');
 
 export const PROVISIONAL_PUBLIC_EXPORTS = new Set<string>([
   './config',
-  './core',
-  './core/analysis',
-  './core/ast',
   './core/capability',
-  './core/discovery',
   './core/enhancement',
   './domain',
   './domain/knowledge/values',
@@ -38,18 +38,13 @@ export const PROVISIONAL_PUBLIC_EXPORTS = new Set<string>([
   './infrastructure/logging',
   './infrastructure/report',
   './infrastructure/signal',
-  './infrastructure/vector',
   './service',
   './service/bootstrap',
   './service/candidate',
   './service/evolution',
-  './service/guard',
   './service/knowledge',
-  './service/panorama',
   './service/quality',
   './service/recipe',
-  './service/search',
-  './service/vector',
   './shared',
   './types',
   './workflows',
@@ -61,14 +56,18 @@ export const PROVISIONAL_PUBLIC_EXPORTS = new Set<string>([
   './workflows/capabilities/planning/dimensions',
   './workflows/capabilities/planning/knowledge',
   './workflows/capabilities/presentation',
-  './workflows/capabilities/project-intelligence',
 ]);
 
 export const TRANSITIONAL_INTERNAL_EXPORTS = new Set<string>([
+  './core',
+  './core/analysis',
+  './core/ast',
+  './core/discovery',
   './domain/dimension',
   './domain/knowledge',
   './infrastructure/database',
   './infrastructure/database/drizzle',
+  './infrastructure/vector',
   './repository',
   './repository/base',
   './repository/bootstrap',
@@ -82,14 +81,19 @@ export const TRANSITIONAL_INTERNAL_EXPORTS = new Set<string>([
   './repository/sourceref',
   './repository/sync',
   './repository/token',
+  './service/guard',
+  './service/panorama',
+  './service/search',
+  './service/vector',
   './workflows/capabilities',
+  './workflows/capabilities/project-intelligence',
 ]);
 
 export function classifyPublicApiExport(exportPath: string): PublicApiClassification | null {
   if (STABLE_PUBLIC_EXPORTS.has(exportPath)) {
     return {
       status: 'stable-public',
-      reason: '根入口是当前唯一长期稳定公开入口。',
+      reason: '该入口已经通过阶段性契约测试锁定为长期稳定公开 API。',
     };
   }
 
