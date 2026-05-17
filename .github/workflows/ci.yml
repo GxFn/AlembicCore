@@ -1,0 +1,71 @@
+name: Core CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core-check:
+    name: Build, lint, test, and pack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Core 是外层仓库共享底座，先保证类型契约、静态扫描、测试和可打包性。
+      - name: TypeScript check
+        run: npm run build:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build package output
+        run: npm run build
+
+      - name: Smoke test package entrypoints
+        run: |
+          node --input-type=module <<'EOF'
+          const core = await import('./dist/index.js');
+          const requiredRootExports = [
+            'DEFAULT_FOLDER_NAMES',
+            'KnowledgeRepositoryImpl',
+            'ProjectIntelligenceCapability',
+            'createExternalWorkflowSession',
+          ];
+
+          for (const key of requiredRootExports) {
+            if (!(key in core)) {
+              throw new Error(`Missing root export: ${key}`);
+            }
+          }
+
+          await import('./dist/shared/index.js');
+          await import('./dist/core/ast/index.js');
+          EOF
+
+      - name: Verify package contents
+        run: npm pack --dry-run
