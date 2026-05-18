@@ -70,6 +70,12 @@ describe('public database and repository entrypoints', () => {
     });
 
     await repositories.knowledgeRepository.create(entry);
+    await repositories.memoryRepository.create({
+      id: 'memory-repository-factory',
+      content: 'Repository bundle should expose semantic memory without schema imports.',
+      source: 'public-db-test',
+      tags: ['repository-bundle'],
+    });
     repositories.recipeSourceRefRepository.upsert({
       recipeId: entry.id,
       sourcePath: 'src/example.ts',
@@ -77,15 +83,21 @@ describe('public database and repository entrypoints', () => {
     });
 
     const fetched = await repositories.knowledgeRepository.findById(entry.id);
+    const memories = await repositories.memoryRepository.getAllActive({ source: 'public-db-test' });
     const sourceRefs = repositories.recipeSourceRefRepository.findByRecipeId(entry.id);
 
     expect(fetched?.title).toBe('Stable repository factory');
+    expect(memories).toHaveLength(1);
+    expect(memories[0].content).toBe(
+      'Repository bundle should expose semantic memory without schema imports.'
+    );
     expect(sourceRefs).toHaveLength(1);
     expect(sourceRefs[0].sourcePath).toBe('src/example.ts');
   });
 
   it('publishes stable repository keys for outer DI registration', () => {
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('knowledgeRepository');
+    expect(ALEMBIC_REPOSITORY_KEYS).toContain('memoryRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('recipeSourceRefRepository');
     expect(isAlembicRepositoryKey('proposalRepository')).toBe(true);
     expect(isAlembicRepositoryKey('tokenUsageStore')).toBe(false);

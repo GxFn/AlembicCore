@@ -8,6 +8,7 @@
 
 import { and, avg, count, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import { semanticMemories } from '../../infrastructure/database/drizzle/schema.js';
+import { jaccardSimilarity, tokenizeForSimilarity } from '../../shared/similarity.js';
 import { RepositoryBase } from '../base/RepositoryBase.js';
 
 /* ═══ 类型定义 ═══ */
@@ -61,6 +62,10 @@ export interface MemoryStats {
   avgImportance: number;
 }
 
+export interface SemanticMemorySimilarityResult extends SemanticMemoryEntity {
+  similarity: number;
+}
+
 /* ═══ 常量 ═══ */
 
 const MAX_MEMORIES = 500;
@@ -86,6 +91,10 @@ export class MemoryRepositoryImpl extends RepositoryBase<
   async findById(id: string): Promise<SemanticMemoryEntity | null> {
     const row = this.drizzle.select().from(this.table).where(eq(this.table.id, id)).limit(1).get();
     return row ? this.#mapRow(row) : null;
+  }
+
+  async get(id: string): Promise<SemanticMemoryEntity | null> {
+    return this.findById(id);
   }
 
   async create(data: SemanticMemoryInsert): Promise<SemanticMemoryEntity> {
@@ -217,6 +226,34 @@ export class MemoryRepositoryImpl extends RepositoryBase<
       .all();
 
     return rows.map((r) => this.#mapRow(r));
+  }
+
+  async findSimilar(
+    content: string,
+    type: string | null = null,
+    limit = 10
+  ): Promise<SemanticMemorySimilarityResult[]> {
+    const normalizedLimit = Math.max(0, Math.floor(limit));
+    if (normalizedLimit === 0) {
+      return [];
+    }
+
+    const lowerContent = (content || '').toLowerCase();
+    const contentTokens = tokenizeForSimilarity(lowerContent);
+    const candidates = await this.getCandidates(type, Math.max(50, normalizedLimit));
+
+    return candidates
+      .map((memory) => ({
+        ...memory,
+        similarity: MemoryRepositoryImpl.computeSimilarity(
+          contentTokens,
+          lowerContent,
+          memory.content
+        ),
+      }))
+      .filter((memory) => memory.similarity > 0.1)
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, normalizedLimit);
   }
 
   /** 记忆总数 */
@@ -351,6 +388,22 @@ export class MemoryRepositoryImpl extends RepositoryBase<
   async clearBootstrapMemories(): Promise<number> {
     const result = this.drizzle.delete(this.table).where(eq(this.table.source, 'bootstrap')).run();
     return result.changes;
+  }
+
+  static computeSimilarity(tokensA: Set<string>, lowerA: string, contentB: string): number {
+    const lowerB = (contentB || '').toLowerCase();
+    const tokensB = tokenizeForSimilarity(lowerB);
+
+    if (tokensA.size === 0 && tokensB.size === 0) {
+      return 1.0;
+    }
+    if (tokensA.size === 0 || tokensB.size === 0) {
+      return 0.0;
+    }
+
+    const jaccard = jaccardSimilarity(tokensA, tokensB);
+    const containsBonus = lowerA.includes(lowerB) || lowerB.includes(lowerA) ? 0.3 : 0;
+    return Math.min(1.0, jaccard + containsBonus);
   }
 
   /* ─── 内部辅助 ─── */

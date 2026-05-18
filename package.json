@@ -22,6 +22,14 @@
       "types": "./dist/knowledge.d.ts",
       "import": "./dist/knowledge.js"
     },
+    "./evolution": {
+      "types": "./dist/evolution.d.ts",
+      "import": "./dist/evolution.js"
+    },
+    "./memory": {
+      "types": "./dist/memory.d.ts",
+      "import": "./dist/memory.js"
+    },
     "./search": {
       "types": "./dist/search.d.ts",
       "import": "./dist/search.js"

@@ -52,6 +52,14 @@ import {
 } from './repository/knowledge/KnowledgeEdgeRepository.js';
 import { KnowledgeRepositoryImpl } from './repository/knowledge/KnowledgeRepository.impl.js';
 import {
+  MemoryRepositoryImpl,
+  type MemoryStats,
+  type SemanticMemoryEntity,
+  type SemanticMemoryInsert,
+  type SemanticMemorySimilarityResult,
+  type SemanticMemoryUpdate,
+} from './repository/memory/MemoryRepository.js';
+import {
   type SessionEntity,
   type SessionInsert,
   SessionRepositoryImpl,
@@ -78,6 +86,7 @@ export type {
   GuardViolationInsert,
   KnowledgeEdge,
   LegacyProposalType,
+  MemoryStats,
   PaginatedViolations,
   ProposalFilter,
   ProposalRecord,
@@ -87,6 +96,10 @@ export type {
   RecipeSourceRefEntity,
   RecipeSourceRefInsert,
   RecordEventInput,
+  SemanticMemoryEntity,
+  SemanticMemoryInsert,
+  SemanticMemorySimilarityResult,
+  SemanticMemoryUpdate,
   SessionEntity,
   SessionInsert,
   TransitionEventRow,
@@ -104,6 +117,7 @@ export type KnowledgeEdgeRepository = KnowledgeEdgeRepositoryImpl;
 export type CodeEntityRepository = CodeEntityRepositoryImpl;
 export type BootstrapRepository = BootstrapRepositoryImpl;
 export type GuardViolationRepository = GuardViolationRepositoryImpl;
+export type MemoryRepository = MemoryRepositoryImpl;
 export type SessionRepository = SessionRepositoryImpl;
 export type SourceRefRepository = RecipeSourceRefRepositoryImpl;
 export type EvolutionProposalRepository = ProposalRepository;
@@ -121,6 +135,7 @@ export interface AlembicRepositoryBundle {
   codeEntityRepository: CodeEntityRepository;
   bootstrapRepository: BootstrapRepository;
   guardViolationRepository: GuardViolationRepository;
+  memoryRepository: MemoryRepository;
   sessionRepository: SessionRepository;
   proposalRepository: EvolutionProposalRepository;
   warningRepository: EvolutionWarningRepository;
@@ -134,6 +149,7 @@ export const ALEMBIC_REPOSITORY_KEYS = [
   'codeEntityRepository',
   'bootstrapRepository',
   'guardViolationRepository',
+  'memoryRepository',
   'sessionRepository',
   'proposalRepository',
   'warningRepository',
@@ -154,6 +170,7 @@ export function createAlembicRepositories(
     codeEntityRepository: new CodeEntityRepositoryImpl(drizzle),
     bootstrapRepository: new BootstrapRepositoryImpl(drizzle),
     guardViolationRepository: new GuardViolationRepositoryImpl(drizzle),
+    memoryRepository: new MemoryRepositoryImpl(drizzle),
     sessionRepository: new SessionRepositoryImpl(drizzle),
     proposalRepository: new ProposalRepository(drizzle),
     warningRepository: new WarningRepository(drizzle),

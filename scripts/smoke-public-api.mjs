@@ -9,6 +9,11 @@ const requiredRootExports = [
   'ProjectIntelligenceCapability',
   'createExternalWorkflowSession',
 ];
+const requiredSubpathExports = {
+  '@alembic/core/evolution': ['toRescanImpactDecision'],
+  '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
+  '@alembic/core/search': ['cosineSimilarity', 'jaccardSimilarity', 'tokenizeForSimilarity'],
+};
 
 const imported = [];
 
@@ -25,5 +30,13 @@ for (const exportName of requiredRootExports) {
   }
 }
 
-console.log(`Imported ${imported.length} exact public API entrypoints.`);
+for (const [specifier, exportNames] of Object.entries(requiredSubpathExports)) {
+  const mod = await import(specifier);
+  for (const exportName of exportNames) {
+    if (!(exportName in mod)) {
+      throw new Error(`Missing ${specifier} export: ${exportName}`);
+    }
+  }
+}
 
+console.log(`Imported ${imported.length} exact public API entrypoints.`);
