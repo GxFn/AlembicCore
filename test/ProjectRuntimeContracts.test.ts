@@ -1,0 +1,162 @@
+import { describe, expect, it } from 'vitest';
+
+import {
+  createProjectRuntimeControlState,
+  hasActiveProjectRuntime,
+  hasSelectedProjectRuntime,
+  isProjectConnectionState,
+  isProjectRuntimeTarget,
+  normalizeProjectConnectionState,
+  PROJECT_CONNECTION_STATES,
+  PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION,
+  PROJECT_RUNTIME_DAEMON_STATUSES,
+  PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES,
+  type ProjectRuntimeControlSnapshot,
+} from '../src/daemon/index.js';
+
+describe('project runtime control public contracts', () => {
+  it('exposes Wave 1 connection and provider state enums', () => {
+    expect(PROJECT_CONNECTION_STATES).toEqual([
+      'ready',
+      'stopped',
+      'starting',
+      'stale',
+      'failed',
+      'missing',
+      'unavailable',
+    ]);
+    expect(PROJECT_RUNTIME_DAEMON_STATUSES).toContain('not-checked');
+    expect(PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES).toEqual([
+      'empty',
+      'process-env',
+      'workspace-settings',
+      'unavailable',
+    ]);
+    expect(isProjectConnectionState('ready')).toBe(true);
+    expect(normalizeProjectConnectionState('missing')).toBe('missing');
+    expect(normalizeProjectConnectionState('unknown')).toBeNull();
+  });
+
+  it('keeps project runtime target validation as projectId or projectRoot only', () => {
+    expect(isProjectRuntimeTarget({ projectId: 'project-a' })).toBe(true);
+    expect(isProjectRuntimeTarget({ projectRoot: '/workspace/app' })).toBe(true);
+    expect(isProjectRuntimeTarget({ projectId: 'project-a', projectRoot: '/workspace/app' })).toBe(
+      false
+    );
+    expect(isProjectRuntimeTarget({})).toBe(false);
+    expect(isProjectRuntimeTarget({ projectId: '' })).toBe(false);
+  });
+
+  it('creates registry-v1 compatible selected and active project state', () => {
+    const emptyState = createProjectRuntimeControlState();
+    expect(emptyState).toEqual({
+      activeProjectId: null,
+      activeProjectRoot: null,
+      schemaVersion: PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION,
+      selectedAt: null,
+      selectedProjectId: null,
+      selectedProjectRoot: null,
+      updatedAt: '1970-01-01T00:00:00.000Z',
+    });
+    expect(hasSelectedProjectRuntime(emptyState)).toBe(false);
+    expect(hasActiveProjectRuntime(emptyState)).toBe(false);
+
+    const selectedState = createProjectRuntimeControlState({
+      activeProjectRoot: '/workspace/app',
+      selectedAt: '2026-05-19T00:00:00.000Z',
+      selectedProjectId: 'project-a',
+      selectedProjectRoot: '/workspace/app',
+      updatedAt: '2026-05-19T00:00:01.000Z',
+    });
+    expect(hasSelectedProjectRuntime(selectedState)).toBe(true);
+    expect(hasActiveProjectRuntime(selectedState)).toBe(true);
+  });
+
+  it('models the Wave 1 project runtime control snapshot shape', () => {
+    const state = createProjectRuntimeControlState({
+      activeProjectId: 'project-a',
+      activeProjectRoot: '/workspace/app',
+      selectedProjectId: 'project-a',
+      selectedProjectRoot: '/workspace/app',
+      updatedAt: '2026-05-19T00:00:01.000Z',
+    });
+    const project = {
+      cacheKey: 'project:project-a',
+      daemon: {
+        dashboardUrl: 'http://127.0.0.1:8123',
+        logPath: '/data/.asd/daemon.log',
+        message: null,
+        pid: 123,
+        pidAlive: true,
+        ready: true,
+        statePath: '/data/.asd/daemon.json',
+        status: 'ready',
+        url: 'http://127.0.0.1:8123',
+      },
+      dashboardUrl: 'http://127.0.0.1:8123',
+      dataRoot: '/data',
+      dataRootSource: 'ghost-registry',
+      databasePath: '/data/.asd/alembic.db',
+      displayName: 'app',
+      fileMonitor: {
+        acceptedEventSources: ['host-edit'],
+        available: true,
+        endpoint: '/api/v1/file-changes',
+        mode: 'daemon-git-worktree',
+      },
+      flags: {
+        activeRuntime: true,
+        missing: false,
+        selected: true,
+        stale: false,
+        unavailable: false,
+      },
+      ghost: true,
+      initializedBy: 'project-registry',
+      internalAi: {
+        available: false,
+        configSource: 'empty',
+        model: null,
+        provider: null,
+      },
+      jobs: {
+        active: 0,
+        byStatus: { queued: 0, running: 0 },
+        jobsDir: '/data/.asd/jobs',
+        latestJobId: null,
+        latestUpdatedAt: null,
+        total: 0,
+      },
+      mode: 'ghost',
+      projectExists: true,
+      projectId: 'project-a',
+      projectRealpath: '/workspace/app',
+      projectRoot: '/workspace/app',
+      registered: true,
+      registry: {
+        createdAt: '2026-05-19T00:00:00.000Z',
+        id: 'project-a',
+      },
+      runtimeDir: '/data/.asd',
+      scope: {
+        controlPlaneOwner: 'alembic',
+        daemonOwner: 'per-project-daemon',
+        jobStoreOwner: '@alembic/core/daemon/JobStore',
+        runtimeOwner: 'alembic',
+      },
+      status: 'ready',
+      workspaceExists: true,
+    } satisfies ProjectRuntimeControlSnapshot['projects'][number];
+    const snapshot = {
+      activeRuntimeProject: project,
+      generatedAt: '2026-05-19T00:00:02.000Z',
+      projects: [project],
+      selectedProject: project,
+      state,
+    } satisfies ProjectRuntimeControlSnapshot;
+
+    expect(snapshot.activeRuntimeProject?.flags.activeRuntime).toBe(true);
+    expect(snapshot.selectedProject?.scope.controlPlaneOwner).toBe('alembic');
+    expect(snapshot.projects[0]?.jobs.byStatus.queued).toBe(0);
+  });
+});

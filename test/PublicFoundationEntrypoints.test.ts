@@ -4,8 +4,10 @@ import { ConfigLoader } from '../src/config.js';
 import {
   ALEMBIC_RUNTIME_HEALTH_PATH,
   createAlembicRuntimeCapabilities,
+  createProjectRuntimeControlState,
   DAEMON_STATE_SCHEMA_VERSION,
   JobStore,
+  PROJECT_CONNECTION_STATES,
 } from '../src/daemon/index.js';
 import { EventBus, SignalBus, timerRegistry } from '../src/events.js';
 import { pathGuard, WriteZone } from '../src/io.js';
@@ -46,6 +48,11 @@ describe('stable foundation entrypoints', () => {
   it('exposes runtime capability contracts through the daemon entrypoint', () => {
     expect(ALEMBIC_RUNTIME_HEALTH_PATH).toBe('/api/v1/daemon/health');
     expect(createAlembicRuntimeCapabilities).toBeDefined();
+  });
+
+  it('exposes project runtime control contracts through the daemon entrypoint', () => {
+    expect(PROJECT_CONNECTION_STATES).toContain('ready');
+    expect(createProjectRuntimeControlState().schemaVersion).toBe(1);
   });
 
   it('exposes config as a provisional module-level entrypoint', () => {

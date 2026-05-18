@@ -20,8 +20,13 @@ const requiredSubpathExports = {
   ],
   '@alembic/core/daemon': [
     'ALEMBIC_RUNTIME_HEALTH_PATH',
+    'PROJECT_CONNECTION_STATES',
+    'PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION',
     'createAlembicRuntimeCapabilities',
     'createAlembicRuntimeProjectIdentity',
+    'createProjectRuntimeControlState',
+    'isProjectRuntimeTarget',
+    'normalizeProjectConnectionState',
     'summarizeAlembicRuntimeCapabilities',
     'summarizeAlembicRuntimeProjectIdentity',
   ],
