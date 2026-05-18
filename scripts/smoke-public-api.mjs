@@ -18,6 +18,11 @@ const requiredSubpathExports = {
     'RECIPES_DIR',
     'getProjectSkillsPath',
   ],
+  '@alembic/core/daemon': [
+    'ALEMBIC_RUNTIME_HEALTH_PATH',
+    'createAlembicRuntimeCapabilities',
+    'summarizeAlembicRuntimeCapabilities',
+  ],
   '@alembic/core/evolution': ['toRescanImpactDecision'],
   '@alembic/core/knowledge': ['getGatewaySourceLabel', 'normalizeGatewaySource'],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
