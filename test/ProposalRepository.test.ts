@@ -23,7 +23,7 @@ function makeInput(overrides: Partial<CreateProposalInput> = {}): CreateProposal
     type: 'update',
     targetRecipeId: 'r-001',
     confidence: 0.85,
-    source: 'ide-agent',
+    source: 'host-agent',
     description: 'Test update proposal',
     ...overrides,
   };
@@ -56,7 +56,7 @@ describe('ProposalRepository', () => {
       expect(result?.type).toBe('update');
       expect(result?.targetRecipeId).toBe('r-001');
       expect(result?.confidence).toBe(0.85);
-      expect(result?.source).toBe('ide-agent');
+      expect(result?.source).toBe('host-agent');
       expect(result?.description).toBe('Test update proposal');
       expect(result?.relatedRecipeIds).toEqual([]);
       expect(result?.evidence).toEqual([]);
@@ -97,6 +97,11 @@ describe('ProposalRepository', () => {
       const customExpiry = Date.now() + 1000;
       const result = repo.create(makeInput({ expiresAt: customExpiry }));
       expect(result?.expiresAt).toBe(customExpiry);
+    });
+
+    it('normalizes legacy ide-agent input to host-agent on new writes', () => {
+      const result = repo.create(makeInput({ source: 'ide-agent' }));
+      expect(result?.source).toBe('host-agent');
     });
 
     it('sets type-specific observation windows', () => {
@@ -178,6 +183,39 @@ describe('ProposalRepository', () => {
       const results = repo.find({ expiredBefore: 5000 });
       expect(results).toHaveLength(1);
       expect(results[0].targetRecipeId).toBe('r-old');
+    });
+
+    it('host-agent source filter includes legacy ide-agent rows', () => {
+      const now = Date.now();
+      repo.create(makeInput({ targetRecipeId: 'r-host' }));
+      sqlite
+        .prepare(
+          `INSERT INTO evolution_proposals (
+            id, type, target_recipe_id, related_recipe_ids, confidence, source, description,
+            evidence, status, proposed_at, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          'ep-legacy-source',
+          'update',
+          'r-legacy',
+          '[]',
+          0.7,
+          'ide-agent',
+          'legacy source row',
+          '[]',
+          'pending',
+          now - 1,
+          now + 1000
+        );
+
+      const results = repo.find({ source: 'host-agent' });
+      expect(results.map((result) => result.targetRecipeId)).toEqual(
+        expect.arrayContaining(['r-host', 'r-legacy'])
+      );
+      expect(results.find((result) => result.targetRecipeId === 'r-legacy')?.source).toBe(
+        'ide-agent'
+      );
     });
   });
 

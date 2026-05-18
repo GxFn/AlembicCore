@@ -19,6 +19,17 @@ import { and, count, desc, eq, inArray, lte } from 'drizzle-orm';
 import { EvolutionPolicy } from '../../domain/evolution/EvolutionPolicy.js';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { evolutionProposals } from '../../infrastructure/database/drizzle/schema.js';
+import {
+  normalizeProposalSource,
+  type ProposalSource,
+  proposalSourceStorageValues,
+} from '../../shared/source-contracts.js';
+
+export {
+  getProposalSourceLabel,
+  normalizeProposalSource,
+  proposalSourceStorageValues,
+} from '../../shared/source-contracts.js';
 
 /* ────────────────────── Types ────────────────────── */
 
@@ -42,15 +53,8 @@ export type LegacyProposalType =
   | 'contradiction'
   | 'correction';
 
-/** Proposal 来源 */
-export type ProposalSource =
-  | 'ide-agent'
-  | 'metabolism'
-  | 'decay-scan'
-  | 'consolidation'
-  | 'relevance-audit'
-  | 'file-change'
-  | 'rescan-evolution';
+/** Proposal 来源；`ide-agent` 仅作为旧数据/旧调用方兼容值保留。 */
+export type { ProposalSource } from '../../shared/source-contracts.js';
 
 /** Proposal 状态 */
 export type ProposalStatus = 'pending' | 'observing' | 'executed' | 'rejected' | 'expired';
@@ -149,7 +153,8 @@ export class ProposalRepository {
       targetRecipeId: input.targetRecipeId,
       relatedRecipeIds: input.relatedRecipeIds ?? [],
       confidence: input.confidence,
-      source: input.source,
+      // 新写入统一使用 host-neutral source；旧 DB 行仍可按原值读取。
+      source: normalizeProposalSource(input.source),
       description: input.description,
       evidence: input.evidence ?? [],
       status,
@@ -214,7 +219,12 @@ export class ProposalRepository {
     }
 
     if (filter.source) {
-      conditions.push(eq(evolutionProposals.source, filter.source));
+      const sourceValues = proposalSourceStorageValues(filter.source);
+      conditions.push(
+        sourceValues.length === 1
+          ? eq(evolutionProposals.source, sourceValues[0])
+          : inArray(evolutionProposals.source, sourceValues)
+      );
     }
 
     if (filter.expiredBefore) {

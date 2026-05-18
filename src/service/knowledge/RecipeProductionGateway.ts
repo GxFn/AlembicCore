@@ -1,7 +1,7 @@
 /**
  * RecipeProductionGateway — 统一 Recipe 生产入口
  *
- * 所有 Recipe 创建（Agent Tool / MCP / IDE Agent / Batch Import）
+ * 所有 Recipe 创建（Agent Tool / MCP / Host Agent / Batch Import）
  * 通过此 Gateway 的统一管道，保证前置校验一致：
  *
  *   1. Schema Validation (UnifiedValidator)
@@ -14,6 +14,11 @@
  */
 
 import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
+import {
+  type GatewaySource,
+  getGatewaySourceLabel,
+  getGatewaySourceUserId,
+} from '../../shared/source-contracts.js';
 import type { BootstrapDedup, CandidateSummary } from '../bootstrap/BootstrapDedup.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
@@ -24,7 +29,12 @@ interface GatewayLogger {
 
 /* ═══════════════════ Types ═══════════════════ */
 
-export type GatewaySource = 'agent-tool' | 'mcp-external' | 'ide-agent' | 'batch-import';
+export type { GatewaySource } from '../../shared/source-contracts.js';
+export {
+  getGatewaySourceLabel,
+  getGatewaySourceUserId,
+  normalizeGatewaySource,
+} from '../../shared/source-contracts.js';
 
 export interface CreateRecipeItem {
   title?: string;
@@ -602,16 +612,7 @@ export class RecipeProductionGateway {
   /* ═══════════════════ Private ═══════════════════ */
 
   #sourceToUserId(source: GatewaySource): string {
-    switch (source) {
-      case 'agent-tool':
-        return 'agent';
-      case 'mcp-external':
-        return 'mcp';
-      case 'ide-agent':
-        return 'ide-agent';
-      case 'batch-import':
-        return 'batch-import';
-    }
+    return getGatewaySourceUserId(source);
   }
 
   #prepareCreateData(
@@ -663,16 +664,7 @@ export class RecipeProductionGateway {
   }
 
   #sourceLabel(source: GatewaySource): string {
-    switch (source) {
-      case 'agent-tool':
-        return 'agent';
-      case 'mcp-external':
-        return 'mcp';
-      case 'ide-agent':
-        return 'ide-agent';
-      case 'batch-import':
-        return 'batch-import';
-    }
+    return getGatewaySourceLabel(source);
   }
 
   async #createProposalFromAdvice(

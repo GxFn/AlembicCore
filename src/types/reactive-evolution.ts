@@ -4,6 +4,15 @@
  * 文件变更事件驱动的 Recipe 实时进化。
  */
 
+import type { FileChangeEventSource } from '../shared/source-contracts.js';
+
+export type { FileChangeEventSource } from '../shared/source-contracts.js';
+export {
+  getFileChangeEventSourceLabel,
+  isLegacyFileChangeEventSource,
+  normalizeFileChangeEventSource,
+} from '../shared/source-contracts.js';
+
 /* ═══════════════════ File Change Events ═══════════════════ */
 
 /** 文件变更类型 */
@@ -12,14 +21,14 @@ export type FileChangeType = 'created' | 'renamed' | 'deleted' | 'modified';
 /**
  * 文件变更事件来源。
  *
- *  - `ide-edit`     VSCode 扩展捕获的实时 IDE 编辑（Signal 1-3：rename / delete / create）+ 保存
+ *  - `host-edit`    宿主编辑事件（rename / delete / create / save）汇总
+ *  - `ide-edit`     旧客户端兼容 alias；新写入应归一到 `host-edit`
  *  - `git-head`     Git HEAD 变化（commit / pull / switch）导致的批量 diff
  *  - `git-worktree` Working Tree 扫描（窗口聚焦 / 5 分钟定时）产生的批量 diff
  *
- * 来源会被透传到 {@link ReactiveEvolutionReport.eventSource}，供 VSCode 扩展判断
- * 是否弹窗（只有 ide-edit 才弹）。服务端 FileChangeHandler 只读取不修改。
+ * 来源会被透传到 {@link ReactiveEvolutionReport.eventSource}，供宿主侧决定
+ * 是否即时提示用户。服务端 FileChangeHandler 只读取不修改。
  */
-export type FileChangeEventSource = 'ide-edit' | 'git-head' | 'git-worktree';
 
 /** 单个文件变更事件（新模型：path 为主键） */
 export interface FileChangeEvent {
@@ -29,7 +38,7 @@ export interface FileChangeEvent {
   path: string;
   /** 变更前路径（仅 renamed 时有值） */
   oldPath?: string;
-  /** 事件来源（可选，旧版客户端不传则视为 'ide-edit' 以保持向后兼容） */
+  /** 事件来源（可选；新代码默认归一为 `host-edit`，旧 `ide-edit` 仍兼容读取） */
   eventSource?: FileChangeEventSource;
 }
 
@@ -86,7 +95,7 @@ export interface ReactiveEvolutionReport {
    * 本批事件的主要来源。
    *
    * 取批次中出现次数最多的 eventSource；批次只含一种来源时就是该来源。
-   * VSCode 扩展据此判断：非 'ide-edit' 的批次一律不弹窗（只在 Dashboard 汇总）。
+   * 宿主侧据此判断：`host-edit` 可以即时提示，批量来源通常只进入 Dashboard 汇总。
    */
   eventSource?: FileChangeEventSource;
 }

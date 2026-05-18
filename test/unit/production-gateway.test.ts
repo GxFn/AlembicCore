@@ -510,6 +510,23 @@ describe('RecipeProductionGateway', () => {
       expect(ctx.userId).toBe('mcp');
     });
 
+    it('应把旧 ide-agent 来源归一为 host-agent 写入', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      await gateway.create({
+        source: 'ide-agent',
+        items: [makeItem()],
+        options: { skipSimilarityCheck: true, skipConsolidation: true },
+      });
+
+      const createCall = (deps.knowledgeService.create as ReturnType<typeof vi.fn>).mock.calls[0];
+      const data = createCall[0] as Record<string, unknown>;
+      const ctx = createCall[1] as { userId: string };
+      expect(data.source).toBe('host-agent');
+      expect(ctx.userId).toBe('host-agent');
+    });
+
     it('created.raw 应包含完整 saved 对象', async () => {
       const gateway = new RecipeProductionGateway(makeDeps());
 

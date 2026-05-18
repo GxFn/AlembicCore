@@ -69,7 +69,7 @@ export interface PathGuardConfigureOptions {
   /**
    * 宿主 adapter 可显式扩展项目内写入前缀。
    *
-   * Core 默认只允许 runtime/knowledge 写入；Cursor、VSCode、GitHub 等交付目录
+   * Core 默认只允许 runtime/knowledge 写入；编辑器、自动化平台等交付目录
    * 必须由外层 delivery adapter 自己声明，避免交付渠道规则偷渡进 Core。
    */
   extraProjectWritePrefixes?: string[];

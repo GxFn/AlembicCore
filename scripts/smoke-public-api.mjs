@@ -19,7 +19,9 @@ const requiredSubpathExports = {
     'getProjectSkillsPath',
   ],
   '@alembic/core/evolution': ['toRescanImpactDecision'],
+  '@alembic/core/knowledge': ['getGatewaySourceLabel', 'normalizeGatewaySource'],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
+  '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],
   '@alembic/core/service/candidate': ['aggregateCandidates', 'findSimilarRecipes'],
   '@alembic/core/search': [
     'AuthoritySignal',
@@ -31,17 +33,21 @@ const requiredSubpathExports = {
     'tokenizeForSimilarity',
   ],
   '@alembic/core/shared': [
+    'ALEMBIC_AGENT_SOURCE',
     'AppConfigSchema',
     'ConstitutionViolation',
     'DEFAULT_FOLDER_NAMES',
+    'HOST_AGENT_SOURCE',
     'NotFoundError',
     'WorkspaceSettingsStore',
     'applyTestDimensionFilter',
     'computeContentHash',
     'getDeveloperIdentity',
     'ioLimit',
+    'normalizeFileChangeEventSource',
+    'normalizeProposalSource',
   ],
-  '@alembic/core/types': [],
+  '@alembic/core/types': ['normalizeFileChangeEventSource'],
 };
 const requiredTypeDeclarations = {
   '@alembic/core/types': [

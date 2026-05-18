@@ -65,17 +65,18 @@ describe('consumer core import boundary lint', () => {
 
   it('rejects new transitional deep imports outside an adapter', async () => {
     const root = await createConsumerFixture();
+    const blockedSpecifier = '@alembic/core/workflows/cold-start/' + 'ColdStartIntent';
     await writeFixtureFile(
       root,
       'src/app.ts',
-      "import { ColdStartIntent } from '@alembic/core/workflows/cold-start/ColdStartIntent';\nvoid ColdStartIntent;\n"
+      `import { ColdStartIntent } from '${blockedSpecifier}';\nvoid ColdStartIntent;\n`
     );
 
     const error = await expectBoundaryFailure(root);
 
     expect(error.code).toBe(1);
     expect(error.stdout).toContain('Core import boundary violations: 1');
-    expect(error.stdout).toContain('@alembic/core/workflows/cold-start/ColdStartIntent');
+    expect(error.stdout).toContain(blockedSpecifier);
     expect(error.stdout).toContain('[transitional-internal]');
   });
 

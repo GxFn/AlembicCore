@@ -19,13 +19,16 @@ import {
 } from './repository/evolution/LifecycleEventRepository.js';
 import {
   type CreateProposalInput,
+  getProposalSourceLabel,
   type LegacyProposalType,
+  normalizeProposalSource,
   type ProposalFilter,
   type ProposalRecord,
   ProposalRepository,
   type ProposalSource,
   type ProposalStatus,
   type ProposalType,
+  proposalSourceStorageValues,
 } from './repository/evolution/ProposalRepository.js';
 import {
   type CreateWarningInput,
@@ -123,6 +126,8 @@ export type SourceRefRepository = RecipeSourceRefRepositoryImpl;
 export type EvolutionProposalRepository = ProposalRepository;
 export type EvolutionWarningRepository = WarningRepository;
 export type EvolutionLifecycleEventRepository = LifecycleEventRepository;
+
+export { getProposalSourceLabel, normalizeProposalSource, proposalSourceStorageValues };
 
 export interface AlembicRepositoryDatabase extends AlembicDatabaseHandle {
   getDb(): SqliteDatabase;

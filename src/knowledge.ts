@@ -71,6 +71,9 @@ export {
   type CreateRecipeResult,
   type GatewayDeps,
   type GatewaySource,
+  getGatewaySourceLabel,
+  getGatewaySourceUserId,
   KnowledgeService,
+  normalizeGatewaySource,
   RecipeProductionGateway,
 } from './service/knowledge/index.js';

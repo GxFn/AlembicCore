@@ -18,6 +18,7 @@ export * from './recipe-tokens.js';
 export * from './resolveProjectRoot.js';
 export * from './schemas/index.js';
 export * from './similarity.js';
+export * from './source-contracts.js';
 export * from './TimerRegistry.js';
 export * from './test-mode.js';
 export * from './token-utils.js';

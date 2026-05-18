@@ -7,7 +7,7 @@
  *
  * ---
  * 使用方式：
- *   import { DimensionCopy } from '@alembic/core/domain/dimension/DimensionCopy';
+ *   import { DimensionCopy } from '@alembic/core/dimensions';
  *   const copy = DimensionCopy.get('design-patterns', 'python');
  *   // → { label: '设计模式与代码惯例', guide: '装饰器/描述器/上下文管理器/生成器/ABC 抽象基类/Mixin 模式' }
  */
