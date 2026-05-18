@@ -9,6 +9,52 @@
     "forbidden": 0
   },
   "wildcardExportStatus": "transitional-internal",
+  "closeout": {
+    "schemaVersion": 1,
+    "description": "Wave 3A closeout inventory. Manual categories override consumer-derived categories; remaining consumed transitional/wildcard exports are consumer-replace-first, and remaining unconsumed exports are no-consumer-deprecate-candidate.",
+    "maxCounts": {
+      "transitional-internal": 98,
+      "wildcardExports": 61
+    },
+    "manualCategories": {
+      "promote-to-stable": [],
+      "keep-provisional": [
+        "./core",
+        "./core/analysis",
+        "./core/discovery",
+        "./domain/knowledge",
+        "./infrastructure/database",
+        "./repository",
+        "./service/panorama",
+        "./workflows",
+        "./workflows/capabilities",
+        "./workflows/capabilities/execution/external",
+        "./workflows/capabilities/persistence",
+        "./workflows/capabilities/planning/dimensions",
+        "./workflows/capabilities/planning/knowledge",
+        "./workflows/capabilities/presentation",
+        "./workflows/capabilities/project-intelligence",
+        "./workflows/cold-start",
+        "./workflows/knowledge-rescan",
+        "./workflows/shared"
+      ],
+      "must-keep-transitional": [
+        "./core/ast",
+        "./core/ast/*",
+        "./infrastructure/database/drizzle",
+        "./infrastructure/database/drizzle/*",
+        "./infrastructure/database/migrations/*",
+        "./repository/base",
+        "./repository/base/*",
+        "./repository/bootstrap",
+        "./repository/bootstrap/*",
+        "./repository/code",
+        "./repository/code/*",
+        "./repository/sync",
+        "./repository/sync/*"
+      ]
+    }
+  },
   "stablePublicExports": [
     ".",
     "./daemon",

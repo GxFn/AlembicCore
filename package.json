@@ -560,6 +560,7 @@
     "scripts/check-release-readiness.mjs",
     "scripts/lint-consumer-core-imports.mjs",
     "scripts/public-api-boundary-policy.mjs",
+    "scripts/report-public-api-closeout.mjs",
     "README.md"
   ],
   "scripts": {
@@ -572,6 +573,7 @@
     "smoke:public-api": "node scripts/smoke-public-api.mjs",
     "lint:public-api-boundary": "node scripts/check-public-api-boundary.mjs",
     "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports.mjs",
+    "report:public-api-closeout": "node scripts/report-public-api-closeout.mjs",
     "release:check": "node scripts/check-release-readiness.mjs",
     "lint": "biome check src/ test/ scripts/ *.ts",
     "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",

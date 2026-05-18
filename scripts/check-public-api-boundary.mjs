@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import process from 'node:process';
 import {
+  getPublicApiCloseoutManualCategories,
+  getPublicApiCloseoutMaxCounts,
   makePublicApiBoundaryClassifier,
   loadPublicApiBoundaryPolicy,
   summarizePublicApiExports,
@@ -57,6 +59,57 @@ function findMissingPolicyExports(policy, exportPaths) {
   };
 }
 
+function buildCloseoutSummary(policy, exportPaths, summary) {
+  const wildcardExportPaths = exportPaths.filter((exportPath) => exportPath.includes('*'));
+  const maxCounts = getPublicApiCloseoutMaxCounts(policy);
+  const closeoutExportPaths = new Set([...policy.transitionalInternalExports, ...wildcardExportPaths]);
+  const manualCategories = getPublicApiCloseoutManualCategories(policy);
+  const manualCategoryCounts = Object.fromEntries(
+    Object.entries(manualCategories).map(([category, values]) => [category, values.length]),
+  );
+  const manualIssues = Object.entries(manualCategories).flatMap(([category, values]) =>
+    values
+      .filter((exportPath) => !closeoutExportPaths.has(exportPath))
+      .map((exportPath) => ({
+        category,
+        exportPath,
+        kind: 'closeout-unknown-export',
+        message: `Closeout category ${category} references an export that is not transitional or wildcard.`,
+      })),
+  );
+  const countIssues = [];
+
+  if (maxCounts) {
+    const transitionalCount = summary['transitional-internal'] ?? 0;
+    if (transitionalCount > maxCounts['transitional-internal']) {
+      countIssues.push({
+        actual: transitionalCount,
+        expected: maxCounts['transitional-internal'],
+        kind: 'closeout-transitional-growth',
+        message: `Closeout transitional exports may not grow: expected <= ${maxCounts['transitional-internal']}, found ${transitionalCount}.`,
+      });
+    }
+
+    if (wildcardExportPaths.length > maxCounts.wildcardExports) {
+      countIssues.push({
+        actual: wildcardExportPaths.length,
+        expected: maxCounts.wildcardExports,
+        kind: 'closeout-wildcard-growth',
+        message: `Closeout wildcard exports may not grow: expected <= ${maxCounts.wildcardExports}, found ${wildcardExportPaths.length}.`,
+      });
+    }
+  }
+
+  return {
+    closeoutExportCount: closeoutExportPaths.size,
+    issues: [...manualIssues, ...countIssues],
+    manualCategoryCounts,
+    maxCounts,
+    transitionalExportCount: summary['transitional-internal'] ?? 0,
+    wildcardExportCount: wildcardExportPaths.length,
+  };
+}
+
 function buildReport() {
   const pkg = readPackageJson();
   const policy = loadPublicApiBoundaryPolicy();
@@ -74,6 +127,7 @@ function buildReport() {
     (sum, values) => sum + values.length,
     0,
   );
+  const closeoutSummary = buildCloseoutSummary(policy, exportPaths, summary);
   const issues = [
     ...unclassified.map((exportPath) => ({
       kind: 'unclassified-export',
@@ -90,6 +144,7 @@ function buildReport() {
       status: mismatch.status,
       message: `${mismatch.status}: expected ${mismatch.expected}, found ${mismatch.actual}.`,
     })),
+    ...closeoutSummary.issues,
   ];
 
   if (missingPolicyExportCount > 0) {
@@ -106,6 +161,7 @@ function buildReport() {
     issueCount: issues.length,
     issues,
     packageName: pkg.name,
+    closeoutSummary,
     summary,
     wildcardExportCount: exportPaths.filter((exportPath) => exportPath.includes('*')).length,
   };
@@ -117,6 +173,7 @@ function formatTextReport(report) {
       `Public API boundary OK: ${report.exportCount} package exports classified.`,
       `Exact exports: ${report.exactExportCount}; wildcard exports: ${report.wildcardExportCount}.`,
       `Status summary: stable=${report.summary['stable-public']}, provisional=${report.summary['provisional-public']}, transitional=${report.summary['transitional-internal']}.`,
+      `Closeout no-growth: transitional<=${report.closeoutSummary.maxCounts?.['transitional-internal'] ?? 'unset'} (${report.closeoutSummary.transitionalExportCount}); wildcard<=${report.closeoutSummary.maxCounts?.wildcardExports ?? 'unset'} (${report.closeoutSummary.wildcardExportCount}).`,
     ].join('\n');
   }
 
