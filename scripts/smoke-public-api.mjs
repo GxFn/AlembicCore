@@ -10,9 +10,30 @@ const requiredRootExports = [
   'createExternalWorkflowSession',
 ];
 const requiredSubpathExports = {
+  '@alembic/core/config': [
+    'CANDIDATES_DIR',
+    'ConfigDefaults',
+    'ConfigLoader',
+    'ConfigPaths',
+    'RECIPES_DIR',
+    'getProjectSkillsPath',
+  ],
   '@alembic/core/evolution': ['toRescanImpactDecision'],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
+  '@alembic/core/service/candidate': ['aggregateCandidates', 'findSimilarRecipes'],
   '@alembic/core/search': ['cosineSimilarity', 'jaccardSimilarity', 'tokenizeForSimilarity'],
+  '@alembic/core/shared': [
+    'AppConfigSchema',
+    'ConstitutionViolation',
+    'DEFAULT_FOLDER_NAMES',
+    'NotFoundError',
+    'WorkspaceSettingsStore',
+    'applyTestDimensionFilter',
+    'computeContentHash',
+    'getDeveloperIdentity',
+    'ioLimit',
+  ],
+  '@alembic/core/types': [],
 };
 
 const imported = [];

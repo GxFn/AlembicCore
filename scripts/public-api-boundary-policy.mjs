@@ -12,6 +12,12 @@ export const PUBLIC_API_CLOSEOUT_CATEGORIES = [
   'no-consumer-deprecate-candidate',
   'must-keep-transitional',
 ];
+export const PUBLIC_API_FACADE_READINESS_DECISIONS = [
+  'consumer-ready-stable',
+  'consumer-ready-provisional',
+  'split-required',
+  'keep-transitional',
+];
 
 export function loadPublicApiBoundaryPolicy(policyUrl = PUBLIC_API_BOUNDARY_POLICY_URL) {
   const policy = JSON.parse(readFileSync(policyUrl, 'utf8'));
@@ -116,6 +122,10 @@ export function getPublicApiCloseoutMaxCounts(policy = loadPublicApiBoundaryPoli
   return policy.closeout?.maxCounts;
 }
 
+export function getPublicApiFacadeReadiness(policy = loadPublicApiBoundaryPolicy()) {
+  return policy.closeout?.facadeReadiness ?? { groups: {}, specifiers: {} };
+}
+
 function validatePolicy(policy) {
   const requiredArrays = [
     'stablePublicExports',
@@ -159,6 +169,7 @@ function validateCloseoutPolicy(closeout) {
 
   validateCloseoutMaxCounts(closeout.maxCounts);
   validateCloseoutManualCategories(closeout.manualCategories ?? {});
+  validateFacadeReadiness(closeout.facadeReadiness);
 }
 
 function validateCloseoutMaxCounts(maxCounts) {
@@ -205,6 +216,54 @@ function validateCloseoutManualCategories(manualCategories) {
         );
       }
       seen.set(exportPath, category);
+    }
+  }
+}
+
+function validateFacadeReadiness(facadeReadiness) {
+  if (facadeReadiness === undefined) {
+    return;
+  }
+
+  if (!facadeReadiness || typeof facadeReadiness !== 'object' || Array.isArray(facadeReadiness)) {
+    throw new Error('public-api-boundary policy closeout.facadeReadiness must be an object');
+  }
+
+  if (facadeReadiness.schemaVersion !== 1) {
+    throw new Error('public-api-boundary policy closeout.facadeReadiness.schemaVersion must be 1');
+  }
+
+  validateReadinessEntries(facadeReadiness.groups ?? {}, 'groups');
+  validateReadinessEntries(facadeReadiness.specifiers ?? {}, 'specifiers');
+}
+
+function validateReadinessEntries(entries, key) {
+  if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
+    throw new Error(`public-api-boundary policy closeout.facadeReadiness.${key} must be an object`);
+  }
+
+  const allowedDecisions = new Set(PUBLIC_API_FACADE_READINESS_DECISIONS);
+  for (const [source, entry] of Object.entries(entries)) {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`public-api-boundary policy closeout.facadeReadiness.${key}.${source} must be an object`);
+    }
+
+    if (!allowedDecisions.has(entry.decision)) {
+      throw new Error(
+        `public-api-boundary policy closeout.facadeReadiness.${key}.${source}.decision is unknown`,
+      );
+    }
+
+    if (typeof entry.targetFacade !== 'string' || !entry.targetFacade.startsWith('.')) {
+      throw new Error(
+        `public-api-boundary policy closeout.facadeReadiness.${key}.${source}.targetFacade must be an export path`,
+      );
+    }
+
+    if (entry.symbols !== undefined && !Array.isArray(entry.symbols)) {
+      throw new Error(
+        `public-api-boundary policy closeout.facadeReadiness.${key}.${source}.symbols must be an array`,
+      );
     }
   }
 }

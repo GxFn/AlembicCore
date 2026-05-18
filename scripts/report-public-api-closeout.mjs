@@ -5,8 +5,11 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
   PUBLIC_API_CLOSEOUT_CATEGORIES,
+  PUBLIC_API_FACADE_READINESS_DECISIONS,
+  getPublicApiFacadeReadiness,
   getPublicApiCloseoutManualCategories,
   loadPublicApiBoundaryPolicy,
+  CORE_PACKAGE_NAME,
   specifierToExportPath,
 } from './public-api-boundary-policy.mjs';
 
@@ -72,6 +75,27 @@ function manualCategoryByExportPath(policy) {
     exportPaths.map((exportPath) => [exportPath, category]),
   );
   return new Map(entries);
+}
+
+function exportPathToSpecifier(exportPath) {
+  return exportPath === '.' ? CORE_PACKAGE_NAME : `${CORE_PACKAGE_NAME}/${exportPath.slice(2)}`;
+}
+
+function buildFacadeReadinessMaps(policy) {
+  const readiness = getPublicApiFacadeReadiness(policy);
+  return {
+    groups: new Map(Object.entries(readiness.groups ?? {})),
+    specifiers: new Map(Object.entries(readiness.specifiers ?? {})),
+  };
+}
+
+function resolveFacadeReadiness(specifier, closeoutPath, readinessMaps) {
+  const exact = readinessMaps.specifiers.get(specifier);
+  if (exact) {
+    return exact;
+  }
+
+  return readinessMaps.groups.get(closeoutPath);
 }
 
 function resolveCloseoutExportPath(specifier, allExportPaths, closeoutPaths, wildcardExports) {
@@ -177,6 +201,72 @@ function addConsumerReferences(inventory, consumerScan, allExportPaths, closeout
   return matchedCloseoutReferences;
 }
 
+function collectReplacementReadiness(
+  consumerScans,
+  allExportPaths,
+  closeoutPaths,
+  wildcardExports,
+  readinessMaps,
+) {
+  const entries = new Map();
+
+  for (const scan of consumerScans) {
+    if (!scan.result || scan.status === 'failed') {
+      continue;
+    }
+
+    for (const reference of scan.result.references ?? []) {
+      const closeoutPath = resolveCloseoutExportPath(
+        reference.specifier,
+        allExportPaths,
+        closeoutPaths,
+        wildcardExports,
+      );
+      if (!closeoutPath) {
+        continue;
+      }
+
+      const readiness = resolveFacadeReadiness(reference.specifier, closeoutPath, readinessMaps);
+      if (!readiness) {
+        continue;
+      }
+
+      const key = reference.specifier;
+      const entry = entries.get(key) ?? {
+        closeoutPath,
+        consumers: {},
+        decision: readiness.decision,
+        reason: readiness.reason,
+        references: 0,
+        specifier: reference.specifier,
+        symbols: readiness.symbols ?? [],
+        targetFacade: readiness.targetFacade,
+        targetSpecifier: exportPathToSpecifier(readiness.targetFacade),
+      };
+      entry.references += 1;
+      entry.consumers[scan.name] = (entry.consumers[scan.name] ?? 0) + 1;
+      entries.set(key, entry);
+    }
+  }
+
+  const byDecision = Object.fromEntries(PUBLIC_API_FACADE_READINESS_DECISIONS.map((decision) => [decision, 0]));
+  const items = [...entries.values()].sort(
+    (left, right) => right.references - left.references || left.specifier.localeCompare(right.specifier),
+  );
+
+  for (const item of items) {
+    byDecision[item.decision] += item.references;
+  }
+
+  return {
+    byDecision,
+    items,
+    readyReferences:
+      (byDecision['consumer-ready-stable'] ?? 0) + (byDecision['consumer-ready-provisional'] ?? 0),
+    totalReferences: items.reduce((sum, item) => sum + item.references, 0),
+  };
+}
+
 function buildReport() {
   const pkg = readPackageJson();
   const policy = loadPublicApiBoundaryPolicy();
@@ -184,6 +274,7 @@ function buildReport() {
   const allExportPathSet = new Set(allExportPaths);
   const closeoutPathSet = new Set(closeoutPaths);
   const manualCategories = manualCategoryByExportPath(policy);
+  const readinessMaps = buildFacadeReadinessMaps(policy);
   const inventory = new Map(
     closeoutPaths.map((exportPath) => [
       exportPath,
@@ -235,6 +326,13 @@ function buildReport() {
     consumerSummaries,
     issueCount: consumerSummaries.reduce((sum, summary) => sum + (summary.issueCount ?? 0), 0),
     packageName: pkg.name,
+    replacementReadiness: collectReplacementReadiness(
+      consumerScans,
+      allExportPathSet,
+      closeoutPathSet,
+      wildcardExports,
+      readinessMaps,
+    ),
     totalCloseoutExports: closeoutPaths.length,
     wildcardExportCount: wildcardExports.length,
   };
@@ -266,6 +364,24 @@ function formatTextReport(report) {
         .map(([name, count]) => `${name}:${count}`)
         .join(', ');
       lines.push(`- ${item.exportPath}: refs=${item.consumerReferences}${consumers ? ` (${consumers})` : ''}`);
+    }
+  }
+
+  const readiness = report.replacementReadiness;
+  lines.push(
+    `Replacement readiness: readyRefs=${readiness.readyReferences}/${readiness.totalReferences}; ${PUBLIC_API_FACADE_READINESS_DECISIONS.map((decision) => `${decision}=${readiness.byDecision[decision]}`).join(', ')}.`,
+  );
+
+  const topReadiness = readiness.items.slice(0, 12);
+  if (topReadiness.length > 0) {
+    lines.push('Top replacement-ready deep specifiers:');
+    for (const item of topReadiness) {
+      const consumers = Object.entries(item.consumers)
+        .map(([name, count]) => `${name}:${count}`)
+        .join(', ');
+      lines.push(
+        `- ${item.specifier} -> ${item.targetSpecifier} [${item.decision}]: refs=${item.references}${consumers ? ` (${consumers})` : ''}`,
+      );
     }
   }
 

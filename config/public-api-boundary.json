@@ -53,6 +53,178 @@
         "./repository/sync",
         "./repository/sync/*"
       ]
+    },
+    "facadeReadiness": {
+      "schemaVersion": 1,
+      "description": "Wave 3B readiness map for shared/config/types/candidate deep imports. This does not delete wildcard exports; it tells consumers which exact facade can replace each deep specifier.",
+      "groups": {
+        "./shared/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "reason": "The shared exact facade re-exports current shared helpers, schemas, errors, test-mode, concurrency, workspace settings, markdown/diff utilities and tokens."
+        },
+        "./infrastructure/config/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./config",
+          "reason": "The config exact facade exposes ConfigLoader, namespaces, and direct path/default helpers used by consumers."
+        },
+        "./types/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./types",
+          "reason": "The types exact facade is type-only and re-exports workflow, snapshot and reactive evolution contracts."
+        },
+        "./service/candidate/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./service/candidate",
+          "reason": "The candidate exact facade re-exports candidate aggregation and similarity services without stabilizing the whole service tree."
+        }
+      },
+      "specifiers": {
+        "@alembic/core/infrastructure/config/ConfigLoader": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./config",
+          "symbols": ["ConfigLoader", "default"],
+          "reason": "Default and named ConfigLoader are available from the config facade."
+        },
+        "@alembic/core/infrastructure/config/Defaults": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./config",
+          "symbols": ["CANDIDATES_DIR", "RECIPES_DIR", "ConfigDefaults"],
+          "reason": "Frequently used default constants are direct facade exports; namespace consumers can use ConfigDefaults."
+        },
+        "@alembic/core/infrastructure/config/Paths": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./config",
+          "symbols": ["getProjectSkillsPath", "ConfigPaths"],
+          "reason": "Frequently used path helpers are direct facade exports; namespace consumers can use ConfigPaths."
+        },
+        "@alembic/core/service/candidate/CandidateAggregator": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./service/candidate",
+          "symbols": ["aggregateCandidates"],
+          "reason": "Candidate aggregation is exported by the candidate facade."
+        },
+        "@alembic/core/service/candidate/SimilarityService": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./service/candidate",
+          "symbols": ["findSimilarRecipes"],
+          "reason": "Candidate similarity is exported by the candidate facade."
+        },
+        "@alembic/core/shared/WorkspaceSettingsStore": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["PROVIDER_KEY_ENV", "WorkspaceSettingsStore"],
+          "reason": "Workspace settings are shared runtime support, not a workspace-project facade contract yet."
+        },
+        "@alembic/core/shared/concurrency": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["cpuLimit", "createLimit", "ioLimit"],
+          "reason": "Concurrency limiters are exported by the shared facade."
+        },
+        "@alembic/core/shared/constants": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["KNOWLEDGE_CONFIDENCE"],
+          "reason": "Shared constants are exported by the shared facade."
+        },
+        "@alembic/core/shared/content-hash": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["computeContentHash"],
+          "reason": "Content hash utility is exported by the shared facade."
+        },
+        "@alembic/core/shared/developer-identity": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["getDeveloperIdentity"],
+          "reason": "Developer identity helper is exported by the shared facade; downstream tests can mock the facade entrypoint."
+        },
+        "@alembic/core/shared/diff-parser": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["parseDiffHunks", "tokenizeDiffLines"],
+          "reason": "Diff parsing helpers are exported by the shared facade."
+        },
+        "@alembic/core/shared/errors/BaseError": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["ConstitutionViolation", "InternalError", "PermissionDenied"],
+          "reason": "Error classes are exported through the shared errors index and shared facade."
+        },
+        "@alembic/core/shared/errors/index": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["NotFoundError", "ValidationError"],
+          "reason": "Error classes are exported through the shared facade."
+        },
+        "@alembic/core/shared/folder-names": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./workspace",
+          "symbols": ["DEFAULT_FOLDER_NAMES", "validateFolderNameSegment"],
+          "reason": "Folder names are already part of the stable workspace facade."
+        },
+        "@alembic/core/shared/isOwnDevRepo": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["isExcludedProject"],
+          "reason": "Development repository helpers remain shared support and are exported by the shared facade."
+        },
+        "@alembic/core/shared/markdown-utils": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["extractCodeBlocksFromMarkdown"],
+          "reason": "Markdown utilities are exported by the shared facade."
+        },
+        "@alembic/core/shared/schemas/common": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["PaginationSchema"],
+          "reason": "Common schemas are exported by the shared schema index and shared facade."
+        },
+        "@alembic/core/shared/schemas/config": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["AppConfigSchema", "ConstitutionSchema"],
+          "reason": "Config schemas are exported by the shared schema index and shared facade."
+        },
+        "@alembic/core/shared/similarity": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./search",
+          "symbols": ["jaccardSimilarity"],
+          "reason": "Similarity helpers are already stabilized on the search facade."
+        },
+        "@alembic/core/shared/test-mode": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["applyTestDimensionFilter", "getTestModeConfig"],
+          "reason": "Test-mode helpers are exported by the shared facade; downstream tests can mock the facade entrypoint."
+        },
+        "@alembic/core/shared/token-utils": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./shared",
+          "symbols": ["estimateTokens"],
+          "reason": "Token utilities are exported by the shared facade."
+        },
+        "@alembic/core/types/reactive-evolution": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./types",
+          "symbols": ["FileChangeEvent", "FileChangeEventSource", "ImpactLevel"],
+          "reason": "Reactive evolution contracts are type-only exports from the types facade."
+        },
+        "@alembic/core/types/snapshot-views": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./types",
+          "symbols": ["PipelineFillView"],
+          "reason": "Snapshot view contracts are type-only exports from the types facade."
+        },
+        "@alembic/core/types/workflows": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./types",
+          "symbols": ["IncrementalPlan", "McpContext"],
+          "reason": "Workflow contracts are type-only exports from the types facade."
+        }
+      }
     }
   },
   "stablePublicExports": [
