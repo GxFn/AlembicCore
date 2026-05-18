@@ -21,7 +21,9 @@ const requiredSubpathExports = {
   '@alembic/core/daemon': [
     'ALEMBIC_RUNTIME_HEALTH_PATH',
     'createAlembicRuntimeCapabilities',
+    'createAlembicRuntimeProjectIdentity',
     'summarizeAlembicRuntimeCapabilities',
+    'summarizeAlembicRuntimeProjectIdentity',
   ],
   '@alembic/core/evolution': ['toRescanImpactDecision'],
   '@alembic/core/knowledge': ['getGatewaySourceLabel', 'normalizeGatewaySource'],

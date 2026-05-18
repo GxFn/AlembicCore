@@ -1,3 +1,4 @@
+import type { WorkspaceMode } from '../shared/ProjectRegistry.js';
 import {
   type CanonicalFileChangeEventSource,
   HOST_EDIT_SOURCE,
@@ -23,6 +24,8 @@ export const ALEMBIC_FILE_MONITOR_MODES = [
   'disabled',
 ] as const;
 
+export const ALEMBIC_RUNTIME_DATA_ROOT_SOURCES = ['project-root', 'ghost-registry'] as const;
+
 export const ALEMBIC_JOB_KINDS = ['bootstrap', 'rescan'] as const;
 
 export const ALEMBIC_JOB_ENDPOINTS = {
@@ -45,6 +48,7 @@ export type AlembicRuntimeMode = 'api' | 'daemon';
 export type AlembicRuntimeRouteKind = (typeof ALEMBIC_RUNTIME_ROUTE_KINDS)[number];
 export type AlembicEnhancementRoute = 'local-alembic';
 export type AlembicFileMonitorMode = (typeof ALEMBIC_FILE_MONITOR_MODES)[number];
+export type AlembicRuntimeDataRootSource = (typeof ALEMBIC_RUNTIME_DATA_ROOT_SOURCES)[number];
 export type AlembicJobKind = (typeof ALEMBIC_JOB_KINDS)[number];
 export type AlembicInternalAiConfigSource =
   | 'empty'
@@ -54,10 +58,13 @@ export type AlembicInternalAiConfigSource =
 
 export interface AlembicRuntimeProjectIdentity {
   dataRoot: string;
+  dataRootSource: AlembicRuntimeDataRootSource;
   databasePath?: string;
   projectId: string | null;
   projectRoot: string;
+  runtimeDir: string;
   schemaMigrationVersion?: string | null;
+  workspaceMode?: WorkspaceMode;
 }
 
 export interface AlembicRuntimeEnhancementIdentity {
@@ -145,6 +152,17 @@ export interface CreateAlembicRuntimeHealthDataOptions extends AlembicRuntimePro
   version: string;
 }
 
+export interface AlembicRuntimeProjectIdentitySummary {
+  dataRoot: string | null;
+  dataRootSource: AlembicRuntimeDataRootSource | null;
+  databasePath: string | null;
+  projectId: string | null;
+  projectRoot: string | null;
+  runtimeDir: string | null;
+  schemaMigrationVersion: string | null;
+  workspaceMode: WorkspaceMode | null;
+}
+
 export interface AlembicRuntimeCapabilitySummary {
   apiAvailable: boolean | null;
   dashboardAvailable: boolean | null;
@@ -154,6 +172,23 @@ export interface AlembicRuntimeCapabilitySummary {
   internalAiAvailable: boolean | null;
   jobsAvailable: boolean | null;
   jobKinds: string[];
+}
+
+export function createAlembicRuntimeProjectIdentity(
+  options: AlembicRuntimeProjectIdentity
+): AlembicRuntimeProjectIdentity {
+  return {
+    dataRoot: options.dataRoot,
+    dataRootSource: options.dataRootSource,
+    databasePath: options.databasePath,
+    projectId: options.projectId,
+    projectRoot: options.projectRoot,
+    runtimeDir: options.runtimeDir,
+    schemaMigrationVersion: options.schemaMigrationVersion ?? null,
+    // workspaceMode 可由 provider 显式传入；缺省时按 dataRootSource 推导，方便外层渐进接入。
+    workspaceMode:
+      options.workspaceMode ?? inferWorkspaceModeFromDataRootSource(options.dataRootSource),
+  };
 }
 
 export function createAlembicRuntimeCapabilities(
@@ -193,20 +228,17 @@ export function createAlembicRuntimeCapabilities(
 export function createAlembicRuntimeHealthData(
   options: CreateAlembicRuntimeHealthDataOptions
 ): AlembicRuntimeHealthData {
+  const projectIdentity = createAlembicRuntimeProjectIdentity(options);
   return {
     capabilities: options.capabilities,
     dashboardUrl: options.dashboardUrl ?? null,
-    dataRoot: options.dataRoot,
-    databasePath: options.databasePath,
+    ...projectIdentity,
     enhancement: createAlembicRuntimeEnhancementIdentity({
       version: options.version,
       ...options.enhancement,
     }),
     mode: options.mode,
     pid: options.pid,
-    projectId: options.projectId,
-    projectRoot: options.projectRoot,
-    schemaMigrationVersion: options.schemaMigrationVersion ?? null,
     uptime: options.uptime,
     version: options.version,
   };
@@ -248,6 +280,38 @@ export function summarizeAlembicRuntimeCapabilities(
   };
 }
 
+export function summarizeAlembicRuntimeProjectIdentity(
+  value: unknown
+): AlembicRuntimeProjectIdentitySummary {
+  const identity = asRecord(value);
+  return {
+    dataRoot: firstString(identity?.dataRoot),
+    dataRootSource: normalizeAlembicRuntimeDataRootSource(identity?.dataRootSource),
+    databasePath: firstString(identity?.databasePath),
+    projectId: nullableString(identity?.projectId),
+    projectRoot: firstString(identity?.projectRoot),
+    runtimeDir: firstString(identity?.runtimeDir),
+    schemaMigrationVersion: nullableString(identity?.schemaMigrationVersion),
+    workspaceMode: normalizeAlembicWorkspaceMode(identity?.workspaceMode),
+  };
+}
+
+export function isAlembicRuntimeDataRootSource(
+  value: unknown
+): value is AlembicRuntimeDataRootSource {
+  return typeof value === 'string' && ALEMBIC_RUNTIME_DATA_ROOT_SOURCES.includes(value as never);
+}
+
+export function normalizeAlembicRuntimeDataRootSource(
+  value: unknown
+): AlembicRuntimeDataRootSource | null {
+  return isAlembicRuntimeDataRootSource(value) ? value : null;
+}
+
+export function normalizeAlembicWorkspaceMode(value: unknown): WorkspaceMode | null {
+  return value === 'standard' || value === 'ghost' ? value : null;
+}
+
 export function isAlembicRuntimeRouteKind(value: unknown): value is AlembicRuntimeRouteKind {
   return typeof value === 'string' && ALEMBIC_RUNTIME_ROUTE_KINDS.includes(value as never);
 }
@@ -281,6 +345,14 @@ function firstString(...values: unknown[]): string | null {
     }
   }
   return null;
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+function inferWorkspaceModeFromDataRootSource(source: AlembicRuntimeDataRootSource): WorkspaceMode {
+  return source === 'ghost-registry' ? 'ghost' : 'standard';
 }
 
 function stringArray(value: unknown): string[] {

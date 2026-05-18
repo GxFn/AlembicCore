@@ -5,8 +5,12 @@ import {
   ALEMBIC_RUNTIME_HEALTH_PATH,
   createAlembicRuntimeCapabilities,
   createAlembicRuntimeHealthData,
+  createAlembicRuntimeProjectIdentity,
+  normalizeAlembicRuntimeDataRootSource,
   normalizeAlembicRuntimeRouteKind,
+  normalizeAlembicWorkspaceMode,
   summarizeAlembicRuntimeCapabilities,
+  summarizeAlembicRuntimeProjectIdentity,
 } from '../src/daemon/index.js';
 
 describe('Alembic runtime boundary contracts', () => {
@@ -53,10 +57,12 @@ describe('Alembic runtime boundary contracts', () => {
     const health = createAlembicRuntimeHealthData({
       capabilities,
       dataRoot: '/data',
+      dataRootSource: 'ghost-registry',
       databasePath: '/data/.asd/alembic.db',
       mode: 'daemon',
       projectId: 'abcd1234',
       projectRoot: '/project',
+      runtimeDir: '/data/.asd',
       schemaMigrationVersion: '009',
       version: '0.1.0',
     });
@@ -76,10 +82,41 @@ describe('Alembic runtime boundary contracts', () => {
       jobsAvailable: true,
       jobKinds: ['bootstrap', 'rescan'],
     });
+    expect(summarizeAlembicRuntimeProjectIdentity(health)).toMatchObject({
+      dataRoot: '/data',
+      dataRootSource: 'ghost-registry',
+      databasePath: '/data/.asd/alembic.db',
+      projectId: 'abcd1234',
+      projectRoot: '/project',
+      runtimeDir: '/data/.asd',
+      schemaMigrationVersion: '009',
+      workspaceMode: 'ghost',
+    });
   });
 
   it('normalizes runtime route kinds for plugin and install adapters', () => {
     expect(normalizeAlembicRuntimeRouteKind('local-alembic-daemon')).toBe('local-alembic-daemon');
     expect(normalizeAlembicRuntimeRouteKind('unknown')).toBeNull();
+  });
+
+  it('creates canonical project identity fields used by daemon health consumers', () => {
+    expect(
+      createAlembicRuntimeProjectIdentity({
+        dataRoot: '/project',
+        dataRootSource: 'project-root',
+        databasePath: '/project/.asd/alembic.db',
+        projectId: null,
+        projectRoot: '/project',
+        runtimeDir: '/project/.asd',
+      })
+    ).toMatchObject({
+      dataRootSource: 'project-root',
+      runtimeDir: '/project/.asd',
+      workspaceMode: 'standard',
+    });
+    expect(normalizeAlembicRuntimeDataRootSource('ghost-registry')).toBe('ghost-registry');
+    expect(normalizeAlembicRuntimeDataRootSource('tmp')).toBeNull();
+    expect(normalizeAlembicWorkspaceMode('standard')).toBe('standard');
+    expect(normalizeAlembicWorkspaceMode('tmp')).toBeNull();
   });
 });
