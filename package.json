@@ -555,6 +555,7 @@
     "config/public-api-boundary.json",
     "dist",
     "resources",
+    "RELEASE-PLAYBOOK.md",
     "scripts/check-public-api-boundary.mjs",
     "scripts/check-release-readiness.mjs",
     "scripts/lint-consumer-core-imports.mjs",

@@ -17,6 +17,7 @@ const dependencySections = [
 const requiredPackageEntries = [
   'package/package.json',
   'package/README.md',
+  'package/RELEASE-PLAYBOOK.md',
   'package/config/public-api-boundary.json',
   'package/dist/index.js',
   'package/dist/index.d.ts',

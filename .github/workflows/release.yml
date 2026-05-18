@@ -1,0 +1,101 @@
+name: Core Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: core-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Verify and publish @alembic/core
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check tag matches package version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          package_version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          expected_tag="v${package_version}"
+          if [[ "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}."
+            echo "Expected tag: ${expected_tag}"
+            exit 1
+          fi
+
+      # Release 入口必须复用 Core 的完整本地检查，避免发布包绕过日常边界守门。
+      - name: Check, build, and test
+        run: npm run check
+
+      - name: Build package output
+        run: npm run build
+
+      - name: Smoke public API entrypoints
+        run: npm run smoke:public-api
+
+      - name: Verify release package baseline
+        run: npm run release:check
+
+      - name: Generate pack preview
+        shell: bash
+        run: |
+          npm --cache "${RUNNER_TEMP}/alembic-core-npm-cache" pack --dry-run --json > "${RUNNER_TEMP}/alembic-core-pack-dry-run.json"
+          node --input-type=module <<'NODE'
+          import { readFileSync, appendFileSync } from 'node:fs';
+          const pack = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/alembic-core-pack-dry-run.json`, 'utf8'))[0];
+          const summary = [
+            '## @alembic/core pack preview',
+            '',
+            `- Package: ${pack.name}@${pack.version}`,
+            `- Source commit: ${process.env.GITHUB_SHA}`,
+            `- Tarball: ${pack.filename}`,
+            `- Entries: ${pack.entryCount}`,
+            `- Unpacked size: ${pack.unpackedSize}`,
+            `- Integrity: ${pack.integrity}`,
+            '',
+          ].join('\n');
+          appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          NODE
+
+      - name: Upload pack preview
+        uses: actions/upload-artifact@v4
+        with:
+          name: alembic-core-pack-dry-run
+          path: ${{ runner.temp }}/alembic-core-pack-dry-run.json
+
+      - name: Publish to npm
+        if: github.ref_type == 'tag'
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Dry-run summary
+        if: github.ref_type != 'tag'
+        run: |
+          echo "Manual workflow_dispatch is a dry-run release staging path."
+          echo "Create and push tag v<package.version> to publish @alembic/core."
