@@ -221,8 +221,8 @@
         "@alembic/core/types/workflows": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./types",
-          "symbols": ["IncrementalPlan", "McpContext"],
-          "reason": "Workflow contracts are type-only exports from the types facade."
+          "symbols": ["IncrementalPlan", "McpContext", "WorkflowDatabaseLike", "WorkflowSkillHooks"],
+          "reason": "Workflow contracts are type-only exports from the types facade; Wave 3B-Core-2 keeps these as type-only facade exports."
         }
       }
     }

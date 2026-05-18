@@ -10,7 +10,16 @@ export type { SearchContext, SearchItem } from './service/search/contextBoost.js
 export { contextBoost } from './service/search/contextBoost.js';
 export { FieldWeightedScorer } from './service/search/FieldWeightedScorer.js';
 export { HybridRetriever } from './service/search/HybridRetriever.js';
-export { MultiSignalRanker } from './service/search/MultiSignalRanker.js';
+export {
+  AuthoritySignal,
+  ContextMatchSignal,
+  DifficultySignal,
+  MultiSignalRanker,
+  PopularitySignal,
+  RecencySignal,
+  RelevanceSignal,
+  VectorSignal,
+} from './service/search/MultiSignalRanker.js';
 export { SearchEngine };
 export type {
   GuardKnowledgeRepo,
