@@ -556,6 +556,7 @@
     "dist",
     "resources",
     "scripts/check-public-api-boundary.mjs",
+    "scripts/check-release-readiness.mjs",
     "scripts/lint-consumer-core-imports.mjs",
     "scripts/public-api-boundary-policy.mjs",
     "README.md"
@@ -570,6 +571,7 @@
     "smoke:public-api": "node scripts/smoke-public-api.mjs",
     "lint:public-api-boundary": "node scripts/check-public-api-boundary.mjs",
     "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports.mjs",
+    "release:check": "node scripts/check-release-readiness.mjs",
     "lint": "biome check src/ test/ scripts/ *.ts",
     "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",
     "format": "biome format --write src/ test/ scripts/ *.ts",
