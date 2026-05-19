@@ -131,6 +131,82 @@ describe('WorkspaceResolver', () => {
     expect(facts.ghostMarker).toMatchObject({ kind: 'project-registry', projectId: entry.id });
   });
 
+  test('keeps ghost mode when ordinary register attaches an existing ghost project', () => {
+    useTempAlembicHome();
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-ghost-attach-'));
+    const entry = ProjectRegistry.register(projectRoot, true);
+    const attached = ProjectRegistry.register(projectRoot, false);
+    const dataRoot = getGhostWorkspaceDir(entry.id);
+
+    expect(attached).toEqual(entry);
+    expect(ProjectRegistry.inspect(projectRoot)).toMatchObject({
+      mode: 'ghost',
+      ghost: true,
+      projectId: entry.id,
+      dataRoot,
+      dataRootSource: 'ghost-registry',
+    });
+    expect(WorkspaceResolver.fromProject(projectRoot).toFacts()).toMatchObject({
+      mode: 'ghost',
+      ghost: true,
+      projectId: entry.id,
+      dataRoot,
+      dataRootSource: 'ghost-registry',
+    });
+  });
+
+  test('keeps standard mode when ordinary register attaches an existing standard project', () => {
+    useTempAlembicHome();
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-standard-attach-'));
+    const entry = ProjectRegistry.register(projectRoot, false);
+    const attached = ProjectRegistry.register(projectRoot, true);
+
+    expect(attached).toEqual(entry);
+    expect(ProjectRegistry.inspect(projectRoot)).toMatchObject({
+      mode: 'standard',
+      ghost: false,
+      projectId: entry.id,
+      dataRoot: path.resolve(projectRoot),
+      dataRootSource: 'project-root',
+    });
+    expect(WorkspaceResolver.fromProject(projectRoot).toFacts()).toMatchObject({
+      mode: 'standard',
+      ghost: false,
+      projectId: entry.id,
+      dataRoot: path.resolve(projectRoot),
+      dataRootSource: 'project-root',
+    });
+  });
+
+  test('explicitly switches workspace mode while preserving project id', () => {
+    useTempAlembicHome();
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-mode-switch-'));
+    const entry = ProjectRegistry.register(projectRoot, false);
+    const ghostEntry = ProjectRegistry.setWorkspaceMode(projectRoot, 'ghost');
+    const ghostDataRoot = getGhostWorkspaceDir(entry.id);
+
+    expect(ghostEntry).toMatchObject({ id: entry.id, ghost: true });
+    expect(ghostEntry.createdAt).toBe(entry.createdAt);
+    expect(WorkspaceResolver.fromProject(projectRoot).toFacts()).toMatchObject({
+      mode: 'ghost',
+      ghost: true,
+      projectId: entry.id,
+      dataRoot: ghostDataRoot,
+      dataRootSource: 'ghost-registry',
+    });
+
+    const standardEntry = ProjectRegistry.setWorkspaceMode(projectRoot, 'standard');
+    expect(standardEntry).toMatchObject({ id: entry.id, ghost: false });
+    expect(standardEntry.createdAt).toBe(entry.createdAt);
+    expect(WorkspaceResolver.fromProject(projectRoot).toFacts()).toMatchObject({
+      mode: 'standard',
+      ghost: false,
+      projectId: entry.id,
+      dataRoot: path.resolve(projectRoot),
+      dataRootSource: 'project-root',
+    });
+  });
+
   test('inspects unregistered projects as standard mode without a ghost marker', () => {
     useTempAlembicHome();
     const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-standard-unregistered-'));

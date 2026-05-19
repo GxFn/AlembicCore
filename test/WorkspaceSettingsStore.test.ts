@@ -84,6 +84,26 @@ describe('WorkspaceSettingsStore', () => {
     expect(secrets.ai.providerKeys.google).toBe('secret-google-key');
   });
 
+  test('follows registry mode without ordinary register changing settings data root', () => {
+    useTempAlembicHome();
+    const projectRoot = makeProjectRoot();
+    const entry = ProjectRegistry.register(projectRoot, false);
+
+    expect(WorkspaceSettingsStore.fromProject(projectRoot).settingsPath).toBe(
+      path.join(projectRoot, '.asd', 'settings.json')
+    );
+
+    ProjectRegistry.register(projectRoot, true);
+    expect(WorkspaceSettingsStore.fromProject(projectRoot).settingsPath).toBe(
+      path.join(projectRoot, '.asd', 'settings.json')
+    );
+
+    ProjectRegistry.setWorkspaceMode(projectRoot, 'ghost');
+    const ghostSettingsPath = WorkspaceSettingsStore.fromProject(projectRoot).settingsPath;
+    expect(ghostSettingsPath).toContain(path.join('.asd', 'workspaces', entry.id));
+    expect(ghostSettingsPath).not.toContain(projectRoot);
+  });
+
   test('applies workspace settings without overriding explicit process env by default', () => {
     useTempAlembicHome();
     const projectRoot = makeProjectRoot();
