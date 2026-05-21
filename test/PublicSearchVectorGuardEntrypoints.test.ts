@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGuardCheckEngine, detectLanguage, GuardCheckEngine } from '../src/guard.js';
 import { pathGuard } from '../src/io.js';
 import {
+  buildSearchResponseMeta,
   createSearchEngine,
   FieldWeightedScorer,
   HybridRetriever,
@@ -49,6 +50,13 @@ describe('stable search, vector, and guard entrypoints', () => {
 
     expect(engine).toBeInstanceOf(SearchEngine);
     await expect(engine.search('empty')).resolves.toMatchObject({ total: 0 });
+    expect(
+      buildSearchResponseMeta({ requestedMode: 'semantic', actualMode: 'semantic' })
+    ).toMatchObject({
+      route: 'core-search-engine',
+      semanticUsed: true,
+      vectorUsed: true,
+    });
     expect(tokenize('GuardSearchBoundary')).toContain('guard');
     expect(scorer.search('guard', 1)[0]?.id).toBe('doc-1');
     expect(fused.map((item) => item.id)).toContain('doc-1');

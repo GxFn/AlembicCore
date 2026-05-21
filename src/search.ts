@@ -37,9 +37,11 @@ export {
 } from './repository/search/SearchRepoAdapter.js';
 export type {
   BM25DocMeta,
+  BuildSearchResponseMetaInput,
   DbRow,
   DocMeta,
   RankingContext,
+  ResidentVectorMeta,
   RrfHit,
   Scorer,
   ScorerResult,
@@ -50,14 +52,21 @@ export type {
   SearchHybridRetriever,
   SearchOptions,
   SearchResponse,
+  SearchResponseMeta,
   SearchResultItem,
+  SearchRoute,
+  SearchTimingMeta,
   SearchVectorService,
   SearchVectorStore,
+  SearchWorkspaceIdentity,
   SlimSearchResult,
   VectorHit,
 } from './service/search/SearchTypes.js';
 export {
+  buildSearchResponseMeta,
   groupByKind,
+  inferSearchSemanticUsage,
+  inferSearchVectorUsage,
   slimSearchResult,
 } from './service/search/SearchTypes.js';
 export { tokenize } from './service/search/tokenizer.js';

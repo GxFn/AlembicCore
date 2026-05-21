@@ -73,6 +73,15 @@ export interface ProgressInfo {
   [key: string]: unknown;
 }
 
+export interface VectorHybridSearchHit {
+  id: string;
+  score: number;
+  vectorUsed: boolean;
+  semanticUsed: boolean;
+  fallbackReason?: string;
+  [key: string]: unknown;
+}
+
 export type ProgressFn = (info: ProgressInfo) => void;
 
 // ── Service ──
@@ -346,7 +355,7 @@ export class VectorService {
           ) => Array<{ id: string; score?: number; [key: string]: unknown }>)
         | null;
     } = {}
-  ): Promise<Array<{ id: string; score: number; [key: string]: unknown }>> {
+  ): Promise<VectorHybridSearchHit[]> {
     if (!this.#embedProvider) {
       return [];
     }
@@ -356,6 +365,8 @@ export class VectorService {
       return results.map((r) => ({
         id: ((r.item as Record<string, unknown>).id as string) || '',
         score: r.score,
+        vectorUsed: true,
+        semanticUsed: true,
         item: r.item,
       }));
     }
@@ -364,9 +375,11 @@ export class VectorService {
 
     // Embed query — circuit breaker skips embed after repeated failures
     let queryVector: number[] | null = null;
+    let fallbackReason: string | undefined;
     const circuitOpen = Date.now() < this.#embedCircuitOpenUntil;
     const tEmbedStart = performance.now();
     if (circuitOpen) {
+      fallbackReason = 'embed_circuit_open';
       this.#logger.debug('[VectorService] embed circuit open, skipping embed');
     } else {
       try {
@@ -379,10 +392,12 @@ export class VectorService {
         this.#embedConsecutiveFailures++;
         if (this.#embedConsecutiveFailures >= VectorService.#EMBED_CIRCUIT_THRESHOLD) {
           this.#embedCircuitOpenUntil = Date.now() + VectorService.#EMBED_CIRCUIT_COOLDOWN_MS;
+          fallbackReason = `embed_circuit_open:${err instanceof Error ? err.message : String(err)}`;
           this.#logger.warn('[VectorService] embed circuit OPEN — skipping embed for 60s', {
             consecutiveFailures: this.#embedConsecutiveFailures,
           });
         } else {
+          fallbackReason = `embed_failed:${err instanceof Error ? err.message : String(err)}`;
           this.#logger.warn('[VectorService] embed failed, degrading to sparse-only', {
             error: err instanceof Error ? err.message : String(err),
             failCount: this.#embedConsecutiveFailures,
@@ -408,6 +423,9 @@ export class VectorService {
         id: (r.id as string) || '',
         score: (r.score as number) || 0,
         ...r,
+        vectorUsed: !!queryVector,
+        semanticUsed: !!queryVector,
+        ...(fallbackReason && !queryVector ? { fallbackReason } : {}),
       }));
     } catch (err: unknown) {
       this.#logger.warn('[VectorService] hybridSearch failed', {

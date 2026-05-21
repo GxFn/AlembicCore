@@ -49,6 +49,7 @@ export type {
   ProgressFn,
   ProgressInfo,
   SyncResult,
+  VectorHybridSearchHit,
   VectorServiceConfig,
   VectorStats,
 } from './service/vector/VectorService.js';

@@ -1,5 +1,10 @@
 import { vi } from 'vitest';
-import { BM25Scorer, SearchEngine, tokenize } from '../src/service/search/SearchEngine.js';
+import {
+  BM25Scorer,
+  buildSearchResponseMeta,
+  SearchEngine,
+  tokenize,
+} from '../src/service/search/SearchEngine.js';
 
 /* ────────────────────────────────────────────
  *  tokenize()
@@ -229,6 +234,16 @@ describe('SearchEngine', () => {
 
     const result = await engine.search('URLSession', { mode: 'keyword' });
     expect(result.mode).toBe('keyword');
+    expect(result.searchMeta).toEqual(
+      expect.objectContaining({
+        route: 'core-search-engine',
+        requestedMode: 'keyword',
+        actualMode: 'keyword',
+        semanticUsed: false,
+        vectorUsed: false,
+        resultCount: result.total,
+      })
+    );
     expect(db.prepare).toHaveBeenCalled();
   });
 
@@ -290,6 +305,126 @@ describe('SearchEngine', () => {
 
     const result = await engine.search('swift', { mode: 'semantic' });
     expect(result.mode).toBe('weighted'); // falls back to FieldWeighted
+    expect(result.searchMeta).toEqual(
+      expect.objectContaining({
+        requestedMode: 'semantic',
+        actualMode: 'weighted',
+        semanticUsed: false,
+        vectorUsed: false,
+        fallbackReason: 'embed_provider_unavailable',
+      })
+    );
+  });
+
+  test('searchMeta should mark real VectorService semantic route', async () => {
+    const rows = [
+      {
+        id: 'r1',
+        title: 'VideoURLPreloader',
+        description: 'preload media URL',
+        language: 'swift',
+        category: 'Player',
+        knowledgeType: 'code-pattern',
+        kind: 'pattern',
+        content_json: '{}',
+        status: 'active',
+        tags_json: '[]',
+        trigger: 'preload',
+      },
+    ];
+    const db = makeMockDb(rows);
+    const vectorService = {
+      search: vi.fn().mockResolvedValue([
+        {
+          score: 0.91,
+          item: {
+            id: 'entry_r1',
+            metadata: { entryId: 'r1', title: 'VideoURLPreloader', kind: 'pattern' },
+          },
+        },
+      ]),
+    };
+    const engine = new SearchEngine(db, { vectorService: vectorService as never });
+
+    const result = await engine.search('视频地址预加载', {
+      mode: 'semantic',
+      limit: 5,
+      rank: false,
+    });
+
+    expect(vectorService.search).toHaveBeenCalledWith('视频地址预加载', { topK: 10 });
+    expect(result.mode).toBe('semantic');
+    expect(result.searchMeta).toEqual(
+      expect.objectContaining({
+        route: 'core-search-engine',
+        requestedMode: 'semantic',
+        actualMode: 'semantic',
+        semanticUsed: true,
+        vectorUsed: true,
+        resultCount: 1,
+      })
+    );
+  });
+
+  test('auto searchMeta should not report vector usage for sparse-only RRF fallback', async () => {
+    const db = makeMockDb([]);
+    const vectorService = {
+      hybridSearch: vi.fn().mockResolvedValue([
+        {
+          id: 'sparse-only-1',
+          score: 0.42,
+          vectorUsed: false,
+          semanticUsed: false,
+          fallbackReason: 'embed_failed:API error',
+          data: { item: { id: 'sparse-only-1', title: 'Sparse fallback' } },
+        },
+      ]),
+    };
+    const engine = new SearchEngine(db, { vectorService: vectorService as never });
+
+    const result = await engine.search('ambiguous resident search', {
+      mode: 'auto',
+      limit: 5,
+      rank: false,
+    });
+
+    expect(vectorService.hybridSearch).toHaveBeenCalled();
+    expect(result.mode).toBe('auto(sparse-rrf,conf=0)');
+    expect(result.searchMeta).toEqual(
+      expect.objectContaining({
+        requestedMode: 'auto',
+        actualMode: 'auto(sparse-rrf,conf=0)',
+        semanticUsed: false,
+        vectorUsed: false,
+        fallbackReason: 'embed_failed:API error',
+      })
+    );
+  });
+
+  test('buildSearchResponseMeta should model resident service vector telemetry', () => {
+    const meta = buildSearchResponseMeta({
+      route: 'resident-service',
+      requestedMode: 'semantic',
+      actualMode: 'semantic',
+      resultCount: 3,
+      durationMs: 6.4,
+      workspace: { projectId: 'bili', workspaceMode: 'ghost' },
+      residentVector: { available: true, endpoint: '/api/v1/search' },
+      timings: { embedMs: 2, vectorMs: 4, totalMs: 6 },
+    });
+
+    expect(meta).toMatchObject({
+      route: 'resident-service',
+      requestedMode: 'semantic',
+      actualMode: 'semantic',
+      semanticUsed: true,
+      vectorUsed: true,
+      resultCount: 3,
+      durationMs: 6,
+      workspace: { projectId: 'bili', workspaceMode: 'ghost' },
+      residentVector: { available: true, endpoint: '/api/v1/search' },
+      timings: { embedMs: 2, vectorMs: 4, totalMs: 6 },
+    });
   });
 
   test('refreshIndex should rebuild index', () => {

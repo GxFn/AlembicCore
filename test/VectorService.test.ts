@@ -293,6 +293,8 @@ describe('VectorService', () => {
       expect(hybridRetriever.search).toHaveBeenCalled();
       expect(results).toHaveLength(1);
       expect(results[0].id).toBe('doc1');
+      expect(results[0].vectorUsed).toBe(true);
+      expect(results[0].semanticUsed).toBe(true);
     });
 
     it('should fall back to search() when no hybridRetriever', async () => {
@@ -301,6 +303,7 @@ describe('VectorService', () => {
       const results = await svc.hybridSearch('query');
 
       expect(results).toHaveLength(1);
+      expect(results[0].vectorUsed).toBe(true);
     });
 
     it('should return empty when no embedProvider', async () => {
@@ -316,6 +319,9 @@ describe('VectorService', () => {
       // Degrades to sparse-only: hybridRetriever still called with null queryVector
       expect(hybridRetriever.search).toHaveBeenCalled();
       expect(results).toHaveLength(1);
+      expect(results[0].vectorUsed).toBe(false);
+      expect(results[0].semanticUsed).toBe(false);
+      expect(results[0].fallbackReason).toBe('embed_failed:API error');
     });
   });
 

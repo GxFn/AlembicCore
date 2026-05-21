@@ -154,6 +154,117 @@ export interface RankingContext {
   [key: string]: unknown;
 }
 
+export type SearchRoute =
+  | 'core-search-engine'
+  | 'resident-service'
+  | 'plugin-embedded'
+  | 'unknown'
+  | (string & {});
+
+export interface SearchWorkspaceIdentity {
+  projectId?: string;
+  projectRoot?: string;
+  dataRoot?: string;
+  workspaceMode?: string;
+  [key: string]: unknown;
+}
+
+export interface SearchTimingMeta {
+  totalMs?: number;
+  embedMs?: number;
+  vectorMs?: number;
+  fuseMs?: number;
+  [key: string]: number | undefined;
+}
+
+export interface ResidentVectorMeta {
+  available: boolean;
+  reason?: string;
+  endpoint?: string;
+  serviceVersion?: string;
+  [key: string]: unknown;
+}
+
+export interface SearchResponseMeta {
+  route: SearchRoute;
+  requestedMode: string;
+  actualMode: string;
+  semanticUsed: boolean;
+  vectorUsed: boolean;
+  resultCount: number;
+  durationMs: number;
+  fallbackReason?: string;
+  workspace?: SearchWorkspaceIdentity;
+  timings?: SearchTimingMeta;
+  residentVector?: ResidentVectorMeta;
+  [key: string]: unknown;
+}
+
+export interface BuildSearchResponseMetaInput {
+  route?: SearchRoute;
+  requestedMode?: string;
+  actualMode?: string;
+  semanticUsed?: boolean;
+  vectorUsed?: boolean;
+  resultCount?: number;
+  durationMs?: number;
+  fallbackReason?: string;
+  workspace?: SearchWorkspaceIdentity;
+  timings?: SearchTimingMeta;
+  residentVector?: ResidentVectorMeta;
+  [key: string]: unknown;
+}
+
+export function inferSearchSemanticUsage(actualMode: string | undefined): boolean {
+  const normalized = (actualMode ?? '').toLowerCase();
+  return (
+    normalized.includes('semantic') || normalized.includes('rrf') || normalized.includes('hybrid')
+  );
+}
+
+export function inferSearchVectorUsage(actualMode: string | undefined): boolean {
+  const normalized = (actualMode ?? '').toLowerCase();
+  return (
+    normalized.includes('semantic') || normalized.includes('rrf') || normalized.includes('hybrid')
+  );
+}
+
+export function buildSearchResponseMeta(
+  input: BuildSearchResponseMetaInput = {}
+): SearchResponseMeta {
+  const actualMode = input.actualMode ?? input.requestedMode ?? 'unknown';
+  const requestedMode = input.requestedMode ?? actualMode;
+  const rawDuration = input.durationMs ?? input.timings?.totalMs ?? 0;
+  const durationMs = Number.isFinite(rawDuration) ? Math.max(0, Math.round(rawDuration)) : 0;
+
+  const meta: SearchResponseMeta = {
+    route: input.route ?? 'core-search-engine',
+    requestedMode,
+    actualMode,
+    semanticUsed: input.semanticUsed ?? inferSearchSemanticUsage(actualMode),
+    vectorUsed: input.vectorUsed ?? inferSearchVectorUsage(actualMode),
+    resultCount: input.resultCount ?? 0,
+    durationMs,
+  };
+
+  // resident service / Plugin bridge 共享观测契约：
+  // 只在真实存在时写入，避免旧客户端把 undefined 当成显式状态。
+  if (input.fallbackReason) {
+    meta.fallbackReason = input.fallbackReason;
+  }
+  if (input.workspace) {
+    meta.workspace = input.workspace;
+  }
+  if (input.timings) {
+    meta.timings = input.timings;
+  }
+  if (input.residentVector) {
+    meta.residentVector = input.residentVector;
+  }
+
+  return meta;
+}
+
 /** Search response envelope */
 export interface SearchResponse {
   items: SearchResultItem[];
@@ -163,6 +274,7 @@ export interface SearchResponse {
   type?: string;
   ranked?: boolean;
   byKind?: Record<string, SearchResultItem[]>;
+  searchMeta?: SearchResponseMeta;
 }
 
 /** Duck-typed database connection (better-sqlite3 style) */
@@ -324,5 +436,14 @@ export interface SearchVectorService {
           ) => Array<{ id: string; score?: number; [key: string]: unknown }>)
         | null;
     }
-  ): Promise<Array<{ id: string; score: number; [key: string]: unknown }>>;
+  ): Promise<
+    Array<{
+      id: string;
+      score: number;
+      vectorUsed?: boolean;
+      semanticUsed?: boolean;
+      fallbackReason?: string;
+      [key: string]: unknown;
+    }>
+  >;
 }
