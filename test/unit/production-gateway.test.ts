@@ -342,6 +342,49 @@ describe('RecipeProductionGateway', () => {
       expect(result.merged).toHaveLength(0);
     });
 
+    it('pendingSemanticReview 应关联真实新 Recipe ID', async () => {
+      const consolidationAdvisor = {
+        analyzeBatch: vi.fn(() => ({
+          items: [
+            {
+              index: 0,
+              advice: {
+                action: 'create',
+                confidence: 0.64,
+                reason: '语义相近但字段分析不明确',
+                pendingSemanticReview: true,
+                targetRecipe: { id: 'existing-1', title: 'Existing', similarity: 0.58 },
+              },
+            },
+          ],
+          internalOverlaps: [],
+        })),
+      };
+
+      const gateway = new RecipeProductionGateway(makeDeps({ consolidationAdvisor }));
+
+      const result = await gateway.create({
+        source: 'mcp-external',
+        items: [makeItem()],
+        options: { skipSimilarityCheck: true, skipConsolidation: false },
+      });
+
+      expect(result.created).toMatchObject([{ index: 0, id: 'recipe-1' }]);
+      expect(result.pendingSemanticReview).toMatchObject([
+        {
+          index: 0,
+          title: 'WebSocket 客户端异步消息流模式',
+          newRecipeId: 'recipe-1',
+          createdRecipe: {
+            id: 'recipe-1',
+            title: 'WebSocket 客户端异步消息流模式',
+            lifecycle: 'staging',
+          },
+          relatedRecipe: { id: 'existing-1' },
+        },
+      ]);
+    });
+
     it('skipConsolidation=true 应跳过融合分析', async () => {
       const consolidationAdvisor = {
         analyzeBatch: vi.fn(),

@@ -678,6 +678,21 @@ describe('ConfidenceRouter', () => {
     expect(result.action).toBe('auto_approve');
   });
 
+  test('host-agent 默认可信但仍经过 reasoning 和内容门', async () => {
+    const router = new ConfidenceRouter();
+    const entry = makeEntry({
+      source: 'host-agent',
+      content: { pattern: 'host agent verified project pattern', rationale: 'reason' },
+      reasoning: { whyStandard: 'standard', confidence: 0.75, sources: ['src/app.ts'] },
+    });
+
+    const result = await router.route(entry);
+
+    expect(router._config.trustedSources).toContain('host-agent');
+    expect(result.action).toBe('auto_approve');
+    expect(result.reason).toContain('source: host-agent');
+  });
+
   test('内容不完整 → pending', async () => {
     const router = new ConfidenceRouter();
     const entry = makeEntry({

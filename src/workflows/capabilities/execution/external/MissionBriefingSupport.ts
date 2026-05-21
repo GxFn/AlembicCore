@@ -224,8 +224,8 @@ export function buildInternalNextSteps(
     '',
     '== 完成后可执行的后续操作 ==',
     '1. 调用 alembic_enrich_candidates(candidateIds) 补全候选缺失字段',
-    '2. 使用 knowledge({ action: "submit_batch" }) 手动提交更多知识条目',
-    '3. 使用 knowledge({ action: "submit" }) 逐条提交高质量知识',
+    '2. 使用 alembic_submit_knowledge({ items: [...] }) 手动提交更多知识条目',
+    '3. 使用 alembic_submit_knowledge({ items: [...] }) 逐条提交高质量知识',
     '4. 使用 alembic_skill({ operation: "load", name }) 加载自动生成的 Project Skills',
     '',
     '== 宏观维度 → Project Skills ==',
@@ -471,13 +471,13 @@ function buildWorkflowInstruction({
       'Step 1 — Evolve (仅 needsVerification 中的 Recipe): ' +
       '读 sourceRefs 源码验证 → 调用 alembic_evolve({ decisions: [本维度决策] }) → ' +
       'Step 2 — Gap-Fill: ' +
-      '仅当 dimensionGaps[].executionMode="produce" 时，分析代码发现新模式 → 调用 knowledge({ action: "submit", params: { dimensionId: 当前维度ID, category: 业务/组件分类, knowledgeType: 知识类型 } }) 提交，数量不得超过 createBudget；' +
+      '仅当 dimensionGaps[].executionMode="produce" 时，分析代码发现新模式 → 调用 alembic_submit_knowledge({ items: [{ dimensionId: 当前维度ID, category: 业务/组件分类, knowledgeType: 知识类型, ... }] }) 提交，数量不得超过 createBudget；' +
       'executionMode="verify-only" 的维度只做验证/演进，不提交新候选 → ' +
       'Step 3 — Complete: 调用 alembic_dimension_complete 完成维度'
     );
   }
 
-  return '对每个维度: (1) 用你的原生能力阅读代码分析 → (2) 调用 knowledge({ action: "submit_batch", dimensionId: 当前维度ID, items: [...] }) 批量提交候选（**每维度最少 3 条，目标 5 条**；item.category 只填业务/组件分类，item.knowledgeType 只填知识类型） → (3) 调用 alembic_dimension_complete 完成维度（必须传 referencedFiles=[分析过的文件路径] 和 keyFindings=[3-5条关键发现]）';
+  return '对每个维度: (1) 用你的原生能力阅读代码分析 → (2) 调用 alembic_submit_knowledge({ items: [{ dimensionId: 当前维度ID, ... }] }) 批量提交候选（**每维度最少 3 条，目标 5 条**；item.category 只填业务/组件分类，item.knowledgeType 只填知识类型） → (3) 调用 alembic_dimension_complete 完成维度（必须传 referencedFiles=[分析过的文件路径] 和 keyFindings=[3-5条关键发现]）';
 }
 
 // ═══════════════════════════════════════════════════════════

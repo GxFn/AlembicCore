@@ -3,6 +3,7 @@ import type { DimensionDef } from '../../src/types/project-snapshot.js';
 import { BootstrapSession } from '../../src/workflows/capabilities/execution/external/BootstrapSession.js';
 import { runExternalDimensionCompletionWorkflow } from '../../src/workflows/capabilities/execution/external/ExternalDimensionCompletionWorkflow.js';
 import { buildMissionBriefing } from '../../src/workflows/capabilities/execution/external/MissionBriefingBuilder.js';
+import { buildInternalNextSteps } from '../../src/workflows/capabilities/execution/external/MissionBriefingSupport.js';
 import {
   buildKnowledgeRescanPlan,
   type RelevanceAuditResult,
@@ -10,10 +11,12 @@ import {
 } from '../../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
 import { projectExternalRescanEvidencePlan } from '../../src/workflows/capabilities/planning/knowledge/RescanEvidenceProjectors.js';
 import type { RecipeSnapshotEntry } from '../../src/workflows/capabilities/RecipeSnapshotTypes.js';
+import { presentExternalColdStartResponse } from '../../src/workflows/cold-start/ColdStartPresenters.js';
 import {
   createExternalKnowledgeRescanIntent,
   createInternalKnowledgeRescanIntent,
 } from '../../src/workflows/knowledge-rescan/KnowledgeRescanIntent.js';
+import { presentExternalKnowledgeRescanResponse } from '../../src/workflows/knowledge-rescan/KnowledgeRescanPresenters.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Architecture guide' } as DimensionDef,
@@ -128,6 +131,51 @@ describe('host-agent mining workflow core', () => {
     expect(briefing.meta?.profile).toBe('rescan-external');
     expect((briefing.evidenceHints as Record<string, unknown>).rescanMode).toBe(true);
     expect((briefing.executionPlan as { workflow: string }).workflow).toContain('增量扫描模式');
+    expect((briefing.executionPlan as { workflow: string }).workflow).toContain(
+      'alembic_submit_knowledge'
+    );
+    expect((briefing.executionPlan as { workflow: string }).workflow).not.toContain(
+      'knowledge({ action'
+    );
+  });
+
+  test('projects Codex-visible submission instructions to the real MCP tool name', () => {
+    const coldStart = presentExternalColdStartResponse({
+      cleanupResult: { deletedFiles: 0, clearedTables: [], errors: [] },
+      briefing: { executionPlan: { tiers: [] } },
+      dimensionCount: 2,
+      responseTimeMs: 1,
+    });
+    const rescan = presentExternalKnowledgeRescanResponse({
+      recipeSnapshot: { count: 1 },
+      cleanResult: { clearedTables: [], deletedFiles: 0 },
+      auditSummary: {
+        totalAudited: 1,
+        healthy: 1,
+        watch: 0,
+        decay: 0,
+        severe: 0,
+        dead: 0,
+        proposalsCreated: 0,
+        immediateDeprecated: 0,
+      },
+      briefing: { executionPlan: { tiers: [] } },
+      evidencePlan: {
+        decayCount: 0,
+        coveredDimensions: 1,
+        gapSummary: '无缺口。',
+      },
+      dimensions,
+      responseTimeMs: 1,
+    });
+    const nextSteps = buildInternalNextSteps(dimensions);
+    const visibleText = `${JSON.stringify(coldStart)}\n${JSON.stringify(
+      rescan
+    )}\n${nextSteps.join('\n')}`;
+
+    expect(visibleText).toContain('alembic_submit_knowledge');
+    expect(visibleText).not.toContain('knowledge({ action');
+    expect(visibleText).not.toContain('submit_batch');
   });
 
   test('completes a dimension by recovering submissions, binding recipes, and saving checkpoint', async () => {

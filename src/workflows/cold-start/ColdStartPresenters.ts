@@ -237,7 +237,7 @@ export function presentExternalColdStartResponse({
       `⚠️ Bootstrap 仅完成第一步（项目扫描），你必须继续完成全部 ${dimensionCount} 个维度的分析。` +
       `请立即按 executionPlan.tiers 的顺序，对每个维度执行：` +
       `(1) 用你的代码阅读能力分析该维度相关文件 → ` +
-      `(2) 调用 knowledge({ action: "submit_batch" }) 提交候选知识（**每维度最少 3 条，目标 5 条**，不同关注点拆为独立候选） → ` +
+      `(2) 调用 alembic_submit_knowledge({ items: [...] }) 提交候选知识（**每维度最少 3 条，目标 5 条**，不同关注点拆为独立候选） → ` +
       `(3) 调用 alembic_dimension_complete 标记维度完成。` +
       `不要停下来等待用户确认，直接开始第一个维度。`,
     meta: { tool: 'alembic_bootstrap', responseTimeMs },
