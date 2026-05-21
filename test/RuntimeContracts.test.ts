@@ -64,14 +64,14 @@ describe('Alembic runtime boundary contracts', () => {
       projectRoot: '/project',
       runtimeDir: '/data/.asd',
       schemaMigrationVersion: '009',
-      version: '0.1.0',
+      version: '0.2.0',
     });
 
     expect(health.enhancement).toEqual({
       apiVersion: 'v1',
       packageName: 'alembic-ai',
       route: 'local-alembic',
-      version: '0.1.0',
+      version: '0.2.0',
     });
     expect(summarizeAlembicRuntimeCapabilities(health.capabilities)).toMatchObject({
       apiAvailable: true,
