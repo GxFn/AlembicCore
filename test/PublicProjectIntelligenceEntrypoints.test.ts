@@ -1,19 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  analyzeProject,
   analyzeSourceFile,
   buildProjectSnapshot,
   CallGraphAnalyzer,
   CORE_GRAMMAR_RESOURCE_FILES,
   ensureProjectGrammarResources,
+  getDiscovererRegistry,
   getProjectDiscovererRegistry,
+  isProjectAstAvailable,
   LanguageService,
   listCoreGrammarResources,
+  loadProjectAstPlugins,
   PanoramaService,
   ProjectGraph,
   ProjectIntelligenceCapability,
   parseCMakeProject,
   parseGradleProject,
+  resetDiscovererRegistry,
   resetProjectDiscovererRegistry,
 } from '../src/project-intelligence.js';
 
@@ -44,6 +49,9 @@ describe('stable project intelligence entrypoint', () => {
   });
 
   it('exposes discovery and config parser contracts through one facade', () => {
+    resetDiscovererRegistry();
+    const directRegistry = getDiscovererRegistry();
+    const directDiscovererIds = directRegistry.getAll().map((discoverer) => discoverer.id);
     resetProjectDiscovererRegistry();
     const registry = getProjectDiscovererRegistry();
     const discovererIds = registry.getAll().map((discoverer) => discoverer.id);
@@ -52,6 +60,7 @@ describe('stable project intelligence entrypoint', () => {
     );
     const gradle = parseGradleProject('rootProject.name = "demo"\ninclude(":app", ":core")');
 
+    expect(directDiscovererIds).toEqual(discovererIds);
     expect(discovererIds).toEqual(expect.arrayContaining(['node', 'spm', 'generic']));
     expect(cmake.projectName).toBe('Core');
     expect(cmake.targets[0]?.name).toBe('core');
@@ -79,6 +88,9 @@ describe('stable project intelligence entrypoint', () => {
     });
 
     expect(ProjectGraph).toBeDefined();
+    expect(analyzeProject).toBeInstanceOf(Function);
+    expect(isProjectAstAvailable).toBeInstanceOf(Function);
+    expect(loadProjectAstPlugins).toBeInstanceOf(Function);
     expect(new CallGraphAnalyzer('/project')).toBeDefined();
     expect(PanoramaService).toBeDefined();
     expect(ProjectIntelligenceCapability.run).toBeInstanceOf(Function);

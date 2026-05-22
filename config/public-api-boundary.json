@@ -110,6 +110,49 @@
           "symbols": ["findSimilarRecipes"],
           "reason": "Candidate similarity is exported by the candidate facade."
         },
+        "@alembic/core/core/AstAnalyzer": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./project-intelligence",
+          "symbols": [
+            "analyzeFile",
+            "analyzeProject",
+            "analyzeSourceFile",
+            "isProjectAstAvailable",
+            "loadProjectAstPlugins",
+            "parseToTree"
+          ],
+          "reason": "Alembic benchmarking scripts only need project AST analysis entrypoints; the stable project-intelligence facade already exposes those symbols without requiring the transitional core/AstAnalyzer path."
+        },
+        "@alembic/core/core/ast": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./project-intelligence",
+          "symbols": [
+            "CORE_GRAMMAR_RESOURCE_FILES",
+            "ensureProjectGrammarResources",
+            "loadProjectAstPlugins",
+            "ProjectGraph",
+            "reloadProjectAstPlugins"
+          ],
+          "reason": "AST plugin loading, grammar resources and project graph construction are available from the stable project-intelligence facade; consumers do not need the transitional core/ast index for those symbols."
+        },
+        "@alembic/core/core/discovery": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./project-intelligence",
+          "symbols": [
+            "getDiscovererRegistry",
+            "getProjectDiscovererRegistry",
+            "LanguageService",
+            "resetDiscovererRegistry",
+            "resetProjectDiscovererRegistry"
+          ],
+          "reason": "Discovery registry and language detection contracts are exposed by the stable project-intelligence facade, so Alembic scripts can leave the transitional core/discovery path."
+        },
+        "@alembic/core/core/enhancement": {
+          "decision": "keep-transitional",
+          "targetFacade": "./core/enhancement",
+          "symbols": ["getEnhancementRegistry", "initEnhancementRegistry"],
+          "reason": "Enhancement registry consumers still include Alembic and AlembicPlugin runtime paths and tests. No stable replacement facade exists in this wave, so the exact provisional core/enhancement entry remains intentionally transitional."
+        },
         "@alembic/core/shared/WorkspaceSettingsStore": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
