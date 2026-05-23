@@ -19,14 +19,20 @@ const requiredSubpathExports = {
     'getProjectSkillsPath',
   ],
   '@alembic/core/daemon': [
+    'ALEMBIC_RESIDENT_FEATURES',
+    'ALEMBIC_RESIDENT_SERVICE_CONTRACT_VERSION',
     'ALEMBIC_RUNTIME_HEALTH_PATH',
     'PROJECT_CONNECTION_STATES',
     'PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION',
+    'classifyAlembicResidentJobFeature',
+    'createAlembicResidentServiceStatus',
     'createAlembicRuntimeCapabilities',
     'createAlembicRuntimeProjectIdentity',
     'createProjectRuntimeControlState',
     'isProjectRuntimeTarget',
+    'normalizeAlembicResidentServiceStatus',
     'normalizeProjectConnectionState',
+    'summarizeAlembicResidentServiceStatus',
     'summarizeAlembicRuntimeCapabilities',
     'summarizeAlembicRuntimeProjectIdentity',
   ],
@@ -66,6 +72,15 @@ const requiredSubpathExports = {
   '@alembic/core/types': ['normalizeFileChangeEventSource'],
 };
 const requiredTypeDeclarations = {
+  '@alembic/core/daemon': [
+    'AlembicResidentDashboardHandoff',
+    'AlembicResidentJobReadRequest',
+    'AlembicResidentJobSubmitRequest',
+    'AlembicResidentSearchRequest',
+    'AlembicResidentServiceProbe',
+    'AlembicResidentServiceResult',
+    'AlembicResidentServiceStatus',
+  ],
   '@alembic/core/types': [
     'IncrementalPlan',
     'McpContext',
