@@ -31,7 +31,11 @@ const requiredSubpathExports = {
     'summarizeAlembicRuntimeProjectIdentity',
   ],
   '@alembic/core/evolution': ['toRescanImpactDecision'],
-  '@alembic/core/knowledge': ['getGatewaySourceLabel', 'normalizeGatewaySource'],
+  '@alembic/core/knowledge': [
+    'getGatewaySourceLabel',
+    'normalizeGatewaySource',
+    'normalizeLifecycle',
+  ],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
   '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],
   '@alembic/core/service/candidate': ['aggregateCandidates', 'findSimilarRecipes'],

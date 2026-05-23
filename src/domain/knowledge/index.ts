@@ -23,6 +23,7 @@ export {
   Lifecycle,
   lifecycleInSql,
   NON_DEPRECATED_LIFECYCLES,
+  normalizeLifecycle,
   PUBLISHED_LIFECYCLES,
 } from './Lifecycle.js';
 export { Constraints } from './values/Constraints.js';

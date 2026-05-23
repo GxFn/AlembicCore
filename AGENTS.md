@@ -27,9 +27,10 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 
 ## 外层接入规则
 
-- 外层仓库通过 `vendor/AlembicCore` 子仓库接入本仓库，并通过 `@alembic/core: file:vendor/AlembicCore` 使用 npm 包入口。
-- 修改 Core 能力时，优先在本 workspace 的 `AlembicCore` 仓库完成、验证、提交，再由 `Alembic` / `AlembicPlugin` 更新子仓库指针。
-- 不要把外层仓库中的 `vendor/AlembicCore` 当普通目录随手改散；如果必须在 vendor 内修 Core，也要按独立 Core commit 处理，并同步回 Core 源仓库。
+- 日常 workspace 本地开发优先让外层仓库通过 `@alembic/core: file:../AlembicCore` 使用本仓库包入口，确保只有一个 Core 源仓库承担真实修改。
+- `vendor/AlembicCore` 只用于 release、portable runtime、vendor snapshot 或当前总控文档明确要求的封版场景；不要把 vendor/submodule 当作日常开发接入默认路径。
+- 修改 Core 能力时，必须在本 workspace 的 `AlembicCore` 仓库完成、验证、提交，再由 `Alembic` / `AlembicPlugin` 按对应计划更新本地 file 依赖或 vendor 指针。
+- 如果封版场景必须在外层仓库的 `vendor/AlembicCore` 内修 Core，也要按独立 Core commit 处理，并同步回 Core 源仓库。
 - Core 的 `dist/` 是构建产物，外层接入前可以构建它，但不得提交 `dist/`。
 
 ## Package 入口规则

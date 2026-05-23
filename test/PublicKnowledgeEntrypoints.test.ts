@@ -20,6 +20,7 @@ import {
   KnowledgeService,
   KnowledgeSyncService,
   Lifecycle,
+  normalizeLifecycle,
   parseKnowledgeMarkdown,
   RecipeExtractor,
   RecipeProductionGateway,
@@ -45,6 +46,7 @@ describe('stable knowledge and dimension entrypoints', () => {
 
     expect(entry.title).toBe('稳定知识入口');
     expect(Lifecycle.ACTIVE).toBe('active');
+    expect(normalizeLifecycle('unknown-lifecycle')).toBe(Lifecycle.PENDING);
     expect(isValidTransition(Lifecycle.PENDING, Lifecycle.STAGING)).toBe(true);
   });
 

@@ -35,6 +35,7 @@ export {
   Lifecycle,
   lifecycleInSql,
   NON_DEPRECATED_LIFECYCLES,
+  normalizeLifecycle,
   PUBLISHED_LIFECYCLES,
 } from './domain/knowledge/index.js';
 export type { KnowledgeEntryProps } from './domain/knowledge/KnowledgeEntry.js';
