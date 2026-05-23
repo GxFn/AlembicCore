@@ -1,4 +1,12 @@
 export type {
+  DeprecateVerdict,
+  RelevanceVerdict,
+  RiskTier,
+  UpdateVerdict,
+} from './domain/evolution/EvolutionPolicy.js';
+// EvolutionPolicy 是 evolution 稳定 facade 的领域决策入口；外层不应继续 deep import domain/evolution。
+export { EvolutionPolicy } from './domain/evolution/EvolutionPolicy.js';
+export type {
   CandidateForConsolidation,
   ConsolidationAction,
   ConsolidationAdvice,
