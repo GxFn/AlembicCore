@@ -67,8 +67,11 @@ npm publish --access public --provenance
 
 ## Failure Handling
 
-- If `release:check` fails, fix Core package metadata, `dist` output, exports, or
-  package `files` before publishing.
+- If `release:check` reports `dirty-working-tree`, commit, stash, or revert local
+  changes before staging the release. The readiness check is release-oriented and
+  must fail on uncommitted package state.
+- If `release:check` fails for package metadata, `dist` output, exports, or package
+  `files`, fix the package contents before publishing.
 - If tag validation fails, delete the incorrect tag and create a tag matching
   `package.json` version.
 - If npm publish fails because of auth or provenance, fix the GitHub secret,

@@ -164,7 +164,7 @@ function collectPackageEntryIssues(packFilePaths) {
     }));
 }
 
-function collectMetadataIssues(pkg, sourceCommit) {
+function collectMetadataIssues(pkg, sourceCommit, gitStatus) {
   const issues = [];
 
   if (pkg.name !== '@alembic/core') {
@@ -188,6 +188,14 @@ function collectMetadataIssues(pkg, sourceCommit) {
     });
   }
 
+  if (gitStatus.length > 0) {
+    issues.push({
+      kind: 'dirty-working-tree',
+      message:
+        'Working tree must be clean before release; commit, stash, or revert local changes before running release:check.',
+    });
+  }
+
   return issues;
 }
 
@@ -200,7 +208,7 @@ function buildReport() {
   const packFilePaths = new Set(pack.files.map((file) => `package/${file.path}`));
 
   const issues = [
-    ...collectMetadataIssues(pkg, sourceCommit),
+    ...collectMetadataIssues(pkg, sourceCommit, gitStatus),
     ...collectDependencyIssues(pkg, packageLockText),
     ...collectPackageEntryIssues(packFilePaths),
     ...collectExportIssues(pkg, packFilePaths),

@@ -1,7 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 
 import { computeContentHash } from '../src/shared/content-hash.js';
-import { parseDiffHunks } from '../src/shared/diff-parser.js';
+import { getFileDiff, parseDiffHunks } from '../src/shared/diff-parser.js';
 import { extractCodeBlocksFromMarkdown } from '../src/shared/markdown-utils.js';
 import { tokenizeIdentifiers } from '../src/shared/recipe-tokens.js';
 import { ContentSchema } from '../src/shared/schemas/common.js';
@@ -43,6 +46,21 @@ index 111..222 100644
 `);
 
     expect(parsed).toEqual([{ removedLines: ['old'], addedLines: ['new'] }]);
+  });
+
+  it('非 git 目录获取 diff 时安静降级', () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'alembic-core-diff-'));
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    try {
+      writeFileSync(join(projectRoot, 'sample.ts'), 'export const value = 1;\n');
+
+      expect(getFileDiff(projectRoot, 'sample.ts')).toBeNull();
+      expect(stderr).not.toHaveBeenCalled();
+    } finally {
+      stderr.mockRestore();
+      rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 
   it('校验共享 schema 和相似度工具', () => {
