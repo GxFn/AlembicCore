@@ -72,6 +72,8 @@ import {
   type RecipeSourceRefInsert,
   RecipeSourceRefRepositoryImpl,
 } from './repository/sourceref/RecipeSourceRefRepository.js';
+import { RawDbSyncAdapter, type SyncRepo } from './repository/sync/SyncRepoAdapter.js';
+import { TokenUsageStore } from './repository/token/TokenUsageStore.js';
 
 export type {
   BootstrapSnapshotEntity,
@@ -105,6 +107,7 @@ export type {
   SemanticMemoryUpdate,
   SessionEntity,
   SessionInsert,
+  SyncRepo,
   TransitionEventRow,
   ViolationRecord,
   ViolationStatByRule,
@@ -127,7 +130,24 @@ export type EvolutionProposalRepository = ProposalRepository;
 export type EvolutionWarningRepository = WarningRepository;
 export type EvolutionLifecycleEventRepository = LifecycleEventRepository;
 
-export { getProposalSourceLabel, normalizeProposalSource, proposalSourceStorageValues };
+export {
+  BootstrapRepositoryImpl,
+  CodeEntityRepositoryImpl,
+  GuardViolationRepositoryImpl,
+  KnowledgeEdgeRepositoryImpl,
+  KnowledgeRepositoryImpl,
+  LifecycleEventRepository,
+  MemoryRepositoryImpl,
+  ProposalRepository,
+  RawDbSyncAdapter,
+  RecipeSourceRefRepositoryImpl,
+  SessionRepositoryImpl,
+  TokenUsageStore,
+  WarningRepository,
+  getProposalSourceLabel,
+  normalizeProposalSource,
+  proposalSourceStorageValues,
+};
 
 export interface AlembicRepositoryDatabase extends AlembicDatabaseHandle {
   getDb(): SqliteDatabase;

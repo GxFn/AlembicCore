@@ -77,6 +77,51 @@
           "decision": "consumer-ready-provisional",
           "targetFacade": "./service/candidate",
           "reason": "The candidate exact facade re-exports candidate aggregation and similarity services without stabilizing the whole service tree."
+        },
+        "./service/knowledge/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./knowledge",
+          "reason": "The stable knowledge facade now exposes high-reference knowledge service classes, sync/path/source-ref helpers, and production gateway contracts used by outer repositories."
+        },
+        "./service/evolution/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./evolution",
+          "reason": "The stable evolution facade now exposes high-reference evolution services, diff impact helpers, planner contracts, and gateway contracts used by outer repositories."
+        },
+        "./repository/evolution/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./repositories",
+          "reason": "The stable repositories facade now exposes evolution repositories and their record/input/status contracts without requiring deep repository paths."
+        },
+        "./repository/knowledge/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./repositories",
+          "reason": "The stable repositories facade now exposes knowledge repository implementations and edge/file-store contracts needed by current consumers."
+        },
+        "./repository/sourceref/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./repositories",
+          "reason": "The stable repositories facade now exposes recipe source-ref repository contracts and implementation used by rescan workflows."
+        },
+        "./repository/sync/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./repositories",
+          "reason": "The stable repositories facade now exposes the sync repository adapter consumed by knowledge sync CLI/runtime code."
+        },
+        "./repository/token/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./repositories",
+          "reason": "The stable repositories facade now exposes TokenUsageStore for outer DI modules while keeping construction ownership with the outer runtime."
+        },
+        "./infrastructure/signal/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./events",
+          "reason": "Signal bus, aggregator, bridge, and trace writer contracts are already re-exported from the stable events facade."
+        },
+        "./infrastructure/report/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./infrastructure/report",
+          "reason": "ReportStore is still infrastructure support without a stable report facade; consumers can leave file-level deep imports for the exact provisional report entrypoint first."
         }
       },
       "specifiers": {

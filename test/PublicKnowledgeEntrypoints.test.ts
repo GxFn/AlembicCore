@@ -7,14 +7,24 @@ import {
   resolveRecipeDimensionId,
 } from '../src/dimensions.js';
 import {
+  CodeEntityGraph,
+  ConfidenceRouter,
   checkRecipeReadiness,
+  computeKnowledgeHash,
   getAgentAdapterFieldSpec,
   getExternalAgentRequiredFields,
   isValidTransition,
   KnowledgeEntry,
+  KnowledgeFileWriter,
+  KnowledgeGraphService,
   KnowledgeService,
+  KnowledgeSyncService,
   Lifecycle,
+  parseKnowledgeMarkdown,
+  RecipeExtractor,
   RecipeProductionGateway,
+  rewriteRecipePaths,
+  SourceRefReconciler,
   UnifiedValidator,
   V3_FIELD_SPEC,
 } from '../src/knowledge.js';
@@ -53,5 +63,18 @@ describe('stable knowledge and dimension entrypoints', () => {
   it('exposes production gateway and knowledge service as stable service contracts', () => {
     expect(RecipeProductionGateway).toBeDefined();
     expect(KnowledgeService).toBeDefined();
+  });
+
+  it('exposes high-reference knowledge services through the stable knowledge facade', () => {
+    expect(CodeEntityGraph).toBeDefined();
+    expect(ConfidenceRouter).toBeDefined();
+    expect(KnowledgeFileWriter).toBeDefined();
+    expect(KnowledgeGraphService).toBeDefined();
+    expect(KnowledgeSyncService).toBeDefined();
+    expect(RecipeExtractor).toBeDefined();
+    expect(SourceRefReconciler).toBeDefined();
+    expect(rewriteRecipePaths).toBeDefined();
+    expect(computeKnowledgeHash('stable facade')).toMatch(/^[0-9a-f]+$/);
+    expect(parseKnowledgeMarkdown('# Stable facade')).toBeDefined();
   });
 });

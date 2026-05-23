@@ -8,8 +8,16 @@ import { pathGuard } from '../src/io.js';
 import { KnowledgeEntry } from '../src/knowledge.js';
 import {
   ALEMBIC_REPOSITORY_KEYS,
+  CodeEntityRepositoryImpl,
   createAlembicRepositories,
   isAlembicRepositoryKey,
+  KnowledgeEdgeRepositoryImpl,
+  KnowledgeRepositoryImpl,
+  ProposalRepository,
+  RawDbSyncAdapter,
+  RecipeSourceRefRepositoryImpl,
+  TokenUsageStore,
+  WarningRepository,
 } from '../src/repositories.js';
 
 describe('public database and repository entrypoints', () => {
@@ -101,5 +109,16 @@ describe('public database and repository entrypoints', () => {
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('recipeSourceRefRepository');
     expect(isAlembicRepositoryKey('proposalRepository')).toBe(true);
     expect(isAlembicRepositoryKey('tokenUsageStore')).toBe(false);
+  });
+
+  it('exposes high-reference repository implementations and adapters through the stable facade', () => {
+    expect(KnowledgeRepositoryImpl).toBeDefined();
+    expect(KnowledgeEdgeRepositoryImpl).toBeDefined();
+    expect(CodeEntityRepositoryImpl).toBeDefined();
+    expect(RecipeSourceRefRepositoryImpl).toBeDefined();
+    expect(ProposalRepository).toBeDefined();
+    expect(WarningRepository).toBeDefined();
+    expect(RawDbSyncAdapter).toBeDefined();
+    expect(TokenUsageStore).toBeDefined();
   });
 });
