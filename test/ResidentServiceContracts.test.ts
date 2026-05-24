@@ -45,6 +45,8 @@ describe('resident service public contracts', () => {
     expect(status.serviceScope.projectIdentity).toEqual({
       dataRootSource: 'ghost-registry',
       projectId: 'project-a',
+      projectScope: null,
+      projectScopeId: null,
       schemaMigrationVersion: '009',
       workspaceMode: 'ghost',
     });

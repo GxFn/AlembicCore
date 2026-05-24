@@ -22,6 +22,12 @@ import {
   type ProjectRegistryInspection,
   type WorkspaceMode,
 } from './ProjectRegistry.js';
+import {
+  type ProjectDescriptor,
+  type ProjectScopeSummary,
+  resolveProjectScopeForFolder,
+  summarizeProjectScopeDescriptor,
+} from './ProjectScope.js';
 
 export interface WorkspaceFacts {
   targetProjectRoot: string;
@@ -32,6 +38,11 @@ export interface WorkspaceFacts {
   ghost: boolean;
   projectId: string | null;
   expectedProjectId: string;
+  projectScope: ProjectScopeSummary | null;
+  projectScopeId: string | null;
+  controlRoot: string | null;
+  folders: ProjectScopeSummary['folders'];
+  currentFolderId: string | null;
   dataRoot: string;
   dataRootSource: 'project-root' | 'ghost-registry';
   workspaceExists: boolean;
@@ -59,6 +70,12 @@ export class WorkspaceResolver {
   /** 项目 ID（来自 ProjectRegistry） */
   readonly projectId: string | null;
 
+  /** 抽象 ProjectScope（多 folder 模式），为空时保持旧单根解析语义 */
+  readonly projectScope: ProjectDescriptor | null;
+
+  /** 当前物理 folder 在 ProjectScope 内的 ID */
+  readonly currentFolderId: string | null;
+
   /** 知识库目录名（如 'Alembic'） */
   readonly knowledgeBaseDir: string;
 
@@ -69,16 +86,36 @@ export class WorkspaceResolver {
     projectRoot: string;
     ghost?: boolean;
     projectId?: string;
+    projectScope?: ProjectDescriptor | null;
+    currentFolderId?: string | null;
     knowledgeBaseDir?: string;
     folderNames?: PartialAlembicFolderNames;
   }) {
     this.projectRoot = path.resolve(opts.projectRoot);
-    this.ghost = opts.ghost ?? false;
     this.folderNames = resolveFolderNames(opts.folderNames);
     this.knowledgeBaseDir =
       opts.knowledgeBaseDir ??
       detectKnowledgeBaseDir(this.projectRoot, this.folderNames.project.knowledgeBase);
     const inspection = ProjectRegistry.inspect(this.projectRoot);
+    this.projectScope = opts.projectScope ?? null;
+    const scopeResolution = this.projectScope
+      ? resolveProjectScopeForFolder(this.projectScope, this.projectRoot)
+      : null;
+    this.currentFolderId =
+      opts.currentFolderId ??
+      scopeResolution?.currentFolderId ??
+      this.projectScope?.currentFolderId ??
+      null;
+
+    if (this.projectScope) {
+      // ProjectScope 首版固定 Ghost 写入边界；projectRoot 仍是当前源码 folder。
+      this.ghost = true;
+      this.projectId = opts.projectId ?? this.projectScope.projectId;
+      this.dataRoot = this.projectScope.dataRoot;
+      return;
+    }
+
+    this.ghost = opts.ghost ?? false;
 
     if (this.ghost) {
       // Ghost 模式：从 ProjectRegistry 查 ID 或用显式传入的 ID
@@ -101,13 +138,19 @@ export class WorkspaceResolver {
    */
   static fromProject(
     projectRoot: string,
-    opts: { folderNames?: PartialAlembicFolderNames } = {}
+    opts: {
+      currentFolderId?: string | null;
+      folderNames?: PartialAlembicFolderNames;
+      projectScope?: ProjectDescriptor | null;
+    } = {}
   ): WorkspaceResolver {
     const inspection = ProjectRegistry.inspect(projectRoot);
     return new WorkspaceResolver({
       projectRoot,
       ghost: inspection.ghost,
       projectId: inspection.projectId ?? undefined,
+      projectScope: opts.projectScope,
+      currentFolderId: opts.currentFolderId,
       folderNames: opts.folderNames,
     });
   }
@@ -118,6 +161,9 @@ export class WorkspaceResolver {
    */
   toFacts(): WorkspaceFacts {
     const inspection = ProjectRegistry.inspect(this.projectRoot);
+    const projectScope = this.projectScope
+      ? summarizeProjectScopeDescriptor(this.projectScope, this.currentFolderId)
+      : null;
     return {
       targetProjectRoot: this.projectRoot,
       projectRealpath: inspection.projectRealpath,
@@ -127,6 +173,11 @@ export class WorkspaceResolver {
       ghost: this.ghost,
       projectId: this.projectId,
       expectedProjectId: inspection.expectedProjectId,
+      projectScope,
+      projectScopeId: projectScope?.projectScopeId ?? null,
+      controlRoot: projectScope?.controlRoot ?? null,
+      folders: projectScope?.folders ?? [],
+      currentFolderId: projectScope?.currentFolderId ?? null,
       dataRoot: this.dataRoot,
       dataRootSource: this.ghost ? 'ghost-registry' : 'project-root',
       workspaceExists: fs.existsSync(this.dataRoot),

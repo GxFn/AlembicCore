@@ -8,6 +8,7 @@ import {
   getProjectRegistryPath,
   ProjectRegistry,
 } from '../src/shared/ProjectRegistry.js';
+import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 import WorkspaceResolver from '../src/shared/WorkspaceResolver.js';
 
 const ORIGINAL_ALEMBIC_HOME = process.env.ALEMBIC_HOME;
@@ -257,5 +258,50 @@ describe('WorkspaceResolver', () => {
     expect(resolver.recipesDir).toBe(path.join(projectRoot, 'Knowledge', 'patterns'));
     expect(resolver.skillsDir).toBe(path.join(projectRoot, 'Knowledge', 'agent-skills'));
     expect(resolver.wikiDir).toBe(path.join(projectRoot, 'Knowledge', 'docs'));
+  });
+
+  test('projects multi-root ProjectScope facts while keeping projectRoot as the current folder', () => {
+    const controlRoot = path.join(os.tmpdir(), 'alembic-workspace-control-root');
+    const currentFolder = path.join(controlRoot, 'AlembicCore');
+    const dataRoot = path.join(os.tmpdir(), 'alembic-project-scope-data');
+    const projectScope = createProjectDescriptor({
+      controlRoot,
+      dataRoot,
+      folders: [
+        { id: 'folder-alembic', path: path.join(controlRoot, 'Alembic') },
+        { id: 'folder-core', path: currentFolder },
+      ],
+      projectId: 'project-a',
+      projectScopeId: 'scope-a',
+    });
+    const resolver = new WorkspaceResolver({
+      projectRoot: currentFolder,
+      projectScope,
+    });
+    const facts = resolver.toFacts();
+
+    expect(resolver.projectRoot).toBe(currentFolder);
+    expect(resolver.dataRoot).toBe(dataRoot);
+    expect(resolver.ghost).toBe(true);
+    expect(facts).toMatchObject({
+      controlRoot,
+      currentFolderId: 'folder-core',
+      dataRoot,
+      dataRootSource: 'ghost-registry',
+      folders: [
+        { folderId: 'folder-alembic', path: path.join(controlRoot, 'Alembic') },
+        { folderId: 'folder-core', path: currentFolder },
+      ],
+      mode: 'ghost',
+      projectId: 'project-a',
+      projectScopeId: 'scope-a',
+      targetProjectRoot: currentFolder,
+    });
+    expect(facts.projectScope).toMatchObject({
+      currentFolderPath: currentFolder,
+      folderCount: 2,
+      projectScopeId: 'scope-a',
+      storageKind: 'ghost',
+    });
   });
 });

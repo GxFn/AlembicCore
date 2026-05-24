@@ -14,6 +14,7 @@ import {
   summarizeAlembicRuntimeCapabilities,
   summarizeAlembicRuntimeProjectIdentity,
 } from '../src/daemon/index.js';
+import { PROJECT_SCOPE_OPERATIONS } from '../src/shared/index.js';
 
 describe('Alembic runtime boundary contracts', () => {
   it('builds a daemon-owned runtime capability shape without HTTP or dashboard dependencies', () => {
@@ -57,6 +58,13 @@ describe('Alembic runtime boundary contracts', () => {
         'hidden-reasoning',
       ],
     });
+    expect(capabilities.projectScope).toMatchObject({
+      available: false,
+      storageKind: 'ghost',
+      supportedOperations: [...PROJECT_SCOPE_OPERATIONS],
+      supportsFolderRemove: false,
+      supportsStandardStorage: false,
+    });
   });
 
   it('creates health data and summarizes consumer-facing capability availability', () => {
@@ -84,6 +92,33 @@ describe('Alembic runtime boundary contracts', () => {
       mode: 'daemon',
       projectId: 'abcd1234',
       projectRoot: '/project',
+      projectScope: {
+        contractVersion: 1,
+        controlRoot: '/workspace',
+        controlRootIncludedInFolders: false,
+        currentFolderId: 'folder-a',
+        currentFolderPath: '/workspace/project',
+        dataRoot: '/data',
+        dataRootSource: 'ghost-registry',
+        displayName: 'Project A',
+        folderCount: 1,
+        folders: [
+          {
+            displayName: 'project',
+            folderId: 'folder-a',
+            path: '/workspace/project',
+            realpath: null,
+            repositoryId: null,
+            role: 'source',
+            state: 'active',
+          },
+        ],
+        projectId: 'abcd1234',
+        projectRootWriteAllowed: false,
+        projectScopeId: 'scope-a',
+        standardWriteAllowed: false,
+        storageKind: 'ghost',
+      },
       runtimeDir: '/data/.asd',
       schemaMigrationVersion: '009',
       version: '0.2.0',
@@ -115,6 +150,10 @@ describe('Alembic runtime boundary contracts', () => {
       ],
       jobsAvailable: true,
       jobKinds: ['bootstrap', 'rescan'],
+      projectScopeAvailable: false,
+      projectScopeEndpoint: '/api/v1/project-scope',
+      projectScopeStorageKind: 'ghost',
+      projectScopeSupportedOperations: [...PROJECT_SCOPE_OPERATIONS],
     });
     expect(summarizeAlembicRuntimeProjectIdentity(health)).toMatchObject({
       dataRoot: '/data',
@@ -122,6 +161,12 @@ describe('Alembic runtime boundary contracts', () => {
       databasePath: '/data/.asd/alembic.db',
       projectId: 'abcd1234',
       projectRoot: '/project',
+      projectScope: {
+        currentFolderId: 'folder-a',
+        projectScopeId: 'scope-a',
+        storageKind: 'ghost',
+      },
+      projectScopeId: 'scope-a',
       runtimeDir: '/data/.asd',
       schemaMigrationVersion: '009',
       workspaceMode: 'ghost',

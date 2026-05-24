@@ -13,6 +13,7 @@ export * from './markdown-utils.js';
 export { default as pathGuard, PathGuardError } from './PathGuard.js';
 export * from './ProjectMarkers.js';
 export * from './ProjectRegistry.js';
+export * from './ProjectScope.js';
 export * from './package-root.js';
 export * from './recipe-tokens.js';
 export * from './resolveProjectRoot.js';

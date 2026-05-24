@@ -1,5 +1,11 @@
 import type { WorkspaceMode } from '../shared/ProjectRegistry.js';
 import {
+  createProjectScopeEndpointCapability,
+  normalizeProjectScopeSummary,
+  type ProjectScopeEndpointCapability,
+  type ProjectScopeSummary,
+} from '../shared/ProjectScope.js';
+import {
   type CanonicalFileChangeEventSource,
   HOST_EDIT_SOURCE,
   LEGACY_IDE_EDIT_SOURCE,
@@ -72,6 +78,8 @@ export interface AlembicRuntimeProjectIdentity {
   databasePath?: string;
   projectId: string | null;
   projectRoot: string;
+  projectScope?: ProjectScopeSummary | null;
+  projectScopeId?: string | null;
   runtimeDir: string;
   schemaMigrationVersion?: string | null;
   workspaceMode?: WorkspaceMode;
@@ -128,6 +136,7 @@ export interface AlembicRuntimeCapabilities {
   fileMonitor: AlembicFileMonitorCapability;
   internalAi: AlembicInternalAiCapability;
   jobs: AlembicJobsCapability;
+  projectScope: ProjectScopeEndpointCapability;
 }
 
 export interface AlembicRuntimeHealthData extends AlembicRuntimeProjectIdentity {
@@ -153,6 +162,7 @@ export interface CreateAlembicRuntimeCapabilitiesOptions {
   jobEndpoints?: Partial<Record<keyof typeof ALEMBIC_JOB_ENDPOINTS, string>>;
   jobKinds?: readonly AlembicJobKind[];
   jobsAvailable?: boolean;
+  projectScope?: Partial<ProjectScopeEndpointCapability>;
 }
 
 export interface CreateAlembicRuntimeHealthDataOptions extends AlembicRuntimeProjectIdentity {
@@ -171,6 +181,8 @@ export interface AlembicRuntimeProjectIdentitySummary {
   databasePath: string | null;
   projectId: string | null;
   projectRoot: string | null;
+  projectScope: ProjectScopeSummary | null;
+  projectScopeId: string | null;
   runtimeDir: string | null;
   schemaMigrationVersion: string | null;
   workspaceMode: WorkspaceMode | null;
@@ -191,6 +203,10 @@ export interface AlembicRuntimeCapabilitySummary {
   jobEventSourceClasses: string[];
   jobsAvailable: boolean | null;
   jobKinds: string[];
+  projectScopeAvailable: boolean | null;
+  projectScopeEndpoint: string | null;
+  projectScopeStorageKind: string | null;
+  projectScopeSupportedOperations: string[];
 }
 
 export function createAlembicRuntimeProjectIdentity(
@@ -202,6 +218,8 @@ export function createAlembicRuntimeProjectIdentity(
     databasePath: options.databasePath,
     projectId: options.projectId,
     projectRoot: options.projectRoot,
+    projectScope: options.projectScope ?? null,
+    projectScopeId: options.projectScope?.projectScopeId ?? options.projectScopeId ?? null,
     runtimeDir: options.runtimeDir,
     schemaMigrationVersion: options.schemaMigrationVersion ?? null,
     // workspaceMode 可由 provider 显式传入；缺省时按 dataRootSource 推导，方便外层渐进接入。
@@ -242,6 +260,7 @@ export function createAlembicRuntimeCapabilities(
       processEvents: createJobProcessEventEndpointCapability(options.jobProcessEvents),
       kinds: jobKinds,
     },
+    projectScope: createProjectScopeEndpointCapability(options.projectScope),
   };
 }
 
@@ -288,6 +307,8 @@ export function summarizeAlembicRuntimeCapabilities(
   const internalAi = asRecord(capabilities?.internalAi);
   const jobs = asRecord(capabilities?.jobs);
   const processEvents = asRecord(jobs?.processEvents);
+  const projectScope = asRecord(capabilities?.projectScope);
+  const projectScopeEndpoints = asRecord(projectScope?.endpoints);
 
   return {
     apiAvailable: booleanOrNull(api?.available),
@@ -314,6 +335,10 @@ export function summarizeAlembicRuntimeCapabilities(
       : [],
     jobsAvailable: booleanOrNull(jobs?.available),
     jobKinds: stringArray(jobs?.kinds),
+    projectScopeAvailable: booleanOrNull(projectScope?.available),
+    projectScopeEndpoint: firstString(projectScopeEndpoints?.readScope, projectScope?.endpoint),
+    projectScopeStorageKind: firstString(projectScope?.storageKind),
+    projectScopeSupportedOperations: stringArray(projectScope?.supportedOperations),
   };
 }
 
@@ -327,6 +352,8 @@ export function summarizeAlembicRuntimeProjectIdentity(
     databasePath: firstString(identity?.databasePath),
     projectId: nullableString(identity?.projectId),
     projectRoot: firstString(identity?.projectRoot),
+    projectScope: normalizeProjectScopeSummary(identity?.projectScope),
+    projectScopeId: nullableString(identity?.projectScopeId),
     runtimeDir: firstString(identity?.runtimeDir),
     schemaMigrationVersion: nullableString(identity?.schemaMigrationVersion),
     workspaceMode: normalizeAlembicWorkspaceMode(identity?.workspaceMode),

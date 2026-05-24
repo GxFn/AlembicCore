@@ -1,4 +1,5 @@
 import type { WorkspaceMode } from '../shared/ProjectRegistry.js';
+import type { ProjectScopeSummary } from '../shared/ProjectScope.js';
 import type { DaemonJobStatus } from './JobStore.js';
 import type { AlembicRuntimeDataRootSource } from './RuntimeContracts.js';
 
@@ -132,6 +133,8 @@ export interface ProjectRuntimeScopeSummary {
   projectId: string | null;
   projectRealpath: string;
   projectRoot: string;
+  projectScope?: ProjectScopeSummary | null;
+  projectScopeId?: string | null;
   registered: boolean;
   registry: ProjectRuntimeRegistrySummary;
   runtimeDir: string;
