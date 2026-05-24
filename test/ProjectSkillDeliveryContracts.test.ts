@@ -7,6 +7,7 @@ import {
   normalizeProjectSkillDeliveryReceipt,
   PROJECT_SKILL_DELIVERY_CONTRACT_VERSION,
   summarizeProjectSkillDeliveryReceipt,
+  validateProjectSkillDeliveryReceipt,
 } from '../src/host-agent-workflows.js';
 
 describe('ProjectSkillDeliveryContracts', () => {
@@ -26,21 +27,30 @@ describe('ProjectSkillDeliveryContracts', () => {
         path: 'Alembic/skills/architecture/SKILL.md',
       },
       authorization: {
+        codexSkillRoot: '.agents/skills',
         grantedBy: 'user',
+        projectScopeId: 'scope-project-1',
         required: true,
         status: 'granted',
       },
+      codexSkillRoot: '.agents/skills',
       createdAt: '2026-05-24T10:00:00Z',
       dimensionId: 'architecture',
       evidenceRefs: ['reports/bootstrap/architecture.md'],
       id: 'receipt-1',
       managedMarker: {
+        generatedSkillId: 'skill-architecture',
+        generationHash: 'sha256:abc',
         markerPath: '.agents/skills/architecture/.alembic-managed.json',
       },
       projectId: 'project-1',
       projectRoot: '/workspace/project',
+      projectScopeId: 'scope-project-1',
       runtimeExport: {
+        codexSkillRoot: '.agents/skills',
         linkMode: 'symlink',
+        projectScopeId: 'scope-project-1',
+        refreshRequired: true,
         status: 'exported',
         targetPath: '.agents/skills/architecture',
         targetRoot: '.agents/skills',
@@ -53,19 +63,30 @@ describe('ProjectSkillDeliveryContracts', () => {
     });
 
     expect(receipt).toMatchObject({
-      authorization: { status: 'granted' },
+      authorization: {
+        codexSkillRoot: '.agents/skills',
+        projectScopeId: 'scope-project-1',
+        status: 'granted',
+      },
       contractVersion: PROJECT_SKILL_DELIVERY_CONTRACT_VERSION,
       dimensionId: 'architecture',
       managedMarker: {
+        generatedSkillId: 'skill-architecture',
+        generationHash: 'sha256:abc',
         managedBy: 'alembic',
+        projectScopeId: 'scope-project-1',
         route: 'alembic',
         sourcePath: 'Alembic/skills/architecture/SKILL.md',
       },
+      projectScopeId: 'scope-project-1',
       route: 'alembic',
       runtimeExport: {
         authorizationStatus: 'granted',
+        codexSkillRoot: '.agents/skills',
         conflictStatus: 'none',
         linkMode: 'symlink',
+        projectScopeId: 'scope-project-1',
+        refreshRequired: true,
         status: 'exported',
         strategy: 'symlink-first',
       },
@@ -78,6 +99,10 @@ describe('ProjectSkillDeliveryContracts', () => {
     });
     expect(receipt.asset.artifactRefs[0]?.dimensionId).toBe('architecture');
     expect(summarizeProjectSkillDeliveryReceipt(receipt)).toContain('exported');
+    expect(validateProjectSkillDeliveryReceipt(receipt)).toMatchObject({
+      issues: [],
+      ok: true,
+    });
   });
 
   it('normalizes Plugin route receipt input without requiring runtime export', () => {
@@ -90,12 +115,15 @@ describe('ProjectSkillDeliveryContracts', () => {
         required: false,
         status: 'not-required',
       },
+      codexSkillRoot: '.agents/skills',
       conflictStatus: 'compatible-existing',
       createdAt: '2026-05-24T10:05:00Z',
       id: 'receipt-2',
       projectRoot: '/workspace/project',
+      projectScopeId: 'scope-project-1',
       runtimeExport: {
         conflictStatus: 'compatible-existing',
+        refreshRequired: false,
         status: 'skipped',
       },
       skillName: 'react-patterns',
@@ -112,11 +140,19 @@ describe('ProjectSkillDeliveryContracts', () => {
     });
 
     expect(normalized).toMatchObject({
-      authorization: { status: 'not-required' },
+      authorization: {
+        codexSkillRoot: '.agents/skills',
+        projectScopeId: 'scope-project-1',
+        status: 'not-required',
+      },
       conflictStatus: 'compatible-existing',
+      projectScopeId: 'scope-project-1',
       route: 'plugin',
       runtimeExport: {
+        codexSkillRoot: '.agents/skills',
         conflictStatus: 'compatible-existing',
+        projectScopeId: 'scope-project-1',
+        refreshRequired: false,
         status: 'skipped',
       },
       skillName: 'react-patterns',
@@ -140,5 +176,36 @@ describe('ProjectSkillDeliveryContracts', () => {
         skillName: 'missing',
       })
     ).toBeNull();
+  });
+
+  it('reports scope and marker identity validation issues', () => {
+    const receipt = createAlembicProjectSkillDeliveryReceipt({
+      asset: {
+        path: 'Alembic/skills/quality/SKILL.md',
+      },
+      authorization: {
+        required: true,
+        status: 'granted',
+      },
+      createdAt: '2026-05-24T10:15:00Z',
+      id: 'receipt-4',
+      managedMarker: {
+        markerPath: '.agents/skills/quality/.alembic-managed.json',
+      },
+      projectRoot: '/workspace/project',
+      runtimeExport: {
+        status: 'exported',
+      },
+      skillName: 'quality',
+    });
+
+    expect(validateProjectSkillDeliveryReceipt(receipt)).toMatchObject({
+      issues: [
+        'authorization-scope-missing',
+        'runtime-export-scope-missing',
+        'managed-marker-identity-missing',
+      ],
+      ok: false,
+    });
   });
 });

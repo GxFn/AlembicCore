@@ -48,6 +48,11 @@ export type ProjectSkillRuntimeExportStatus =
 export type ProjectSkillLinkMode = (typeof PROJECT_SKILL_LINK_MODES)[number];
 export type ProjectSkillAuthorizationStatus = (typeof PROJECT_SKILL_AUTHORIZATION_STATUSES)[number];
 export type ProjectSkillConflictStatus = (typeof PROJECT_SKILL_CONFLICT_STATUSES)[number];
+export type ProjectSkillDeliveryValidationIssue =
+  | 'invalid-receipt-shape'
+  | 'authorization-scope-missing'
+  | 'runtime-export-scope-missing'
+  | 'managed-marker-identity-missing';
 
 export interface ProjectSkillDeliveryEvidenceRef {
   dimensionId: string | null;
@@ -69,17 +74,22 @@ export interface ProjectSkillDeliveryAsset {
 }
 
 export interface ProjectSkillDeliveryAuthorization {
+  codexSkillRoot: string | null;
   grantedBy: string | null;
   message: string | null;
+  projectScopeId: string | null;
   required: boolean;
   status: ProjectSkillAuthorizationStatus;
 }
 
 export interface ProjectSkillRuntimeExportReceipt {
   authorizationStatus: ProjectSkillAuthorizationStatus;
+  codexSkillRoot: string | null;
   conflictStatus: ProjectSkillConflictStatus;
   linkMode: ProjectSkillLinkMode;
   message: string | null;
+  projectScopeId: string | null;
+  refreshRequired: boolean;
   status: ProjectSkillRuntimeExportStatus;
   strategy: ProjectSkillRuntimeExportStrategy;
   targetPath: string | null;
@@ -88,10 +98,13 @@ export interface ProjectSkillRuntimeExportReceipt {
 
 export interface ProjectSkillManagedMarker {
   contractVersion: typeof PROJECT_SKILL_DELIVERY_CONTRACT_VERSION;
+  generatedSkillId: string | null;
+  generationHash: string | null;
   managedBy: 'alembic';
   markerPath: string | null;
   projectId: string | null;
   projectRoot: string;
+  projectScopeId: string | null;
   route: ProjectSkillDeliveryRoute;
   skillName: string;
   sourcePath: string;
@@ -118,11 +131,18 @@ export interface ProjectSkillDeliveryReceipt {
   managedMarker: ProjectSkillManagedMarker | null;
   projectId: string | null;
   projectRoot: string;
+  projectScopeId: string | null;
   route: ProjectSkillDeliveryRoute;
   runtimeExport: ProjectSkillRuntimeExportReceipt;
   shoutSummary: ProjectSkillDeliveryShoutSummary;
   skillName: string;
   targetName: string | null;
+}
+
+export interface ProjectSkillDeliveryValidationResult {
+  issues: ProjectSkillDeliveryValidationIssue[];
+  ok: boolean;
+  receipt: ProjectSkillDeliveryReceipt | null;
 }
 
 export interface CreateProjectSkillDeliveryReceiptInput {
@@ -138,6 +158,7 @@ export interface CreateProjectSkillDeliveryReceiptInput {
   };
   authorization?: Partial<ProjectSkillDeliveryAuthorization> | null;
   conflictStatus?: ProjectSkillConflictStatus | null;
+  codexSkillRoot?: string | null;
   createdAt: string;
   dimensionId?: string | null;
   evidenceRefs?: readonly unknown[];
@@ -145,6 +166,7 @@ export interface CreateProjectSkillDeliveryReceiptInput {
   managedMarker?: Partial<ProjectSkillManagedMarker> | null;
   projectId?: string | null;
   projectRoot: string;
+  projectScopeId?: string | null;
   route: ProjectSkillDeliveryRoute;
   runtimeExport?: Partial<ProjectSkillRuntimeExportReceipt> | null;
   shoutSummary?: Partial<ProjectSkillDeliveryShoutSummary> | null;
@@ -162,8 +184,22 @@ export function createProjectSkillDeliveryReceipt(
 ): ProjectSkillDeliveryReceipt {
   const dimensionId = input.dimensionId ?? input.asset.dimensionId ?? null;
   const targetName = input.targetName ?? input.asset.targetName ?? null;
+  const projectScopeId =
+    input.projectScopeId ??
+    input.authorization?.projectScopeId ??
+    input.runtimeExport?.projectScopeId ??
+    input.managedMarker?.projectScopeId ??
+    null;
+  const codexSkillRoot =
+    input.codexSkillRoot ??
+    input.authorization?.codexSkillRoot ??
+    input.runtimeExport?.codexSkillRoot ??
+    null;
   const conflictStatus = input.conflictStatus ?? input.runtimeExport?.conflictStatus ?? 'none';
-  const authorization = createProjectSkillDeliveryAuthorization(input.authorization);
+  const authorization = createProjectSkillDeliveryAuthorization(input.authorization, {
+    codexSkillRoot,
+    projectScopeId,
+  });
   const asset = createProjectSkillDeliveryAsset(input.asset, {
     dimensionId,
     skillName: input.skillName,
@@ -171,7 +207,9 @@ export function createProjectSkillDeliveryReceipt(
   });
   const runtimeExport = createProjectSkillRuntimeExportReceipt(input.runtimeExport, {
     authorizationStatus: authorization.status,
+    codexSkillRoot,
     conflictStatus,
+    projectScopeId,
   });
   const receipt: ProjectSkillDeliveryReceipt = {
     asset,
@@ -186,13 +224,16 @@ export function createProjectSkillDeliveryReceipt(
       ? createProjectSkillManagedMarker(input.managedMarker, {
           projectId: input.projectId ?? null,
           projectRoot: input.projectRoot,
+          projectScopeId,
           route: input.route,
           skillName: input.skillName,
+          generationHash: asset.contentHash,
           sourcePath: asset.path,
         })
       : null,
     projectId: input.projectId ?? null,
     projectRoot: input.projectRoot,
+    projectScopeId,
     route: input.route,
     runtimeExport,
     shoutSummary: createProjectSkillDeliveryShoutSummary(input.shoutSummary, {
@@ -262,6 +303,10 @@ export function normalizeProjectSkillDeliveryReceipt(
     },
     authorization: normalizeProjectSkillDeliveryAuthorization(record.authorization),
     conflictStatus: normalizeProjectSkillConflictStatus(record.conflictStatus),
+    codexSkillRoot: firstString(
+      asRecord(record.authorization)?.codexSkillRoot,
+      asRecord(record.runtimeExport)?.codexSkillRoot
+    ),
     createdAt,
     dimensionId: nullableString(record.dimensionId),
     evidenceRefs: Array.isArray(record.evidenceRefs) ? record.evidenceRefs : [],
@@ -269,6 +314,12 @@ export function normalizeProjectSkillDeliveryReceipt(
     managedMarker: normalizeProjectSkillManagedMarkerInput(record.managedMarker),
     projectId: nullableString(record.projectId),
     projectRoot,
+    projectScopeId: firstString(
+      record.projectScopeId,
+      asRecord(record.authorization)?.projectScopeId,
+      asRecord(record.runtimeExport)?.projectScopeId,
+      asRecord(record.managedMarker)?.projectScopeId
+    ),
     route,
     runtimeExport: normalizeProjectSkillRuntimeExportReceipt(record.runtimeExport),
     shoutSummary: normalizeProjectSkillDeliveryShoutSummary(record.shoutSummary),
@@ -281,6 +332,48 @@ export function isProjectSkillDeliveryReceipt(
   value: unknown
 ): value is ProjectSkillDeliveryReceipt {
   return normalizeProjectSkillDeliveryReceipt(value) !== null;
+}
+
+export function validateProjectSkillDeliveryReceipt(
+  value: unknown
+): ProjectSkillDeliveryValidationResult {
+  const receipt = normalizeProjectSkillDeliveryReceipt(value);
+  if (!receipt) {
+    return {
+      issues: ['invalid-receipt-shape'],
+      ok: false,
+      receipt: null,
+    };
+  }
+
+  const issues: ProjectSkillDeliveryValidationIssue[] = [];
+  if (
+    receipt.authorization.required &&
+    receipt.authorization.status === 'granted' &&
+    (!receipt.authorization.projectScopeId || !receipt.authorization.codexSkillRoot)
+  ) {
+    issues.push('authorization-scope-missing');
+  }
+  if (
+    receipt.runtimeExport.status === 'exported' &&
+    (!receipt.runtimeExport.projectScopeId || !receipt.runtimeExport.codexSkillRoot)
+  ) {
+    issues.push('runtime-export-scope-missing');
+  }
+  if (
+    receipt.managedMarker &&
+    (!receipt.managedMarker.generatedSkillId ||
+      !receipt.managedMarker.generationHash ||
+      !receipt.managedMarker.projectScopeId)
+  ) {
+    issues.push('managed-marker-identity-missing');
+  }
+
+  return {
+    issues,
+    ok: issues.length === 0,
+    receipt,
+  };
 }
 
 export function createProjectSkillDeliveryEvidenceRef(
@@ -376,11 +469,17 @@ function createProjectSkillDeliveryAsset(
 }
 
 function createProjectSkillDeliveryAuthorization(
-  value?: Partial<ProjectSkillDeliveryAuthorization> | null
+  value: Partial<ProjectSkillDeliveryAuthorization> | null | undefined,
+  defaults: {
+    codexSkillRoot: string | null;
+    projectScopeId: string | null;
+  }
 ): ProjectSkillDeliveryAuthorization {
   return {
+    codexSkillRoot: value?.codexSkillRoot ?? defaults.codexSkillRoot,
     grantedBy: value?.grantedBy ?? null,
     message: value?.message ?? null,
+    projectScopeId: value?.projectScopeId ?? defaults.projectScopeId,
     required: value?.required ?? true,
     status: value?.status ?? 'unknown',
   };
@@ -390,15 +489,21 @@ function createProjectSkillRuntimeExportReceipt(
   value: Partial<ProjectSkillRuntimeExportReceipt> | null | undefined,
   defaults: {
     authorizationStatus: ProjectSkillAuthorizationStatus;
+    codexSkillRoot: string | null;
     conflictStatus: ProjectSkillConflictStatus;
+    projectScopeId: string | null;
   }
 ): ProjectSkillRuntimeExportReceipt {
+  const status = value?.status ?? 'not-requested';
   return {
     authorizationStatus: value?.authorizationStatus ?? defaults.authorizationStatus,
+    codexSkillRoot: value?.codexSkillRoot ?? defaults.codexSkillRoot,
     conflictStatus: value?.conflictStatus ?? defaults.conflictStatus,
     linkMode: value?.linkMode ?? 'none',
     message: value?.message ?? null,
-    status: value?.status ?? 'not-requested',
+    projectScopeId: value?.projectScopeId ?? defaults.projectScopeId,
+    refreshRequired: value?.refreshRequired ?? status === 'exported',
+    status,
     strategy: value?.strategy ?? 'symlink-first',
     targetPath: value?.targetPath ?? null,
     targetRoot: value?.targetRoot ?? null,
@@ -410,18 +515,23 @@ function createProjectSkillManagedMarker(
   defaults: {
     projectId: string | null;
     projectRoot: string;
+    projectScopeId: string | null;
     route: ProjectSkillDeliveryRoute;
     skillName: string;
+    generationHash: string | null;
     sourcePath: string;
   }
 ): ProjectSkillManagedMarker {
-  // marker 只描述“谁管理了导出的项目 Skill”，实际写入由 Alembic/Plugin 完成。
+  // marker 只描述“谁管理了导出的项目 Skill”，实际写入与覆盖判断由 Alembic/Plugin 完成。
   return {
     contractVersion: PROJECT_SKILL_DELIVERY_CONTRACT_VERSION,
+    generatedSkillId: marker.generatedSkillId ?? defaults.skillName,
+    generationHash: marker.generationHash ?? defaults.generationHash,
     managedBy: 'alembic',
     markerPath: marker.markerPath ?? null,
     projectId: marker.projectId ?? defaults.projectId,
     projectRoot: marker.projectRoot ?? defaults.projectRoot,
+    projectScopeId: marker.projectScopeId ?? defaults.projectScopeId,
     route: marker.route ?? defaults.route,
     skillName: marker.skillName ?? defaults.skillName,
     sourcePath: marker.sourcePath ?? defaults.sourcePath,
@@ -458,8 +568,10 @@ function normalizeProjectSkillDeliveryAuthorization(
     return null;
   }
   return {
+    codexSkillRoot: nullableString(record.codexSkillRoot),
     grantedBy: nullableString(record.grantedBy),
     message: nullableString(record.message),
+    projectScopeId: nullableString(record.projectScopeId),
     required: booleanOrUndefined(record.required),
     status: normalizeProjectSkillAuthorizationStatus(record.status) ?? undefined,
   };
@@ -475,9 +587,12 @@ function normalizeProjectSkillRuntimeExportReceipt(
   return {
     authorizationStatus:
       normalizeProjectSkillAuthorizationStatus(record.authorizationStatus) ?? undefined,
+    codexSkillRoot: nullableString(record.codexSkillRoot),
     conflictStatus: normalizeProjectSkillConflictStatus(record.conflictStatus) ?? undefined,
     linkMode: normalizeProjectSkillLinkMode(record.linkMode) ?? undefined,
     message: nullableString(record.message),
+    projectScopeId: nullableString(record.projectScopeId),
+    refreshRequired: booleanOrUndefined(record.refreshRequired),
     status: normalizeProjectSkillRuntimeExportStatus(record.status) ?? undefined,
     strategy: normalizeProjectSkillRuntimeExportStrategy(record.strategy) ?? undefined,
     targetPath: nullableString(record.targetPath),
@@ -494,9 +609,12 @@ function normalizeProjectSkillManagedMarkerInput(
   }
   const route = normalizeProjectSkillDeliveryRoute(record.route);
   return {
+    generatedSkillId: nullableString(record.generatedSkillId),
+    generationHash: nullableString(record.generationHash),
     markerPath: nullableString(record.markerPath),
     projectId: nullableString(record.projectId),
     projectRoot: nullableString(record.projectRoot) ?? undefined,
+    projectScopeId: nullableString(record.projectScopeId),
     route: route ?? undefined,
     skillName: nullableString(record.skillName) ?? undefined,
     sourcePath: nullableString(record.sourcePath) ?? undefined,
@@ -551,6 +669,16 @@ function nonEmptyString(value: unknown): string | null {
 
 function nullableString(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
+}
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    const normalized = nullableString(value);
+    if (normalized !== null) {
+      return normalized;
+    }
+  }
+  return null;
 }
 
 function booleanOrUndefined(value: unknown): boolean | undefined {

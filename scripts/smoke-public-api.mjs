@@ -62,6 +62,7 @@ const requiredSubpathExports = {
     'isProjectSkillDeliveryReceipt',
     'normalizeProjectSkillDeliveryReceipt',
     'summarizeProjectSkillDeliveryReceipt',
+    'validateProjectSkillDeliveryReceipt',
   ],
   '@alembic/core/knowledge': [
     'getGatewaySourceLabel',
@@ -124,6 +125,8 @@ const requiredTypeDeclarations = {
     'ProjectSkillDeliveryEvidenceRef',
     'ProjectSkillDeliveryReceipt',
     'ProjectSkillDeliveryRoute',
+    'ProjectSkillDeliveryValidationIssue',
+    'ProjectSkillDeliveryValidationResult',
     'ProjectSkillLinkMode',
     'ProjectSkillManagedMarker',
     'ProjectSkillRuntimeExportReceipt',

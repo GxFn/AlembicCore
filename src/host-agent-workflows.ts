@@ -22,6 +22,8 @@ export type {
   ProjectSkillDeliveryEvidenceRef,
   ProjectSkillDeliveryReceipt,
   ProjectSkillDeliveryRoute,
+  ProjectSkillDeliveryValidationIssue,
+  ProjectSkillDeliveryValidationResult,
   ProjectSkillLinkMode,
   ProjectSkillManagedMarker,
   ProjectSkillRuntimeExportReceipt,
