@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ALEMBIC_FILE_MONITOR_COMPATIBILITY_ALIASES,
+  ALEMBIC_JOB_PROCESS_EVENTS_PATH,
   ALEMBIC_RUNTIME_HEALTH_PATH,
   createAlembicRuntimeCapabilities,
   createAlembicRuntimeHealthData,
   createAlembicRuntimeProjectIdentity,
+  JOB_PROCESS_EVENT_CONTRACT_VERSION,
   normalizeAlembicRuntimeDataRootSource,
   normalizeAlembicRuntimeRouteKind,
   normalizeAlembicWorkspaceMode,
@@ -39,6 +41,13 @@ describe('Alembic runtime boundary contracts', () => {
       ...ALEMBIC_FILE_MONITOR_COMPATIBILITY_ALIASES,
     });
     expect(capabilities.jobs.kinds).toEqual(['bootstrap', 'rescan']);
+    expect(capabilities.jobs.endpoints.events).toBe(ALEMBIC_JOB_PROCESS_EVENTS_PATH);
+    expect(capabilities.jobs.processEvents).toMatchObject({
+      available: false,
+      contractVersion: JOB_PROCESS_EVENT_CONTRACT_VERSION,
+      developerFacingDefaultDisplayPolicy: 'full',
+      endpoint: ALEMBIC_JOB_PROCESS_EVENTS_PATH,
+    });
   });
 
   it('creates health data and summarizes consumer-facing capability availability', () => {
@@ -52,6 +61,10 @@ describe('Alembic runtime boundary contracts', () => {
         configSource: 'empty',
         model: null,
         provider: null,
+      },
+      jobProcessEvents: {
+        available: true,
+        supportedKinds: ['workflow', 'llm.input', 'artifact'],
       },
     });
     const health = createAlembicRuntimeHealthData({
@@ -79,6 +92,9 @@ describe('Alembic runtime boundary contracts', () => {
       fileMonitorAvailable: false,
       fileMonitorMode: 'disabled',
       internalAiAvailable: false,
+      jobEventsAvailable: true,
+      jobEventsEndpoint: ALEMBIC_JOB_PROCESS_EVENTS_PATH,
+      jobEventKinds: ['workflow', 'llm.input', 'artifact'],
       jobsAvailable: true,
       jobKinds: ['bootstrap', 'rescan'],
     });

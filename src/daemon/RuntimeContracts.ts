@@ -4,6 +4,12 @@ import {
   HOST_EDIT_SOURCE,
   LEGACY_IDE_EDIT_SOURCE,
 } from '../shared/source-contracts.js';
+import {
+  ALEMBIC_JOB_PROCESS_EVENTS_PATH,
+  createJobProcessEventEndpointCapability,
+  JOB_PROCESS_EVENT_KINDS,
+  type JobProcessEventEndpointCapability,
+} from './JobProcessEventContracts.js';
 
 export const ALEMBIC_RUNTIME_API_VERSION = 'v1';
 export const ALEMBIC_RUNTIME_PACKAGE_NAME = 'alembic-ai';
@@ -30,6 +36,7 @@ export const ALEMBIC_JOB_KINDS = ['bootstrap', 'rescan'] as const;
 
 export const ALEMBIC_JOB_ENDPOINTS = {
   bootstrap: '/api/v1/jobs/bootstrap',
+  events: ALEMBIC_JOB_PROCESS_EVENTS_PATH,
   list: '/api/v1/jobs',
   rescan: '/api/v1/jobs/rescan',
 } as const;
@@ -104,9 +111,11 @@ export interface AlembicJobsCapability {
   available: boolean;
   endpoints: {
     bootstrap?: string;
+    events?: string;
     list?: string;
     rescan?: string;
   };
+  processEvents: JobProcessEventEndpointCapability;
   kinds: AlembicJobKind[];
 }
 
@@ -137,6 +146,7 @@ export interface CreateAlembicRuntimeCapabilitiesOptions {
   fileMonitorEndpoint?: string | null;
   fileMonitorMode?: AlembicFileMonitorMode;
   internalAi: AlembicInternalAiCapability;
+  jobProcessEvents?: Partial<JobProcessEventEndpointCapability>;
   jobEndpoints?: Partial<Record<keyof typeof ALEMBIC_JOB_ENDPOINTS, string>>;
   jobKinds?: readonly AlembicJobKind[];
   jobsAvailable?: boolean;
@@ -170,6 +180,9 @@ export interface AlembicRuntimeCapabilitySummary {
   fileMonitorAvailable: boolean | null;
   fileMonitorMode: AlembicFileMonitorMode | null;
   internalAiAvailable: boolean | null;
+  jobEventsAvailable: boolean | null;
+  jobEventsEndpoint: string | null;
+  jobEventKinds: string[];
   jobsAvailable: boolean | null;
   jobKinds: string[];
 }
@@ -220,6 +233,7 @@ export function createAlembicRuntimeCapabilities(
         ...ALEMBIC_JOB_ENDPOINTS,
         ...options.jobEndpoints,
       },
+      processEvents: createJobProcessEventEndpointCapability(options.jobProcessEvents),
       kinds: jobKinds,
     },
   };
@@ -267,6 +281,7 @@ export function summarizeAlembicRuntimeCapabilities(
   const fileMonitor = asRecord(capabilities?.fileMonitor);
   const internalAi = asRecord(capabilities?.internalAi);
   const jobs = asRecord(capabilities?.jobs);
+  const processEvents = asRecord(jobs?.processEvents);
 
   return {
     apiAvailable: booleanOrNull(api?.available),
@@ -275,6 +290,11 @@ export function summarizeAlembicRuntimeCapabilities(
     fileMonitorAvailable: booleanOrNull(fileMonitor?.available),
     fileMonitorMode: normalizeAlembicFileMonitorMode(fileMonitor?.mode),
     internalAiAvailable: booleanOrNull(internalAi?.available),
+    jobEventsAvailable: booleanOrNull(processEvents?.available),
+    jobEventsEndpoint: firstString(processEvents?.endpoint),
+    jobEventKinds: processEvents
+      ? stringArray(processEvents.supportedKinds ?? JOB_PROCESS_EVENT_KINDS)
+      : [],
     jobsAvailable: booleanOrNull(jobs?.available),
     jobKinds: stringArray(jobs?.kinds),
   };
