@@ -226,14 +226,14 @@ export function buildInternalNextSteps(
     '1. 调用 alembic_enrich_candidates(candidateIds) 补全候选缺失字段',
     '2. 使用 alembic_submit_knowledge({ items: [...] }) 手动提交更多知识条目',
     '3. 使用 alembic_submit_knowledge({ items: [...] }) 逐条提交高质量知识',
-    '4. 使用 alembic_skill({ operation: "load", name }) 加载自动生成的 Project Skills',
+    '4. 查看 ProjectSkillDeliveryReceipt，确认 runtimeExport.status 是否已进入 Codex 项目级 runtime',
     '',
     '== 宏观维度 → Project Skills ==',
     `宏观维度（${dimensions
       .filter((d) => d.skillWorthy)
       .map((d) => d.id)
       .join('/')}）`,
-    '自动生成 Project Skill 到 Alembic/skills/，可通过 alembic_skill({ operation: "load" }) 加载。',
+    '自动生成 Project Skill 到 Alembic/skills/，后续由交付 receipt 记录授权、冲突和 Codex runtime export 状态。',
   ];
 }
 

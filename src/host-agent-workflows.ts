@@ -13,6 +13,21 @@ export type {
   ProjectSnapshotInput,
 } from './types/project-snapshot.js';
 export * from './workflows/capabilities/execution/external/index.js';
+export type {
+  ProjectSkillAssetKind,
+  ProjectSkillAuthorizationStatus,
+  ProjectSkillConflictStatus,
+  ProjectSkillDeliveryAsset,
+  ProjectSkillDeliveryAuthorization,
+  ProjectSkillDeliveryEvidenceRef,
+  ProjectSkillDeliveryReceipt,
+  ProjectSkillDeliveryRoute,
+  ProjectSkillLinkMode,
+  ProjectSkillManagedMarker,
+  ProjectSkillRuntimeExportReceipt,
+  ProjectSkillRuntimeExportStatus,
+  ProjectSkillRuntimeExportStrategy,
+} from './workflows/capabilities/execution/external/ProjectSkillDeliveryContracts.js';
 export * from './workflows/capabilities/persistence/index.js';
 export * from './workflows/capabilities/planning/dimensions/index.js';
 export * from './workflows/capabilities/planning/knowledge/index.js';
