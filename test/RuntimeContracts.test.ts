@@ -47,6 +47,15 @@ describe('Alembic runtime boundary contracts', () => {
       contractVersion: JOB_PROCESS_EVENT_CONTRACT_VERSION,
       developerFacingDefaultDisplayPolicy: 'full',
       endpoint: ALEMBIC_JOB_PROCESS_EVENTS_PATH,
+      supportedDisplayPolicies: ['full', 'summary-only', 'hidden'],
+      supportedRetentionPolicies: ['transient', 'job-retained', 'artifact-retained'],
+      supportedSourceClasses: [
+        'developer-facing',
+        'machine-only',
+        'raw-provider',
+        'secret',
+        'hidden-reasoning',
+      ],
     });
   });
 
@@ -93,8 +102,17 @@ describe('Alembic runtime boundary contracts', () => {
       fileMonitorMode: 'disabled',
       internalAiAvailable: false,
       jobEventsAvailable: true,
+      jobEventDisplayPolicies: ['full', 'summary-only', 'hidden'],
       jobEventsEndpoint: ALEMBIC_JOB_PROCESS_EVENTS_PATH,
       jobEventKinds: ['workflow', 'llm.input', 'artifact'],
+      jobEventRetentionPolicies: ['transient', 'job-retained', 'artifact-retained'],
+      jobEventSourceClasses: [
+        'developer-facing',
+        'machine-only',
+        'raw-provider',
+        'secret',
+        'hidden-reasoning',
+      ],
       jobsAvailable: true,
       jobKinds: ['bootstrap', 'rescan'],
     });

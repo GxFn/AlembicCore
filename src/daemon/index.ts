@@ -2,8 +2,11 @@ export * from './DaemonState.js';
 export type {
   JobProcessDeveloperView,
   JobProcessEvent,
+  JobProcessEventArtifactRef,
+  JobProcessEventDisplayPolicy,
   JobProcessEventEndpointCapability,
   JobProcessEventKind,
+  JobProcessEventRetentionPolicy,
   JobProcessEventSourceClass,
 } from './JobProcessEventContracts.js';
 export * from './JobProcessEventContracts.js';

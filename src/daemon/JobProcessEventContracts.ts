@@ -55,56 +55,74 @@ export interface JobProcessEventContent {
   text: string | null;
 }
 
+export interface JobProcessEventArtifactRef {
+  kind: string;
+  label: string | null;
+  mimeType: string | null;
+  ref: string;
+}
+
 export interface JobProcessEvent {
+  artifactRefs: JobProcessEventArtifactRef[];
   content: JobProcessEventContent | null;
   contractVersion: typeof JOB_PROCESS_EVENT_CONTRACT_VERSION;
   correlationId: string | null;
   createdAt: string;
+  dimensionId: string | null;
   displayPolicy: JobProcessEventDisplayPolicy;
   id: string;
   jobId: string;
   kind: JobProcessEventKind;
   metadata: Record<string, unknown>;
-  parentId: string | null;
+  parentEventId: string | null;
   phase: string | null;
   retention: JobProcessEventRetentionPolicy;
   sequence: number;
   severity: JobProcessEventSeverity;
   sourceClass: JobProcessEventSourceClass;
   summary: string | null;
+  targetName: string | null;
   title: string;
 }
 
 export interface JobProcessDeveloperView {
+  artifactRefs: JobProcessEventArtifactRef[];
   content: JobProcessEventContent | null;
   createdAt: string;
+  dimensionId: string | null;
   displayPolicy: Exclude<JobProcessEventDisplayPolicy, 'hidden'>;
   eventId: string;
   jobId: string;
   kind: JobProcessEventKind;
+  metadata: Record<string, unknown>;
+  parentEventId: string | null;
   phase: string | null;
   sequence: number;
   severity: JobProcessEventSeverity;
   summary: string | null;
+  targetName: string | null;
   title: string;
 }
 
 export interface CreateJobProcessEventInput {
+  artifactRefs?: readonly JobProcessEventArtifactRef[];
   content?: JobProcessEventContent | null;
   correlationId?: string | null;
   createdAt: string;
+  dimensionId?: string | null;
   displayPolicy?: JobProcessEventDisplayPolicy;
   id: string;
   jobId: string;
   kind: JobProcessEventKind;
   metadata?: Record<string, unknown>;
-  parentId?: string | null;
+  parentEventId?: string | null;
   phase?: string | null;
   retention?: JobProcessEventRetentionPolicy;
   sequence: number;
   severity?: JobProcessEventSeverity;
   sourceClass?: JobProcessEventSourceClass;
   summary?: string | null;
+  targetName?: string | null;
   title: string;
 }
 
@@ -114,36 +132,45 @@ export interface JobProcessEventEndpointCapability {
   defaultRetention: JobProcessEventRetentionPolicy;
   developerFacingDefaultDisplayPolicy: 'full';
   endpoint: string | null;
+  supportedDisplayPolicies: JobProcessEventDisplayPolicy[];
   supportedKinds: JobProcessEventKind[];
+  supportedRetentionPolicies: JobProcessEventRetentionPolicy[];
+  supportedSourceClasses: JobProcessEventSourceClass[];
 }
 
 export interface CreateJobProcessEventEndpointCapabilityOptions {
   available?: boolean;
   defaultRetention?: JobProcessEventRetentionPolicy;
   endpoint?: string | null;
+  supportedDisplayPolicies?: readonly JobProcessEventDisplayPolicy[];
   supportedKinds?: readonly JobProcessEventKind[];
+  supportedRetentionPolicies?: readonly JobProcessEventRetentionPolicy[];
+  supportedSourceClasses?: readonly JobProcessEventSourceClass[];
 }
 
 export function createJobProcessEvent(input: CreateJobProcessEventInput): JobProcessEvent {
   const sourceClass = input.sourceClass ?? 'developer-facing';
   const displayPolicy = input.displayPolicy ?? defaultDisplayPolicyForSourceClass(sourceClass);
   return {
+    artifactRefs: normalizeJobProcessEventArtifactRefs(input.artifactRefs),
     content: input.content ?? null,
     contractVersion: JOB_PROCESS_EVENT_CONTRACT_VERSION,
     correlationId: input.correlationId ?? null,
     createdAt: input.createdAt,
+    dimensionId: input.dimensionId ?? null,
     displayPolicy,
     id: input.id,
     jobId: input.jobId,
     kind: input.kind,
     metadata: input.metadata ?? {},
-    parentId: input.parentId ?? null,
+    parentEventId: input.parentEventId ?? null,
     phase: input.phase ?? null,
     retention: input.retention ?? defaultRetentionForSourceClass(sourceClass),
     sequence: input.sequence,
     severity: input.severity ?? defaultSeverityForKind(input.kind),
     sourceClass,
     summary: input.summary ?? null,
+    targetName: input.targetName ?? null,
     title: input.title,
   };
 }
@@ -165,21 +192,25 @@ export function normalizeJobProcessEvent(value: unknown): JobProcessEvent | null
   }
 
   return createJobProcessEvent({
+    artifactRefs: normalizeJobProcessEventArtifactRefs(record.artifactRefs),
     content: normalizeJobProcessEventContent(record.content),
     correlationId: nullableString(record.correlationId),
     createdAt,
+    dimensionId: nullableString(record.dimensionId),
     displayPolicy: normalizeJobProcessEventDisplayPolicy(record.displayPolicy) ?? undefined,
     id,
     jobId,
     kind,
     metadata: asRecord(record.metadata) ?? {},
-    parentId: nullableString(record.parentId),
+    // 返工后统一对外输出 parentEventId；这里仅兼容验收前写入的 parentId 输入。
+    parentEventId: nullableString(record.parentEventId) ?? nullableString(record.parentId),
     phase: nullableString(record.phase),
     retention: normalizeJobProcessEventRetentionPolicy(record.retention) ?? undefined,
     sequence,
     severity: normalizeJobProcessEventSeverity(record.severity) ?? undefined,
     sourceClass: normalizeJobProcessEventSourceClass(record.sourceClass) ?? undefined,
     summary: nullableString(record.summary),
+    targetName: nullableString(record.targetName),
     title,
   });
 }
@@ -193,16 +224,21 @@ export function createJobProcessDeveloperView(
   const displayPolicy = event.displayPolicy === 'summary-only' ? 'summary-only' : 'full';
 
   return {
+    artifactRefs: event.artifactRefs.map((artifactRef) => ({ ...artifactRef })),
     content: displayPolicy === 'summary-only' ? null : event.content,
     createdAt: event.createdAt,
+    dimensionId: event.dimensionId,
     displayPolicy,
     eventId: event.id,
     jobId: event.jobId,
     kind: event.kind,
+    metadata: { ...event.metadata },
+    parentEventId: event.parentEventId,
     phase: event.phase,
     sequence: event.sequence,
     severity: event.severity,
     summary: event.summary,
+    targetName: event.targetName,
     title: event.title,
   };
 }
@@ -216,7 +252,16 @@ export function createJobProcessEventEndpointCapability(
     defaultRetention: options.defaultRetention ?? 'job-retained',
     developerFacingDefaultDisplayPolicy: 'full',
     endpoint: options.endpoint === undefined ? ALEMBIC_JOB_PROCESS_EVENTS_PATH : options.endpoint,
+    supportedDisplayPolicies: [
+      ...(options.supportedDisplayPolicies ?? JOB_PROCESS_EVENT_DISPLAY_POLICIES),
+    ],
     supportedKinds: [...(options.supportedKinds ?? JOB_PROCESS_EVENT_KINDS)],
+    supportedRetentionPolicies: [
+      ...(options.supportedRetentionPolicies ?? JOB_PROCESS_EVENT_RETENTION_POLICIES),
+    ],
+    supportedSourceClasses: [
+      ...(options.supportedSourceClasses ?? JOB_PROCESS_EVENT_SOURCE_CLASSES),
+    ],
   };
 }
 
@@ -316,6 +361,45 @@ function normalizeJobProcessEventContent(value: unknown): JobProcessEventContent
     mimeType: nullableString(content.mimeType),
     role: normalizeJobProcessEventMessageRole(content.role),
     text: nullableString(content.text),
+  };
+}
+
+function normalizeJobProcessEventArtifactRefs(value: unknown): JobProcessEventArtifactRef[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value
+    .map((item) => normalizeJobProcessEventArtifactRef(item))
+    .filter((item): item is JobProcessEventArtifactRef => item !== null);
+}
+
+function normalizeJobProcessEventArtifactRef(value: unknown): JobProcessEventArtifactRef | null {
+  const directRef = nonEmptyString(value);
+  if (directRef) {
+    return {
+      kind: 'artifact',
+      label: null,
+      mimeType: null,
+      ref: directRef,
+    };
+  }
+
+  const record = asRecord(value);
+  if (!record) {
+    return null;
+  }
+
+  const ref =
+    nonEmptyString(record.ref) ?? nonEmptyString(record.path) ?? nonEmptyString(record.url);
+  if (!ref) {
+    return null;
+  }
+
+  return {
+    kind: nonEmptyString(record.kind) ?? 'artifact',
+    label: nullableString(record.label),
+    mimeType: nullableString(record.mimeType),
+    ref,
   };
 }
 

@@ -7,7 +7,10 @@ import {
 import {
   ALEMBIC_JOB_PROCESS_EVENTS_PATH,
   createJobProcessEventEndpointCapability,
+  JOB_PROCESS_EVENT_DISPLAY_POLICIES,
   JOB_PROCESS_EVENT_KINDS,
+  JOB_PROCESS_EVENT_RETENTION_POLICIES,
+  JOB_PROCESS_EVENT_SOURCE_CLASSES,
   type JobProcessEventEndpointCapability,
 } from './JobProcessEventContracts.js';
 
@@ -181,8 +184,11 @@ export interface AlembicRuntimeCapabilitySummary {
   fileMonitorMode: AlembicFileMonitorMode | null;
   internalAiAvailable: boolean | null;
   jobEventsAvailable: boolean | null;
+  jobEventDisplayPolicies: string[];
   jobEventsEndpoint: string | null;
   jobEventKinds: string[];
+  jobEventRetentionPolicies: string[];
+  jobEventSourceClasses: string[];
   jobsAvailable: boolean | null;
   jobKinds: string[];
 }
@@ -291,9 +297,20 @@ export function summarizeAlembicRuntimeCapabilities(
     fileMonitorMode: normalizeAlembicFileMonitorMode(fileMonitor?.mode),
     internalAiAvailable: booleanOrNull(internalAi?.available),
     jobEventsAvailable: booleanOrNull(processEvents?.available),
+    jobEventDisplayPolicies: processEvents
+      ? stringArray(processEvents.supportedDisplayPolicies ?? JOB_PROCESS_EVENT_DISPLAY_POLICIES)
+      : [],
     jobEventsEndpoint: firstString(processEvents?.endpoint),
     jobEventKinds: processEvents
       ? stringArray(processEvents.supportedKinds ?? JOB_PROCESS_EVENT_KINDS)
+      : [],
+    jobEventRetentionPolicies: processEvents
+      ? stringArray(
+          processEvents.supportedRetentionPolicies ?? JOB_PROCESS_EVENT_RETENTION_POLICIES
+        )
+      : [],
+    jobEventSourceClasses: processEvents
+      ? stringArray(processEvents.supportedSourceClasses ?? JOB_PROCESS_EVENT_SOURCE_CLASSES)
       : [],
     jobsAvailable: booleanOrNull(jobs?.available),
     jobKinds: stringArray(jobs?.kinds),
