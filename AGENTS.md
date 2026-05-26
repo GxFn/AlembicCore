@@ -10,6 +10,13 @@ Agent 不得把完整实现改成薄实现，不得把成熟能力改成空壳�
 
 不要在旧工作区或旧克隆路径下工作；当前统一以本 workspace 内的 Alembic 系列仓库为准。
 
+## Visible Automation Dispatch
+
+- 如果本窗口通过 AlembicWorkspace 的 Visible Automation Dispatch heartbeat 唤醒，先读取 workspace `AGENTS.md`、当前总控文档、`skills/dev/visible-automation-dispatch-target/SKILL.md` 和本文件。
+- 只允许 claim / finish `AlembicCore` 目标任务；不得代领、处理、验证或总结其它窗口任务。
+- 下一跳 heartbeat 只是投递信封；只有 finish JSON 明确 `handoffPolicy=target-courier` 且 `courierAllowed=true` 时，才可按 payload 创建下一条 automation 并 record-arm。不得 claim / finish 下一窗口任务。
+- `AlembicTest` 下一跳默认由总控调起；本窗口不得处理 `AlembicTest` 任务或把非测试 smoke 误写成真实测试结论。
+
 ## 文档存储提示
 
 - 新建长期迁移、计划、验收、扫描、边界和跨仓库任务文档时，统一写到 workspace 根目录的 `docs/AlembicCore/`，不要散落到各子仓库或 workspace `docs/` 根层级。
