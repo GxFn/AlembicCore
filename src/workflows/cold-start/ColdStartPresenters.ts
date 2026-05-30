@@ -14,6 +14,7 @@ import { inferTargetRole } from '../capabilities/presentation/TargetClassifier.j
 import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
+import type { ColdStartSelectionSummary } from './ColdStartPlan.js';
 
 export type ColdStartTargetFileMap = Record<string, Array<Record<string, unknown>>>;
 
@@ -131,6 +132,7 @@ export interface InternalColdStartResponseInput {
   targetFileMap: ColdStartTargetFileMap;
   dimensions: DimensionDef[];
   cachedSessionId: string | null;
+  selectionSummary?: ColdStartSelectionSummary | null;
   taskCount: number;
   bootstrapSession: { toJSON(): Record<string, unknown> } | null;
   responseTimeMs: number;
@@ -143,6 +145,7 @@ export function presentInternalColdStartResponse({
   targetFileMap,
   dimensions,
   cachedSessionId,
+  selectionSummary,
   taskCount,
   bootstrapSession,
   responseTimeMs,
@@ -162,6 +165,7 @@ export function presentInternalColdStartResponse({
     guardViolationFiles: presentGuardViolationFiles(snapshot),
     analysisFramework: {
       dimensions,
+      dimensionSelection: selectionSummary ?? null,
       skillWorthyDimensions: dimensions
         .filter((dimension) => dimension.skillWorthy)
         .map((d) => d.id),
@@ -199,6 +203,7 @@ export function presentInternalColdStartResponse({
       snapshot.localPackageModules.length > 0 ? snapshot.localPackageModules : null,
     warnings: snapshot.warnings.length > 0 ? snapshot.warnings : undefined,
     nextSteps: buildInternalNextSteps(dimensions),
+    dimensionSelection: selectionSummary ?? null,
     bootstrapSession: bootstrapSession ? bootstrapSession.toJSON() : null,
     bootstrapCandidates: { created: 0, failed: 0, errors: [], status: 'filling' },
     autoSkills: { created: 0, failed: 0, skills: [], errors: [], status: 'filling' },

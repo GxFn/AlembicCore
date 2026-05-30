@@ -331,6 +331,7 @@ export async function runPhase1_FileCollection(
 
   const seenPaths = new Set<string>();
   const allFiles: BootstrapFileEntry[] = [];
+  const warnings: string[] = [];
   for (const t of allTargets) {
     const isTestTarget = typeof t === 'object' && /^test/i.test(t.type || '');
     try {
@@ -354,15 +355,18 @@ export async function runPhase1_FileCollection(
             targetName: typeof t === 'string' ? t : t.name,
             isTest: isTestTarget || LanguageService.isTestFile(fp),
           });
-        } catch {
-          /* skip unreadable */
+        } catch (err: unknown) {
+          const reason = err instanceof Error ? err.message : String(err);
+          warnings.push(`File collection skipped unreadable file ${fp}: ${reason}`);
         }
         if (allFiles.length >= maxFiles) {
           break;
         }
       }
-    } catch {
-      /* skip target */
+    } catch (err: unknown) {
+      const targetName = typeof t === 'string' ? t : t.name;
+      const reason = err instanceof Error ? err.message : String(err);
+      warnings.push(`File collection skipped target ${targetName}: ${reason}`);
     }
     if (allFiles.length >= maxFiles) {
       break;
@@ -391,6 +395,7 @@ export async function runPhase1_FileCollection(
     discoverer: discoverer as unknown as DiscovererLike,
     langStats,
     truncated,
+    warnings,
   };
 }
 
@@ -1237,6 +1242,7 @@ export async function runAllPhases(
   const p1Start = Date.now();
   const phase1 = await runPhase1_FileCollection(projectRoot, ctx.logger, options);
   const { allFiles, allTargets, discoverer, langStats, truncated } = phase1;
+  warnings.push(...phase1.warnings);
 
   if (truncated) {
     warnings.push(
