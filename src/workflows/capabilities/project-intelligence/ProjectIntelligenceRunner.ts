@@ -132,8 +132,18 @@ interface Phase1Options {
 }
 
 /** Phase 1.5 AST analysis options */
+type AstProjectAnalyzer = typeof analyzeProject;
+type AstAvailabilityProbe = typeof astIsAvailable;
+type AstContextGenerator = typeof generateContextForAgent;
+
 interface AstAnalysisOptions {
   generateAstContext?: boolean;
+  /** 测试夹具专用：默认仍使用真实 analyzeProject，保持外部行为不变。 */
+  analyzeProject?: AstProjectAnalyzer;
+  /** 测试夹具专用：允许确定性触发 AST degraded 分支，不依赖本机 grammar 状态。 */
+  isAstAvailable?: AstAvailabilityProbe;
+  /** 测试夹具专用：只在 generateAstContext=true 时替换上下文生成器。 */
+  generateContextForAgent?: AstContextGenerator;
   [key: string]: unknown;
 }
 
@@ -443,7 +453,11 @@ export async function runPhase1_5_AstAnalysis(
 
   // Phase 1.5b: AST 分析
   const primaryLangEarly = detectPrimaryLanguage(langStats);
-  if (astIsAvailable() && primaryLangEarly) {
+  const isAstAvailable = options.isAstAvailable ?? astIsAvailable;
+  const astAvailable = isAstAvailable();
+  const analyzeProjectFn = options.analyzeProject ?? analyzeProject;
+  const generateContextForAgentFn = options.generateContextForAgent ?? generateContextForAgent;
+  if (astAvailable && primaryLangEarly) {
     try {
       const astFiles = allFiles.map((f: BootstrapFileEntry) => ({
         name: f.name,
@@ -474,14 +488,14 @@ export async function runPhase1_5_AstAnalysis(
         /* Enhancement 未加载 */
       }
 
-      astProjectSummary = analyzeProject(astFiles, primaryLangEarly, {
+      astProjectSummary = analyzeProjectFn(astFiles, primaryLangEarly, {
         preprocessFile: sfcPreprocessor,
       });
 
       // 内部 Agent 专用: 生成 astContext 文本
       if (options.generateAstContext) {
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- astProjectSummary flows from analyzeProject return
-        astContext = generateContextForAgent(
+        astContext = generateContextForAgentFn(
           astProjectSummary as Parameters<typeof generateContextForAgent>[0]
         );
       }
@@ -504,7 +518,7 @@ export async function runPhase1_5_AstAnalysis(
     }
   } else {
     logger.info(
-      `[Bootstrap] AST skipped: tree-sitter ${astIsAvailable() ? 'available' : 'not available'}, lang=${primaryLangEarly}`
+      `[Bootstrap] AST skipped: tree-sitter ${astAvailable ? 'available' : 'not available'}, lang=${primaryLangEarly}`
     );
   }
 
