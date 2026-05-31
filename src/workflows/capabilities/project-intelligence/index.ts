@@ -1,5 +1,6 @@
 export * from './FileDiffPlanner.js';
 export * from './FileDiffSnapshotStore.js';
+export * from './IDEAgentAnalysisPacketBuilder.js';
 export * from './ProjectIntelligenceCapability.js';
 export * from './ProjectIntelligenceIncrementalPlanner.js';
 export * from './ProjectIntelligencePreparation.js';

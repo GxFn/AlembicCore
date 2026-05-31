@@ -13,4 +13,30 @@ export * from './infrastructure/index.js';
 export { KnowledgeRepositoryImpl } from './repository/knowledge/index.js';
 export * from './service/index.js';
 export * from './shared/index.js';
-export { ProjectIntelligenceCapability } from './workflows/capabilities/project-intelligence/index.js';
+export {
+  buildIDEAgentAnalysisPacket,
+  buildIDEAgentAnalysisPacketFromSnapshot,
+  createIDEAgentAnalysisProgressSeed,
+  createIDEAgentAnalysisUnitKey,
+  createIDEAgentAnalysisUnitProgress,
+  type IDEAgentAnalysisDegradedReason,
+  type IDEAgentAnalysisPacket,
+  type IDEAgentAnalysisPacketBuilderInput,
+  type IDEAgentAnalysisPacketBuilderOptions,
+  type IDEAgentAnalysisPacketProfile,
+  type IDEAgentAnalysisProgressSeed,
+  type IDEAgentAnalysisUnit,
+  type IDEAgentAnalysisUnitCheckpointLink,
+  type IDEAgentAnalysisUnitProgress,
+  type IDEAgentAnalysisUnitStatus,
+  type IDEAgentCompletionContract,
+  type IDEAgentDependencyHint,
+  type IDEAgentSourceRef,
+  type IDEAgentSourceRefRole,
+  type IDEAgentStableUnitKey,
+  type IDEAgentStableUnitKeyInput,
+  type IDEAgentStructuralEvidenceKind,
+  type IDEAgentStructuralEvidenceRef,
+  type IDEAgentStructuralHints,
+  ProjectIntelligenceCapability,
+} from './workflows/capabilities/project-intelligence/index.js';
