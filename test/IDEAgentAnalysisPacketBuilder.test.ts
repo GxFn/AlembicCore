@@ -255,6 +255,35 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
     expect(packet.structuralEvidenceRefs.length).toBeGreaterThan(0);
   });
 
+  it('handles raw PanoramaService shape with layers.levels, modules Map, and cycles', () => {
+    const packet = buildIDEAgentAnalysisPacketFromSnapshot(
+      makeSnapshot({
+        panoramaResult: {
+          layers: {
+            levels: [{ level: 2, name: 'Services', modules: ['AuthService', 'UserRepository'] }],
+          },
+          modules: new Map([
+            ['AuthService', { name: 'AuthService', fanIn: 12, fanOut: 1 }],
+            ['UserRepository', { name: 'UserRepository', fanIn: 1, fanOut: 0 }],
+          ]),
+          cycles: [{ modules: ['AuthService', 'UserRepository'], severity: 'warning' }],
+        },
+      }),
+      {
+        generatedAt: '2026-05-31T00:00:00.000Z',
+      }
+    );
+    const panoramaHints = packet.units.flatMap((unit) => unit.structuralHints.panorama ?? []);
+
+    expect(panoramaHints).toEqual(
+      expect.arrayContaining([
+        'L2 Services: AuthService, UserRepository',
+        'AuthService fanIn=12 fanOut=1',
+        'warning: AuthService -> UserRepository',
+      ])
+    );
+  });
+
   it('uses sourceRef/fqn/entity/line for stable keys and keeps short aliases display-only', () => {
     const first = createIDEAgentAnalysisUnitKey({
       sourceRef: 'src/a/UserService.ts:12',

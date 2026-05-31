@@ -868,16 +868,76 @@ function describeGuardViolation(filePath: string, violation: GuardViolation): st
 
 function collectPanoramaHints(panorama: PanoramaResult | null): string[] {
   return [
-    ...(panorama?.layers ?? []).map(
-      (layer) => `L${layer.level} ${layer.name}: ${layer.modules.join(', ')}`
-    ),
-    ...(panorama?.couplingHotspots ?? []).map(
-      (hotspot) => `${hotspot.module} fanIn=${hotspot.fanIn} fanOut=${hotspot.fanOut}`
-    ),
-    ...(panorama?.cyclicDependencies ?? []).map(
-      (cycle) => `${cycle.severity}: ${cycle.cycle.join(' -> ')}`
-    ),
+    ...collectPanoramaLayerHints(panorama),
+    ...collectPanoramaCouplingHints(panorama),
+    ...collectPanoramaCycleHints(panorama),
   ];
+}
+
+// 兼容两类 Panorama 输入：ProjectSnapshot 归一化数组，以及 PanoramaService 原始 layers.levels / modules Map。
+function collectPanoramaLayerHints(panorama: PanoramaResult | null): string[] {
+  const rawLayers = panorama?.layers as unknown;
+  const layers = Array.isArray(rawLayers)
+    ? rawLayers
+    : isRecord(rawLayers) && Array.isArray(rawLayers.levels)
+      ? rawLayers.levels
+      : [];
+
+  return layers.filter(isRecord).map((layer) => {
+    const level = typeof layer.level === 'number' ? layer.level : 0;
+    const name = typeof layer.name === 'string' ? layer.name : `Layer ${level}`;
+    const modules = Array.isArray(layer.modules) ? layer.modules.map(String) : [];
+    return `L${level} ${name}: ${modules.join(', ')}`;
+  });
+}
+
+function collectPanoramaCouplingHints(panorama: PanoramaResult | null): string[] {
+  const normalizedHotspots = (panorama?.couplingHotspots ?? []).map(
+    (hotspot) => `${hotspot.module} fanIn=${hotspot.fanIn} fanOut=${hotspot.fanOut}`
+  );
+  const rawModules = (panorama as Record<string, unknown> | null)?.modules;
+  const moduleValues =
+    rawModules instanceof Map
+      ? [...rawModules.values()]
+      : isRecord(rawModules)
+        ? Object.values(rawModules)
+        : [];
+  const rawHotspots = moduleValues
+    .filter(isRecord)
+    .filter((mod) => (readNumber(mod.fanIn) ?? 0) >= 10 || (readNumber(mod.fanOut) ?? 0) >= 10)
+    .map((mod) => {
+      const name = typeof mod.name === 'string' ? mod.name : '';
+      return `${name} fanIn=${readNumber(mod.fanIn) ?? 0} fanOut=${readNumber(mod.fanOut) ?? 0}`;
+    });
+
+  return [...normalizedHotspots, ...rawHotspots];
+}
+
+function collectPanoramaCycleHints(panorama: PanoramaResult | null): string[] {
+  const normalizedCycles = (panorama?.cyclicDependencies ?? []).map(
+    (cycle) => `${cycle.severity}: ${cycle.cycle.join(' -> ')}`
+  );
+  const rawCycles = (panorama as Record<string, unknown> | null)?.cycles;
+  const rawCycleHints = Array.isArray(rawCycles)
+    ? rawCycles.filter(isRecord).map((cycle) => {
+        const severity = typeof cycle.severity === 'string' ? cycle.severity : 'cycle';
+        const modules = Array.isArray(cycle.modules)
+          ? cycle.modules.map(String)
+          : Array.isArray(cycle.cycle)
+            ? cycle.cycle.map(String)
+            : [];
+        return `${severity}: ${modules.join(' -> ')}`;
+      })
+    : [];
+  return [...normalizedCycles, ...rawCycleHints];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object');
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === 'number' ? value : null;
 }
 
 function buildMaterializationSummary(
