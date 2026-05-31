@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import winston from 'winston';
 
@@ -172,10 +173,20 @@ export class Logger {
     if (config.file && config.file.enabled !== false) {
       const rawLogsDir = config.file.path || './.asd/logs';
       const projectRoot = pathGuard.projectRoot;
-      const logsDir =
+      let logsDir =
         projectRoot && !path.isAbsolute(rawLogsDir)
           ? path.resolve(projectRoot, rawLogsDir)
           : path.resolve(rawLogsDir);
+
+      const relativeLogsDir = projectRoot ? path.relative(projectRoot, logsDir) : '';
+      const logsDirInsideProject =
+        Boolean(projectRoot) &&
+        relativeLogsDir !== '' &&
+        !relativeLogsDir.startsWith('..') &&
+        !path.isAbsolute(relativeLogsDir);
+      if (logsDirInsideProject && !pathGuard.isProjectWriteSafe(logsDir)) {
+        logsDir = path.join(os.tmpdir(), 'alembic-dev', 'logs');
+      }
 
       if (!fs.existsSync(logsDir)) {
         fs.mkdirSync(logsDir, { recursive: true });
