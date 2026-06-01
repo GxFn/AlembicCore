@@ -18,6 +18,12 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
+import {
+  buildProjectScopeSourceRefIndex,
+  type CanonicalSourceIdentity,
+  type ProjectScopeSourceRefIndex,
+  resolveProjectScopeSourceRef,
+} from '../../shared/ProjectScope.js';
 import { rewriteRecipePaths } from './RecipePathRewriter.js';
 
 const execFileAsync = promisify(execFile);
@@ -63,18 +69,26 @@ export class SourceRefReconciler {
   #signalBus: SignalBus | null;
   #logger = Logger.getInstance();
   #ttlMs: number;
+  #sourceRefIndex: ProjectScopeSourceRefIndex | null;
 
   constructor(
     projectRoot: string,
     sourceRefRepo: RecipeSourceRefRepositoryImpl,
     knowledgeRepo: KnowledgeRepositoryImpl,
-    options?: { ttlMs?: number; signalBus?: SignalBus }
+    options?: {
+      sourceIdentities?: readonly CanonicalSourceIdentity[];
+      signalBus?: SignalBus;
+      ttlMs?: number;
+    }
   ) {
     this.#projectRoot = projectRoot;
     this.#sourceRefRepo = sourceRefRepo;
     this.#knowledgeRepo = knowledgeRepo;
     this.#signalBus = options?.signalBus ?? null;
     this.#ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
+    this.#sourceRefIndex = options?.sourceIdentities?.length
+      ? buildProjectScopeSourceRefIndex(options.sourceIdentities)
+      : null;
   }
 
   /**
@@ -149,9 +163,11 @@ export class SourceRefReconciler {
           }
         }
 
-        // 验证路径存在性
-        const absPath = path.resolve(this.#projectRoot, sourcePath);
-        const exists = fs.existsSync(absPath);
+        // ProjectScope 场景先用 qualifiedPath / 唯一 legacyPath 定位；legacyPath 歧义时
+        // 不自动写错仓库，保持 stale 并等待外层补充 folder identity。
+        const resolvedSource = this.#resolveSourcePath(sourcePath);
+        const exists =
+          resolvedSource.status === 'resolved' && fs.existsSync(resolvedSource.absolutePath);
 
         if (existing) {
           // 更新已有记录
@@ -396,5 +412,38 @@ export class SourceRefReconciler {
     }
 
     return renameMap;
+  }
+
+  #resolveSourcePath(sourcePath: string): {
+    absolutePath: string;
+    reason: string;
+    status: 'ambiguous' | 'missing' | 'resolved';
+  } {
+    if (this.#sourceRefIndex) {
+      const resolution = resolveProjectScopeSourceRef(sourcePath, this.#sourceRefIndex);
+      if (resolution.status === 'ambiguous') {
+        this.#logger.warn('SourceRefReconciler: ambiguous ProjectScope sourceRef', {
+          sourcePath,
+        });
+        return {
+          absolutePath: path.resolve(this.#projectRoot, sourcePath),
+          reason: resolution.reason,
+          status: 'ambiguous',
+        };
+      }
+      if (resolution.identity?.absolutePath) {
+        return {
+          absolutePath: resolution.identity.absolutePath,
+          reason: resolution.reason,
+          status: 'resolved',
+        };
+      }
+    }
+
+    return {
+      absolutePath: path.resolve(this.#projectRoot, sourcePath),
+      reason: 'legacy-project-root',
+      status: 'resolved',
+    };
   }
 }

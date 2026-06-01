@@ -14,22 +14,15 @@ import {
   type DiscoveredTarget,
   ProjectDiscoverer,
 } from './ProjectDiscoverer.js';
+import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
-const EXCLUDE_DIRS = new Set([
-  '__pycache__',
-  '.venv',
-  'venv',
+const EXCLUDE_DIRS = createSourceScanExcludeDirs([
   '.tox',
-  '.git',
   '.mypy_cache',
   '.pytest_cache',
   '.eggs',
-  'dist',
-  'build',
-  'node_modules',
   '.nox',
   '.ruff_cache',
-  '.cursor',
 ]);
 
 export class PythonDiscoverer extends ProjectDiscoverer {

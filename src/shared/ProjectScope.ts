@@ -137,6 +137,43 @@ export interface ProjectScopeEvidenceRef {
   sourceKind: 'artifact' | 'report' | 'source-file' | 'unknown';
 }
 
+export interface CanonicalSourceIdentity {
+  absolutePath: string | null;
+  folderDisplayName: string | null;
+  folderId: string | null;
+  folderPath: string | null;
+  folderRelativeRoot: string | null;
+  legacyPath: string;
+  projectScopeId: string | null;
+  qualifiedPath: string;
+  relativePath: string;
+}
+
+export interface CanonicalSourceIdentityInput {
+  folderDisplayName?: string | null;
+  folderId?: string | null;
+  folderPath?: string | null;
+  projectRoot?: string | null;
+  projectScopeId?: string | null;
+  relativePath?: string | null;
+  sourcePath: string;
+}
+
+export type ProjectScopeSourceRefResolutionStatus = 'resolved' | 'missing' | 'ambiguous';
+
+export interface ProjectScopeSourceRefResolution {
+  identity: CanonicalSourceIdentity | null;
+  input: string;
+  reason: string;
+  status: ProjectScopeSourceRefResolutionStatus;
+}
+
+export interface ProjectScopeSourceRefIndex {
+  ambiguousLegacyPaths: ReadonlySet<string>;
+  byLegacyPath: ReadonlyMap<string, CanonicalSourceIdentity>;
+  byQualifiedPath: ReadonlyMap<string, CanonicalSourceIdentity>;
+}
+
 export interface ProjectScopeRegistryFolderIndexEntry {
   folderId: string;
   projectScopeId: string;
@@ -417,6 +454,85 @@ export function createProjectScopeSourceRef(input: {
   });
 }
 
+export function createCanonicalSourceIdentity(
+  input: CanonicalSourceIdentityInput
+): CanonicalSourceIdentity {
+  const sourcePath = normalizeSlashPath(input.sourcePath, 'sourcePath');
+  const relativePath = normalizeSlashPath(input.relativePath ?? sourcePath, 'relativePath');
+  const folderDisplayName = normalizeNullableString(input.folderDisplayName);
+  const folderPath = normalizeNullableString(input.folderPath);
+  const projectRoot = normalizeNullableString(input.projectRoot);
+  const folderRelativeRoot =
+    folderPath && projectRoot
+      ? normalizeComparableSourcePath(path.relative(projectRoot, folderPath))
+      : null;
+  const qualifiedPath = folderDisplayName
+    ? normalizeComparableSourcePath(`${folderDisplayName}/${relativePath}`)
+    : relativePath;
+
+  return {
+    absolutePath: folderPath ? path.resolve(folderPath, relativePath) : null,
+    folderDisplayName,
+    folderId: normalizeNullableString(input.folderId),
+    folderPath,
+    folderRelativeRoot,
+    legacyPath: relativePath,
+    projectScopeId: normalizeNullableString(input.projectScopeId),
+    qualifiedPath,
+    relativePath,
+  };
+}
+
+export function buildProjectScopeSourceRefIndex(
+  identities: readonly CanonicalSourceIdentity[]
+): ProjectScopeSourceRefIndex {
+  const byQualifiedPath = new Map<string, CanonicalSourceIdentity>();
+  const legacyBuckets = new Map<string, CanonicalSourceIdentity[]>();
+
+  for (const identity of identities) {
+    byQualifiedPath.set(normalizeComparableSourcePath(identity.qualifiedPath), identity);
+    const legacy = normalizeComparableSourcePath(identity.legacyPath);
+    legacyBuckets.set(legacy, [...(legacyBuckets.get(legacy) ?? []), identity]);
+  }
+
+  const byLegacyPath = new Map<string, CanonicalSourceIdentity>();
+  const ambiguousLegacyPaths = new Set<string>();
+  for (const [legacyPath, entries] of legacyBuckets) {
+    const distinctQualifiedPaths = new Set(entries.map((entry) => entry.qualifiedPath));
+    if (distinctQualifiedPaths.size === 1 && entries[0]) {
+      byLegacyPath.set(legacyPath, entries[0]);
+    } else {
+      ambiguousLegacyPaths.add(legacyPath);
+    }
+  }
+
+  return { ambiguousLegacyPaths, byLegacyPath, byQualifiedPath };
+}
+
+export function resolveProjectScopeSourceRef(
+  sourceRef: string,
+  index: ProjectScopeSourceRefIndex
+): ProjectScopeSourceRefResolution {
+  const normalized = normalizeComparableSourcePath(sourceRef);
+  const qualified = index.byQualifiedPath.get(normalized);
+  if (qualified) {
+    return { identity: qualified, input: sourceRef, reason: 'qualified-path', status: 'resolved' };
+  }
+  if (index.ambiguousLegacyPaths.has(normalized)) {
+    return {
+      identity: null,
+      input: sourceRef,
+      reason: 'ambiguous-legacy-path',
+      status: 'ambiguous',
+    };
+  }
+  const legacy = index.byLegacyPath.get(normalized);
+  if (legacy) {
+    return { identity: legacy, input: sourceRef, reason: 'unique-legacy-path', status: 'resolved' };
+  }
+  return { identity: null, input: sourceRef, reason: 'not-found', status: 'missing' };
+}
+
 export function createProjectScopeRegistryDocument(
   scopes: readonly ProjectDescriptor[] = []
 ): ProjectScopeRegistryDocument {
@@ -612,6 +728,17 @@ function pathsEquivalent(left: string | null, right: string | null): boolean {
     return false;
   }
   return path.resolve(left) === path.resolve(right);
+}
+
+function normalizeSlashPath(value: string, label: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`[ProjectScope] ${label} must be a non-empty string`);
+  }
+  return normalizeComparableSourcePath(value);
+}
+
+function normalizeComparableSourcePath(value: string): string {
+  return value.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/');
 }
 
 function cloneRecord(value: Record<string, unknown> | null | undefined): Record<string, unknown> {

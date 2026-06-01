@@ -59,4 +59,9 @@ export { NodeDiscoverer } from './NodeDiscoverer.js';
 export { ProjectDiscoverer } from './ProjectDiscoverer.js';
 export { PythonDiscoverer } from './PythonDiscoverer.js';
 export { RustDiscoverer } from './RustDiscoverer.js';
+export {
+  COMMON_SOURCE_SCAN_EXCLUDE_DIRS,
+  createSourceScanExcludeDirs,
+  isSourceScanExcludedDir,
+} from './SourceScanExclusions.js';
 export { SpmDiscoverer } from './SpmDiscoverer.js';

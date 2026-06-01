@@ -1,3 +1,4 @@
+import type { CanonicalSourceIdentity } from '../../../shared/ProjectScope.js';
 import { inferTargetRole } from '../presentation/TargetClassifier.js';
 
 type ProjectAnalysisTargetItem =
@@ -12,6 +13,7 @@ type ProjectAnalysisTargetItem =
 interface ProjectAnalysisTargetFile {
   targetName: string;
   relativePath: string;
+  sourceIdentity?: CanonicalSourceIdentity;
 }
 
 export interface ProjectAnalysisTargetSummary {
@@ -29,6 +31,7 @@ export interface ProjectAnalysisLocalPackageModule {
   fileCount: number;
   inferredRole: string;
   keyFiles: string[];
+  keyFileIdentities?: CanonicalSourceIdentity[];
 }
 
 export function buildProjectAnalysisTargetsSummary({
@@ -73,6 +76,10 @@ export function buildProjectAnalysisLocalPackageModules({
       keyFiles: allFiles
         .filter((file) => file.targetName === target.name)
         .slice(0, 8)
-        .map((file) => file.relativePath),
+        .map((file) => file.sourceIdentity?.qualifiedPath ?? file.relativePath),
+      keyFileIdentities: allFiles
+        .filter((file) => file.targetName === target.name && file.sourceIdentity)
+        .slice(0, 8)
+        .map((file) => file.sourceIdentity as CanonicalSourceIdentity),
     }));
 }

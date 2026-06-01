@@ -8,6 +8,7 @@ import {
   ProjectDiscoverer,
   resetDiscovererRegistry,
 } from '../src/core/discovery/index.js';
+import { createProjectDescriptor } from '../src/shared/index.js';
 import { runPhase1_FileCollection } from '../src/workflows/capabilities/project-intelligence/ProjectIntelligenceRunner.js';
 
 class WarningFixtureDiscoverer extends ProjectDiscoverer {
@@ -91,6 +92,52 @@ describe('project intelligence file collection warnings', () => {
       );
     } finally {
       await fs.rm(projectRoot, { force: true, recursive: true });
+    }
+  });
+
+  it('collects only ProjectScope source folders and excludes vendor snapshots', async () => {
+    const controlRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pcv-project-scope-'));
+    const coreRoot = path.join(controlRoot, 'AlembicCore');
+    const pluginRoot = path.join(controlRoot, 'AlembicPlugin');
+    await fs.mkdir(path.join(coreRoot, 'src'), { recursive: true });
+    await fs.mkdir(path.join(coreRoot, 'vendor', 'Snapshot', 'src'), { recursive: true });
+    await fs.mkdir(path.join(pluginRoot, 'lib'), { recursive: true });
+    await fs.writeFile(path.join(coreRoot, 'package.json'), '{"name":"core"}');
+    await fs.writeFile(path.join(pluginRoot, 'package.json'), '{"name":"plugin"}');
+    await fs.writeFile(path.join(coreRoot, 'src', 'index.ts'), 'export const core = 1;');
+    await fs.writeFile(
+      path.join(coreRoot, 'vendor', 'Snapshot', 'src', 'index.ts'),
+      'export const snapshot = 1;'
+    );
+    await fs.writeFile(path.join(pluginRoot, 'lib', 'index.ts'), 'export const plugin = 1;');
+
+    const scope = createProjectDescriptor({
+      controlRoot,
+      dataRoot: path.join(controlRoot, '.ghost'),
+      folders: [
+        { id: 'folder-core', displayName: 'AlembicCore', path: coreRoot },
+        { id: 'folder-plugin', displayName: 'AlembicPlugin', path: pluginRoot },
+      ],
+      projectScopeId: 'scope-fixture',
+    });
+
+    try {
+      const result = await runPhase1_FileCollection(
+        controlRoot,
+        {
+          info() {},
+          warn() {},
+        },
+        { maxFiles: 20, projectScope: scope }
+      );
+
+      expect(result.allFiles.map((file) => file.sourceIdentity?.qualifiedPath).sort()).toEqual([
+        'AlembicCore/src/index.ts',
+        'AlembicPlugin/lib/index.ts',
+      ]);
+      expect(result.allFiles.map((file) => file.path).join('\n')).not.toContain('/vendor/');
+    } finally {
+      await fs.rm(controlRoot, { force: true, recursive: true });
     }
   });
 });

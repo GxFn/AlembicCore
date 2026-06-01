@@ -14,6 +14,7 @@
  * @module types/project-snapshot
  */
 
+import type { CanonicalSourceIdentity } from '../shared/ProjectScope.js';
 import type { FileDiffPlan } from './workflows.js';
 
 // ── Phase 1: 文件发现 ────────────────────────────────────────
@@ -23,6 +24,7 @@ export interface SnapshotFile {
   name: string;
   path: string;
   relativePath: string;
+  sourceIdentity?: CanonicalSourceIdentity;
   content: string;
   targetName: string;
   language?: string;
@@ -50,6 +52,7 @@ export interface LocalPackageModule {
   fileCount: number;
   inferredRole?: string;
   keyFiles?: string[];
+  keyFileIdentities?: CanonicalSourceIdentity[];
 }
 
 // ── Phase 1.5: 语言 & AST 分析 ──────────────────────────────

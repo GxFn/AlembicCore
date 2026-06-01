@@ -15,28 +15,9 @@ import {
   type DiscoveredTarget,
   ProjectDiscoverer,
 } from './ProjectDiscoverer.js';
+import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
-const EXCLUDE_DIRS = new Set([
-  'node_modules',
-  '.git',
-  '.cursor',
-  'dist',
-  'build',
-  'out',
-  '.build',
-  'target',
-  'Pods',
-  'Carthage',
-  'DerivedData',
-  '__pycache__',
-  '.venv',
-  'venv',
-  '.gradle',
-  '.idea',
-  'vendor',
-  'coverage',
-  '.cache',
-]);
+const EXCLUDE_DIRS = createSourceScanExcludeDirs(['.gradle']);
 
 const SOURCE_EXTENSIONS = LanguageService.sourceExts;
 

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { EvolutionPolicy } from '../../../../domain/evolution/EvolutionPolicy.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
 import type { EvolutionCandidatePlan } from '../../../../service/evolution/RecipeImpactPlanner.js';
+import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
 import type { DimensionDef } from '../../../../types/project-snapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import { buildEvolutionPrescreen, type EvolutionPrescreen } from './EvolutionPrescreen.js';
@@ -103,7 +104,12 @@ export interface RecipeAuditOptions {
   container: RescanServiceContainer;
   logger: RescanLogger;
   recipeEntries: RecipeSnapshotEntry[];
-  allFiles: Array<{ path?: string; relativePath?: string; name: string }>;
+  allFiles: Array<{
+    name: string;
+    path?: string;
+    relativePath?: string;
+    sourceIdentity?: CanonicalSourceIdentity;
+  }>;
   projectRoot?: string;
   /** RecipeImpactPlanner 产出的增量候选（可选，有则增强 verdict 精度） */
   candidatePlan?: EvolutionCandidatePlan | null;
@@ -193,19 +199,45 @@ export async function auditRecipesForRescan(
 }
 
 function buildComparableFilePathSet(
-  allFiles: Array<{ path?: string; relativePath?: string; name: string }>,
+  allFiles: Array<{
+    name: string;
+    path?: string;
+    relativePath?: string;
+    sourceIdentity?: CanonicalSourceIdentity;
+  }>,
   projectRoot?: string
-): Set<string> {
+): ComparableFilePathIndex {
   const paths = new Set<string>();
+  const legacyBuckets = new Map<string, Set<string>>();
   for (const file of allFiles) {
+    addComparablePath(paths, file.sourceIdentity?.qualifiedPath);
     addComparablePath(paths, file.relativePath);
     addComparablePath(paths, file.name);
     addComparablePath(paths, file.path);
+    if (file.sourceIdentity?.legacyPath && file.sourceIdentity.qualifiedPath) {
+      const legacy = normalizeComparablePath(file.sourceIdentity.legacyPath);
+      const bucket = legacyBuckets.get(legacy) ?? new Set<string>();
+      bucket.add(normalizeComparablePath(file.sourceIdentity.qualifiedPath));
+      legacyBuckets.set(legacy, bucket);
+    }
     if (file.path && projectRoot && path.isAbsolute(file.path)) {
       addComparablePath(paths, path.relative(projectRoot, file.path));
     }
   }
-  return paths;
+  const ambiguousLegacyPaths = new Set(
+    [...legacyBuckets.entries()]
+      .filter(([, qualifiedPaths]) => qualifiedPaths.size > 1)
+      .map(([legacyPath]) => legacyPath)
+  );
+  for (const ambiguous of ambiguousLegacyPaths) {
+    paths.delete(ambiguous);
+  }
+  return { ambiguousLegacyPaths, paths };
+}
+
+interface ComparableFilePathIndex {
+  ambiguousLegacyPaths: ReadonlySet<string>;
+  paths: ReadonlySet<string>;
 }
 
 function addComparablePath(paths: Set<string>, value: string | undefined): void {
@@ -280,7 +312,7 @@ function classifyRecipe(
     impactMap: Map<string, ImpactEntry>;
     staleByRecipe: Map<string, RefHealth> | null;
     sourceRefRepo: RecipeSourceRefRepositoryImpl | null;
-    filePathSet: Set<string>;
+    filePathSet: ComparableFilePathIndex;
   }
 ): RelevanceAuditResult {
   const decayReasons: string[] = [];
@@ -380,12 +412,12 @@ function refHealthToScore(health: RefHealth): { score: number; reasons: string[]
 
 function lifecycleToScore(
   entry: RecipeSnapshotEntry,
-  filePathSet: Set<string>
+  filePathSet: ComparableFilePathIndex
 ): { score: number; reasons: string[] } {
   const reasons: string[] = [];
   const hasSourceFiles = (entry.sourceRefs?.length ?? 0) > 0;
   const existingFiles = hasSourceFiles
-    ? (entry.sourceRefs ?? []).filter((ref) => filePathSet.has(normalizeComparablePath(ref))).length
+    ? (entry.sourceRefs ?? []).filter((ref) => hasComparablePath(filePathSet, ref)).length
     : 0;
 
   switch (entry.lifecycle) {
@@ -414,7 +446,7 @@ function lifecycleToScore(
 
 function buildImpactEvidence(
   impact: ImpactEntry,
-  _filePathSet: Set<string>
+  _filePathSet: ComparableFilePathIndex
 ): RelevanceAuditResult['evidence'] {
   const isDeleted =
     impact.reason === 'source-deleted' || impact.reason === 'source-deleted-partial';
@@ -428,7 +460,7 @@ function buildImpactEvidence(
 
 function buildRefEvidence(
   health: RefHealth,
-  _filePathSet: Set<string>,
+  _filePathSet: ComparableFilePathIndex,
   _entry: RecipeSnapshotEntry
 ): RelevanceAuditResult['evidence'] {
   return {
@@ -441,16 +473,25 @@ function buildRefEvidence(
 
 function buildLifecycleEvidence(
   entry: RecipeSnapshotEntry,
-  filePathSet: Set<string>
+  filePathSet: ComparableFilePathIndex
 ): RelevanceAuditResult['evidence'] {
   const refs = entry.sourceRefs ?? [];
-  const existCount = refs.filter((ref) => filePathSet.has(normalizeComparablePath(ref))).length;
+  const existCount = refs.filter((ref) => hasComparablePath(filePathSet, ref)).length;
   return {
     triggerStillMatches: entry.lifecycle === 'active' || entry.lifecycle === 'evolving',
     symbolsAlive: existCount,
     depsIntact: existCount > 0 || refs.length === 0,
     codeFilesExist: existCount,
   };
+}
+
+function hasComparablePath(index: ComparableFilePathIndex, value: string): boolean {
+  const normalized = normalizeComparablePath(value);
+  return (
+    Boolean(normalized) &&
+    !index.ambiguousLegacyPaths.has(normalized) &&
+    index.paths.has(normalized)
+  );
 }
 
 // ── 共用工具 ────────────────────────────────────────────

@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   addProjectScopeFolder,
+  buildProjectScopeSourceRefIndex,
+  createCanonicalSourceIdentity,
   createProjectDescriptor,
   createProjectScopeEndpointCapability,
   createProjectScopeRegistryDocument,
@@ -13,8 +15,10 @@ import {
   PROJECT_SCOPE_STORAGE_KINDS,
   resolveProjectScopeForFolder,
   resolveProjectScopeRegistryFolder,
+  resolveProjectScopeSourceRef,
   summarizeProjectScopeDescriptor,
 } from '../src/shared/index.js';
+import { auditRecipesForRescan } from '../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
 
 describe('ProjectScope multi-root contracts', () => {
   it('models one abstract project with multiple physical folders and Ghost-only storage', () => {
@@ -145,6 +149,103 @@ describe('ProjectScope multi-root contracts', () => {
       projectScopeId: 'scope-a',
       relativePath: 'src/shared/ProjectScope.ts',
       sourceKind: 'source-file',
+    });
+  });
+
+  it('creates canonical source identities and blocks ambiguous short sourceRefs', () => {
+    const controlRoot = path.join('/workspace', 'AlembicWorkspace');
+    const coreIdentity = createCanonicalSourceIdentity({
+      folderDisplayName: 'AlembicCore',
+      folderId: 'folder-core',
+      folderPath: path.join(controlRoot, 'AlembicCore'),
+      projectRoot: controlRoot,
+      projectScopeId: 'scope-a',
+      sourcePath: 'lib/index.ts',
+    });
+    const pluginIdentity = createCanonicalSourceIdentity({
+      folderDisplayName: 'AlembicPlugin',
+      folderId: 'folder-plugin',
+      folderPath: path.join(controlRoot, 'AlembicPlugin'),
+      projectRoot: controlRoot,
+      projectScopeId: 'scope-a',
+      sourcePath: 'lib/index.ts',
+    });
+    const index = buildProjectScopeSourceRefIndex([coreIdentity, pluginIdentity]);
+
+    expect(coreIdentity).toMatchObject({
+      folderRelativeRoot: 'AlembicCore',
+      legacyPath: 'lib/index.ts',
+      qualifiedPath: 'AlembicCore/lib/index.ts',
+      relativePath: 'lib/index.ts',
+    });
+    expect(resolveProjectScopeSourceRef('AlembicCore/lib/index.ts', index)).toMatchObject({
+      identity: coreIdentity,
+      reason: 'qualified-path',
+      status: 'resolved',
+    });
+    expect(resolveProjectScopeSourceRef('lib/index.ts', index)).toMatchObject({
+      identity: null,
+      reason: 'ambiguous-legacy-path',
+      status: 'ambiguous',
+    });
+  });
+
+  it('lets rescan audit accept qualified refs but block ambiguous legacy refs', async () => {
+    const controlRoot = path.join('/workspace', 'AlembicWorkspace');
+    const coreIdentity = createCanonicalSourceIdentity({
+      folderDisplayName: 'AlembicCore',
+      folderId: 'folder-core',
+      folderPath: path.join(controlRoot, 'AlembicCore'),
+      projectRoot: controlRoot,
+      projectScopeId: 'scope-a',
+      sourcePath: 'lib/index.ts',
+    });
+    const pluginIdentity = createCanonicalSourceIdentity({
+      folderDisplayName: 'AlembicPlugin',
+      folderId: 'folder-plugin',
+      folderPath: path.join(controlRoot, 'AlembicPlugin'),
+      projectRoot: controlRoot,
+      projectScopeId: 'scope-a',
+      sourcePath: 'lib/index.ts',
+    });
+    const audit = await auditRecipesForRescan({
+      allFiles: [
+        { name: 'index.ts', relativePath: 'lib/index.ts', sourceIdentity: coreIdentity },
+        { name: 'index.ts', relativePath: 'lib/index.ts', sourceIdentity: pluginIdentity },
+      ],
+      container: { get: () => null },
+      logger: { info() {}, warn() {} },
+      recipeEntries: [
+        {
+          id: 'ambiguous',
+          title: 'Ambiguous legacy source',
+          trigger: 'legacy',
+          category: 'architecture',
+          knowledgeType: 'pattern',
+          doClause: 'Use explicit repo identity',
+          lifecycle: 'active',
+          sourceRefs: ['lib/index.ts'],
+        },
+        {
+          id: 'qualified',
+          title: 'Qualified source',
+          trigger: 'qualified',
+          category: 'architecture',
+          knowledgeType: 'pattern',
+          doClause: 'Use explicit repo identity',
+          lifecycle: 'active',
+          sourceRefs: ['AlembicCore/lib/index.ts'],
+        },
+      ],
+    });
+
+    expect(audit.results.find((result) => result.recipeId === 'ambiguous')).toMatchObject({
+      evidence: { codeFilesExist: 0 },
+      relevanceScore: 55,
+    });
+    expect(audit.results.find((result) => result.recipeId === 'qualified')).toMatchObject({
+      evidence: { codeFilesExist: 1 },
+      relevanceScore: 90,
     });
   });
 });

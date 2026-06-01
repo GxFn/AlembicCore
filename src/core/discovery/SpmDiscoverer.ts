@@ -11,6 +11,7 @@ import { existsSync, readdirSync, readFileSync, type Stats, statSync } from 'nod
 import { basename, dirname, extname, join } from 'node:path';
 import { LanguageService } from '../../shared/LanguageService.js';
 import { ProjectDiscoverer } from './ProjectDiscoverer.js';
+import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
 /** Package.swift 解析结果 */
 interface ParsedPackage {
@@ -26,17 +27,7 @@ interface ParsedPackage {
   platforms: { name: string; version: string }[];
 }
 
-const SKIP_DIRS = new Set([
-  'node_modules',
-  '.git',
-  'Build',
-  '.build',
-  '.swiftpm',
-  'Pods',
-  'DerivedData',
-  'Carthage',
-  '.cursor',
-]);
+const SKIP_DIRS = createSourceScanExcludeDirs(['.swiftpm', 'Build']);
 
 export class SpmDiscoverer extends ProjectDiscoverer {
   #projectRoot: string | null = null;

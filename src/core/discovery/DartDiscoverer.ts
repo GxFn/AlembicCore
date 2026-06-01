@@ -14,17 +14,13 @@ import {
   type DiscoveredTarget,
   ProjectDiscoverer,
 } from './ProjectDiscoverer.js';
+import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
 const SOURCE_EXTENSIONS = new Set(['.dart']);
 
-const EXCLUDE_DIRS = new Set([
-  '.git',
+const EXCLUDE_DIRS = createSourceScanExcludeDirs([
   '.dart_tool',
   '.fvm',
-  'build',
-  'node_modules',
-  '.idea',
-  '.vscode',
   'ios',
   'android',
   'macos',
@@ -33,7 +29,6 @@ const EXCLUDE_DIRS = new Set([
   'web',
   '.pub-cache',
   '.pub',
-  '.cursor',
 ]);
 
 export class DartDiscoverer extends ProjectDiscoverer {

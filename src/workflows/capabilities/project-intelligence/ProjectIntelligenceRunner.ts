@@ -26,6 +26,12 @@ import {
 import type { CallGraphResult as CallGraphAnalysisResult } from '../../../core/analysis/CallGraphAnalyzer.js';
 import { DimensionCopy } from '../../../domain/dimension/DimensionCopy.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
+import {
+  type CanonicalSourceIdentity,
+  createCanonicalSourceIdentity,
+  type ProjectDescriptor,
+  type ProjectFolderDescriptor,
+} from '../../../shared/ProjectScope.js';
 import type { GuardAudit } from '../../../types/project-snapshot.js';
 import type { IncrementalPlan } from '../../../types/workflows.js';
 import {
@@ -63,6 +69,7 @@ interface BootstrapFileEntry {
   name: string;
   path: string;
   relativePath: string;
+  sourceIdentity?: CanonicalSourceIdentity;
   content: string;
   targetName: string;
   /** Whether this file belongs to a test target or matches test file naming patterns */
@@ -74,7 +81,7 @@ type TargetItem =
   | string
   | {
       name: string;
-      framework?: string;
+      framework?: string | null;
       type?: string;
       packageName?: string;
       [key: string]: unknown;
@@ -128,6 +135,7 @@ interface Phase4Params {
 /** Phase 1 options */
 interface Phase1Options {
   maxFiles?: number;
+  projectScope?: ProjectDescriptor | null;
   [key: string]: unknown;
 }
 
@@ -229,6 +237,7 @@ interface AllPhasesOptions {
   generateAstContext?: boolean;
   materialize?: ProjectAnalysisMaterializationInput;
   maxFiles?: number;
+  projectScope?: ProjectDescriptor | null;
   skipGuard?: boolean;
   sourceTag?: string;
   summaryPrefix?: string;
@@ -330,53 +339,86 @@ export async function runPhase1_FileCollection(
   options: Phase1Options = {}
 ) {
   const maxFiles = options.maxFiles || 500;
-
-  const { getDiscovererRegistry } = await import('../../../core/discovery/index.js');
-  const registry = getDiscovererRegistry();
-  const discoverer = await registry.detect(projectRoot);
-  logger.info(`[Bootstrap] Project type: ${discoverer.displayName} (${discoverer.id})`);
-
-  await discoverer.load(projectRoot);
-  const allTargets = await discoverer.listTargets();
-
   const seenPaths = new Set<string>();
   const allFiles: BootstrapFileEntry[] = [];
+  const allTargets: TargetItem[] = [];
   const warnings: string[] = [];
-  for (const t of allTargets) {
-    const isTestTarget = typeof t === 'object' && /^test/i.test(t.type || '');
-    try {
-      const fileList = await discoverer.getTargetFiles(t);
-      for (const f of fileList) {
-        const fp = typeof f === 'string' ? f : f.path;
-        if (seenPaths.has(fp)) {
-          continue;
+  const folderInputs = resolvePhase1SourceFolders(projectRoot, options.projectScope);
+  const discoverers: DiscovererLike[] = [];
+
+  for (const folderInput of folderInputs) {
+    const { getDiscovererRegistry } = await import('../../../core/discovery/index.js');
+    const registry = getDiscovererRegistry();
+    const discoverer = await registry.detect(folderInput.root);
+    discoverers.push(discoverer as unknown as DiscovererLike);
+    logger.info(
+      `[Bootstrap] Project type: ${discoverer.displayName} (${discoverer.id})` +
+        (folderInput.folder ? ` folder=${folderInput.folder.displayName}` : '')
+    );
+
+    await discoverer.load(folderInput.root);
+    const targets = await discoverer.listTargets();
+    allTargets.push(
+      ...targets.map((target) => decorateProjectScopeTarget(target, folderInput.folder))
+    );
+
+    for (const t of targets) {
+      const isTestTarget = typeof t === 'object' && /^test/i.test(t.type || '');
+      try {
+        const fileList = await discoverer.getTargetFiles(t);
+        for (const f of fileList) {
+          const fp = typeof f === 'string' ? f : f.path;
+          if (seenPaths.has(fp)) {
+            continue;
+          }
+          if (isAlembicGenerated(fp)) {
+            continue; // R13: skip generated files
+          }
+          seenPaths.add(fp);
+          try {
+            const content = fs.readFileSync(fp, 'utf8');
+            const relativePath = normalizePhase1RelativePath(
+              typeof f === 'string' ? path.relative(folderInput.root, fp) : f.relativePath,
+              fp,
+              folderInput.root
+            );
+            allFiles.push({
+              name: f.name || path.basename(fp),
+              path: fp,
+              relativePath,
+              ...(folderInput.folder
+                ? {
+                    sourceIdentity: createCanonicalSourceIdentity({
+                      folderDisplayName: folderInput.folder.displayName,
+                      folderId: folderInput.folder.id,
+                      folderPath: folderInput.folder.path,
+                      projectRoot,
+                      projectScopeId: options.projectScope?.projectScopeId ?? null,
+                      relativePath,
+                      sourcePath: relativePath,
+                    }),
+                  }
+                : {}),
+              content,
+              targetName: buildProjectScopeTargetName(t, folderInput.folder),
+              isTest: isTestTarget || LanguageService.isTestFile(fp),
+            });
+          } catch (err: unknown) {
+            const reason = err instanceof Error ? err.message : String(err);
+            warnings.push(`File collection skipped unreadable file ${fp}: ${reason}`);
+          }
+          if (allFiles.length >= maxFiles) {
+            break;
+          }
         }
-        if (isAlembicGenerated(fp)) {
-          continue; // R13: skip generated files
-        }
-        seenPaths.add(fp);
-        try {
-          const content = fs.readFileSync(fp, 'utf8');
-          allFiles.push({
-            name: f.name || path.basename(fp),
-            path: fp,
-            relativePath: f.relativePath || path.basename(fp),
-            content,
-            targetName: typeof t === 'string' ? t : t.name,
-            isTest: isTestTarget || LanguageService.isTestFile(fp),
-          });
-        } catch (err: unknown) {
-          const reason = err instanceof Error ? err.message : String(err);
-          warnings.push(`File collection skipped unreadable file ${fp}: ${reason}`);
-        }
-        if (allFiles.length >= maxFiles) {
-          break;
-        }
+      } catch (err: unknown) {
+        const targetName = typeof t === 'string' ? t : t.name;
+        const reason = err instanceof Error ? err.message : String(err);
+        warnings.push(`File collection skipped target ${targetName}: ${reason}`);
       }
-    } catch (err: unknown) {
-      const targetName = typeof t === 'string' ? t : t.name;
-      const reason = err instanceof Error ? err.message : String(err);
-      warnings.push(`File collection skipped target ${targetName}: ${reason}`);
+      if (allFiles.length >= maxFiles) {
+        break;
+      }
     }
     if (allFiles.length >= maxFiles) {
       break;
@@ -402,10 +444,76 @@ export async function runPhase1_FileCollection(
   return {
     allFiles,
     allTargets: allTargets as unknown as TargetItem[],
-    discoverer: discoverer as unknown as DiscovererLike,
+    discoverer: summarizePhase1Discoverers(discoverers),
     langStats,
     truncated,
     warnings,
+  };
+}
+
+interface Phase1SourceFolder {
+  folder: ProjectFolderDescriptor | null;
+  root: string;
+}
+
+function resolvePhase1SourceFolders(
+  projectRoot: string,
+  projectScope: ProjectDescriptor | null | undefined
+): Phase1SourceFolder[] {
+  const folders = projectScope?.folders.filter((folder) => folder.state === 'active') ?? [];
+  if (!projectScope || folders.length === 0) {
+    return [{ folder: null, root: projectRoot }];
+  }
+  return folders.map((folder) => ({ folder, root: folder.path }));
+}
+
+function decorateProjectScopeTarget(
+  target: TargetItem,
+  folder: ProjectFolderDescriptor | null
+): TargetItem {
+  if (!folder) {
+    return target;
+  }
+  const name = buildProjectScopeTargetName(target, folder);
+  return typeof target === 'string'
+    ? { name, type: 'target', folderId: folder.id, folderDisplayName: folder.displayName }
+    : { ...target, name, folderId: folder.id, folderDisplayName: folder.displayName };
+}
+
+function buildProjectScopeTargetName(
+  target: TargetItem,
+  folder: ProjectFolderDescriptor | null
+): string {
+  const name = typeof target === 'string' ? target : target.name;
+  return folder ? `${folder.displayName}:${name}` : name;
+}
+
+function normalizePhase1RelativePath(
+  relativePath: string | undefined,
+  absolutePath: string,
+  folderRoot: string
+): string {
+  return (relativePath || path.relative(folderRoot, absolutePath)).replace(/\\/g, '/');
+}
+
+function summarizePhase1Discoverers(discoverers: readonly DiscovererLike[]): DiscovererLike {
+  if (discoverers.length === 1 && discoverers[0]) {
+    return discoverers[0];
+  }
+  const ids = discoverers.map((discoverer) => discoverer.id).join('+') || 'unknown';
+  return {
+    id: `project-scope:${ids}`,
+    displayName: `ProjectScope (${discoverers.map((d) => d.displayName).join(', ')})`,
+    async load() {},
+    async listTargets() {
+      return [];
+    },
+    async getTargetFiles() {
+      return [];
+    },
+    async getDependencyGraph() {
+      return { nodes: [], edges: [] };
+    },
   };
 }
 
@@ -461,7 +569,9 @@ export async function runPhase1_5_AstAnalysis(
     try {
       const astFiles = allFiles.map((f: BootstrapFileEntry) => ({
         name: f.name,
-        relativePath: f.relativePath,
+        // ProjectScope 场景下 AST / callgraph 也必须使用 repo-qualified 路径，
+        // 否则两个 folder 都有 lib/index.ts 时会在结构证据层发生碰撞。
+        relativePath: f.sourceIdentity?.qualifiedPath ?? f.relativePath,
         content: f.content,
       }));
 

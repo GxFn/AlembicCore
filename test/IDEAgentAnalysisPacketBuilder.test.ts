@@ -305,6 +305,78 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
     expect(first.key).not.toBe(second.key);
   });
 
+  it('uses repo-qualified source refs for ProjectScope packets with duplicate short paths', () => {
+    const snapshot = makeSnapshot({
+      astProjectSummary: null,
+      allFiles: [
+        {
+          name: 'index.ts',
+          path: '/workspace/AlembicCore/lib/index.ts',
+          relativePath: 'lib/index.ts',
+          sourceIdentity: {
+            absolutePath: '/workspace/AlembicCore/lib/index.ts',
+            folderDisplayName: 'AlembicCore',
+            folderId: 'folder-core',
+            folderPath: '/workspace/AlembicCore',
+            folderRelativeRoot: 'AlembicCore',
+            legacyPath: 'lib/index.ts',
+            projectScopeId: 'scope-a',
+            qualifiedPath: 'AlembicCore/lib/index.ts',
+            relativePath: 'lib/index.ts',
+          },
+          content: 'export const core = 1;',
+          targetName: 'AlembicCore:core',
+        },
+        {
+          name: 'index.ts',
+          path: '/workspace/AlembicPlugin/lib/index.ts',
+          relativePath: 'lib/index.ts',
+          sourceIdentity: {
+            absolutePath: '/workspace/AlembicPlugin/lib/index.ts',
+            folderDisplayName: 'AlembicPlugin',
+            folderId: 'folder-plugin',
+            folderPath: '/workspace/AlembicPlugin',
+            folderRelativeRoot: 'AlembicPlugin',
+            legacyPath: 'lib/index.ts',
+            projectScopeId: 'scope-a',
+            qualifiedPath: 'AlembicPlugin/lib/index.ts',
+            relativePath: 'lib/index.ts',
+          },
+          content: 'export const plugin = 1;',
+          targetName: 'AlembicPlugin:plugin',
+        },
+      ],
+      localPackageModules: [],
+      depGraphData: null,
+      guardAudit: null,
+    });
+
+    const packet = buildIDEAgentAnalysisPacketFromSnapshot(snapshot, {
+      generatedAt: '2026-06-01T00:00:00.000Z',
+      maxUnits: 1,
+    });
+    const coreKey = createIDEAgentAnalysisUnitKey({
+      sourceRef: 'lib/index.ts',
+      qualifiedPath: 'AlembicCore/lib/index.ts',
+      folderId: 'folder-core',
+      entityType: 'file',
+    });
+    const pluginKey = createIDEAgentAnalysisUnitKey({
+      sourceRef: 'lib/index.ts',
+      qualifiedPath: 'AlembicPlugin/lib/index.ts',
+      folderId: 'folder-plugin',
+      entityType: 'file',
+    });
+
+    expect(packet.requiredReadSet).toEqual(
+      expect.arrayContaining(['AlembicCore/lib/index.ts', 'AlembicPlugin/lib/index.ts'])
+    );
+    expect(packet.sourceRefs.map((ref) => ref.qualifiedPath)).toEqual(
+      expect.arrayContaining(['AlembicCore/lib/index.ts', 'AlembicPlugin/lib/index.ts'])
+    );
+    expect(coreKey.key).not.toBe(pluginKey.key);
+  });
+
   it('surfaces degraded AST, callgraph, and dependency graph warnings', () => {
     const snapshot = makeSnapshot({
       astProjectSummary: null,

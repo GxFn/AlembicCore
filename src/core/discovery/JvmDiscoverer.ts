@@ -17,19 +17,10 @@ import {
   type DiscoveredTarget,
   ProjectDiscoverer,
 } from './ProjectDiscoverer.js';
+import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
 const SOURCE_EXTENSIONS = new Set(['.java', '.kt', '.kts']);
-const EXCLUDE_DIRS = new Set([
-  '.gradle',
-  '.idea',
-  '.cursor',
-  'build',
-  'target',
-  '.git',
-  'node_modules',
-  'out',
-  '.kotlin',
-]);
+const EXCLUDE_DIRS = createSourceScanExcludeDirs(['.gradle', '.kotlin']);
 
 export class JvmDiscoverer extends ProjectDiscoverer {
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: 完整复制迁移保留 JVM discoverer 的项目根状态槽位。

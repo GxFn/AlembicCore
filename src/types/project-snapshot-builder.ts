@@ -9,6 +9,7 @@
  * @module types/project-snapshot-builder
  */
 
+import type { CanonicalSourceIdentity } from '../shared/ProjectScope.js';
 import type {
   AstSummary,
   CallGraphResult,
@@ -119,6 +120,7 @@ function normalizeFiles(raw: unknown): readonly SnapshotFile[] {
     name: String(f.name || ''),
     path: String(f.path || ''),
     relativePath: String(f.relativePath || ''),
+    sourceIdentity: normalizeCanonicalSourceIdentity(f.sourceIdentity),
     content: String(f.content || ''),
     targetName: String(f.targetName || ''),
     language: f.language != null ? String(f.language) : undefined,
@@ -235,5 +237,44 @@ function normalizeLocalPackageModules(raw: unknown): readonly LocalPackageModule
   if (!Array.isArray(raw)) {
     return [];
   }
-  return raw as LocalPackageModule[];
+  return raw.map((module: Record<string, unknown>) => ({
+    name: String(module.name || ''),
+    packageName: String(module.packageName || module.name || ''),
+    fileCount: typeof module.fileCount === 'number' ? module.fileCount : 0,
+    inferredRole: module.inferredRole != null ? String(module.inferredRole) : undefined,
+    keyFiles: Array.isArray(module.keyFiles) ? module.keyFiles.map(String) : undefined,
+    keyFileIdentities: Array.isArray(module.keyFileIdentities)
+      ? module.keyFileIdentities
+          .map((identity) => normalizeCanonicalSourceIdentity(identity))
+          .filter((identity): identity is CanonicalSourceIdentity => Boolean(identity))
+      : undefined,
+  }));
+}
+
+function normalizeCanonicalSourceIdentity(raw: unknown): CanonicalSourceIdentity | undefined {
+  if (!raw || typeof raw !== 'object') {
+    return undefined;
+  }
+  const identity = raw as Record<string, unknown>;
+  const relativePath = normalizeOptionalString(identity.relativePath);
+  const qualifiedPath = normalizeOptionalString(identity.qualifiedPath);
+  const legacyPath = normalizeOptionalString(identity.legacyPath) ?? relativePath;
+  if (!relativePath || !qualifiedPath || !legacyPath) {
+    return undefined;
+  }
+  return {
+    absolutePath: normalizeOptionalString(identity.absolutePath) ?? null,
+    folderDisplayName: normalizeOptionalString(identity.folderDisplayName) ?? null,
+    folderId: normalizeOptionalString(identity.folderId) ?? null,
+    folderPath: normalizeOptionalString(identity.folderPath) ?? null,
+    folderRelativeRoot: normalizeOptionalString(identity.folderRelativeRoot) ?? null,
+    legacyPath,
+    projectScopeId: normalizeOptionalString(identity.projectScopeId) ?? null,
+    qualifiedPath,
+    relativePath,
+  };
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
 }

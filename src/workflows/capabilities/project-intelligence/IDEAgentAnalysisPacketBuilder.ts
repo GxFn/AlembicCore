@@ -1,5 +1,6 @@
 import { isAbsolute, relative } from 'node:path';
 import { computeContentHash } from '../../../shared/content-hash.js';
+import type { CanonicalSourceIdentity } from '../../../shared/ProjectScope.js';
 import type {
   AstClassInfo,
   AstMethodInfo,
@@ -61,7 +62,14 @@ export type IDEAgentAnalysisUnitStatus =
 
 export interface IDEAgentSourceRef {
   path: string;
+  folderDisplayName?: string;
+  folderId?: string;
+  folderRelativeRoot?: string;
   line?: number;
+  legacyPath?: string;
+  projectScopeId?: string;
+  qualifiedPath?: string;
+  relativePath?: string;
   symbol?: string;
   fqn?: string;
   entityType?: string;
@@ -72,6 +80,9 @@ export interface IDEAgentSourceRef {
 
 export interface IDEAgentStableUnitKeyInput {
   sourceRef: string;
+  folderId?: string;
+  projectScopeId?: string;
+  qualifiedPath?: string;
   fqn?: string;
   entityType: string;
   line?: number;
@@ -218,8 +229,13 @@ interface SourceRefCandidate {
   score: number;
 }
 
+interface SourceIdentityIndex {
+  byComparablePath: ReadonlyMap<string, CanonicalSourceIdentity>;
+}
+
 const DEFAULT_MAX_UNITS = 12;
-const STABLE_KEY_FORMAT = 'sourceRef + fqn + entityType + optional line/symbol';
+const STABLE_KEY_FORMAT =
+  'qualifiedSourceRef/folder identity + fqn + entityType + optional line/symbol';
 
 export function buildIDEAgentAnalysisPacket({
   result,
@@ -322,16 +338,30 @@ export function createIDEAgentAnalysisUnitKey(
   input: IDEAgentStableUnitKeyInput
 ): IDEAgentStableUnitKey {
   const sourceRef = normalizeComparablePath(input.sourceRef);
+  const qualifiedPath = input.qualifiedPath
+    ? normalizeComparablePath(input.qualifiedPath)
+    : undefined;
   const symbol = input.symbol?.trim() || undefined;
   const fqn = input.fqn?.trim() || undefined;
   const shortAlias = createShortAlias({ fqn, symbol, sourceRef });
   return {
     sourceRef,
+    ...(input.projectScopeId ? { projectScopeId: input.projectScopeId } : {}),
+    ...(input.folderId ? { folderId: input.folderId } : {}),
+    ...(qualifiedPath ? { qualifiedPath } : {}),
     ...(fqn ? { fqn } : {}),
     entityType: input.entityType,
     ...(typeof input.line === 'number' ? { line: input.line } : {}),
     ...(symbol ? { symbol } : {}),
-    key: `ide_unit_${stableHash({ sourceRef, fqn, entityType: input.entityType, line: input.line, symbol })}`,
+    key: `ide_unit_${stableHash({
+      sourceRef: qualifiedPath ?? sourceRef,
+      projectScopeId: input.projectScopeId,
+      folderId: input.folderId,
+      fqn,
+      entityType: input.entityType,
+      line: input.line,
+      symbol,
+    })}`,
     ...(shortAlias ? { shortAlias } : {}),
   };
 }
@@ -442,13 +472,16 @@ function buildAnalysisUnit({
     8
   );
   const sourceRefs = dedupeSourceRefs(selected.map((candidate) => candidate.sourceRef));
-  const requiredReadSet = sortUnique(sourceRefs.map((sourceRef) => sourceRef.path));
+  const requiredReadSet = sortUnique(sourceRefs.map(readableSourcePath));
   const structuralEvidenceRefs = dedupeEvidenceRefs(
     selected.map((candidate) => candidate.evidence)
   );
   const representative = sourceRefs[0] ?? createFallbackSourceRef(snapshot);
   const key = createIDEAgentAnalysisUnitKey({
     sourceRef: sourceRefKey(representative),
+    projectScopeId: representative.projectScopeId,
+    folderId: representative.folderId,
+    qualifiedPath: representative.qualifiedPath,
     fqn: representative.fqn,
     entityType: representative.entityType ?? 'dimension',
     line: representative.line,
@@ -501,34 +534,47 @@ function buildAnalysisUnit({
 }
 
 function collectSourceRefCandidates(snapshot: ProjectSnapshot): SourceRefCandidate[] {
+  const sourceIdentityIndex = buildSourceIdentityIndex(snapshot.allFiles);
   const candidates: SourceRefCandidate[] = [
-    ...collectAstCandidates(snapshot.projectRoot, snapshot.ast),
-    ...collectDependencyCandidates(snapshot.projectRoot, snapshot.dependencyGraph),
-    ...collectGuardCandidates(snapshot.projectRoot, snapshot.guardAudit),
-    ...collectModuleCandidates(snapshot.projectRoot, snapshot.localPackageModules),
+    ...collectAstCandidates(snapshot.projectRoot, snapshot.ast, sourceIdentityIndex),
+    ...collectDependencyCandidates(
+      snapshot.projectRoot,
+      snapshot.dependencyGraph,
+      sourceIdentityIndex
+    ),
+    ...collectGuardCandidates(snapshot.projectRoot, snapshot.guardAudit, sourceIdentityIndex),
+    ...collectModuleCandidates(
+      snapshot.projectRoot,
+      snapshot.localPackageModules,
+      sourceIdentityIndex
+    ),
     ...collectFileCandidates(snapshot.projectRoot, snapshot.allFiles),
   ];
   return candidates.sort(
     (a, b) =>
       b.score - a.score ||
-      a.sourceRef.path.localeCompare(b.sourceRef.path) ||
+      readableSourcePath(a.sourceRef).localeCompare(readableSourcePath(b.sourceRef)) ||
       (a.sourceRef.symbol ?? '').localeCompare(b.sourceRef.symbol ?? '')
   );
 }
 
-function collectAstCandidates(projectRoot: string, ast: AstSummary | null): SourceRefCandidate[] {
+function collectAstCandidates(
+  projectRoot: string,
+  ast: AstSummary | null,
+  sourceIdentityIndex: SourceIdentityIndex
+): SourceRefCandidate[] {
   if (!ast) {
     return [];
   }
   const result: SourceRefCandidate[] = [];
   for (const cls of ast.classes ?? []) {
-    const ref = sourceRefFromAstClass(projectRoot, cls);
+    const ref = sourceRefFromAstClass(projectRoot, cls, sourceIdentityIndex);
     if (!ref) {
       continue;
     }
     result.push(makeCandidate(ref, 'ast', `class:${ref.fqn ?? ref.symbol ?? ref.path}`, 100));
     for (const method of collectClassMethods(cls).slice(0, 4)) {
-      const methodRef = sourceRefFromAstMethod(projectRoot, method, cls);
+      const methodRef = sourceRefFromAstMethod(projectRoot, method, cls, sourceIdentityIndex);
       if (methodRef) {
         result.push(
           makeCandidate(
@@ -542,7 +588,7 @@ function collectAstCandidates(projectRoot: string, ast: AstSummary | null): Sour
     }
   }
   for (const protocol of ast.protocols ?? []) {
-    const ref = sourceRefFromProtocol(projectRoot, protocol);
+    const ref = sourceRefFromProtocol(projectRoot, protocol, sourceIdentityIndex);
     if (ref) {
       result.push(makeCandidate(ref, 'ast', `protocol:${ref.fqn ?? ref.symbol ?? ref.path}`, 86));
     }
@@ -552,16 +598,18 @@ function collectAstCandidates(projectRoot: string, ast: AstSummary | null): Sour
 
 function collectDependencyCandidates(
   projectRoot: string,
-  dependencyGraph: DependencyGraph | null
+  dependencyGraph: DependencyGraph | null,
+  sourceIdentityIndex: SourceIdentityIndex
 ): SourceRefCandidate[] {
   return (dependencyGraph?.edges ?? [])
-    .map((edge) => sourceRefFromDependencyEdge(projectRoot, edge))
+    .map((edge) => sourceRefFromDependencyEdge(projectRoot, edge, sourceIdentityIndex))
     .filter((candidate): candidate is SourceRefCandidate => Boolean(candidate));
 }
 
 function collectGuardCandidates(
   projectRoot: string,
-  guardAudit: GuardAudit | null
+  guardAudit: GuardAudit | null,
+  sourceIdentityIndex: SourceIdentityIndex
 ): SourceRefCandidate[] {
   const result: SourceRefCandidate[] = [];
   for (const file of guardAudit?.files ?? []) {
@@ -574,6 +622,7 @@ function collectGuardCandidates(
         entityType: 'guard-violation',
         role: 'guard',
         displayName: violation.message ?? violation.ruleId ?? file.filePath,
+        sourceIdentityIndex,
       });
       if (ref) {
         result.push(makeCandidate(ref, 'guard', `guard:${ref.path}:${violation.ruleId ?? ''}`, 78));
@@ -590,6 +639,7 @@ function collectGuardCandidates(
         entityType: 'guard-violation',
         role: 'guard',
         displayName: violation.message ?? violation.ruleId ?? location.filePath,
+        sourceIdentityIndex,
       });
       if (ref) {
         result.push(makeCandidate(ref, 'guard', `guard:${ref.path}:${violation.ruleId ?? ''}`, 76));
@@ -601,7 +651,8 @@ function collectGuardCandidates(
 
 function collectModuleCandidates(
   projectRoot: string,
-  modules: readonly LocalPackageModule[]
+  modules: readonly LocalPackageModule[],
+  sourceIdentityIndex: SourceIdentityIndex
 ): SourceRefCandidate[] {
   return modules.flatMap((module) =>
     (module.keyFiles ?? []).slice(0, 6).flatMap((filePath) => {
@@ -612,6 +663,7 @@ function collectModuleCandidates(
         entityType: 'module',
         role: 'module',
         displayName: module.packageName || module.name,
+        sourceIdentityIndex,
       });
       return ref ? [makeCandidate(ref, 'module', `module:${module.name}:${ref.path}`, 72)] : [];
     })
@@ -629,6 +681,7 @@ function collectFileCandidates(
       entityType: 'file',
       role: 'entry',
       displayName: file.name || file.relativePath || file.path,
+      sourceIdentity: file.sourceIdentity,
     });
     return ref
       ? [makeCandidate(ref, 'file', `file:${ref.path}`, file.priority === 'high' ? 70 : 50)]
@@ -654,7 +707,11 @@ function makeCandidate(
   };
 }
 
-function sourceRefFromAstClass(projectRoot: string, cls: AstClassInfo): IDEAgentSourceRef | null {
+function sourceRefFromAstClass(
+  projectRoot: string,
+  cls: AstClassInfo,
+  sourceIdentityIndex: SourceIdentityIndex
+): IDEAgentSourceRef | null {
   return makeSourceRef({
     projectRoot,
     path: cls.relativePath ?? cls.file,
@@ -663,13 +720,15 @@ function sourceRefFromAstClass(projectRoot: string, cls: AstClassInfo): IDEAgent
     entityType: cls.kind ?? 'class',
     role: 'symbol',
     displayName: cls.name,
+    sourceIdentityIndex,
   });
 }
 
 function sourceRefFromAstMethod(
   projectRoot: string,
   method: AstMethodInfo,
-  cls: AstClassInfo
+  cls: AstClassInfo,
+  sourceIdentityIndex: SourceIdentityIndex
 ): IDEAgentSourceRef | null {
   const methodName = method.name;
   const className = method.className ?? cls.name;
@@ -683,12 +742,14 @@ function sourceRefFromAstMethod(
     entityType: 'method',
     role: 'symbol',
     displayName: `${className}.${methodName}`,
+    sourceIdentityIndex,
   });
 }
 
 function sourceRefFromProtocol(
   projectRoot: string,
-  protocol: AstProtocolInfo
+  protocol: AstProtocolInfo,
+  sourceIdentityIndex: SourceIdentityIndex
 ): IDEAgentSourceRef | null {
   return makeSourceRef({
     projectRoot,
@@ -701,12 +762,14 @@ function sourceRefFromProtocol(
     entityType: 'protocol',
     role: 'symbol',
     displayName: protocol.name,
+    sourceIdentityIndex,
   });
 }
 
 function sourceRefFromDependencyEdge(
   projectRoot: string,
-  edge: DependencyEdge
+  edge: DependencyEdge,
+  sourceIdentityIndex: SourceIdentityIndex
 ): SourceRefCandidate | null {
   const ref = makeSourceRef({
     projectRoot,
@@ -715,6 +778,7 @@ function sourceRefFromDependencyEdge(
     entityType: 'dependency-edge',
     role: 'dependency',
     displayName: `${edge.from} -> ${edge.to}`,
+    sourceIdentityIndex,
   });
   if (!ref) {
     return null;
@@ -736,6 +800,8 @@ function makeSourceRef({
   entityType,
   role,
   displayName,
+  sourceIdentity,
+  sourceIdentityIndex,
 }: {
   projectRoot: string;
   path?: string;
@@ -745,14 +811,24 @@ function makeSourceRef({
   entityType?: string;
   role?: IDEAgentSourceRefRole;
   displayName?: string;
+  sourceIdentity?: CanonicalSourceIdentity;
+  sourceIdentityIndex?: SourceIdentityIndex;
 }): IDEAgentSourceRef | null {
   const normalizedPath = normalizeProjectPath(path, projectRoot);
   if (!normalizedPath) {
     return null;
   }
+  const identity = sourceIdentity ?? sourceIdentityIndex?.byComparablePath.get(normalizedPath);
   const alias = createShortAlias({ fqn, symbol, sourceRef: normalizedPath });
   return {
     path: normalizedPath,
+    ...(identity?.projectScopeId ? { projectScopeId: identity.projectScopeId } : {}),
+    ...(identity?.folderId ? { folderId: identity.folderId } : {}),
+    ...(identity?.folderDisplayName ? { folderDisplayName: identity.folderDisplayName } : {}),
+    ...(identity?.folderRelativeRoot ? { folderRelativeRoot: identity.folderRelativeRoot } : {}),
+    ...(identity?.relativePath ? { relativePath: identity.relativePath } : {}),
+    ...(identity?.qualifiedPath ? { qualifiedPath: identity.qualifiedPath } : {}),
+    ...(identity?.legacyPath ? { legacyPath: identity.legacyPath } : {}),
     ...(typeof line === 'number' ? { line } : {}),
     ...(symbol ? { symbol } : {}),
     ...(fqn ? { fqn: normalizeFqn(fqn, projectRoot) } : {}),
@@ -1029,8 +1105,16 @@ function buildUnitReason(
 
 function createFallbackSourceRef(snapshot: ProjectSnapshot): IDEAgentSourceRef {
   const first = snapshot.allFiles[0];
+  const identity = first?.sourceIdentity;
   return {
     path: first?.relativePath || first?.path || 'project',
+    ...(identity?.projectScopeId ? { projectScopeId: identity.projectScopeId } : {}),
+    ...(identity?.folderId ? { folderId: identity.folderId } : {}),
+    ...(identity?.folderDisplayName ? { folderDisplayName: identity.folderDisplayName } : {}),
+    ...(identity?.folderRelativeRoot ? { folderRelativeRoot: identity.folderRelativeRoot } : {}),
+    ...(identity?.relativePath ? { relativePath: identity.relativePath } : {}),
+    ...(identity?.qualifiedPath ? { qualifiedPath: identity.qualifiedPath } : {}),
+    ...(identity?.legacyPath ? { legacyPath: identity.legacyPath } : {}),
     entityType: 'project',
     role: 'entry',
     displayName: snapshot.projectRoot ? 'Project overview' : 'Project',
@@ -1042,16 +1126,65 @@ function findTargetName(
   sourceRefs: readonly IDEAgentSourceRef[],
   files: readonly SnapshotFile[]
 ): string | undefined {
-  const paths = new Set(sourceRefs.map((ref) => ref.path));
-  return files.find((file) => paths.has(file.relativePath || file.path))?.targetName || undefined;
+  const paths = new Set(sourceRefs.flatMap(sourceRefComparablePaths));
+  return (
+    files.find((file) =>
+      [
+        file.relativePath,
+        file.path,
+        file.sourceIdentity?.legacyPath,
+        file.sourceIdentity?.qualifiedPath,
+      ].some((candidate) => candidate && paths.has(normalizeComparablePath(candidate)))
+    )?.targetName || undefined
+  );
 }
 
 function findModuleName(
   sourceRefs: readonly IDEAgentSourceRef[],
   modules: readonly LocalPackageModule[]
 ): string | undefined {
-  const paths = new Set(sourceRefs.map((ref) => ref.path));
-  return modules.find((module) => (module.keyFiles ?? []).some((path) => paths.has(path)))?.name;
+  const paths = new Set(sourceRefs.flatMap(sourceRefComparablePaths));
+  return modules.find((module) =>
+    [
+      ...(module.keyFiles ?? []),
+      ...(module.keyFileIdentities ?? []).flatMap((identity) => [
+        identity.legacyPath,
+        identity.qualifiedPath,
+      ]),
+    ].some((candidate) => paths.has(normalizeComparablePath(candidate)))
+  )?.name;
+}
+
+function buildSourceIdentityIndex(files: readonly SnapshotFile[]): SourceIdentityIndex {
+  const byComparablePath = new Map<string, CanonicalSourceIdentity>();
+  for (const file of files) {
+    const identity = file.sourceIdentity;
+    if (!identity) {
+      continue;
+    }
+    for (const candidate of [
+      file.relativePath,
+      file.path,
+      identity.relativePath,
+      identity.legacyPath,
+      identity.qualifiedPath,
+    ]) {
+      if (candidate) {
+        byComparablePath.set(normalizeComparablePath(candidate), identity);
+      }
+    }
+  }
+  return { byComparablePath };
+}
+
+function readableSourcePath(sourceRef: IDEAgentSourceRef): string {
+  return sourceRef.qualifiedPath ?? sourceRef.path;
+}
+
+function sourceRefComparablePaths(sourceRef: IDEAgentSourceRef): string[] {
+  return [sourceRef.path, sourceRef.relativePath, sourceRef.legacyPath, sourceRef.qualifiedPath]
+    .filter((candidate): candidate is string => Boolean(candidate))
+    .map(normalizeComparablePath);
 }
 
 function normalizeProjectPath(pathValue: string | undefined, projectRoot: string): string | null {
@@ -1083,13 +1216,14 @@ function pathLike(value: string): string | undefined {
 }
 
 function sourceRefKey(sourceRef: IDEAgentSourceRef): string {
-  return `${sourceRef.path}${typeof sourceRef.line === 'number' ? `:${sourceRef.line}` : ''}`;
+  const pathValue = readableSourcePath(sourceRef);
+  return `${pathValue}${typeof sourceRef.line === 'number' ? `:${sourceRef.line}` : ''}`;
 }
 
 function describeSourceRef(sourceRef: IDEAgentSourceRef): string {
   const line = typeof sourceRef.line === 'number' ? `:${sourceRef.line}` : '';
   const symbol = sourceRef.symbol ? ` ${sourceRef.symbol}` : '';
-  return `${sourceRef.path}${line}${symbol}`.trim();
+  return `${readableSourcePath(sourceRef)}${line}${symbol}`.trim();
 }
 
 function createShortAlias({
@@ -1115,6 +1249,9 @@ function dedupeSourceRefs(sourceRefs: readonly IDEAgentSourceRef[]): IDEAgentSou
   for (const ref of sourceRefs) {
     const key = stableHash({
       path: ref.path,
+      qualifiedPath: ref.qualifiedPath,
+      projectScopeId: ref.projectScopeId,
+      folderId: ref.folderId,
       line: ref.line,
       symbol: ref.symbol,
       fqn: ref.fqn,
@@ -1127,7 +1264,7 @@ function dedupeSourceRefs(sourceRefs: readonly IDEAgentSourceRef[]): IDEAgentSou
   }
   return [...map.values()].sort(
     (a, b) =>
-      a.path.localeCompare(b.path) ||
+      readableSourcePath(a).localeCompare(readableSourcePath(b)) ||
       (a.line ?? 0) - (b.line ?? 0) ||
       (a.symbol ?? '').localeCompare(b.symbol ?? '')
   );
