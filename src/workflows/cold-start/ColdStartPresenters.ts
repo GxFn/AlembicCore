@@ -7,7 +7,7 @@ import type {
   PhaseReport,
   ProjectSnapshot,
 } from '../../types/project-snapshot.js';
-import { buildInternalNextSteps } from '../capabilities/execution/external/MissionBriefingSupport.js';
+import { buildInternalNextSteps } from '../capabilities/host-agent/MissionBriefingSupport.js';
 import { buildLanguageExtension as buildProjectLanguageExtension } from '../capabilities/presentation/LanguageExtensionBuilder.js';
 import { summarizePanorama as summarizeProjectPanorama } from '../capabilities/presentation/PanoramaSummaryPresenter.js';
 import { inferTargetRole } from '../capabilities/presentation/TargetClassifier.js';
@@ -32,7 +32,7 @@ export function presentInternalColdStartEmptyProject({
   });
 }
 
-export function presentExternalColdStartEmptyProject({
+export function presentHostAgentColdStartEmptyProject({
   responseTimeMs,
 }: {
   responseTimeMs: number;
@@ -221,7 +221,7 @@ export function presentInternalColdStartResponse({
   });
 }
 
-export function presentExternalColdStartResponse({
+export function presentHostAgentColdStartResponse({
   cleanupResult,
   briefing,
   dimensionCount,

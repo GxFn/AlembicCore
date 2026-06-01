@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'vitest';
 import type { DimensionDef } from '../../src/types/project-snapshot.js';
-import { BootstrapSession } from '../../src/workflows/capabilities/execution/external/BootstrapSession.js';
-import { runExternalDimensionCompletionWorkflow } from '../../src/workflows/capabilities/execution/external/ExternalDimensionCompletionWorkflow.js';
-import { buildMissionBriefing } from '../../src/workflows/capabilities/execution/external/MissionBriefingBuilder.js';
-import { buildInternalNextSteps } from '../../src/workflows/capabilities/execution/external/MissionBriefingSupport.js';
+import { BootstrapSession } from '../../src/workflows/capabilities/host-agent/BootstrapSession.js';
+import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/capabilities/host-agent/HostAgentDimensionCompletionWorkflow.js';
+import { buildMissionBriefing } from '../../src/workflows/capabilities/host-agent/MissionBriefingBuilder.js';
+import { buildInternalNextSteps } from '../../src/workflows/capabilities/host-agent/MissionBriefingSupport.js';
 import {
   buildKnowledgeRescanPlan,
   type RelevanceAuditResult,
   type RelevanceAuditSummary,
 } from '../../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
-import { projectExternalRescanEvidencePlan } from '../../src/workflows/capabilities/planning/knowledge/RescanEvidenceProjectors.js';
+import { projectHostAgentRescanEvidencePlan } from '../../src/workflows/capabilities/planning/knowledge/RescanEvidenceProjectors.js';
 import type { RecipeSnapshotEntry } from '../../src/workflows/capabilities/RecipeSnapshotTypes.js';
-import { presentExternalColdStartResponse } from '../../src/workflows/cold-start/ColdStartPresenters.js';
+import { presentHostAgentColdStartResponse } from '../../src/workflows/cold-start/ColdStartPresenters.js';
 import {
-  createExternalKnowledgeRescanIntent,
+  createHostAgentKnowledgeRescanIntent,
   createInternalKnowledgeRescanIntent,
 } from '../../src/workflows/knowledge-rescan/KnowledgeRescanIntent.js';
-import { presentExternalKnowledgeRescanResponse } from '../../src/workflows/knowledge-rescan/KnowledgeRescanPresenters.js';
+import { presentHostAgentKnowledgeRescanResponse } from '../../src/workflows/knowledge-rescan/KnowledgeRescanPresenters.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Architecture guide' } as DimensionDef,
@@ -24,7 +24,7 @@ const dimensions: DimensionDef[] = [
 ];
 
 describe('host-agent mining workflow core', () => {
-  test('creates internal and external rescan intents with shared cleanup semantics', () => {
+  test('creates internal and host-agent rescan intents with shared cleanup semantics', () => {
     expect(
       createInternalKnowledgeRescanIntent({
         reason: 'manual',
@@ -42,12 +42,12 @@ describe('host-agent mining workflow core', () => {
     });
 
     expect(
-      createExternalKnowledgeRescanIntent({ force: true, dimensions: ['quality'] })
+      createHostAgentKnowledgeRescanIntent({ force: true, dimensions: ['quality'] })
     ).toMatchObject({
-      executor: 'external-agent',
+      executor: 'host-agent',
       analysisMode: 'full',
       cleanupPolicy: 'force-rescan',
-      completionPolicy: 'external-dimension-complete',
+      completionPolicy: 'host-agent-dimension-complete',
       dimensionIds: ['quality'],
     });
   });
@@ -78,7 +78,7 @@ describe('host-agent mining workflow core', () => {
       dimensions,
       targetPerDimension: 2,
     });
-    const evidencePlan = projectExternalRescanEvidencePlan(plan);
+    const evidencePlan = projectHostAgentRescanEvidencePlan(plan);
 
     expect(
       plan.executionDecisions.map((decision) => [decision.dimensionId, decision.mode])
@@ -94,7 +94,7 @@ describe('host-agent mining workflow core', () => {
   test('builds mission briefing with rescan profile evidence hints', () => {
     const briefing = buildMissionBriefing({
       projectMeta: { name: 'Demo', primaryLanguage: 'typescript', fileCount: 10 },
-      profile: 'rescan-external',
+      profile: 'rescan-host-agent',
       activeDimensions: dimensions,
       session: { toJSON: () => ({ id: 'session-1' }) },
       rescan: {
@@ -128,7 +128,7 @@ describe('host-agent mining workflow core', () => {
       },
     });
 
-    expect(briefing.meta?.profile).toBe('rescan-external');
+    expect(briefing.meta?.profile).toBe('rescan-host-agent');
     expect((briefing.evidenceHints as Record<string, unknown>).rescanMode).toBe(true);
     expect((briefing.executionPlan as { workflow: string }).workflow).toContain('增量扫描模式');
     expect((briefing.executionPlan as { workflow: string }).workflow).toContain(
@@ -140,13 +140,13 @@ describe('host-agent mining workflow core', () => {
   });
 
   test('projects Codex-visible submission instructions to the real MCP tool name', () => {
-    const coldStart = presentExternalColdStartResponse({
+    const coldStart = presentHostAgentColdStartResponse({
       cleanupResult: { deletedFiles: 0, clearedTables: [], errors: [] },
       briefing: { executionPlan: { tiers: [] } },
       dimensionCount: 2,
       responseTimeMs: 1,
     });
-    const rescan = presentExternalKnowledgeRescanResponse({
+    const rescan = presentHostAgentKnowledgeRescanResponse({
       recipeSnapshot: { count: 1 },
       cleanResult: { clearedTables: [], deletedFiles: 0 },
       auditSummary: {
@@ -229,7 +229,7 @@ describe('host-agent mining workflow core', () => {
       },
     };
 
-    const response = await runExternalDimensionCompletionWorkflow(
+    const response = await runHostAgentDimensionCompletionWorkflow(
       ctx,
       {
         dimensionId: 'architecture',

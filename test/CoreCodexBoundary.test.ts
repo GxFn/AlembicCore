@@ -70,7 +70,7 @@ const CODEX_RUNTIME_IDENTIFIERS = [
 ];
 
 const HOST_AGENT_WORKFLOW_DIRS = [
-  'src/workflows/capabilities/execution/external',
+  'src/workflows/capabilities/host-agent',
   'src/workflows/capabilities/planning/knowledge',
   'src/workflows/cold-start',
   'src/workflows/knowledge-rescan',

@@ -19,10 +19,10 @@ import {
   TARGET_RECIPES_PER_DIMENSION,
 } from './KnowledgeRescanPlanBuilder.js';
 import {
-  type ExternalDimensionGap,
-  type ExternalRescanEvidencePlan,
+  type HostAgentDimensionGap,
+  type HostAgentRescanEvidencePlan,
   type InternalRescanGapPlan,
-  projectExternalRescanEvidencePlan,
+  projectHostAgentRescanEvidencePlan,
   projectInternalRescanGapPlan,
   projectInternalRescanPromptRecipes,
   projectInternalRescanPromptRecipesFromParts,
@@ -60,7 +60,7 @@ export interface RelevanceAuditSummary {
 
 export {
   buildKnowledgeRescanPlan,
-  projectExternalRescanEvidencePlan,
+  projectHostAgentRescanEvidencePlan,
   projectInternalRescanGapPlan,
   projectInternalRescanPromptRecipes,
   TARGET_RECIPES_PER_DIMENSION,
@@ -68,8 +68,8 @@ export {
 
 export type {
   AuditVerdict,
-  ExternalDimensionGap,
-  ExternalRescanEvidencePlan,
+  HostAgentDimensionGap,
+  HostAgentRescanEvidencePlan,
   InternalRescanGapPlan,
   KnowledgeRescanDimensionPlan,
   KnowledgeRescanExecutionDecision,
@@ -561,11 +561,11 @@ export function buildExistingRecipesForInternalFill(opts: {
   return projectInternalRescanPromptRecipesFromParts(opts);
 }
 
-export function buildExternalRescanEvidencePlan(opts: {
+export function buildHostAgentRescanEvidencePlan(opts: {
   recipeEntries: RecipeSnapshotEntry[];
   auditSummary: RelevanceAuditSummary;
   dimensions: DimensionDef[];
   targetPerDimension?: number;
-}): ExternalRescanEvidencePlan {
-  return projectExternalRescanEvidencePlan(buildKnowledgeRescanPlan(opts));
+}): HostAgentRescanEvidencePlan {
+  return projectHostAgentRescanEvidencePlan(buildKnowledgeRescanPlan(opts));
 }

@@ -6,20 +6,20 @@
  * 由 MissionBriefingBuilder 统一调用。
  */
 
-import { sopToCompactText } from '../../../../domain/dimension/DimensionSop.js';
+import { sopToCompactText } from '../../../domain/dimension/DimensionSop.js';
 import {
   getRequiredFieldNames,
   getRequiredFieldsDescription,
-} from '../../../../domain/knowledge/FieldSpec.js';
-import type { DimensionDef } from '../../../../types/project-snapshot.js';
-import { TierScheduler } from '../../planning/dimensions/TierScheduler.js';
-import type { ExternalRescanEvidencePlan } from '../../planning/knowledge/KnowledgeRescanPlanner.js';
+} from '../../../domain/knowledge/FieldSpec.js';
+import type { DimensionDef } from '../../../types/project-snapshot.js';
+import { TierScheduler } from '../planning/dimensions/TierScheduler.js';
+import type { HostAgentRescanEvidencePlan } from '../planning/knowledge/KnowledgeRescanPlanner.js';
 
 // ═══════════════════════════════════════════════════════════
 // §1 — MissionBriefingProfiles
 // ═══════════════════════════════════════════════════════════
 
-export type BriefingProfile = 'cold-start-external' | 'rescan-external';
+export type BriefingProfile = 'cold-start-host-agent' | 'rescan-host-agent';
 
 export interface ResponseBudget {
   limitBytes: number;
@@ -32,7 +32,7 @@ export interface RescanBriefingPrescreen {
 }
 
 export interface RescanBriefingInput {
-  evidencePlan: ExternalRescanEvidencePlan;
+  evidencePlan: HostAgentRescanEvidencePlan;
   prescreen: RescanBriefingPrescreen;
 }
 
@@ -48,17 +48,19 @@ export interface BriefingPlan {
   responseBudget: ResponseBudget;
 }
 
-export const DEFAULT_BRIEFING_PROFILE: BriefingProfile = 'cold-start-external';
+export const DEFAULT_BRIEFING_PROFILE: BriefingProfile = 'cold-start-host-agent';
 export const DEFAULT_RESPONSE_BUDGET: ResponseBudget = { limitBytes: 100 * 1024 };
 
 export function createBriefingPlan(input: BriefingProfileInput = {}): BriefingPlan {
-  const profile = input.profile ?? (input.rescan ? 'rescan-external' : DEFAULT_BRIEFING_PROFILE);
+  const profile = input.profile ?? (input.rescan ? 'rescan-host-agent' : DEFAULT_BRIEFING_PROFILE);
 
-  if (profile === 'rescan-external' && !input.rescan) {
-    throw new Error('[MissionBriefing] rescan-external profile requires rescan evidence input');
+  if (profile === 'rescan-host-agent' && !input.rescan) {
+    throw new Error('[MissionBriefing] rescan-host-agent profile requires rescan evidence input');
   }
-  if (profile === 'cold-start-external' && input.rescan) {
-    throw new Error('[MissionBriefing] cold-start-external profile cannot accept rescan evidence');
+  if (profile === 'cold-start-host-agent' && input.rescan) {
+    throw new Error(
+      '[MissionBriefing] cold-start-host-agent profile cannot accept rescan evidence'
+    );
   }
 
   return {
@@ -459,7 +461,7 @@ function buildWorkflowInstruction({
   profile: BriefingProfile;
   rescan?: RescanBriefingInput;
 }): string {
-  if (profile === 'rescan-external') {
+  if (profile === 'rescan-host-agent') {
     const needsVerification = rescan?.prescreen.needsVerification.length ?? 0;
     const autoResolved = rescan?.prescreen.autoResolved.length ?? 0;
     return (
@@ -485,10 +487,10 @@ function buildWorkflowInstruction({
 // ═══════════════════════════════════════════════════════════
 
 export interface RescanEvidenceHints {
-  allRecipes: ExternalRescanEvidencePlan['allRecipes'];
+  allRecipes: HostAgentRescanEvidencePlan['allRecipes'];
   rescanMode: true;
-  dimensionGaps: ExternalRescanEvidencePlan['dimensionGaps'];
-  executionReasons: ExternalRescanEvidencePlan['executionReasons'];
+  dimensionGaps: HostAgentRescanEvidencePlan['dimensionGaps'];
+  executionReasons: HostAgentRescanEvidencePlan['executionReasons'];
   evolutionPrescreen: {
     needsVerification: unknown[];
     autoResolved: unknown[];

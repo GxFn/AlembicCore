@@ -1,5 +1,5 @@
 /**
- * BootstrapSession — 外部 Agent 驱动的 Bootstrap 会话状态管理
+ * BootstrapSession — 宿主 Agent 驱动的 Bootstrap 会话状态管理
  *
  * 跨多次 MCP 调用保持状态（进程生命周期内有效）。
  * 通过 ServiceContainer 单例注册，每个项目同时只有一个 active session。
@@ -16,10 +16,10 @@
  */
 
 import crypto from 'node:crypto';
-import type { DimensionDef } from '../../../../types/project-snapshot.js';
-import type { SessionCacheShape } from '../../../../types/snapshot-views.js';
-import type { DimensionQualityReport } from './ExternalSubmissionTracker.js';
-import { ExternalSubmissionTracker } from './ExternalSubmissionTracker.js';
+import type { DimensionDef } from '../../../types/project-snapshot.js';
+import type { SessionCacheShape } from '../../../types/snapshot-views.js';
+import type { DimensionQualityReport } from './HostAgentSubmissionTracker.js';
+import { HostAgentSubmissionTracker } from './HostAgentSubmissionTracker.js';
 import { SessionStore } from './MiningSessionStore.js';
 
 // ── 本地类型定义 ─────────────────────────────────────────────
@@ -70,7 +70,7 @@ export class BootstrapSession {
   dimensions: DimensionDef[];
   snapshotCache: SessionCacheShape | null;
   sessionStore: SessionStore;
-  submissionTracker: ExternalSubmissionTracker;
+  submissionTracker: HostAgentSubmissionTracker;
   /**
    * @param opts.projectRoot 项目根目录
    * @param opts.dimensions 激活的维度定义列表
@@ -83,8 +83,8 @@ export class BootstrapSession {
     this.completedDimensions = new Map<string, DimensionCompletion>(); // dimId → { report, completedAt, recipeIds }
     this.sessionStore = new SessionStore(projectContext);
 
-    /** 外部 Agent 提交追踪 (v2: 对标内部 Agent 的 EvidenceCollector) */
-    this.submissionTracker = new ExternalSubmissionTracker();
+    /** 宿主 Agent 提交追踪 (v2: 对标内部 Agent 的 EvidenceCollector) */
+    this.submissionTracker = new HostAgentSubmissionTracker();
 
     /** Phase 1-4 分析结果缓存，供 wiki_plan 复用 */
     this.snapshotCache = null;

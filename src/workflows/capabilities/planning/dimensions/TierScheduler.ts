@@ -1,7 +1,7 @@
 /**
  * TierScheduler — 维度分层并行调度器
  *
- * 内部 Agent 和外部 Agent 共享此调度模型。
+ * 内部 Agent 和宿主 Agent 共享此调度模型。
  * 按维度间信息依赖关系分 3 层执行:
  * - Tier 1: 基础数据层 (project-profile, 语言条件扫描) — 可并行
  * - Tier 2: 规范+架构+模式 (code-standard, architecture, code-pattern) — 依赖 Tier 1
@@ -12,7 +12,7 @@
  *
  * 调用方:
  *   - 内部 Agent dimension execution — 按 Tier 分层调度 AI pipeline
- *   - MissionBriefingBuilder.js (外部 Agent) — executionPlan 中的 Tier 层序展示
+ *   - MissionBriefingBuilder.js (宿主 Agent) — executionPlan 中的 Tier 层序展示
  *
  * @module TierScheduler
  */

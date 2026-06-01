@@ -23,7 +23,7 @@ export interface InternalRescanGapPlan {
   targetPerDimension: number;
 }
 
-export interface ExternalDimensionGap {
+export interface HostAgentDimensionGap {
   dimensionId: string;
   existingCount: number;
   gap: number;
@@ -34,7 +34,7 @@ export interface ExternalDimensionGap {
   executionReasons: RescanExecutionReason[];
 }
 
-export interface ExternalRescanEvidencePlan {
+export interface HostAgentRescanEvidencePlan {
   allRecipes: Array<{
     id: string;
     title: string;
@@ -51,7 +51,7 @@ export interface ExternalRescanEvidencePlan {
       decayReasons: string[];
     };
   }>;
-  dimensionGaps: ExternalDimensionGap[];
+  dimensionGaps: HostAgentDimensionGap[];
   executionReasons: Record<string, RescanExecutionReason[]>;
   totalGap: number;
   totalCreateBudget: number;
@@ -159,9 +159,9 @@ function projectInternalRescanPromptRecipe({
   };
 }
 
-export function projectExternalRescanEvidencePlan(
+export function projectHostAgentRescanEvidencePlan(
   plan: KnowledgeRescanPlan
-): ExternalRescanEvidencePlan {
+): HostAgentRescanEvidencePlan {
   const snapshotById = new Map(plan.recipeEntries.map((entry) => [entry.id, entry]));
   const allRecipes = plan.auditSummary.results
     .filter((result) => result.verdict !== 'dead')

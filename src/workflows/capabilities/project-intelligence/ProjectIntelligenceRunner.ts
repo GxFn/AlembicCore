@@ -2,7 +2,7 @@
  * ProjectIntelligenceRunner — 共享 Phase 1-4 项目分析管线
  *
  * 冷启动 (ColdStart) 和增量扫描 (KnowledgeRescan) 共享完全相同的
- * 项目分析逻辑，内部/外部 Agent 均通过 ProjectIntelligenceCapability 调用此模块。
+ * 项目分析逻辑，内部/宿主 Agent 均通过 ProjectIntelligenceCapability 调用此模块。
  *
  * Phase 概览:
  *   Phase 1   → 文件收集（DiscovererRegistry → 多语言项目类型检测）
@@ -1341,7 +1341,7 @@ export async function materializeProjectPanorama({
 /**
  * runAllPhases — 一站式执行 Phase 1~4 全部数据收集
  *
- * 内部 Agent 和外部 Agent 均可调用此函数获取统一的分析结果。
+ * 内部 Agent 和宿主 Agent 均可调用此函数获取统一的分析结果。
  *
  * @param projectRoot 项目根目录
  * @param ctx { container, logger }

@@ -7,7 +7,7 @@ const requiredRootExports = [
   'DEFAULT_FOLDER_NAMES',
   'KnowledgeRepositoryImpl',
   'ProjectIntelligenceCapability',
-  'createExternalWorkflowSession',
+  'createHostAgentWorkflowSession',
 ];
 const requiredSubpathExports = {
   '@alembic/core/config': [

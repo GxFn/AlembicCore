@@ -1,9 +1,9 @@
 /**
- * Mission Briefing 构建器 — 外部 Agent 驱动 Bootstrap 的核心数据构建
+ * Mission Briefing 构建器 — 宿主 Agent 驱动 Bootstrap 的核心数据构建
  *
  * 将 Phase 1-4 的分析结果（AST / EntityGraph / DepGraph / Guard）
  * + 维度定义 + 提交规范 + 执行计划 整合为一站式 Mission Briefing，
- * 让外部 Agent (Cursor/Copilot) 拥有全部必要上下文来完成代码分析。
+ * 让宿主 Agent (Cursor/Copilot) 拥有全部必要上下文来完成代码分析。
  *
  * 设计原则：
  *   - 100KB 响应硬上限，大项目自动降级压缩
@@ -14,12 +14,9 @@
  * @module bootstrap/MissionBriefingBuilder
  */
 
-import {
-  getDimensionSOP,
-  PRE_SUBMIT_CHECKLIST,
-} from '../../../../domain/dimension/DimensionSop.js';
-import { getCursorDeliverySpec } from '../../../../domain/knowledge/FieldSpec.js';
-import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../../../../domain/knowledge/StyleGuide.js';
+import { getDimensionSOP, PRE_SUBMIT_CHECKLIST } from '../../../domain/dimension/DimensionSop.js';
+import { getCursorDeliverySpec } from '../../../domain/knowledge/FieldSpec.js';
+import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../../../domain/knowledge/StyleGuide.js';
 import type {
   AstCategoryInfo,
   AstProtocolInfo,
@@ -32,8 +29,8 @@ import type {
   GuardViolation,
   IncrementalPlan,
   LocalPackageModule,
-} from '../../../../types/project-snapshot.js';
-import { TierScheduler } from '../../planning/dimensions/TierScheduler.js';
+} from '../../../types/project-snapshot.js';
+import { TierScheduler } from '../planning/dimensions/TierScheduler.js';
 import { buildEvidenceStarters } from './EvidenceStarterBuilder.js';
 import {
   applyBriefingCompressionPolicy,
@@ -955,7 +952,7 @@ function _inferModule(filePath: string | undefined, targets: MissionBriefing['ta
 
 /**
  * 从 PanoramaResult 提取 layers / couplingHotspots / cycles / gaps
- * 用于注入 MissionBriefing，使外部 Agent 获得项目全景视野
+ * 用于注入 MissionBriefing，使宿主 Agent 获得项目全景视野
  */
 // ── 本地子包/模块 — mustCoverModules ────────────────────────
 
@@ -1232,7 +1229,7 @@ export function buildMissionBriefing({
     session: session.toJSON(),
   };
 
-  if (briefingPlan.profile === 'rescan-external' && briefingPlan.rescan) {
+  if (briefingPlan.profile === 'rescan-host-agent' && briefingPlan.rescan) {
     briefing.evidenceHints = projectRescanEvidenceHints(briefingPlan.rescan);
   }
 

@@ -6,14 +6,14 @@ import { describe, expect, it } from 'vitest';
 import {
   BootstrapSession,
   buildColdStartWorkflowPlan,
-  buildExternalMissionBriefing,
+  buildHostAgentMissionBriefing,
   clearDimensionCheckpoints,
-  createExternalColdStartIntent,
-  createExternalKnowledgeRescanIntent,
+  createHostAgentColdStartIntent,
+  createHostAgentKnowledgeRescanIntent,
   type DimensionDef,
-  ExternalSubmissionTracker,
+  HostAgentSubmissionTracker,
   loadDimensionCheckpoints,
-  runExternalDimensionCompletionWorkflow,
+  runHostAgentDimensionCompletionWorkflow,
   saveDimensionCheckpoint,
 } from '../src/host-agent-workflows.js';
 
@@ -23,9 +23,9 @@ const dimensions: DimensionDef[] = [
 ];
 
 describe('stable host-agent workflow entrypoint', () => {
-  it('exposes external cold-start and rescan intent contracts without host runtime details', () => {
-    const coldStart = createExternalColdStartIntent();
-    const rescan = createExternalKnowledgeRescanIntent({
+  it('exposes host-agent cold-start and rescan intent contracts without host runtime details', () => {
+    const coldStart = createHostAgentColdStartIntent();
+    const rescan = createHostAgentKnowledgeRescanIntent({
       force: true,
       dimensions: ['quality'],
       reason: 'manual',
@@ -38,18 +38,18 @@ describe('stable host-agent workflow entrypoint', () => {
 
     expect(coldStart).toMatchObject({
       kind: 'cold-start',
-      executor: 'external-agent',
-      completionPolicy: 'external-dimension-complete',
+      executor: 'host-agent',
+      completionPolicy: 'host-agent-dimension-complete',
       projectAnalysis: {
-        sourceTag: 'bootstrap-external',
+        sourceTag: 'bootstrap-host-agent',
         generateAstContext: false,
       },
     });
     expect(rescan).toMatchObject({
       kind: 'knowledge-rescan',
-      executor: 'external-agent',
+      executor: 'host-agent',
       cleanupPolicy: 'force-rescan',
-      completionPolicy: 'external-dimension-complete',
+      completionPolicy: 'host-agent-dimension-complete',
       dimensionIds: ['quality'],
     });
     expect(coldStartPlan.response.tool).toBe('alembic_bootstrap');
@@ -62,7 +62,7 @@ describe('stable host-agent workflow entrypoint', () => {
       dimensions,
       projectContext: { projectName: 'Demo', primaryLang: 'typescript' },
     });
-    const tracker = new ExternalSubmissionTracker();
+    const tracker = new HostAgentSubmissionTracker();
     tracker.recordSubmission(
       'architecture',
       {
@@ -77,7 +77,7 @@ describe('stable host-agent workflow entrypoint', () => {
       'recipe-1'
     );
 
-    const briefing = buildExternalMissionBriefing({
+    const briefing = buildHostAgentMissionBriefing({
       projectRoot: '/project',
       primaryLang: 'typescript',
       fileCount: 12,
@@ -102,7 +102,7 @@ describe('stable host-agent workflow entrypoint', () => {
   });
 
   it('validates dimension completion and degrades when no host-agent session exists', async () => {
-    const response = await runExternalDimensionCompletionWorkflow(
+    const response = await runHostAgentDimensionCompletionWorkflow(
       {
         container: {
           get: () => null,

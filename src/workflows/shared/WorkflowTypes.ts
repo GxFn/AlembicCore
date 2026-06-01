@@ -42,5 +42,5 @@ export function normalizeStringArray(values: unknown): string[] | undefined {
 
 // ── Workflow 执行模式 ──
 
-export type WorkflowExecutor = 'internal-agent' | 'external-agent';
+export type WorkflowExecutor = 'internal-agent' | 'host-agent';
 export type WorkflowAnalysisMode = 'full' | 'incremental';

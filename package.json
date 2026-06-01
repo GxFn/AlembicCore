@@ -498,13 +498,13 @@
       "types": "./dist/workflows/capabilities/*.d.ts",
       "import": "./dist/workflows/capabilities/*.js"
     },
-    "./workflows/capabilities/execution/external": {
-      "types": "./dist/workflows/capabilities/execution/external/index.d.ts",
-      "import": "./dist/workflows/capabilities/execution/external/index.js"
+    "./workflows/capabilities/host-agent": {
+      "types": "./dist/workflows/capabilities/host-agent/index.d.ts",
+      "import": "./dist/workflows/capabilities/host-agent/index.js"
     },
-    "./workflows/capabilities/execution/external/*": {
-      "types": "./dist/workflows/capabilities/execution/external/*.d.ts",
-      "import": "./dist/workflows/capabilities/execution/external/*.js"
+    "./workflows/capabilities/host-agent/*": {
+      "types": "./dist/workflows/capabilities/host-agent/*.d.ts",
+      "import": "./dist/workflows/capabilities/host-agent/*.js"
     },
     "./workflows/capabilities/persistence": {
       "types": "./dist/workflows/capabilities/persistence/index.d.ts",

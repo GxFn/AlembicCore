@@ -1,9 +1,9 @@
 /**
- * ExternalSubmissionTracker — 外部 Agent 提交追踪与质量评估
+ * HostAgentSubmissionTracker — 宿主 Agent 提交追踪与质量评估
  *
- * 质量门控的外部 Agent 对应模块。
+ * 质量门控的宿主 Agent 对应模块。
  * 内部 Agent 使用 EvidenceCollector 从 toolCall 中收集证据 (bootstrap-gate.js)，
- * 外部 Agent 使用 ExternalSubmissionTracker 从 knowledge 调用中积累证据。
+ * 宿主 Agent 使用 HostAgentSubmissionTracker 从 knowledge 调用中积累证据。
  *
  * 职责:
  *   - 追踪每个维度的 knowledge 提交 (recipe 元数据 + 引用文件)
@@ -13,7 +13,7 @@
  *   - 为下游维度提供结构化跨维度证据
  *
  * 设计对应关系:
- *   内部 Agent                          外部 Agent
+ *   内部 Agent                          宿主 Agent
  *   ─────────────────                  ─────────────────
  *   EvidenceCollector.processToolCall  → recordSubmission
  *   evidenceMap (代码片段)              → evidenceMap (提交引用)
@@ -21,7 +21,7 @@
  *   buildQualityScores (4维评分)        → buildQualityReport (4维评分)
  *   explorationLog (工具序列)           → submissionLog (提交序列)
  *
- * @module bootstrap/ExternalSubmissionTracker
+ * @module bootstrap/HostAgentSubmissionTracker
  */
 
 // ── 常量 ────────────────────────────────────────────────────
@@ -109,7 +109,7 @@ export interface AccumulatedEvidence {
 
 // ── 主类 ────────────────────────────────────────────────────
 
-export class ExternalSubmissionTracker {
+export class HostAgentSubmissionTracker {
   /** dimId → 提交记录列表 */
   #dimensionSubmissions = new Map<string, SubmissionRecord[]>();
 
@@ -466,4 +466,4 @@ export class ExternalSubmissionTracker {
   }
 }
 
-export default ExternalSubmissionTracker;
+export default HostAgentSubmissionTracker;

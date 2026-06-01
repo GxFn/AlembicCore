@@ -1,14 +1,14 @@
-import { dimensionTags } from '../../../../domain/dimension/RecipeDimension.js';
-import Logger from '../../../../infrastructure/logging/Logger.js';
-import { getDeveloperIdentity } from '../../../../shared/developer-identity.js';
-import { resolveDataRoot } from '../../../../shared/resolveProjectRoot.js';
-import type { DimensionDef } from '../../../../types/project-snapshot.js';
-import { saveDimensionCheckpoint } from '../../persistence/DimensionCheckpoint.js';
-import { getActiveExternalWorkflowSession } from './ExternalMissionWorkflow.js';
+import { dimensionTags } from '../../../domain/dimension/RecipeDimension.js';
+import Logger from '../../../infrastructure/logging/Logger.js';
+import { getDeveloperIdentity } from '../../../shared/developer-identity.js';
+import { resolveDataRoot } from '../../../shared/resolveProjectRoot.js';
+import type { DimensionDef } from '../../../types/project-snapshot.js';
+import { saveDimensionCheckpoint } from '../persistence/DimensionCheckpoint.js';
+import { getActiveHostAgentWorkflowSession } from './HostAgentMissionWorkflow.js';
 
 const logger = Logger.getInstance();
 
-export interface ExternalDimensionCompleteArgs {
+export interface HostAgentDimensionCompleteArgs {
   sessionId?: unknown;
   dimensionId?: unknown;
   submittedRecipeIds?: unknown;
@@ -20,30 +20,30 @@ export interface ExternalDimensionCompleteArgs {
   [key: string]: unknown;
 }
 
-interface ExternalCompletionLogger {
+interface HostAgentCompletionLogger {
   info(msg: string, meta?: Record<string, unknown>): void;
   warn(msg: string, meta?: Record<string, unknown>): void;
   debug?(msg: string, meta?: Record<string, unknown>): void;
 }
 
-export interface ExternalSessionContainer {
+export interface HostAgentSessionContainer {
   get(name: string): unknown;
   services?: Record<string, unknown>;
   singletons?: Record<string, unknown>;
 }
 
-interface ExternalCompletionContainer extends ExternalSessionContainer {
+interface HostAgentCompletionContainer extends HostAgentSessionContainer {
   get(name: string): unknown;
 }
 
-export interface ExternalDimensionCompletionContext {
-  container: ExternalCompletionContainer;
-  logger?: ExternalCompletionLogger;
+export interface HostAgentDimensionCompletionContext {
+  container: HostAgentCompletionContainer;
+  logger?: HostAgentCompletionLogger;
   dataRoot?: string;
   [key: string]: unknown;
 }
 
-export interface ExternalDimensionCompletionResponse<T = unknown> {
+export interface HostAgentDimensionCompletionResponse<T = unknown> {
   success: boolean;
   data?: T | null;
   message?: string;
@@ -51,27 +51,27 @@ export interface ExternalDimensionCompletionResponse<T = unknown> {
   errorCode?: string | null;
 }
 
-export interface ExternalDimensionCompletionDependencies {
+export interface HostAgentDimensionCompletionDependencies {
   getActiveSession?: (
-    container: ExternalSessionContainer,
+    container: HostAgentSessionContainer,
     sessionId?: string
-  ) => Promise<ExternalWorkflowSession | null> | ExternalWorkflowSession | null;
+  ) => Promise<HostAgentWorkflowSession | null> | HostAgentWorkflowSession | null;
   saveCheckpoint?: typeof saveDimensionCheckpoint;
   now?: () => number;
-  onDimensionComplete?: (event: ExternalDimensionCompletedEvent) => void | Promise<void>;
+  onDimensionComplete?: (event: HostAgentDimensionCompletedEvent) => void | Promise<void>;
 }
 
-export interface ExternalDimensionCompletedEvent {
+export interface HostAgentDimensionCompletedEvent {
   sessionId: string;
   dimensionId: string;
   candidateCount: number;
   recipesBound: number;
-  progress: ReturnType<ExternalWorkflowSession['getProgress']>;
+  progress: ReturnType<HostAgentWorkflowSession['getProgress']>;
   isComplete: boolean;
   updated: boolean;
 }
 
-export interface ExternalWorkflowSession {
+export interface HostAgentWorkflowSession {
   id: string;
   projectRoot: string;
   expiresAt?: number;
@@ -168,24 +168,28 @@ interface CompletionInput {
 }
 
 /**
- * 外部宿主 agent 的维度完成闭环。
+ * 宿主 agent 的维度完成闭环。
  *
  * Core 负责校验、从提交追踪器恢复 evidence、绑定 Recipe、保存 checkpoint、
  * 写入关键发现和返回质量反馈；Skill 生成、事件广播、交付 finalizer、
  * 具体 MCP tool meta/nextActions 均由外层仓库处理。
  */
-export async function runExternalDimensionCompletionWorkflow(
-  ctx: ExternalDimensionCompletionContext,
-  args: ExternalDimensionCompleteArgs,
-  dependencies: ExternalDimensionCompletionDependencies = {}
-): Promise<ExternalDimensionCompletionResponse> {
+export async function runHostAgentDimensionCompletionWorkflow(
+  ctx: HostAgentDimensionCompletionContext,
+  args: HostAgentDimensionCompleteArgs,
+  dependencies: HostAgentDimensionCompletionDependencies = {}
+): Promise<HostAgentDimensionCompletionResponse> {
   const startedAtMs = dependencies.now?.() ?? Date.now();
   const input = normalizeCompletionInput(args);
   if (!input.success) {
     return input.response;
   }
 
-  const session = await resolveExternalCompletionSession({ ctx, input: input.value, dependencies });
+  const session = await resolveHostAgentCompletionSession({
+    ctx,
+    input: input.value,
+    dependencies,
+  });
   if (!session.success) {
     return session.response;
   }
@@ -307,10 +311,10 @@ export async function runExternalDimensionCompletionWorkflow(
 }
 
 function normalizeCompletionInput(
-  args: ExternalDimensionCompleteArgs
+  args: HostAgentDimensionCompleteArgs
 ):
   | { success: true; value: CompletionInput }
-  | { success: false; response: ExternalDimensionCompletionResponse } {
+  | { success: false; response: HostAgentDimensionCompletionResponse } {
   const dimensionId = typeof args.dimensionId === 'string' ? args.dimensionId : undefined;
   const analysisText = typeof args.analysisText === 'string' ? args.analysisText : undefined;
   const submittedRecipeIds = args.submittedRecipeIds ?? [];
@@ -352,23 +356,23 @@ function normalizeCompletionInput(
   };
 }
 
-async function resolveExternalCompletionSession({
+async function resolveHostAgentCompletionSession({
   ctx,
   input,
   dependencies,
 }: {
-  ctx: ExternalDimensionCompletionContext;
+  ctx: HostAgentDimensionCompletionContext;
   input: CompletionInput;
-  dependencies: ExternalDimensionCompletionDependencies;
+  dependencies: HostAgentDimensionCompletionDependencies;
 }): Promise<
-  | { success: true; value: ExternalWorkflowSession }
-  | { success: false; response: ExternalDimensionCompletionResponse }
+  | { success: true; value: HostAgentWorkflowSession }
+  | { success: false; response: HostAgentDimensionCompletionResponse }
 > {
-  const getActiveSession = dependencies.getActiveSession ?? getActiveExternalWorkflowSession;
+  const getActiveSession = dependencies.getActiveSession ?? getActiveHostAgentWorkflowSession;
   const session = (await getActiveSession(
     ctx.container,
     input.sessionId
-  )) as ExternalWorkflowSession | null;
+  )) as HostAgentWorkflowSession | null;
   if (session) {
     return { success: true, value: session };
   }
@@ -386,7 +390,7 @@ async function resolveExternalCompletionSession({
   };
 }
 
-function extendSessionTtl(session: ExternalWorkflowSession): void {
+function extendSessionTtl(session: HostAgentWorkflowSession): void {
   if (session.expiresAt) {
     session.expiresAt = Math.max(session.expiresAt, Date.now() + 60 * 60 * 1000);
   }
@@ -400,7 +404,7 @@ function safeResolveDataRoot(container: Parameters<typeof resolveDataRoot>[0]): 
   }
 }
 
-function recoverReferencedFiles(session: ExternalWorkflowSession, dimensionId: string): string[] {
+function recoverReferencedFiles(session: HostAgentWorkflowSession, dimensionId: string): string[] {
   try {
     const filesFromSources = new Set<string>();
     for (const submission of session.submissionTracker.getSubmissions(dimensionId)) {
@@ -415,7 +419,7 @@ function recoverReferencedFiles(session: ExternalWorkflowSession, dimensionId: s
 }
 
 function recoverSubmittedRecipeIds(
-  session: ExternalWorkflowSession,
+  session: HostAgentWorkflowSession,
   dimensionId: string
 ): string[] {
   try {
@@ -434,8 +438,8 @@ async function bindSubmittedRecipes({
   dimensionId,
   submittedRecipeIds,
 }: {
-  ctx: ExternalDimensionCompletionContext;
-  session: ExternalWorkflowSession;
+  ctx: HostAgentDimensionCompletionContext;
+  session: HostAgentWorkflowSession;
   dimensionId: string;
   submittedRecipeIds: string[];
 }): Promise<number> {
@@ -513,7 +517,7 @@ async function persistDimensionCheckpoint({
   recipesBound,
   dependencies,
 }: {
-  session: ExternalWorkflowSession;
+  session: HostAgentWorkflowSession;
   dataRoot: string;
   dimensionId: string;
   candidateCount: number;
@@ -521,7 +525,7 @@ async function persistDimensionCheckpoint({
   referencedFiles: string[];
   submittedRecipeIds: string[];
   recipesBound: number;
-  dependencies: ExternalDimensionCompletionDependencies;
+  dependencies: HostAgentDimensionCompletionDependencies;
 }): Promise<void> {
   try {
     const saveCheckpoint = dependencies.saveCheckpoint ?? saveDimensionCheckpoint;
@@ -545,8 +549,8 @@ async function persistKeyFindings({
   dimensionId,
   keyFindings,
 }: {
-  ctx: ExternalDimensionCompletionContext;
-  session: ExternalWorkflowSession;
+  ctx: HostAgentDimensionCompletionContext;
+  session: HostAgentWorkflowSession;
   dimensionId: string;
   keyFindings: string[];
 }): Promise<void> {
@@ -564,7 +568,7 @@ async function persistKeyFindings({
         finding.substring(0, 80),
         'finding',
         'discovered_in',
-        { source: 'external-agent-bootstrap', sessionId: session.id }
+        { source: 'host-agent-bootstrap', sessionId: session.id }
       );
     }
   } catch (err: unknown) {
@@ -579,7 +583,7 @@ function buildQualityFeedback({
   qualityReport,
 }: {
   dimensionId: string;
-  qualityReport: ReturnType<ExternalWorkflowSession['markDimensionComplete']>['qualityReport'];
+  qualityReport: ReturnType<HostAgentWorkflowSession['markDimensionComplete']>['qualityReport'];
 }): Record<string, unknown> | undefined {
   if (!qualityReport) {
     return undefined;
@@ -607,7 +611,7 @@ function buildSubpackageCoverageWarning({
   dimensionId,
   referencedFiles,
 }: {
-  session: ExternalWorkflowSession;
+  session: HostAgentWorkflowSession;
   dimensionId: string;
   referencedFiles: string[];
 }): string | undefined {
@@ -646,7 +650,7 @@ function buildEvidenceHints({
   isComplete,
   accumulatedEvidence,
 }: {
-  session: ExternalWorkflowSession;
+  session: HostAgentWorkflowSession;
   isComplete: boolean;
   accumulatedEvidence: AccumulatedEvidenceLike;
 }): Record<string, unknown> | undefined {
@@ -680,7 +684,7 @@ function buildEvidenceHints({
 }
 
 function buildPreviousDimensionAnalysis(
-  session: ExternalWorkflowSession,
+  session: HostAgentWorkflowSession,
   accumulatedEvidence: AccumulatedEvidenceLike
 ): Array<{ dimId: string; analysisSummary: string; keyFindings: string[] }> | undefined {
   try {
@@ -715,7 +719,7 @@ function stringArray(value: unknown): string[] {
 function validationFailure(
   message: string,
   errorCode = 'VALIDATION_ERROR'
-): ExternalDimensionCompletionResponse {
+): HostAgentDimensionCompletionResponse {
   return {
     success: false,
     message,

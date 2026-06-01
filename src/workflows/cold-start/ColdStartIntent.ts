@@ -18,7 +18,7 @@ export interface ColdStartProjectAnalysisIntent {
   maxFiles: number;
   contentMaxLines: number;
   skipGuard: boolean;
-  sourceTag: 'bootstrap' | 'bootstrap-external';
+  sourceTag: 'bootstrap' | 'bootstrap-host-agent';
   summaryPrefix?: string;
   generateAstContext: boolean;
 }
@@ -33,7 +33,7 @@ export interface ColdStartWorkflowIntent {
   executor: ColdStartExecutor;
   analysisMode: 'full';
   cleanupPolicy: 'full-reset';
-  completionPolicy: 'auto-fill' | 'external-dimension-complete';
+  completionPolicy: 'auto-fill' | 'host-agent-dimension-complete';
   projectAnalysis: ColdStartProjectAnalysisIntent;
   dimensionIds?: string[];
   internalExecution?: InternalColdStartExecutionIntent;
@@ -65,19 +65,19 @@ export function createInternalColdStartIntent(
   };
 }
 
-export function createExternalColdStartIntent(): ColdStartWorkflowIntent {
+export function createHostAgentColdStartIntent(): ColdStartWorkflowIntent {
   return {
     kind: 'cold-start',
-    executor: 'external-agent',
+    executor: 'host-agent',
     analysisMode: 'full',
     cleanupPolicy: 'full-reset',
-    completionPolicy: 'external-dimension-complete',
+    completionPolicy: 'host-agent-dimension-complete',
     projectAnalysis: {
       maxFiles: 500,
       contentMaxLines: 120,
       skipGuard: false,
-      sourceTag: 'bootstrap-external',
-      summaryPrefix: 'Bootstrap-external scan',
+      sourceTag: 'bootstrap-host-agent',
+      summaryPrefix: 'Bootstrap host-agent scan',
       generateAstContext: false,
     },
     ignoredFileDiffIncremental: false,

@@ -1,6 +1,6 @@
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { BootstrapFile, IncrementalPlan } from '../../../types/workflows.js';
-import type { MiningSessionStore } from '../execution/external/MiningSessionStore.js';
+import type { MiningSessionStore } from '../host-agent/MiningSessionStore.js';
 import { FileDiffPlanner } from '../project-intelligence/FileDiffPlanner.js';
 import type {
   CandidateResults,

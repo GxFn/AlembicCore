@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import Logger from '../../../../infrastructure/logging/Logger.js';
+import Logger from '../../../infrastructure/logging/Logger.js';
 
 const DEFAULT_TTL_MS = 30 * 60 * 1000;
 const MAX_FILE_CACHE = 200;

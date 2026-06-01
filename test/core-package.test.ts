@@ -7,7 +7,7 @@ import {
   getCursorDeliverySpec,
 } from '../src/domain/knowledge/FieldSpec.js';
 import {
-  createExternalWorkflowSession,
+  createHostAgentWorkflowSession,
   DEFAULT_FOLDER_NAMES,
   KnowledgeRepositoryImpl,
   ProjectIntelligenceCapability,
@@ -47,6 +47,6 @@ describe('Core package baseline', () => {
   it('exposes stage 14 root package entrypoints for outer repository convergence', () => {
     expect(KnowledgeRepositoryImpl).toBeDefined();
     expect(ProjectIntelligenceCapability).toBeDefined();
-    expect(createExternalWorkflowSession).toBeDefined();
+    expect(createHostAgentWorkflowSession).toBeDefined();
   });
 });

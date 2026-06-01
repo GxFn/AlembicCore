@@ -1,6 +1,6 @@
 import type { DimensionDef, GuardAudit, ProjectSnapshot } from '../../types/project-snapshot.js';
 import type {
-  ExternalRescanEvidencePlan,
+  HostAgentRescanEvidencePlan,
   InternalRescanGapPlan,
   RelevanceAuditSummary,
 } from '../capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
@@ -23,7 +23,7 @@ export function presentInternalKnowledgeRescanEmptyProject({
   });
 }
 
-export function presentExternalKnowledgeRescanEmptyProject({
+export function presentHostAgentKnowledgeRescanEmptyProject({
   responseTimeMs,
 }: {
   responseTimeMs: number;
@@ -167,7 +167,7 @@ export function presentInternalKnowledgeRescanResponse({
   });
 }
 
-export function presentExternalKnowledgeRescanResponse({
+export function presentHostAgentKnowledgeRescanResponse({
   recipeSnapshot,
   cleanResult,
   auditSummary,
@@ -181,7 +181,7 @@ export function presentExternalKnowledgeRescanResponse({
   cleanResult: CleanupResult;
   auditSummary: RelevanceAuditSummary;
   briefing: Record<string, unknown>;
-  evidencePlan: ExternalRescanEvidencePlan;
+  evidencePlan: HostAgentRescanEvidencePlan;
   dimensions: DimensionDef[];
   reason?: string | null;
   responseTimeMs: number;

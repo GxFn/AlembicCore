@@ -2,7 +2,7 @@
  * StyleGuide.js — 项目特写写作指南（唯一权威来源）
  *
  * 供内部 Agent (bootstrap-producer.js) 和
- * 外部 Agent (MissionBriefing submissionSpec) 共享使用。
+ * 宿主 Agent (MissionBriefing submissionSpec) 共享使用。
  *
  * @module shared/StyleGuide
  */

@@ -3,29 +3,29 @@ import type {
   DimensionDef,
   MissionBriefingResult,
   ProjectSnapshot,
-} from '../../../../types/project-snapshot.js';
-import { toSessionCache } from '../../../../types/snapshot-views.js';
-import { buildLanguageExtension } from '../../presentation/LanguageExtensionBuilder.js';
+} from '../../../types/project-snapshot.js';
+import { toSessionCache } from '../../../types/snapshot-views.js';
+import { buildLanguageExtension } from '../presentation/LanguageExtensionBuilder.js';
 import { buildMissionBriefing } from './MissionBriefingBuilder.js';
 import type { BriefingProfile, RescanBriefingInput } from './MissionBriefingSupport.js';
 import { getOrCreateSessionManager } from './SessionSupport.js';
 
-export type ExternalSessionContainer = Parameters<typeof getOrCreateSessionManager>[0];
-export type ExternalWorkflowSession = ReturnType<
+export type HostAgentSessionContainer = Parameters<typeof getOrCreateSessionManager>[0];
+export type HostAgentWorkflowSession = ReturnType<
   ReturnType<typeof getOrCreateSessionManager>['createSession']
 >;
-export type ExternalMissionBriefingInput = Parameters<typeof buildMissionBriefing>[0];
-export type ExternalMissionBriefingResult = MissionBriefingResult;
+export type HostAgentMissionBriefingInput = Parameters<typeof buildMissionBriefing>[0];
+export type HostAgentMissionBriefingResult = MissionBriefingResult;
 
-export function createExternalWorkflowSession(opts: {
-  container: ExternalSessionContainer;
+export function createHostAgentWorkflowSession(opts: {
+  container: HostAgentSessionContainer;
   projectRoot: string;
   dimensions: DimensionDef[];
   snapshot: ProjectSnapshot;
   primaryLang: string | null;
   fileCount: number;
   moduleCount: number;
-}): ExternalWorkflowSession {
+}): HostAgentWorkflowSession {
   const sessionManager = getOrCreateSessionManager(opts.container);
   const session = sessionManager.createSession({
     projectRoot: opts.projectRoot,
@@ -41,7 +41,7 @@ export function createExternalWorkflowSession(opts: {
   return session;
 }
 
-export function buildExternalMissionBriefing(opts: {
+export function buildHostAgentMissionBriefing(opts: {
   projectRoot: string;
   primaryLang: string | null;
   secondaryLanguages?: string[];
@@ -51,7 +51,7 @@ export function buildExternalMissionBriefing(opts: {
   profile?: BriefingProfile;
   rescan?: RescanBriefingInput;
   briefing: Omit<
-    ExternalMissionBriefingInput,
+    HostAgentMissionBriefingInput,
     'projectMeta' | 'languageExtension' | 'profile' | 'rescan'
   >;
 }): MissionBriefingResult {
@@ -74,10 +74,10 @@ export function buildExternalMissionBriefing(opts: {
   }) as MissionBriefingResult;
 }
 
-export function getActiveExternalWorkflowSession(
-  container: ExternalSessionContainer,
+export function getActiveHostAgentWorkflowSession(
+  container: HostAgentSessionContainer,
   sessionId?: string
-): ExternalWorkflowSession | null {
+): HostAgentWorkflowSession | null {
   const sessionManager = getOrCreateSessionManager(container);
   const session = sessionManager.getSession(sessionId);
   if (session) {
