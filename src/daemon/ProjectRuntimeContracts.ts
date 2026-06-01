@@ -24,7 +24,7 @@ export const PROJECT_RUNTIME_DAEMON_STATUSES = [
   'not-checked',
 ] as const;
 
-export const PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES = [
+export const PROJECT_RUNTIME_API_AI_CONFIG_SOURCES = [
   'empty',
   'process-env',
   'workspace-settings',
@@ -33,8 +33,8 @@ export const PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES = [
 
 export type ProjectConnectionState = (typeof PROJECT_CONNECTION_STATES)[number];
 export type ProjectRuntimeDaemonStatus = (typeof PROJECT_RUNTIME_DAEMON_STATUSES)[number];
-export type ProjectRuntimeInternalAiConfigSource =
-  (typeof PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES)[number];
+export type ProjectRuntimeApiAiConfigSource =
+  (typeof PROJECT_RUNTIME_API_AI_CONFIG_SOURCES)[number];
 
 export type ProjectRuntimeTarget =
   | { projectId: string; projectRoot?: never }
@@ -75,9 +75,9 @@ export interface ProjectRuntimeFileMonitorSummary {
   mode: string;
 }
 
-export interface ProjectRuntimeInternalAiSummary {
+export interface ProjectRuntimeApiAiSummary {
   available: boolean;
-  configSource: ProjectRuntimeInternalAiConfigSource;
+  configSource: ProjectRuntimeApiAiConfigSource;
   model: string | null;
   provider: string | null;
 }
@@ -126,7 +126,7 @@ export interface ProjectRuntimeScopeSummary {
   flags: ProjectRuntimeFlags;
   ghost: boolean;
   initializedBy: 'project-registry';
-  internalAi: ProjectRuntimeInternalAiSummary;
+  apiAi: ProjectRuntimeApiAiSummary;
   jobs: ProjectRuntimeJobsSummary;
   mode: WorkspaceMode;
   projectExists: boolean;

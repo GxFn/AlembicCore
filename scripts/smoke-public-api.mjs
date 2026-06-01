@@ -20,6 +20,7 @@ const requiredSubpathExports = {
   ],
   '@alembic/core/daemon': [
     'ALEMBIC_JOB_PROCESS_EVENTS_PATH',
+    'ALEMBIC_RESIDENT_API_AI_JOB_FEATURES',
     'ALEMBIC_RESIDENT_FEATURES',
     'ALEMBIC_RESIDENT_SERVICE_CONTRACT_VERSION',
     'ALEMBIC_RUNTIME_HEALTH_PATH',
@@ -28,6 +29,7 @@ const requiredSubpathExports = {
     'JOB_PROCESS_EVENT_RETENTION_POLICIES',
     'JOB_PROCESS_EVENT_SOURCE_CLASSES',
     'PROJECT_CONNECTION_STATES',
+    'PROJECT_RUNTIME_API_AI_CONFIG_SOURCES',
     'PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION',
     'classifyAlembicResidentJobFeature',
     'createJobProcessDeveloperView',
@@ -37,6 +39,7 @@ const requiredSubpathExports = {
     'createAlembicRuntimeCapabilities',
     'createAlembicRuntimeProjectIdentity',
     'createProjectRuntimeControlState',
+    'isAlembicResidentApiAiJobFeature',
     'isJobProcessEventDeveloperVisible',
     'isProjectRuntimeTarget',
     'normalizeJobProcessEventKind',
@@ -108,6 +111,9 @@ const requiredSubpathExports = {
 };
 const requiredTypeDeclarations = {
   '@alembic/core/daemon': [
+    'AlembicApiAiCapability',
+    'AlembicApiAiConfigSource',
+    'AlembicResidentApiAiJobFeature',
     'AlembicResidentDashboardHandoff',
     'AlembicResidentJobReadRequest',
     'AlembicResidentJobSubmitRequest',
@@ -123,6 +129,7 @@ const requiredTypeDeclarations = {
     'JobProcessEventKind',
     'JobProcessEventRetentionPolicy',
     'JobProcessEventSourceClass',
+    'ProjectRuntimeApiAiSummary',
   ],
   '@alembic/core/host-agent-workflows': [
     'ProjectSkillAssetKind',

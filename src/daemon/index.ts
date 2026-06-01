@@ -11,8 +11,13 @@ export type {
 } from './JobProcessEventContracts.js';
 export * from './JobProcessEventContracts.js';
 export * from './JobStore.js';
+export type {
+  ProjectRuntimeApiAiConfigSource,
+  ProjectRuntimeApiAiSummary,
+} from './ProjectRuntimeContracts.js';
 export * from './ProjectRuntimeContracts.js';
 export type {
+  AlembicResidentApiAiJobFeature,
   AlembicResidentDashboardHandoff,
   AlembicResidentJobReadRequest,
   AlembicResidentJobSubmitRequest,
@@ -22,4 +27,5 @@ export type {
   AlembicResidentServiceStatus,
 } from './ResidentServiceContracts.js';
 export * from './ResidentServiceContracts.js';
+export type { AlembicApiAiCapability, AlembicApiAiConfigSource } from './RuntimeContracts.js';
 export * from './RuntimeContracts.js';

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  ALEMBIC_RESIDENT_API_AI_JOB_FEATURES,
   ALEMBIC_RESIDENT_FEATURES,
   ALEMBIC_RESIDENT_SERVICE_CONTRACT_VERSION,
   classifyAlembicResidentJobFeature,
@@ -18,8 +19,8 @@ describe('resident service public contracts', () => {
       apiBaseUrl: 'http://127.0.0.1:8123',
       capabilityOverrides: {
         'dashboard.handoff': { available: true },
-        'jobs.internal-ai.bootstrap': { available: true },
-        'jobs.internal-ai.rescan': { available: true },
+        'jobs.api-ai.bootstrap': { available: true },
+        'jobs.api-ai.rescan': { available: true },
         'search.keyword': { available: true },
         'status.health': { available: true },
       },
@@ -51,7 +52,7 @@ describe('resident service public contracts', () => {
       workspaceMode: 'ghost',
     });
     expect(status.serviceScope.diagnosticPaths.projectRoot).toBe('/workspace/demo');
-    expect(status.capabilities['jobs.internal-ai.bootstrap']).toMatchObject({
+    expect(status.capabilities['jobs.api-ai.bootstrap']).toMatchObject({
       available: true,
       owner: 'alembic',
       unavailableReason: null,
@@ -66,7 +67,7 @@ describe('resident service public contracts', () => {
     );
   });
 
-  it('models embedded Plugin as a recoverable host-agent route without Alembic internal AI jobs', () => {
+  it('models embedded Plugin as a recoverable host-agent route without Alembic API AI jobs', () => {
     const status = createAlembicResidentServiceStatus({
       capabilityOverrides: {
         'jobs.host-agent-recoverable.bootstrap': { available: true },
@@ -92,7 +93,7 @@ describe('resident service public contracts', () => {
       owner: 'alembic-plugin',
       unavailableReason: null,
     });
-    expect(status.capabilities['jobs.internal-ai.bootstrap']).toMatchObject({
+    expect(status.capabilities['jobs.api-ai.bootstrap']).toMatchObject({
       available: false,
       owner: 'alembic',
     });
@@ -119,15 +120,19 @@ describe('resident service public contracts', () => {
     expect(summary.unavailableReasons['search.keyword']).toBe('route-unavailable');
   });
 
-  it('keeps internal AI job semantics separate from host-agent recoverable jobs', () => {
-    expect(classifyAlembicResidentJobFeature('jobs.internal-ai.bootstrap')).toBe('internal-ai');
+  it('keeps API AI job semantics separate from host-agent recoverable jobs', () => {
+    expect(ALEMBIC_RESIDENT_API_AI_JOB_FEATURES).toEqual([
+      'jobs.api-ai.bootstrap',
+      'jobs.api-ai.rescan',
+    ]);
+    expect(classifyAlembicResidentJobFeature('jobs.api-ai.bootstrap')).toBe('api-ai');
     expect(classifyAlembicResidentJobFeature('jobs.host-agent-recoverable.rescan')).toBe(
       'host-agent-recoverable'
     );
     expect(classifyAlembicResidentJobFeature('search.keyword')).toBeNull();
-    expect(getAlembicResidentJobOperation('jobs.internal-ai.bootstrap')).toBe('bootstrap');
+    expect(getAlembicResidentJobOperation('jobs.api-ai.bootstrap')).toBe('bootstrap');
     expect(getAlembicResidentJobOperation('jobs.host-agent-recoverable.rescan')).toBe('rescan');
-    expect(resolveAlembicResidentFeatureOwner('jobs.internal-ai.rescan')).toBe('alembic');
+    expect(resolveAlembicResidentFeatureOwner('jobs.api-ai.rescan')).toBe('alembic');
     expect(resolveAlembicResidentFeatureOwner('jobs.host-agent-recoverable.rescan')).toBe(
       'alembic-plugin'
     );

@@ -24,7 +24,7 @@ describe('Alembic runtime boundary contracts', () => {
       dashboardUrl: 'http://127.0.0.1:8123',
       fileMonitorAvailable: true,
       fileMonitorMode: 'daemon-git-worktree',
-      internalAi: {
+      apiAi: {
         available: true,
         configSource: 'workspace-settings',
         model: 'model-a',
@@ -73,7 +73,7 @@ describe('Alembic runtime boundary contracts', () => {
       dashboardAvailable: false,
       dashboardUrl: null,
       fileMonitorAvailable: false,
-      internalAi: {
+      apiAi: {
         available: false,
         configSource: 'empty',
         model: null,
@@ -135,7 +135,7 @@ describe('Alembic runtime boundary contracts', () => {
       dashboardAvailable: false,
       fileMonitorAvailable: false,
       fileMonitorMode: 'disabled',
-      internalAiAvailable: false,
+      apiAiAvailable: false,
       jobEventsAvailable: true,
       jobEventDisplayPolicies: ['full', 'summary-only', 'hidden'],
       jobEventsEndpoint: ALEMBIC_JOB_PROCESS_EVENTS_PATH,

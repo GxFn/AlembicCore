@@ -66,7 +66,7 @@ export type AlembicEnhancementRoute = 'local-alembic';
 export type AlembicFileMonitorMode = (typeof ALEMBIC_FILE_MONITOR_MODES)[number];
 export type AlembicRuntimeDataRootSource = (typeof ALEMBIC_RUNTIME_DATA_ROOT_SOURCES)[number];
 export type AlembicJobKind = (typeof ALEMBIC_JOB_KINDS)[number];
-export type AlembicInternalAiConfigSource =
+export type AlembicApiAiConfigSource =
   | 'empty'
   | 'process-env'
   | 'runtime-overrides'
@@ -111,9 +111,9 @@ export interface AlembicFileMonitorCapability {
   mode: AlembicFileMonitorMode;
 }
 
-export interface AlembicInternalAiCapability {
+export interface AlembicApiAiCapability {
   available: boolean;
-  configSource: AlembicInternalAiConfigSource;
+  configSource: AlembicApiAiConfigSource;
   model: string | null;
   provider: string | null;
 }
@@ -132,9 +132,9 @@ export interface AlembicJobsCapability {
 
 export interface AlembicRuntimeCapabilities {
   api: AlembicApiCapability;
+  apiAi: AlembicApiAiCapability;
   dashboard: AlembicDashboardCapability;
   fileMonitor: AlembicFileMonitorCapability;
-  internalAi: AlembicInternalAiCapability;
   jobs: AlembicJobsCapability;
   projectScope: ProjectScopeEndpointCapability;
 }
@@ -157,7 +157,7 @@ export interface CreateAlembicRuntimeCapabilitiesOptions {
   fileMonitorAvailable?: boolean;
   fileMonitorEndpoint?: string | null;
   fileMonitorMode?: AlembicFileMonitorMode;
-  internalAi: AlembicInternalAiCapability;
+  apiAi: AlembicApiAiCapability;
   jobProcessEvents?: Partial<JobProcessEventEndpointCapability>;
   jobEndpoints?: Partial<Record<keyof typeof ALEMBIC_JOB_ENDPOINTS, string>>;
   jobKinds?: readonly AlembicJobKind[];
@@ -190,11 +190,11 @@ export interface AlembicRuntimeProjectIdentitySummary {
 
 export interface AlembicRuntimeCapabilitySummary {
   apiAvailable: boolean | null;
+  apiAiAvailable: boolean | null;
   dashboardAvailable: boolean | null;
   dashboardUrl: string | null;
   fileMonitorAvailable: boolean | null;
   fileMonitorMode: AlembicFileMonitorMode | null;
-  internalAiAvailable: boolean | null;
   jobEventsAvailable: boolean | null;
   jobEventDisplayPolicies: string[];
   jobEventsEndpoint: string | null;
@@ -243,6 +243,7 @@ export function createAlembicRuntimeCapabilities(
       available: options.dashboardAvailable,
       url: options.dashboardUrl,
     },
+    apiAi: options.apiAi,
     fileMonitor: {
       acceptedEventSources: [...ALEMBIC_FILE_MONITOR_EVENT_SOURCES],
       available: options.fileMonitorAvailable ?? false,
@@ -250,7 +251,6 @@ export function createAlembicRuntimeCapabilities(
       endpoint: options.fileMonitorEndpoint ?? ALEMBIC_FILE_CHANGES_PATH,
       mode: options.fileMonitorMode ?? 'disabled',
     },
-    internalAi: options.internalAi,
     jobs: {
       available: options.jobsAvailable ?? true,
       endpoints: {
@@ -302,9 +302,9 @@ export function summarizeAlembicRuntimeCapabilities(
 ): AlembicRuntimeCapabilitySummary {
   const capabilities = asRecord(value);
   const api = asRecord(capabilities?.api);
+  const apiAi = asRecord(capabilities?.apiAi);
   const dashboard = asRecord(capabilities?.dashboard);
   const fileMonitor = asRecord(capabilities?.fileMonitor);
-  const internalAi = asRecord(capabilities?.internalAi);
   const jobs = asRecord(capabilities?.jobs);
   const processEvents = asRecord(jobs?.processEvents);
   const projectScope = asRecord(capabilities?.projectScope);
@@ -312,11 +312,11 @@ export function summarizeAlembicRuntimeCapabilities(
 
   return {
     apiAvailable: booleanOrNull(api?.available),
+    apiAiAvailable: booleanOrNull(apiAi?.available),
     dashboardAvailable: booleanOrNull(dashboard?.available),
     dashboardUrl: firstString(dashboard?.url),
     fileMonitorAvailable: booleanOrNull(fileMonitor?.available),
     fileMonitorMode: normalizeAlembicFileMonitorMode(fileMonitor?.mode),
-    internalAiAvailable: booleanOrNull(internalAi?.available),
     jobEventsAvailable: booleanOrNull(processEvents?.available),
     jobEventDisplayPolicies: processEvents
       ? stringArray(processEvents.supportedDisplayPolicies ?? JOB_PROCESS_EVENT_DISPLAY_POLICIES)

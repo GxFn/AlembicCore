@@ -37,17 +37,17 @@ export const ALEMBIC_RESIDENT_FEATURES = [
   'status.health',
   'search.keyword',
   'search.semantic',
-  'jobs.internal-ai.bootstrap',
-  'jobs.internal-ai.rescan',
+  'jobs.api-ai.bootstrap',
+  'jobs.api-ai.rescan',
   'jobs.host-agent-recoverable.bootstrap',
   'jobs.host-agent-recoverable.rescan',
   'dashboard.handoff',
   'file-monitor.git-worktree',
 ] as const;
 
-export const ALEMBIC_RESIDENT_INTERNAL_AI_JOB_FEATURES = [
-  'jobs.internal-ai.bootstrap',
-  'jobs.internal-ai.rescan',
+export const ALEMBIC_RESIDENT_API_AI_JOB_FEATURES = [
+  'jobs.api-ai.bootstrap',
+  'jobs.api-ai.rescan',
 ] as const;
 
 export const ALEMBIC_RESIDENT_HOST_AGENT_RECOVERABLE_JOB_FEATURES = [
@@ -56,7 +56,7 @@ export const ALEMBIC_RESIDENT_HOST_AGENT_RECOVERABLE_JOB_FEATURES = [
 ] as const;
 
 export const ALEMBIC_RESIDENT_JOB_FEATURES = [
-  ...ALEMBIC_RESIDENT_INTERNAL_AI_JOB_FEATURES,
+  ...ALEMBIC_RESIDENT_API_AI_JOB_FEATURES,
   ...ALEMBIC_RESIDENT_HOST_AGENT_RECOVERABLE_JOB_FEATURES,
 ] as const;
 
@@ -75,12 +75,11 @@ export type AlembicResidentServiceScopeKind = (typeof ALEMBIC_RESIDENT_SERVICE_S
 export type AlembicResidentServiceUnavailableReason =
   (typeof ALEMBIC_RESIDENT_SERVICE_UNAVAILABLE_REASONS)[number];
 export type AlembicResidentFeature = (typeof ALEMBIC_RESIDENT_FEATURES)[number];
-export type AlembicResidentInternalAiJobFeature =
-  (typeof ALEMBIC_RESIDENT_INTERNAL_AI_JOB_FEATURES)[number];
+export type AlembicResidentApiAiJobFeature = (typeof ALEMBIC_RESIDENT_API_AI_JOB_FEATURES)[number];
 export type AlembicResidentHostAgentRecoverableJobFeature =
   (typeof ALEMBIC_RESIDENT_HOST_AGENT_RECOVERABLE_JOB_FEATURES)[number];
 export type AlembicResidentJobFeature = (typeof ALEMBIC_RESIDENT_JOB_FEATURES)[number];
-export type AlembicResidentJobFamily = 'internal-ai' | 'host-agent-recoverable';
+export type AlembicResidentJobFamily = 'api-ai' | 'host-agent-recoverable';
 export type AlembicResidentJobOperation = 'bootstrap' | 'rescan';
 export type AlembicResidentSearchMode = (typeof ALEMBIC_RESIDENT_SEARCH_MODES)[number];
 export type AlembicResidentSearchResultMode = (typeof ALEMBIC_RESIDENT_SEARCH_RESULT_MODES)[number];
@@ -497,8 +496,8 @@ export function createAlembicResidentServiceUnavailable<TValue>(
 export function classifyAlembicResidentJobFeature(
   feature: unknown
 ): AlembicResidentJobFamily | null {
-  if (isAlembicResidentInternalAiJobFeature(feature)) {
-    return 'internal-ai';
+  if (isAlembicResidentApiAiJobFeature(feature)) {
+    return 'api-ai';
   }
   if (isAlembicResidentHostAgentRecoverableJobFeature(feature)) {
     return 'host-agent-recoverable';
@@ -531,7 +530,7 @@ export function resolveAlembicResidentFeatureOwner(
   fallbackOwner: AlembicResidentServiceOwner = resolveAlembicResidentRouteOwner(route)
 ): AlembicResidentServiceOwner {
   const family = classifyAlembicResidentJobFeature(feature);
-  if (family === 'internal-ai') {
+  if (family === 'api-ai') {
     return 'alembic';
   }
   if (family === 'host-agent-recoverable') {
@@ -599,12 +598,10 @@ export function isAlembicResidentJobFeature(value: unknown): value is AlembicRes
   return typeof value === 'string' && ALEMBIC_RESIDENT_JOB_FEATURES.includes(value as never);
 }
 
-export function isAlembicResidentInternalAiJobFeature(
+export function isAlembicResidentApiAiJobFeature(
   value: unknown
-): value is AlembicResidentInternalAiJobFeature {
-  return (
-    typeof value === 'string' && ALEMBIC_RESIDENT_INTERNAL_AI_JOB_FEATURES.includes(value as never)
-  );
+): value is AlembicResidentApiAiJobFeature {
+  return typeof value === 'string' && ALEMBIC_RESIDENT_API_AI_JOB_FEATURES.includes(value as never);
 }
 
 export function isAlembicResidentHostAgentRecoverableJobFeature(

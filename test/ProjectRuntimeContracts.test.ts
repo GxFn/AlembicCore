@@ -8,9 +8,9 @@ import {
   isProjectRuntimeTarget,
   normalizeProjectConnectionState,
   PROJECT_CONNECTION_STATES,
+  PROJECT_RUNTIME_API_AI_CONFIG_SOURCES,
   PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION,
   PROJECT_RUNTIME_DAEMON_STATUSES,
-  PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES,
   type ProjectRuntimeControlSnapshot,
 } from '../src/daemon/index.js';
 
@@ -26,7 +26,7 @@ describe('project runtime control public contracts', () => {
       'unavailable',
     ]);
     expect(PROJECT_RUNTIME_DAEMON_STATUSES).toContain('not-checked');
-    expect(PROJECT_RUNTIME_INTERNAL_AI_CONFIG_SOURCES).toEqual([
+    expect(PROJECT_RUNTIME_API_AI_CONFIG_SOURCES).toEqual([
       'empty',
       'process-env',
       'workspace-settings',
@@ -113,7 +113,7 @@ describe('project runtime control public contracts', () => {
       },
       ghost: true,
       initializedBy: 'project-registry',
-      internalAi: {
+      apiAi: {
         available: false,
         configSource: 'empty',
         model: null,
