@@ -169,9 +169,42 @@ export interface ProjectScopeSourceRefResolution {
 }
 
 export interface ProjectScopeSourceRefIndex {
+  ambiguousBasenames?: ReadonlySet<string>;
   ambiguousLegacyPaths: ReadonlySet<string>;
+  byBasename?: ReadonlyMap<string, CanonicalSourceIdentity>;
   byLegacyPath: ReadonlyMap<string, CanonicalSourceIdentity>;
   byQualifiedPath: ReadonlyMap<string, CanonicalSourceIdentity>;
+}
+
+export type ProjectScopeSourceRefNormalizationStatus = 'active' | 'missing' | 'ambiguous';
+
+export type ProjectScopeSourceRefNormalizationReason =
+  | 'qualified-path'
+  | 'unique-legacy-path'
+  | 'unique-basename'
+  | 'ambiguous-legacy-path'
+  | 'ambiguous-basename'
+  | 'not-found';
+
+export interface NormalizedProjectScopeSourceRef {
+  absolutePath: string | null;
+  folderDisplayName: string | null;
+  folderId: string | null;
+  folderPath: string | null;
+  input: string;
+  legacyPath: string | null;
+  normalizedRef: string | null;
+  projectScopeId: string | null;
+  qualifiedPath: string | null;
+  reason: ProjectScopeSourceRefNormalizationReason;
+  relativePath: string | null;
+  status: ProjectScopeSourceRefNormalizationStatus;
+}
+
+export interface ProjectScopeSourceRefNormalizationResult {
+  activeSourceRefs: string[];
+  normalized: NormalizedProjectScopeSourceRef[];
+  rejected: NormalizedProjectScopeSourceRef[];
 }
 
 export interface ProjectScopeRegistryFolderIndexEntry {
@@ -488,11 +521,16 @@ export function buildProjectScopeSourceRefIndex(
 ): ProjectScopeSourceRefIndex {
   const byQualifiedPath = new Map<string, CanonicalSourceIdentity>();
   const legacyBuckets = new Map<string, CanonicalSourceIdentity[]>();
+  const basenameBuckets = new Map<string, CanonicalSourceIdentity[]>();
 
   for (const identity of identities) {
     byQualifiedPath.set(normalizeComparableSourcePath(identity.qualifiedPath), identity);
     const legacy = normalizeComparableSourcePath(identity.legacyPath);
     legacyBuckets.set(legacy, [...(legacyBuckets.get(legacy) ?? []), identity]);
+    const basename = sourceRefBasename(legacy);
+    if (basename) {
+      basenameBuckets.set(basename, [...(basenameBuckets.get(basename) ?? []), identity]);
+    }
   }
 
   const byLegacyPath = new Map<string, CanonicalSourceIdentity>();
@@ -506,7 +544,18 @@ export function buildProjectScopeSourceRefIndex(
     }
   }
 
-  return { ambiguousLegacyPaths, byLegacyPath, byQualifiedPath };
+  const byBasename = new Map<string, CanonicalSourceIdentity>();
+  const ambiguousBasenames = new Set<string>();
+  for (const [basename, entries] of basenameBuckets) {
+    const distinctQualifiedPaths = new Set(entries.map((entry) => entry.qualifiedPath));
+    if (distinctQualifiedPaths.size === 1 && entries[0]) {
+      byBasename.set(basename, entries[0]);
+    } else {
+      ambiguousBasenames.add(basename);
+    }
+  }
+
+  return { ambiguousBasenames, ambiguousLegacyPaths, byBasename, byLegacyPath, byQualifiedPath };
 }
 
 export function resolveProjectScopeSourceRef(
@@ -531,6 +580,67 @@ export function resolveProjectScopeSourceRef(
     return { identity: legacy, input: sourceRef, reason: 'unique-legacy-path', status: 'resolved' };
   }
   return { identity: null, input: sourceRef, reason: 'not-found', status: 'missing' };
+}
+
+export function normalizeProjectScopeSourceRef(
+  sourceRef: string,
+  index: ProjectScopeSourceRefIndex
+): NormalizedProjectScopeSourceRef {
+  const resolution = resolveProjectScopeSourceRef(sourceRef, index);
+  if (resolution.status === 'resolved' && resolution.identity) {
+    return normalizeResolvedProjectScopeSourceRef(
+      sourceRef,
+      resolution.identity,
+      resolution.reason === 'qualified-path' ? 'qualified-path' : 'unique-legacy-path'
+    );
+  }
+  if (resolution.status === 'ambiguous') {
+    return normalizeRejectedProjectScopeSourceRef(sourceRef, {
+      reason: 'ambiguous-legacy-path',
+      status: 'ambiguous',
+    });
+  }
+
+  const normalized = normalizeComparableSourcePath(sourceRef);
+  // basename alias 只接受无目录输入，避免把 `foo/database.ts` 误归到另一个仓库的同名文件。
+  if (!normalized.includes('/')) {
+    if (index.ambiguousBasenames?.has(normalized)) {
+      return normalizeRejectedProjectScopeSourceRef(sourceRef, {
+        reason: 'ambiguous-basename',
+        status: 'ambiguous',
+      });
+    }
+    const basename = index.byBasename?.get(normalized);
+    if (basename) {
+      return normalizeResolvedProjectScopeSourceRef(sourceRef, basename, 'unique-basename');
+    }
+  }
+
+  return normalizeRejectedProjectScopeSourceRef(sourceRef, {
+    reason: 'not-found',
+    status: 'missing',
+  });
+}
+
+export function normalizeProjectScopeSourceRefs(
+  sourceRefs: readonly string[],
+  index: ProjectScopeSourceRefIndex
+): ProjectScopeSourceRefNormalizationResult {
+  const normalized = sourceRefs.map((sourceRef) =>
+    normalizeProjectScopeSourceRef(sourceRef, index)
+  );
+  const activeSourceRefs = Array.from(
+    new Set(
+      normalized
+        .filter((sourceRef) => sourceRef.status === 'active' && sourceRef.normalizedRef)
+        .map((sourceRef) => sourceRef.normalizedRef as string)
+    )
+  );
+  return {
+    activeSourceRefs,
+    normalized,
+    rejected: normalized.filter((sourceRef) => sourceRef.status !== 'active'),
+  };
 }
 
 export function createProjectScopeRegistryDocument(
@@ -739,6 +849,59 @@ function normalizeSlashPath(value: string, label: string): string {
 
 function normalizeComparableSourcePath(value: string): string {
   return value.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/');
+}
+
+function sourceRefBasename(value: string): string | null {
+  const normalized = normalizeComparableSourcePath(value);
+  const basename = path.posix.basename(normalized);
+  return basename && basename !== '.' ? basename : null;
+}
+
+function normalizeResolvedProjectScopeSourceRef(
+  input: string,
+  identity: CanonicalSourceIdentity,
+  reason: ProjectScopeSourceRefNormalizationReason
+): NormalizedProjectScopeSourceRef {
+  return {
+    absolutePath: identity.absolutePath,
+    folderDisplayName: identity.folderDisplayName,
+    folderId: identity.folderId,
+    folderPath: identity.folderPath,
+    input,
+    legacyPath: identity.legacyPath,
+    normalizedRef: identity.qualifiedPath,
+    projectScopeId: identity.projectScopeId,
+    qualifiedPath: identity.qualifiedPath,
+    reason,
+    relativePath: identity.relativePath,
+    status: 'active',
+  };
+}
+
+function normalizeRejectedProjectScopeSourceRef(
+  input: string,
+  output: {
+    reason: Exclude<
+      ProjectScopeSourceRefNormalizationReason,
+      'qualified-path' | 'unique-legacy-path' | 'unique-basename'
+    >;
+    status: Exclude<ProjectScopeSourceRefNormalizationStatus, 'active'>;
+  }
+): NormalizedProjectScopeSourceRef {
+  return {
+    absolutePath: null,
+    folderDisplayName: null,
+    folderId: null,
+    folderPath: null,
+    input,
+    legacyPath: null,
+    normalizedRef: null,
+    projectScopeId: null,
+    qualifiedPath: null,
+    reason: output.reason,
+    relativePath: null,
+    status: output.status,
+  };
 }
 
 function cloneRecord(value: Record<string, unknown> | null | undefined): Record<string, unknown> {
