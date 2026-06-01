@@ -7,6 +7,7 @@ import {
   resolveRecipeDimensionId,
 } from '../src/dimensions.js';
 import {
+  buildProducerStyleGuide,
   CodeEntityGraph,
   ConfidenceRouter,
   checkRecipeReadiness,
@@ -26,6 +27,7 @@ import {
   RecipeProductionGateway,
   rewriteRecipePaths,
   SourceRefReconciler,
+  SUBMIT_REQUIREMENTS,
   UnifiedValidator,
   V3_FIELD_SPEC,
 } from '../src/knowledge.js';
@@ -60,6 +62,14 @@ describe('stable knowledge and dimension entrypoints', () => {
     expect(readiness.missing.length).toBeGreaterThan(0);
 
     expect(new UnifiedValidator()).toBeDefined();
+  });
+
+  it('exposes producer StyleGuide contracts through the stable knowledge facade', () => {
+    const styleGuide = buildProducerStyleGuide();
+
+    expect(styleGuide).toContain('## 插件适配字段（每个 knowledge 提交必须附带）');
+    expect(styleGuide).toContain('trigger 以 @ 开头，kebab-case');
+    expect(SUBMIT_REQUIREMENTS).toContain('每个独立的知识点单独提交为一个候选');
   });
 
   it('exposes production gateway and knowledge service as stable service contracts', () => {

@@ -68,9 +68,11 @@ const requiredSubpathExports = {
     'validateProjectSkillDeliveryReceipt',
   ],
   '@alembic/core/knowledge': [
+    'buildProducerStyleGuide',
     'getGatewaySourceLabel',
     'normalizeGatewaySource',
     'normalizeLifecycle',
+    'SUBMIT_REQUIREMENTS',
   ],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
   '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],

@@ -46,6 +46,10 @@ export {
   WHITELISTED_CATEGORIES as READINESS_WHITELISTED_CATEGORIES,
 } from './domain/knowledge/RecipeReadinessChecker.js';
 export {
+  buildProducerStyleGuide,
+  SUBMIT_REQUIREMENTS,
+} from './domain/knowledge/StyleGuide.js';
+export {
   createStatelessValidator,
   UnifiedValidator,
 } from './domain/knowledge/UnifiedValidator.js';
