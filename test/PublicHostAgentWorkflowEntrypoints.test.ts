@@ -27,6 +27,8 @@ describe('stable host-agent workflow entrypoint', () => {
     const coldStart = createHostAgentColdStartIntent();
     const rescan = createHostAgentKnowledgeRescanIntent({
       force: true,
+      maxFiles: 2000,
+      contentMaxLines: 200,
       dimensions: ['quality'],
       reason: 'manual',
     });
@@ -51,6 +53,10 @@ describe('stable host-agent workflow entrypoint', () => {
       cleanupPolicy: 'force-rescan',
       completionPolicy: 'host-agent-dimension-complete',
       dimensionIds: ['quality'],
+      projectAnalysis: {
+        maxFiles: 2000,
+        contentMaxLines: 200,
+      },
     });
     expect(coldStartPlan.response.tool).toBe('alembic_bootstrap');
     expect(coldStartPlan.projectAnalysis.scan.generateAstContext).toBe(false);
