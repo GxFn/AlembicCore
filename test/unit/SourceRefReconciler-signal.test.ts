@@ -3,8 +3,12 @@
  *
  * 验证 SourceRefReconciler 在发现 stale sourceRefs 时通过 SignalBus 发射 quality 信号。
  */
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { SourceRefReconciler } from '../../src/service/knowledge/SourceRefReconciler.js';
+import { createCanonicalSourceIdentity } from '../../src/shared/ProjectScope.js';
 
 /* ────────────────────── Mock Repos ────────────────────── */
 
@@ -25,6 +29,7 @@ function createMockRepos(options: {
     findByRecipeId(recipeId: string) {
       return existingRefs.filter((r) => r.recipeId === recipeId);
     },
+    deleteOne: vi.fn(),
     upsert: vi.fn(),
     updateStatus: vi.fn(),
     getStaleCountsByRecipe() {
@@ -150,6 +155,63 @@ describe('SourceRefReconciler SignalBus Integration', () => {
       'SourceRefReconciler',
       0.5,
       expect.anything()
+    );
+  });
+
+  it('does not reinsert ProjectScope refs removed from sanitized reasoning.sources', async () => {
+    const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-core-pscssi-p6-'));
+    const alembicRoot = path.join(controlRoot, 'Alembic');
+    const apiServer = path.join(alembicRoot, 'bin/api-server.ts');
+    fs.mkdirSync(path.dirname(apiServer), { recursive: true });
+    fs.writeFileSync(apiServer, 'export {};\n');
+
+    const sourceIdentities = [
+      createCanonicalSourceIdentity({
+        folderDisplayName: 'Alembic',
+        folderId: 'folder-alembic',
+        folderPath: alembicRoot,
+        projectRoot: controlRoot,
+        projectScopeId: 'scope-a',
+        sourcePath: 'bin/api-server.ts',
+      }),
+    ];
+    const { sourceRefRepo, knowledgeRepo } = createMockRepos({
+      entries: [
+        {
+          id: 'r1',
+          reasoning: JSON.stringify({ sources: ['Alembic/bin/api-server.ts'] }),
+        },
+      ],
+      existingRefs: [
+        {
+          recipeId: 'r1',
+          sourcePath: 'package.json',
+          status: 'stale',
+          verifiedAt: 0,
+        },
+      ],
+    });
+
+    const reconciler = new SourceRefReconciler(
+      controlRoot,
+      sourceRefRepo as never,
+      knowledgeRepo as never,
+      { sourceIdentities, ttlMs: 0 }
+    );
+
+    const report = await reconciler.reconcile({ force: true });
+
+    expect(report.stale).toBe(0);
+    expect(sourceRefRepo.deleteOne).toHaveBeenCalledWith('r1', 'package.json');
+    expect(sourceRefRepo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        recipeId: 'r1',
+        sourcePath: 'Alembic/bin/api-server.ts',
+        status: 'active',
+      })
+    );
+    expect(sourceRefRepo.upsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({ sourcePath: 'package.json' })
     );
   });
 });

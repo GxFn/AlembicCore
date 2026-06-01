@@ -9,6 +9,7 @@ import {
   type GatewayDeps,
   RecipeProductionGateway,
 } from '../../src/service/knowledge/RecipeProductionGateway.js';
+import { createCanonicalSourceIdentity } from '../../src/shared/ProjectScope.js';
 
 /* ═══════════════════ Mock Helpers ═══════════════════ */
 
@@ -582,6 +583,175 @@ describe('RecipeProductionGateway', () => {
       expect(result.created[0].raw).toBeDefined();
       expect(result.created[0].raw.title).toBe('WebSocket 客户端异步消息流模式');
       expect(result.created[0].raw.kind).toBe('pattern');
+    });
+  });
+
+  describe('create — ProjectScope sourceRefs', () => {
+    const controlRoot = '/workspace/AlembicWorkspace';
+    const sourceIdentities = [
+      createCanonicalSourceIdentity({
+        folderDisplayName: 'Alembic',
+        folderId: 'folder-alembic',
+        folderPath: `${controlRoot}/Alembic`,
+        projectRoot: controlRoot,
+        projectScopeId: 'scope-a',
+        sourcePath: 'bin/api-server.ts',
+      }),
+      createCanonicalSourceIdentity({
+        folderDisplayName: 'Alembic',
+        folderId: 'folder-alembic',
+        folderPath: `${controlRoot}/Alembic`,
+        projectRoot: controlRoot,
+        projectScopeId: 'scope-a',
+        sourcePath: 'lib/injection/ServiceContainer.ts',
+      }),
+    ];
+
+    it('normalizes valid refs to canonical qualified paths before create', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      const result = await gateway.create({
+        source: 'agent-tool',
+        items: [
+          makeItem({
+            reasoning: {
+              whyStandard: '项目标准做法',
+              sources: ['api-server.ts', 'Alembic/lib/injection/ServiceContainer.ts'],
+              confidence: 0.9,
+            },
+            sourceRefs: ['bin/api-server.ts', 'lib/injection/ServiceContainer.ts'],
+          }),
+        ],
+        options: {
+          projectScopeSourceRefs: { sourceIdentities },
+          skipConsolidation: true,
+        },
+      });
+
+      expect(result.rejected).toHaveLength(0);
+      expect(result.created).toHaveLength(1);
+      const data = (deps.knowledgeService.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        reasoning: { sources: string[] };
+        sourceRefs: string[];
+      };
+      expect(data.reasoning.sources).toEqual([
+        'Alembic/bin/api-server.ts',
+        'Alembic/lib/injection/ServiceContainer.ts',
+      ]);
+      expect(data.sourceRefs).toEqual([
+        'Alembic/bin/api-server.ts',
+        'Alembic/lib/injection/ServiceContainer.ts',
+      ]);
+    });
+
+    it('rejects missing P5 sourceRefs before persistence', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      const result = await gateway.create({
+        source: 'agent-tool',
+        items: [
+          makeItem({
+            reasoning: {
+              whyStandard: '项目标准做法',
+              sources: ['package.json'],
+              confidence: 0.9,
+            },
+            sourceRefs: ['Alembic/lib/injection/index.ts'],
+          }),
+        ],
+        options: {
+          projectScopeSourceRefs: { sourceIdentities },
+          skipConsolidation: true,
+        },
+      });
+
+      expect(result.created).toHaveLength(0);
+      expect(result.rejected).toHaveLength(1);
+      expect(result.rejected[0]).toMatchObject({
+        reason: 'source_ref_validation_failed',
+      });
+      expect(result.rejected[0].errors.join('\n')).toContain(
+        'reasoning.sources rejected "package.json": not-found'
+      );
+      expect(result.rejected[0].errors.join('\n')).toContain(
+        'sourceRefs rejected "Alembic/lib/injection/index.ts": not-found'
+      );
+      expect(deps.knowledgeService.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects ambiguous ProjectScope sourceRefs before persistence', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+      const ambiguousSourceIdentities = [
+        ...sourceIdentities,
+        createCanonicalSourceIdentity({
+          folderDisplayName: 'AlembicPlugin',
+          folderId: 'folder-plugin',
+          folderPath: `${controlRoot}/AlembicPlugin`,
+          projectRoot: controlRoot,
+          projectScopeId: 'scope-a',
+          sourcePath: 'lib/injection/ServiceContainer.ts',
+        }),
+      ];
+
+      const result = await gateway.create({
+        source: 'agent-tool',
+        items: [
+          makeItem({
+            reasoning: {
+              whyStandard: '项目标准做法',
+              sources: ['Alembic/bin/api-server.ts'],
+              confidence: 0.9,
+            },
+            sourceRefs: ['lib/injection/ServiceContainer.ts'],
+          }),
+        ],
+        options: {
+          projectScopeSourceRefs: { sourceIdentities: ambiguousSourceIdentities },
+          skipConsolidation: true,
+        },
+      });
+
+      expect(result.created).toHaveLength(0);
+      expect(result.rejected).toHaveLength(1);
+      expect(result.rejected[0]).toMatchObject({
+        reason: 'source_ref_validation_failed',
+      });
+      expect(result.rejected[0].errors.join('\n')).toContain(
+        'sourceRefs rejected "lib/injection/ServiceContainer.ts": ambiguous-legacy-path'
+      );
+      expect(deps.knowledgeService.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps legacy single-project sourceRefs unchanged without ProjectScope identities', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      const result = await gateway.create({
+        source: 'agent-tool',
+        items: [
+          makeItem({
+            reasoning: {
+              whyStandard: '项目标准做法',
+              sources: ['package.json'],
+              confidence: 0.9,
+            },
+            sourceRefs: ['Alembic/lib/injection/index.ts'],
+          }),
+        ],
+        options: { skipConsolidation: true },
+      });
+
+      expect(result.rejected).toHaveLength(0);
+      expect(result.created).toHaveLength(1);
+      const data = (deps.knowledgeService.create as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        reasoning: { sources: string[] };
+        sourceRefs: string[];
+      };
+      expect(data.reasoning.sources).toEqual(['package.json']);
+      expect(data.sourceRefs).toEqual(['Alembic/lib/injection/index.ts']);
     });
   });
 
