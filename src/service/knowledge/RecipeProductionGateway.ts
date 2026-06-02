@@ -15,12 +15,6 @@
 
 import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
 import {
-  buildProjectScopeSourceRefIndex,
-  type CanonicalSourceIdentity,
-  normalizeProjectScopeSourceRefs,
-  type ProjectScopeSourceRefIndex,
-} from '../../shared/ProjectScope.js';
-import {
   type GatewaySource,
   getGatewaySourceLabel,
   getGatewaySourceUserId,
@@ -69,13 +63,6 @@ export interface CreateRecipeItem {
   [key: string]: unknown;
 }
 
-export interface RecipeProductionProjectScopeSourceRefOptions {
-  /** ProjectScope-aware source identities from ProjectIntelligence / runtime analysis. */
-  sourceIdentities?: readonly CanonicalSourceIdentity[];
-  /** Pre-built sourceRef index; preferred when the caller reuses it across a batch. */
-  sourceRefIndex?: ProjectScopeSourceRefIndex;
-}
-
 export interface CreateRecipeRequest {
   source: GatewaySource;
   items: CreateRecipeItem[];
@@ -102,14 +89,6 @@ export interface CreateRecipeRequest {
     userId?: string;
     /** Bootstrap 会话级去重缓存（冷启动跨维度去重） */
     bootstrapDedup?: BootstrapDedup;
-    /**
-     * ProjectScope sourceRef gate.
-     *
-     * 传入后 Gateway 会在持久化前把 reasoning.sources / sourceRefs 规范化为
-     * repo-qualified source refs；missing / ambiguous refs 直接拒绝该候选，避免
-     * 写入后再由 SourceRefReconciler 变成 stale。
-     */
-    projectScopeSourceRefs?: RecipeProductionProjectScopeSourceRefOptions;
   };
 }
 
@@ -344,40 +323,12 @@ export class RecipeProductionGateway {
       }
     }
 
-    const sourceRefIndex = resolveProjectScopeRecipeSourceRefIndex(options.projectScopeSourceRefs);
-    const sourceRefCheckedItems: { index: number; item: CreateRecipeItem }[] = [];
-
-    if (sourceRefIndex) {
-      for (const entry of validItems) {
-        const normalized = normalizeRecipeProductionSourceRefs(entry.item, sourceRefIndex);
-        if (!normalized.pass) {
-          result.rejected.push({
-            index: entry.index,
-            title: entry.item.title || '(untitled)',
-            reason: 'source_ref_validation_failed',
-            errors: normalized.errors,
-            warnings: normalized.warnings,
-          });
-          this.#logger?.warn(
-            `[Gateway] ✗ sourceRef rejected item ${entry.index}: ${normalized.errors.join('; ')}`
-          );
-          continue;
-        }
-        for (const warning of normalized.warnings) {
-          this.#logger?.warn(`[Gateway] sourceRef normalized item ${entry.index}: ${warning}`);
-        }
-        sourceRefCheckedItems.push({ index: entry.index, item: normalized.item });
-      }
-    } else {
-      sourceRefCheckedItems.push(...validItems);
-    }
-
     // ── Step 1.5: Bootstrap Session-Level Dedup (fast, in-memory) ──
-    let afterDedupItems = sourceRefCheckedItems;
+    let afterDedupItems = validItems;
 
-    if (options.bootstrapDedup && sourceRefCheckedItems.length > 0) {
+    if (options.bootstrapDedup && validItems.length > 0) {
       afterDedupItems = [];
-      for (const entry of sourceRefCheckedItems) {
+      for (const entry of validItems) {
         const { item, index } = entry;
         const summary: CandidateSummary = {
           id: '',
@@ -913,103 +864,4 @@ export class RecipeProductionGateway {
 
     return null;
   }
-}
-
-type RecipeSourceRefFieldName = 'reasoning.sources' | 'sourceRefs';
-
-interface NormalizedRecipeProductionSourceRefs {
-  errors: string[];
-  item: CreateRecipeItem;
-  pass: boolean;
-  warnings: string[];
-}
-
-function resolveProjectScopeRecipeSourceRefIndex(
-  options: RecipeProductionProjectScopeSourceRefOptions | undefined
-): ProjectScopeSourceRefIndex | null {
-  if (options?.sourceRefIndex) {
-    return options.sourceRefIndex;
-  }
-  if (options?.sourceIdentities?.length) {
-    return buildProjectScopeSourceRefIndex(options.sourceIdentities);
-  }
-  return null;
-}
-
-function normalizeRecipeProductionSourceRefs(
-  item: CreateRecipeItem,
-  index: ProjectScopeSourceRefIndex
-): NormalizedRecipeProductionSourceRefs {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  const nextItem: CreateRecipeItem = { ...item };
-
-  const reasoningSources = normalizeRecipeSourceRefField(
-    'reasoning.sources',
-    item.reasoning?.sources,
-    index
-  );
-  errors.push(...reasoningSources.errors);
-  warnings.push(...reasoningSources.warnings);
-  if (reasoningSources.seen) {
-    nextItem.reasoning = {
-      ...(item.reasoning ?? {}),
-      sources: reasoningSources.refs,
-    };
-  }
-
-  const itemSourceRefs = normalizeRecipeSourceRefField('sourceRefs', item.sourceRefs, index);
-  errors.push(...itemSourceRefs.errors);
-  warnings.push(...itemSourceRefs.warnings);
-  if (itemSourceRefs.seen) {
-    nextItem.sourceRefs = itemSourceRefs.refs;
-  }
-
-  return {
-    errors,
-    item: nextItem,
-    pass: errors.length === 0,
-    warnings,
-  };
-}
-
-function normalizeRecipeSourceRefField(
-  fieldName: RecipeSourceRefFieldName,
-  rawRefs: unknown,
-  index: ProjectScopeSourceRefIndex
-): {
-  errors: string[];
-  refs: string[];
-  seen: boolean;
-  warnings: string[];
-} {
-  if (!Array.isArray(rawRefs)) {
-    return { errors: [], refs: [], seen: false, warnings: [] };
-  }
-
-  const refs = rawRefs.filter((sourceRef): sourceRef is string => {
-    return typeof sourceRef === 'string' && sourceRef.trim().length > 0;
-  });
-  const normalized = normalizeProjectScopeSourceRefs(refs, index);
-  const errors = normalized.rejected.map((sourceRef) => {
-    return `${fieldName} rejected "${sourceRef.input}": ${sourceRef.reason}`;
-  });
-  const warnings = normalized.normalized
-    .filter((sourceRef) => {
-      return (
-        sourceRef.status === 'active' &&
-        sourceRef.normalizedRef !== null &&
-        sourceRef.normalizedRef !== sourceRef.input
-      );
-    })
-    .map((sourceRef) => {
-      return `${fieldName} normalized "${sourceRef.input}" -> "${sourceRef.normalizedRef}" (${sourceRef.reason})`;
-    });
-
-  return {
-    errors,
-    refs: normalized.activeSourceRefs,
-    seen: true,
-    warnings,
-  };
 }

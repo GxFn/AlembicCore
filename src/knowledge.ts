@@ -96,7 +96,6 @@ export {
   parseKnowledgeMarkdown,
   RecipeExtractor,
   RecipeProductionGateway,
-  type RecipeProductionProjectScopeSourceRefOptions,
   type ReconcileReport,
   type RejectedRecipeInfo,
   RelationType,
