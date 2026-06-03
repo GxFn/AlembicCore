@@ -8,6 +8,8 @@ import {
   DAEMON_STATE_SCHEMA_VERSION,
   JobStore,
   PROJECT_CONNECTION_STATES,
+  PROJECT_RUNTIME_CONTRACT_VERSION,
+  summarizeProjectRuntimeScopeReadiness,
 } from '../src/daemon/index.js';
 import { EventBus, SignalBus, timerRegistry } from '../src/events.js';
 import { pathGuard, WriteZone } from '../src/io.js';
@@ -52,7 +54,9 @@ describe('stable foundation entrypoints', () => {
 
   it('exposes project runtime control contracts through the daemon entrypoint', () => {
     expect(PROJECT_CONNECTION_STATES).toContain('ready');
+    expect(PROJECT_RUNTIME_CONTRACT_VERSION).toBe(1);
     expect(createProjectRuntimeControlState().schemaVersion).toBe(1);
+    expect(summarizeProjectRuntimeScopeReadiness(null).state).toBe('blocked');
   });
 
   it('exposes config as a provisional module-level entrypoint', () => {
