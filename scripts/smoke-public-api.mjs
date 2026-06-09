@@ -115,6 +115,9 @@ const requiredSubpathExports = {
     'ALEMBIC_AGENT_SOURCE',
     'AppConfigSchema',
     'ConstitutionViolation',
+    'CORE_CONTRACT_SPINE_ROW_IDS',
+    'CORE_CONTRACT_SPINE_ROWS',
+    'CORE_CONTRACT_SPINE_VERSION',
     'DEFAULT_FOLDER_NAMES',
     'HOST_AGENT_SOURCE',
     'NotFoundError',
@@ -133,6 +136,8 @@ const requiredSubpathExports = {
     'normalizeProposalSource',
     'resolveProjectScopeForFolder',
     'summarizeProjectScopeDescriptor',
+    'summarizeCoreContractSpine',
+    'validateCoreContractSpine',
   ],
   '@alembic/core/types': ['normalizeFileChangeEventSource'],
 };

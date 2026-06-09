@@ -1,3 +1,4 @@
+export * from './CoreContractSpine.js';
 export * from './concurrency.js';
 export * from './constants.js';
 export * from './content-hash.js';
