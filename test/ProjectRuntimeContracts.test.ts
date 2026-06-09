@@ -16,10 +16,13 @@ import {
   PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION,
   PROJECT_RUNTIME_DAEMON_STATUSES,
   PROJECT_RUNTIME_FAILURE_REASONS,
+  PROJECT_RUNTIME_FIELD_POLICIES,
   PROJECT_RUNTIME_READINESS_STATES,
   PROJECT_RUNTIME_REQUIRED_SERVICES,
   type ProjectRuntimeControlSnapshot,
+  summarizeProjectRuntimeFieldTaxonomy,
   summarizeProjectRuntimeScopeReadiness,
+  validateProjectRuntimeFieldTaxonomy,
 } from '../src/daemon/index.js';
 
 describe('project runtime control public contracts', () => {
@@ -203,6 +206,67 @@ describe('project runtime control public contracts', () => {
       message: 'Project is not registered in the runtime source of truth.',
       readinessState: 'blocked',
       severity: 'error',
+    });
+  });
+
+  it('exports D19 field taxonomy policies for project runtime contracts', () => {
+    expect(validateProjectRuntimeFieldTaxonomy()).toEqual({
+      contractVersion: PROJECT_RUNTIME_CONTRACT_VERSION,
+      issues: [],
+      policyCount: PROJECT_RUNTIME_FIELD_POLICIES.length,
+      valid: true,
+    });
+
+    expect(summarizeProjectRuntimeFieldTaxonomy()).toMatchObject({
+      byClass: {
+        'artifactRef-only': 0,
+        'compatibility-private': 0,
+        'consumer-needed': 3,
+        diagnostic: 3,
+        'detailRef-only': 0,
+        'hidden-reasoning': 0,
+        internal: 1,
+        public: 1,
+        'raw-provider': 0,
+        sensitive: 2,
+        'typed-extension': 0,
+      },
+      contracts: {
+        ProjectRuntimeFailureEnvelope: 2,
+        ProjectRuntimeIdentityContract: 3,
+        ProjectRuntimeReadinessSummary: 1,
+        ProjectRuntimeScopeSummary: 2,
+        ProjectRuntimeTarget: 2,
+      },
+      contractVersion: PROJECT_RUNTIME_CONTRACT_VERSION,
+      policyCount: PROJECT_RUNTIME_FIELD_POLICIES.length,
+    });
+  });
+
+  it('classifies runtime path fields as diagnostic or sensitive instead of ordinary output', () => {
+    const projectRoot = PROJECT_RUNTIME_FIELD_POLICIES.find(
+      (policy) => policy.fieldPath === 'ProjectRuntimeIdentityContract.projectRoot'
+    );
+    const databasePath = PROJECT_RUNTIME_FIELD_POLICIES.find(
+      (policy) => policy.fieldPath === 'ProjectRuntimeIdentityContract.databasePath'
+    );
+    const failureReason = PROJECT_RUNTIME_FIELD_POLICIES.find(
+      (policy) => policy.fieldPath === 'ProjectRuntimeFailureEnvelope.reason'
+    );
+
+    expect(projectRoot).toMatchObject({
+      diagnosticPolicy: 'diagnostic-context',
+      fieldClass: 'diagnostic',
+      ordinaryOutputAllowed: false,
+    });
+    expect(databasePath).toMatchObject({
+      diagnosticPolicy: 'redacted-summary',
+      fieldClass: 'sensitive',
+      ordinaryOutputAllowed: false,
+    });
+    expect(failureReason).toMatchObject({
+      fieldClass: 'public',
+      ordinaryOutputAllowed: true,
     });
   });
 });

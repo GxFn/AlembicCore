@@ -1,3 +1,12 @@
+import type {
+  CoreFieldClass,
+  CoreFieldPolicy,
+  CoreFieldPolicySummary,
+  CoreFieldPolicyValidationIssue,
+  CoreFieldPolicyValidationResult,
+} from './FieldTaxonomy.js';
+import { summarizeCoreFieldPolicies, validateCoreFieldPolicies } from './FieldTaxonomy.js';
+
 export const CORE_CONTRACT_SPINE_VERSION = 1;
 
 export const CORE_CONTRACT_SPINE_ROW_IDS = [
@@ -60,7 +69,7 @@ export interface CoreContractSpineRow {
   currentCompatibilityOwner: readonly string[];
   driftGate: string;
   errorKinds: readonly string[];
-  exposureClasses: readonly string[];
+  exposureClasses: readonly CoreFieldClass[];
   fixturePolicy: string;
   functionClass: CoreContractFunctionClass;
   id: CoreContractSpineRowId;
@@ -100,6 +109,20 @@ export interface ValidateCoreContractSpineOptions {
 export interface CoreContractSpineSummary {
   coreRoles: Record<CoreContractRole, number>;
   functionClasses: Record<CoreContractFunctionClass, number>;
+  rowIds: CoreContractSpineRowId[];
+  version: typeof CORE_CONTRACT_SPINE_VERSION;
+}
+
+export interface CoreContractSpineFieldPolicy extends CoreFieldPolicy {
+  rowId: CoreContractSpineRowId;
+}
+
+export interface CoreContractSpineFieldPolicyValidationResult
+  extends CoreFieldPolicyValidationResult {
+  version: typeof CORE_CONTRACT_SPINE_VERSION;
+}
+
+export interface CoreContractSpineFieldPolicySummary extends CoreFieldPolicySummary {
   rowIds: CoreContractSpineRowId[];
   version: typeof CORE_CONTRACT_SPINE_VERSION;
 }
@@ -275,7 +298,13 @@ export const CORE_CONTRACT_SPINE_ROWS = [
     currentCompatibilityOwner: ['Dashboard job event timeline'],
     driftGate: 'Event schema fixture plus socket/recovery integration.',
     errorKinds: ['partial', 'unavailable', 'not-found', 'internal-error'],
-    exposureClasses: ['developer-facing', 'machine-only', 'raw-provider', 'secret'],
+    exposureClasses: [
+      'consumer-needed',
+      'diagnostic',
+      'raw-provider',
+      'hidden-reasoning',
+      'sensitive',
+    ],
     fixturePolicy: 'Process-event endpoint fixtures and Dashboard hook event samples.',
     functionClass: 'event-stream',
     id: 'I07',
@@ -295,7 +324,7 @@ export const CORE_CONTRACT_SPINE_ROWS = [
     currentCompatibilityOwner: ['Dashboard JobsView'],
     driftGate: 'Snapshot schema validation plus Dashboard rendering fixture.',
     errorKinds: ['not-found', 'artifact-missing', 'artifact-unreadable', 'checksum-mismatch'],
-    exposureClasses: ['public', 'developer-facing', 'diagnostic', 'sensitive'],
+    exposureClasses: ['public', 'consumer-needed', 'diagnostic', 'artifactRef-only', 'sensitive'],
     fixturePolicy: 'Generated snapshot fixtures and real bootstrap/rescan artifacts.',
     functionClass: 'job-artifact',
     id: 'I08',
@@ -347,6 +376,182 @@ export const CORE_CONTRACT_SPINE_ROWS = [
     validationCommands: ['npm run build:check', 'npm run test'],
   },
 ] as const satisfies readonly CoreContractSpineRow[];
+
+export const CORE_CONTRACT_SPINE_FIELD_POLICIES = [
+  {
+    consumers: ['Alembic', 'AlembicPlugin', 'AlembicAgent'],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'strict',
+    failureKinds: ['capability-mismatch', 'not-found'],
+    fieldClass: 'public',
+    fieldPath: 'rows.I01.packageExports',
+    interfaceRole: 'producer-contract',
+    ordinaryOutputAllowed: true,
+    owner: 'AlembicCore',
+    rowId: 'I01',
+    validationCommands: ['npm run smoke:public-api', 'npm run lint:public-api-boundary'],
+  },
+  {
+    consumers: ['AlembicPlugin', 'AlembicDashboard'],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'strict',
+    failureKinds: ['unavailable', 'capability-mismatch', 'degraded'],
+    fieldClass: 'consumer-needed',
+    fieldPath: 'rows.I03.runtimeHealth.capabilities',
+    interfaceRole: 'consumer-projection',
+    ordinaryOutputAllowed: true,
+    owner: 'AlembicCore',
+    rowId: 'I03',
+    validationCommands: ['npm run test -- RuntimeContracts', 'npm run build:check'],
+  },
+  {
+    consumers: [],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'private-adapter',
+    failureKinds: ['internal-error', 'schema-drift'],
+    fieldClass: 'internal',
+    fieldPath: 'rows.I03.runtimeHealth.internalRuntimeState',
+    interfaceRole: 'internal-runtime',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I03',
+    validationCommands: ['npm run test -- RuntimeContracts'],
+  },
+  {
+    consumers: ['AlembicDashboard', 'AlembicPlugin'],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'strict',
+    failureKinds: ['unavailable', 'conflict', 'permission-denied', 'timeout', 'cancelled'],
+    fieldClass: 'consumer-needed',
+    fieldPath: 'rows.I04.projectRuntime.failureEnvelope',
+    interfaceRole: 'consumer-projection',
+    ordinaryOutputAllowed: true,
+    owner: 'AlembicCore',
+    rowId: 'I04',
+    validationCommands: ['npm run test -- ProjectRuntimeContracts', 'npm run build:check'],
+  },
+  {
+    cleanupTrigger:
+      'Remove after D24/D29 import scans and fixture replay prove no product consumer reads legacyPath/byLegacyPath.',
+    consumers: ['Alembic', 'AlembicAgent', 'AlembicPlugin', 'AlembicDashboard'],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'compatibility-gated',
+    failureKinds: ['invalid-input', 'conflict', 'not-found'],
+    fieldClass: 'compatibility-private',
+    fieldPath: 'rows.I05.projectScope.legacyPath',
+    interfaceRole: 'compatibility-bridge',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I05',
+    validationCommands: ['npm run test -- ProjectScopeContracts', 'npm run check'],
+  },
+  {
+    consumers: ['AlembicPlugin', 'AlembicDashboard'],
+    diagnosticPolicy: 'detailRef',
+    extensionPolicy: 'detailRef-only',
+    failureKinds: ['not-found', 'partial', 'internal-error'],
+    fieldClass: 'detailRef-only',
+    fieldPath: 'rows.I06.jobs.detailRef',
+    interfaceRole: 'diagnostic-extension',
+    ordinaryOutputAllowed: true,
+    owner: 'AlembicCore',
+    rowId: 'I06',
+    validationCommands: ['npm run test -- JobStore RuntimeContracts', 'npm run build:check'],
+  },
+  {
+    consumers: [],
+    diagnosticPolicy: 'redacted-summary',
+    extensionPolicy: 'private-adapter',
+    failureKinds: ['schema-drift', 'sensitive-leak'],
+    fieldClass: 'raw-provider',
+    fieldPath: 'rows.I07.jobProcessEvents.rawProviderPayload',
+    interfaceRole: 'internal-runtime',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I07',
+    validationCommands: ['npm run test -- JobProcessEventContracts'],
+  },
+  {
+    consumers: [],
+    diagnosticPolicy: 'redacted-summary',
+    extensionPolicy: 'private-adapter',
+    failureKinds: ['schema-drift', 'sensitive-leak'],
+    fieldClass: 'hidden-reasoning',
+    fieldPath: 'rows.I07.jobProcessEvents.hiddenReasoning',
+    interfaceRole: 'internal-runtime',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I07',
+    validationCommands: ['npm run test -- JobProcessEventContracts'],
+  },
+  {
+    consumers: [],
+    diagnosticPolicy: 'redacted-summary',
+    extensionPolicy: 'private-adapter',
+    failureKinds: ['sensitive-leak', 'internal-error'],
+    fieldClass: 'sensitive',
+    fieldPath: 'rows.I07.jobProcessEvents.providerSecrets',
+    interfaceRole: 'internal-runtime',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I07',
+    validationCommands: ['npm run test -- JobProcessEventContracts'],
+  },
+  {
+    consumers: ['AlembicPlugin', 'AlembicDashboard'],
+    diagnosticPolicy: 'artifactRef',
+    extensionPolicy: 'artifactRef-only',
+    failureKinds: ['not-found', 'partial', 'schema-drift'],
+    fieldClass: 'artifactRef-only',
+    fieldPath: 'rows.I08.jobDisplaySnapshots.artifactRef',
+    interfaceRole: 'diagnostic-extension',
+    ordinaryOutputAllowed: true,
+    owner: 'AlembicCore',
+    rowId: 'I08',
+    validationCommands: ['npm run test -- JobDisplaySnapshotContracts', 'npm run build:check'],
+  },
+  {
+    consumers: ['AlembicPlugin', 'AlembicDashboard', 'Codex host'],
+    diagnosticPolicy: 'diagnostic-context',
+    extensionPolicy: 'diagnostic-ref',
+    failureKinds: ['invalid-input', 'unavailable', 'capability-mismatch', 'internal-error'],
+    fieldClass: 'diagnostic',
+    fieldPath: 'rows.I21.guard.diagnosticContext',
+    interfaceRole: 'diagnostic-extension',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I21',
+    validationCommands: ['npm run test -- guard', 'npm run build:check'],
+  },
+  {
+    cleanupTrigger:
+      'Remove after provider and Dashboard fixture replay prove canonical acceptedEventSources replace compatibilityAliases.',
+    consumers: ['Alembic', 'AlembicDashboard'],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'compatibility-gated',
+    failureKinds: ['invalid-input', 'not-found', 'schema-drift'],
+    fieldClass: 'compatibility-private',
+    fieldPath: 'rows.I23.fileChanges.compatibilityAliases',
+    interfaceRole: 'compatibility-bridge',
+    ordinaryOutputAllowed: false,
+    owner: 'AlembicCore',
+    rowId: 'I23',
+    validationCommands: ['npm run test -- RuntimeContracts SourceContracts', 'npm run check'],
+  },
+  {
+    consumers: ['AlembicDashboard', 'AlembicPlugin'],
+    diagnosticPolicy: 'none',
+    extensionPolicy: 'typed-extension',
+    failureKinds: ['schema-drift', 'partial', 'unavailable'],
+    fieldClass: 'typed-extension',
+    fieldPath: 'rows.I23.fileChanges.auditExtension',
+    interfaceRole: 'diagnostic-extension',
+    ordinaryOutputAllowed: true,
+    owner: 'AlembicCore',
+    rowId: 'I23',
+    validationCommands: ['npm run test -- RuntimeContracts SourceContracts'],
+  },
+] as const satisfies readonly CoreContractSpineFieldPolicy[];
 
 export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
   {
@@ -545,6 +750,34 @@ export function validateCoreContractSpine(
   };
 }
 
+export function validateCoreContractFieldPolicies(
+  policies: readonly CoreContractSpineFieldPolicy[] = CORE_CONTRACT_SPINE_FIELD_POLICIES
+): CoreContractSpineFieldPolicyValidationResult {
+  const validation = validateCoreFieldPolicies(policies, {
+    forbiddenOwners: CORE_CONTRACT_SPINE_FORBIDDEN_RESPONSIBILITIES,
+  });
+  const issues: CoreFieldPolicyValidationIssue[] = [...validation.issues];
+  const policiesByRowId = new Set(policies.map((policy) => policy.rowId));
+
+  for (const rowId of CORE_CONTRACT_SPINE_ROW_IDS) {
+    if (!policiesByRowId.has(rowId)) {
+      issues.push({
+        code: 'missing-field-policy',
+        fieldPath: `rows.${rowId}`,
+        message: `Core contract spine row ${rowId} is missing a field taxonomy policy.`,
+        path: `rows.${rowId}.fieldPolicies`,
+      });
+    }
+  }
+
+  return {
+    issues,
+    policyCount: validation.policyCount,
+    valid: issues.length === 0,
+    version: CORE_CONTRACT_SPINE_VERSION,
+  };
+}
+
 export function validateCoreLegacyContractConvergence(
   options: ValidateCoreLegacyContractConvergenceOptions = {}
 ): CoreLegacyContractConvergenceValidationResult {
@@ -639,6 +872,19 @@ export function summarizeCoreContractSpine(
     coreRoles,
     functionClasses,
     rowIds: rows.map((row) => row.id),
+    version: CORE_CONTRACT_SPINE_VERSION,
+  };
+}
+
+export function summarizeCoreContractFieldPolicies(
+  policies: readonly CoreContractSpineFieldPolicy[] = CORE_CONTRACT_SPINE_FIELD_POLICIES
+): CoreContractSpineFieldPolicySummary {
+  const summary = summarizeCoreFieldPolicies(policies);
+  const coveredRowIds = new Set(policies.map((policy) => policy.rowId));
+
+  return {
+    ...summary,
+    rowIds: CORE_CONTRACT_SPINE_ROW_IDS.filter((rowId) => coveredRowIds.has(rowId)),
     version: CORE_CONTRACT_SPINE_VERSION,
   };
 }

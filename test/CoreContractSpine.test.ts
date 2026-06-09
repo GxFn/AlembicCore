@@ -3,14 +3,18 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  CORE_CONTRACT_SPINE_FIELD_POLICIES,
   CORE_CONTRACT_SPINE_FORBIDDEN_RESPONSIBILITIES,
   CORE_CONTRACT_SPINE_ROW_IDS,
   CORE_CONTRACT_SPINE_ROWS,
   CORE_CONTRACT_SPINE_VERSION,
+  CORE_FIELD_CLASSES,
   CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES,
   CORE_LEGACY_CONVERGENCE_CANDIDATE_IDS,
+  summarizeCoreContractFieldPolicies,
   summarizeCoreContractSpine,
   summarizeCoreLegacyContractConvergence,
+  validateCoreContractFieldPolicies,
   validateCoreContractSpine,
   validateCoreLegacyContractConvergence,
 } from '../src/shared/index.js';
@@ -83,7 +87,45 @@ describe('Core deterministic contract spine', () => {
       expect(row.removalBlocker.length, row.id).toBeGreaterThan(0);
       expect(row.driftGate.length, row.id).toBeGreaterThan(0);
       expect(row.validationCommands.length, row.id).toBeGreaterThan(0);
+      for (const exposureClass of row.exposureClasses) {
+        expect(CORE_FIELD_CLASSES, row.id).toContain(exposureClass);
+      }
     }
+  });
+
+  it('validates D19 field taxonomy policy coverage for every spine row', () => {
+    expect(validateCoreContractFieldPolicies()).toEqual({
+      issues: [],
+      policyCount: CORE_CONTRACT_SPINE_FIELD_POLICIES.length,
+      valid: true,
+      version: CORE_CONTRACT_SPINE_VERSION,
+    });
+
+    const coveredRowIds = new Set(CORE_CONTRACT_SPINE_FIELD_POLICIES.map((policy) => policy.rowId));
+    expect([...coveredRowIds]).toEqual([...CORE_CONTRACT_SPINE_ROW_IDS]);
+  });
+
+  it('summarizes D19 closure categories without promoting private fields to public output', () => {
+    const summary = summarizeCoreContractFieldPolicies();
+    const projectScopeLegacyPath = CORE_CONTRACT_SPINE_FIELD_POLICIES.find(
+      (policy) => policy.fieldPath === 'rows.I05.projectScope.legacyPath'
+    );
+
+    expect(summary.rowIds).toEqual([...CORE_CONTRACT_SPINE_ROW_IDS]);
+    expect(summary.byClass).toMatchObject({
+      'artifactRef-only': 1,
+      'compatibility-private': 2,
+      'detailRef-only': 1,
+      'hidden-reasoning': 1,
+      'raw-provider': 1,
+      sensitive: 1,
+      'typed-extension': 1,
+    });
+    expect(projectScopeLegacyPath).toMatchObject({
+      cleanupTrigger: expect.stringContaining('legacyPath/byLegacyPath'),
+      fieldClass: 'compatibility-private',
+      ordinaryOutputAllowed: false,
+    });
   });
 
   it('reports missing public facades as contract drift', () => {
