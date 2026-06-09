@@ -45,7 +45,6 @@ import { buildSearchResponseMeta } from './SearchTypes.js';
 export { BM25Scorer } from './BM25Scorer.js';
 export { FieldWeightedScorer } from './FieldWeightedScorer.js';
 export type {
-  BM25DocMeta,
   DbRow,
   DocMeta,
   RankingContext,

@@ -14,7 +14,7 @@
  * @module FieldWeightedScorer
  */
 
-import type { BM25SearchResult, Scorer } from './SearchTypes.js';
+import type { Scorer, ScorerResult } from './SearchTypes.js';
 import { tokenize } from './tokenizer.js';
 
 // ── 字段权重常量（可调） ──
@@ -208,13 +208,13 @@ export class FieldWeightedScorer implements Scorer {
   }
 
   /** 搜索：对每个文档按字段加权评分，返回降序结果 */
-  search(query: string, limit = 20): BM25SearchResult[] {
+  search(query: string, limit = 20): ScorerResult[] {
     const queryTokens = tokenize(query);
     if (queryTokens.length === 0) {
       return [];
     }
 
-    const scores: BM25SearchResult[] = [];
+    const scores: ScorerResult[] = [];
 
     for (const doc of this.documents) {
       if (!doc) {

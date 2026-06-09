@@ -7,7 +7,7 @@
  * @module BM25Scorer
  */
 
-import type { BM25Document, BM25SearchResult, Scorer } from './SearchTypes.js';
+import type { Scorer, ScorerDocument, ScorerResult } from './SearchTypes.js';
 import { BM25_B, BM25_K1, tokenize } from './tokenizer.js';
 
 /** BM25 评分器 */
@@ -16,7 +16,7 @@ export class BM25Scorer implements Scorer {
   _totalLength: number;
   avgLength: number;
   docFreq: Record<string, number>;
-  documents: (BM25Document | null)[];
+  documents: (ScorerDocument | null)[];
   totalDocs: number;
   constructor() {
     this.documents = []; // [{id, tokens, tokenFreq, length, meta}]
@@ -104,7 +104,7 @@ export class BM25Scorer implements Scorer {
 
   /** 压缩 documents 数组，清除 tombstone 空洞 */
   _compact() {
-    const alive = this.documents.filter((d): d is BM25Document => d !== null);
+    const alive = this.documents.filter((d): d is ScorerDocument => d !== null);
     this.documents = alive;
     this._idIndex.clear();
     for (let i = 0; i < alive.length; i++) {
@@ -119,7 +119,7 @@ export class BM25Scorer implements Scorer {
       return [];
     }
 
-    const scores: BM25SearchResult[] = [];
+    const scores: ScorerResult[] = [];
 
     for (const doc of this.documents) {
       if (!doc) {

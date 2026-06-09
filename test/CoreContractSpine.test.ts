@@ -7,8 +7,12 @@ import {
   CORE_CONTRACT_SPINE_ROW_IDS,
   CORE_CONTRACT_SPINE_ROWS,
   CORE_CONTRACT_SPINE_VERSION,
+  CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES,
+  CORE_LEGACY_CONVERGENCE_CANDIDATE_IDS,
   summarizeCoreContractSpine,
+  summarizeCoreLegacyContractConvergence,
   validateCoreContractSpine,
+  validateCoreLegacyContractConvergence,
 } from '../src/shared/index.js';
 
 interface PackageJson {
@@ -23,6 +27,10 @@ function readPackageJson(): PackageJson {
 
 function sourceFilesFromRows() {
   return CORE_CONTRACT_SPINE_ROWS.flatMap((row) => row.sourceFiles);
+}
+
+function sourceFilesFromConvergenceCandidates() {
+  return CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES.flatMap((candidate) => candidate.sourceFiles);
 }
 
 describe('Core deterministic contract spine', () => {
@@ -113,5 +121,92 @@ describe('Core deterministic contract spine', () => {
       rowIds: [...CORE_CONTRACT_SPINE_ROW_IDS],
       version: CORE_CONTRACT_SPINE_VERSION,
     });
+  });
+});
+
+describe('Core legacy contract convergence', () => {
+  it('locks the D9 candidate set and records delete vs preserve decisions', () => {
+    expect(CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES.map((candidate) => candidate.id)).toEqual([
+      ...CORE_LEGACY_CONVERGENCE_CANDIDATE_IDS,
+    ]);
+
+    const summary = summarizeCoreLegacyContractConvergence();
+    expect(summary).toMatchObject({
+      candidateIds: [...CORE_LEGACY_CONVERGENCE_CANDIDATE_IDS],
+      deletedCandidateIds: ['D9-C04'],
+      preservedCandidateIds: ['D9-C01', 'D9-C02', 'D9-C03'],
+      statuses: {
+        'already-solved': 0,
+        blocked: 0,
+        deleted: 1,
+        'preserved-with-owner': 3,
+        rewritten: 0,
+      },
+      version: CORE_CONTRACT_SPINE_VERSION,
+    });
+  });
+
+  it('validates package exports and source files for every D9 convergence candidate', () => {
+    const packageJson = readPackageJson();
+    const sourceFiles = sourceFilesFromConvergenceCandidates();
+
+    for (const sourceFile of sourceFiles) {
+      expect(existsSync(path.join(CORE_ROOT, sourceFile)), sourceFile).toBe(true);
+    }
+
+    expect(
+      validateCoreLegacyContractConvergence({
+        packageExports: Object.keys(packageJson.exports),
+        sourceFiles,
+      })
+    ).toEqual({
+      candidateCount: 4,
+      issues: [],
+      valid: true,
+      version: CORE_CONTRACT_SPINE_VERSION,
+    });
+  });
+
+  it('keeps preserved legacy surfaces tied to current owners and cleanup triggers', () => {
+    const preserved = CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES.filter(
+      (candidate) => candidate.status === 'preserved-with-owner'
+    );
+
+    for (const candidate of preserved) {
+      expect(candidate.currentConsumers.length, candidate.id).toBeGreaterThan(0);
+      expect(candidate.currentCompatibilityOwner.length, candidate.id).toBeGreaterThan(0);
+      expect(candidate.cleanupBlocker.length, candidate.id).toBeGreaterThan(0);
+      expect(candidate.removalTrigger.length, candidate.id).toBeGreaterThan(0);
+      expect(candidate.publicExposurePolicy).toMatch(/canonical|compatibility|stay outside Core/i);
+    }
+  });
+
+  it('blocks deleting a legacy surface while active consumer evidence remains', () => {
+    const validation = validateCoreLegacyContractConvergence({
+      activeLegacyConsumerRefs: ['D9-C04'],
+    });
+
+    expect(validation.valid).toBe(false);
+    expect(validation.issues).toContainEqual(
+      expect.objectContaining({
+        candidateId: 'D9-C04',
+        code: 'deleted-candidate-has-active-consumer',
+        path: 'candidates.D9-C04.status',
+      })
+    );
+  });
+
+  it('records file monitor aliases and ProjectScope legacy refs as compatibility-only', () => {
+    const fileMonitor = CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES.find(
+      (candidate) => candidate.id === 'D9-C02'
+    );
+    const projectScope = CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES.find(
+      (candidate) => candidate.id === 'D9-C03'
+    );
+
+    expect(fileMonitor?.publicExposurePolicy).toContain('canonical acceptedEventSources');
+    expect(fileMonitor?.removalTrigger).toContain('compatibilityAliases');
+    expect(projectScope?.publicExposurePolicy).toContain('qualifiedPath/projectScopeId');
+    expect(projectScope?.publicExposurePolicy).toContain('ambiguous legacy refs must be rejected');
   });
 });

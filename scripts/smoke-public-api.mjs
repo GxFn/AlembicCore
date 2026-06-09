@@ -115,6 +115,8 @@ const requiredSubpathExports = {
     'ALEMBIC_AGENT_SOURCE',
     'AppConfigSchema',
     'ConstitutionViolation',
+    'CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES',
+    'CORE_LEGACY_CONVERGENCE_CANDIDATE_IDS',
     'CORE_CONTRACT_SPINE_ROW_IDS',
     'CORE_CONTRACT_SPINE_ROWS',
     'CORE_CONTRACT_SPINE_VERSION',
@@ -137,7 +139,9 @@ const requiredSubpathExports = {
     'resolveProjectScopeForFolder',
     'summarizeProjectScopeDescriptor',
     'summarizeCoreContractSpine',
+    'summarizeCoreLegacyContractConvergence',
     'validateCoreContractSpine',
+    'validateCoreLegacyContractConvergence',
   ],
   '@alembic/core/types': ['normalizeFileChangeEventSource'],
 };

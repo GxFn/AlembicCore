@@ -36,7 +36,6 @@ export {
   unwrapSearchDb,
 } from './repository/search/SearchRepoAdapter.js';
 export type {
-  BM25DocMeta,
   BuildSearchResponseMetaInput,
   DbRow,
   DocMeta,

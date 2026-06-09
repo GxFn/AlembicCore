@@ -25,12 +25,6 @@ export interface ScorerResult {
   meta: Record<string, unknown>;
 }
 
-// ── Legacy aliases (backward compat) ──
-/** @deprecated Use ScorerDocument */
-export type BM25Document = ScorerDocument;
-/** @deprecated Use ScorerResult */
-export type BM25SearchResult = ScorerResult;
-
 /**
  * Scorer 通用接口 — FieldWeightedScorer（默认）与 BM25Scorer 共同实现
  *
@@ -69,9 +63,6 @@ export interface DocMeta {
   qualityScore: number;
   [key: string]: unknown;
 }
-
-/** @deprecated Use DocMeta */
-export type BM25DocMeta = DocMeta;
 
 /** Unified search result item flowing through the ranking pipeline */
 export interface SearchResultItem {
