@@ -4,6 +4,7 @@ import {
   createProjectRuntimeControlState,
   createProjectRuntimeFailureEnvelope,
   createProjectRuntimeIdentityContractFromScopeSummary,
+  getProjectRuntimeFailureReasonTaxonomy,
   hasActiveProjectRuntime,
   hasSelectedProjectRuntime,
   isProjectConnectionState,
@@ -15,13 +16,16 @@ import {
   PROJECT_RUNTIME_CONTRACT_VERSION,
   PROJECT_RUNTIME_CONTROL_STATE_SCHEMA_VERSION,
   PROJECT_RUNTIME_DAEMON_STATUSES,
+  PROJECT_RUNTIME_FAILURE_REASON_TAXONOMY,
   PROJECT_RUNTIME_FAILURE_REASONS,
   PROJECT_RUNTIME_FIELD_POLICIES,
   PROJECT_RUNTIME_READINESS_STATES,
   PROJECT_RUNTIME_REQUIRED_SERVICES,
   type ProjectRuntimeControlSnapshot,
+  summarizeProjectRuntimeFailureReasonTaxonomy,
   summarizeProjectRuntimeFieldTaxonomy,
   summarizeProjectRuntimeScopeReadiness,
+  validateProjectRuntimeFailureReasonTaxonomy,
   validateProjectRuntimeFieldTaxonomy,
 } from '../src/daemon/index.js';
 
@@ -267,6 +271,52 @@ describe('project runtime control public contracts', () => {
     expect(failureReason).toMatchObject({
       fieldClass: 'public',
       ordinaryOutputAllowed: true,
+    });
+  });
+
+  it('maps every project runtime failure reason to the D25 Core failure taxonomy', () => {
+    expect(validateProjectRuntimeFailureReasonTaxonomy()).toEqual({
+      contractVersion: PROJECT_RUNTIME_CONTRACT_VERSION,
+      issues: [],
+      reasonCount: PROJECT_RUNTIME_FAILURE_REASON_TAXONOMY.length,
+      valid: true,
+    });
+    expect(PROJECT_RUNTIME_FAILURE_REASON_TAXONOMY.map((entry) => entry.reason)).toEqual([
+      ...PROJECT_RUNTIME_FAILURE_REASONS,
+    ]);
+    expect(summarizeProjectRuntimeFailureReasonTaxonomy()).toMatchObject({
+      byFailureKind: {
+        degraded: 1,
+        'host-failure': 4,
+        'invalid-input': 1,
+        'not-found': 1,
+        'provider-error': 1,
+        unavailable: 6,
+      },
+      contractVersion: PROJECT_RUNTIME_CONTRACT_VERSION,
+      reasonCount: PROJECT_RUNTIME_FAILURE_REASON_TAXONOMY.length,
+    });
+  });
+
+  it('keeps provider and host runtime failures distinct from generic unavailable', () => {
+    expect(getProjectRuntimeFailureReasonTaxonomy('api-ai-unavailable')).toMatchObject({
+      canonicalFailureKind: 'provider-error',
+      retryable: true,
+      service: 'api-ai',
+    });
+    expect(getProjectRuntimeFailureReasonTaxonomy('daemon-failed')).toMatchObject({
+      canonicalFailureKind: 'host-failure',
+      retryable: false,
+      service: 'daemon',
+    });
+    expect(getProjectRuntimeFailureReasonTaxonomy('daemon-stale')).toMatchObject({
+      canonicalFailureKind: 'degraded',
+      defaultReadinessState: 'degraded',
+      retryable: true,
+    });
+    expect(getProjectRuntimeFailureReasonTaxonomy('project-not-registered')).toMatchObject({
+      canonicalFailureKind: 'not-found',
+      retryable: false,
     });
   });
 });

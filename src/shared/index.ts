@@ -5,6 +5,7 @@ export * from './content-hash.js';
 export * from './developer-identity.js';
 export * from './diff-parser.js';
 export * from './errors/index.js';
+export * from './FailureTaxonomy.js';
 export * from './FieldTaxonomy.js';
 export * from './folder-names.js';
 export * from './isOwnDevRepo.js';
