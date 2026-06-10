@@ -208,35 +208,35 @@ function buildComparableFilePathSet(
   projectRoot?: string
 ): ComparableFilePathIndex {
   const paths = new Set<string>();
-  const legacyBuckets = new Map<string, Set<string>>();
+  const unqualifiedBuckets = new Map<string, Set<string>>();
   for (const file of allFiles) {
     addComparablePath(paths, file.sourceIdentity?.qualifiedPath);
     addComparablePath(paths, file.relativePath);
     addComparablePath(paths, file.name);
     addComparablePath(paths, file.path);
-    if (file.sourceIdentity?.legacyPath && file.sourceIdentity.qualifiedPath) {
-      const legacy = normalizeComparablePath(file.sourceIdentity.legacyPath);
-      const bucket = legacyBuckets.get(legacy) ?? new Set<string>();
+    if (file.sourceIdentity?.relativePath && file.sourceIdentity.qualifiedPath) {
+      const unqualified = normalizeComparablePath(file.sourceIdentity.relativePath);
+      const bucket = unqualifiedBuckets.get(unqualified) ?? new Set<string>();
       bucket.add(normalizeComparablePath(file.sourceIdentity.qualifiedPath));
-      legacyBuckets.set(legacy, bucket);
+      unqualifiedBuckets.set(unqualified, bucket);
     }
     if (file.path && projectRoot && path.isAbsolute(file.path)) {
       addComparablePath(paths, path.relative(projectRoot, file.path));
     }
   }
-  const ambiguousLegacyPaths = new Set(
-    [...legacyBuckets.entries()]
+  const ambiguousUnqualifiedPaths = new Set(
+    [...unqualifiedBuckets.entries()]
       .filter(([, qualifiedPaths]) => qualifiedPaths.size > 1)
-      .map(([legacyPath]) => legacyPath)
+      .map(([unqualifiedPath]) => unqualifiedPath)
   );
-  for (const ambiguous of ambiguousLegacyPaths) {
+  for (const ambiguous of ambiguousUnqualifiedPaths) {
     paths.delete(ambiguous);
   }
-  return { ambiguousLegacyPaths, paths };
+  return { ambiguousUnqualifiedPaths, paths };
 }
 
 interface ComparableFilePathIndex {
-  ambiguousLegacyPaths: ReadonlySet<string>;
+  ambiguousUnqualifiedPaths: ReadonlySet<string>;
   paths: ReadonlySet<string>;
 }
 
@@ -489,7 +489,7 @@ function hasComparablePath(index: ComparableFilePathIndex, value: string): boole
   const normalized = normalizeComparablePath(value);
   return (
     Boolean(normalized) &&
-    !index.ambiguousLegacyPaths.has(normalized) &&
+    !index.ambiguousUnqualifiedPaths.has(normalized) &&
     index.paths.has(normalized)
   );
 }

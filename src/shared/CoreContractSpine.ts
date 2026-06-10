@@ -431,16 +431,14 @@ export const CORE_CONTRACT_SPINE_FIELD_POLICIES = [
     validationCommands: ['npm run test -- ProjectRuntimeContracts', 'npm run build:check'],
   },
   {
-    cleanupTrigger:
-      'Remove after D24/D29 import scans and fixture replay prove no product consumer reads legacyPath/byLegacyPath.',
     consumers: ['Alembic', 'AlembicAgent', 'AlembicPlugin', 'AlembicDashboard'],
     diagnosticPolicy: 'none',
-    extensionPolicy: 'compatibility-gated',
+    extensionPolicy: 'strict',
     failureKinds: ['invalid-input', 'conflict', 'not-found'],
-    fieldClass: 'compatibility-private',
-    fieldPath: 'rows.I05.projectScope.legacyPath',
-    interfaceRole: 'compatibility-bridge',
-    ordinaryOutputAllowed: false,
+    fieldClass: 'consumer-needed',
+    fieldPath: 'rows.I05.projectScope.qualifiedPath',
+    interfaceRole: 'consumer-projection',
+    ordinaryOutputAllowed: true,
     owner: 'AlembicCore',
     rowId: 'I05',
     validationCommands: ['npm run test -- ProjectScopeContracts', 'npm run check'],
@@ -624,32 +622,26 @@ export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
   },
   {
     cleanupBlocker:
-      'Alembic provider project-scope analysis, AlembicAgent evidence, Plugin IDE-agent surfaces, and Dashboard project-scope UI still consume legacyPath compatibility data.',
-    currentCompatibilityOwner: [
-      'Alembic provider ProjectScopeAnalysis',
-      'AlembicAgent source evidence',
-      'AlembicPlugin IDEAgentAnalysisSurface',
-      'AlembicDashboard ProjectScopePanel',
-    ],
-    currentConsumers: ['Alembic', 'AlembicAgent', 'AlembicPlugin', 'AlembicDashboard'],
+      'Already satisfied by CR1 accepted consumer commits and Core canonical-only source-ref deletion.',
+    currentCompatibilityOwner: [],
+    currentConsumers: [],
     decisionRationale:
-      'Qualified refs are mandatory for new Core-normalized paths, while legacyPath stays as compatibility input/output with explicit ambiguity behavior.',
+      'CR1 moved active consumers to projectScopeId and repo-qualified paths, so Core no longer keeps short-path alias lookup as a product contract.',
     id: 'D9-C03',
-    legacySurface:
-      'legacyPath, byLegacyPath, unique-legacy-path, and ambiguous-legacy-path source-ref compatibility.',
+    legacySurface: 'Old ProjectScope short-path source-ref alias index and resolution reasons.',
     publicExposurePolicy:
-      'qualifiedPath/projectScopeId are first-class; legacyPath is compatibility-only and ambiguous legacy refs must be rejected.',
+      'Deleted; product-facing ProjectScope lookup and output use projectScopeId plus repo-qualified paths only.',
     registryRows: ['I05'],
     removalTrigger:
-      'No current product source or fixture consumes legacyPath/byLegacyPath and qualifiedPath fixture replay passes across provider, Agent, Plugin, and Dashboard.',
+      'Satisfied by CR1 accepted consumer commits cd501f9215da3ee1fa2f1af5c99ec485d92b6aa6, fce85ee581dec99f37658e025a7eef331f4db009, and 8bf5115782929514ac762f307cde3f7378936516.',
     replacementContract:
       'ProjectScope source refs keyed by projectScopeId and repo-qualified qualifiedPath.',
     requiredExportPaths: ['./shared'],
     sourceFiles: ['src/shared/ProjectScope.ts'],
-    status: 'preserved-with-owner',
+    status: 'deleted',
     validationCommands: [
-      'npm run test -- ProjectScopeContracts',
-      'rg -n "legacyPath|byLegacyPath|ambiguous-legacy-path|unique-legacy-path" Alembic AlembicAgent AlembicPlugin AlembicDashboard -g "!**/vendor/**" -g "!**/dist/**"',
+      'npm run test -- ProjectScopeContracts CoreContractSpine',
+      'npm run smoke:public-api',
     ],
   },
   {

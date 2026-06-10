@@ -143,7 +143,6 @@ export interface CanonicalSourceIdentity {
   folderId: string | null;
   folderPath: string | null;
   folderRelativeRoot: string | null;
-  legacyPath: string;
   projectScopeId: string | null;
   qualifiedPath: string;
   relativePath: string;
@@ -159,7 +158,7 @@ export interface CanonicalSourceIdentityInput {
   sourcePath: string;
 }
 
-export type ProjectScopeSourceRefResolutionStatus = 'resolved' | 'missing' | 'ambiguous';
+export type ProjectScopeSourceRefResolutionStatus = 'resolved' | 'missing';
 
 export interface ProjectScopeSourceRefResolution {
   identity: CanonicalSourceIdentity | null;
@@ -169,22 +168,12 @@ export interface ProjectScopeSourceRefResolution {
 }
 
 export interface ProjectScopeSourceRefIndex {
-  ambiguousBasenames?: ReadonlySet<string>;
-  ambiguousLegacyPaths: ReadonlySet<string>;
-  byBasename?: ReadonlyMap<string, CanonicalSourceIdentity>;
-  byLegacyPath: ReadonlyMap<string, CanonicalSourceIdentity>;
   byQualifiedPath: ReadonlyMap<string, CanonicalSourceIdentity>;
 }
 
-export type ProjectScopeSourceRefNormalizationStatus = 'active' | 'missing' | 'ambiguous';
+export type ProjectScopeSourceRefNormalizationStatus = 'active' | 'missing';
 
-export type ProjectScopeSourceRefNormalizationReason =
-  | 'qualified-path'
-  | 'unique-legacy-path'
-  | 'unique-basename'
-  | 'ambiguous-legacy-path'
-  | 'ambiguous-basename'
-  | 'not-found';
+export type ProjectScopeSourceRefNormalizationReason = 'qualified-path' | 'not-found';
 
 export interface NormalizedProjectScopeSourceRef {
   absolutePath: string | null;
@@ -192,7 +181,6 @@ export interface NormalizedProjectScopeSourceRef {
   folderId: string | null;
   folderPath: string | null;
   input: string;
-  legacyPath: string | null;
   normalizedRef: string | null;
   projectScopeId: string | null;
   qualifiedPath: string | null;
@@ -509,7 +497,6 @@ export function createCanonicalSourceIdentity(
     folderId: normalizeNullableString(input.folderId),
     folderPath,
     folderRelativeRoot,
-    legacyPath: relativePath,
     projectScopeId: normalizeNullableString(input.projectScopeId),
     qualifiedPath,
     relativePath,
@@ -520,42 +507,12 @@ export function buildProjectScopeSourceRefIndex(
   identities: readonly CanonicalSourceIdentity[]
 ): ProjectScopeSourceRefIndex {
   const byQualifiedPath = new Map<string, CanonicalSourceIdentity>();
-  const legacyBuckets = new Map<string, CanonicalSourceIdentity[]>();
-  const basenameBuckets = new Map<string, CanonicalSourceIdentity[]>();
 
   for (const identity of identities) {
     byQualifiedPath.set(normalizeComparableSourcePath(identity.qualifiedPath), identity);
-    const legacy = normalizeComparableSourcePath(identity.legacyPath);
-    legacyBuckets.set(legacy, [...(legacyBuckets.get(legacy) ?? []), identity]);
-    const basename = sourceRefBasename(legacy);
-    if (basename) {
-      basenameBuckets.set(basename, [...(basenameBuckets.get(basename) ?? []), identity]);
-    }
   }
 
-  const byLegacyPath = new Map<string, CanonicalSourceIdentity>();
-  const ambiguousLegacyPaths = new Set<string>();
-  for (const [legacyPath, entries] of legacyBuckets) {
-    const distinctQualifiedPaths = new Set(entries.map((entry) => entry.qualifiedPath));
-    if (distinctQualifiedPaths.size === 1 && entries[0]) {
-      byLegacyPath.set(legacyPath, entries[0]);
-    } else {
-      ambiguousLegacyPaths.add(legacyPath);
-    }
-  }
-
-  const byBasename = new Map<string, CanonicalSourceIdentity>();
-  const ambiguousBasenames = new Set<string>();
-  for (const [basename, entries] of basenameBuckets) {
-    const distinctQualifiedPaths = new Set(entries.map((entry) => entry.qualifiedPath));
-    if (distinctQualifiedPaths.size === 1 && entries[0]) {
-      byBasename.set(basename, entries[0]);
-    } else {
-      ambiguousBasenames.add(basename);
-    }
-  }
-
-  return { ambiguousBasenames, ambiguousLegacyPaths, byBasename, byLegacyPath, byQualifiedPath };
+  return { byQualifiedPath };
 }
 
 export function resolveProjectScopeSourceRef(
@@ -567,18 +524,6 @@ export function resolveProjectScopeSourceRef(
   if (qualified) {
     return { identity: qualified, input: sourceRef, reason: 'qualified-path', status: 'resolved' };
   }
-  if (index.ambiguousLegacyPaths.has(normalized)) {
-    return {
-      identity: null,
-      input: sourceRef,
-      reason: 'ambiguous-legacy-path',
-      status: 'ambiguous',
-    };
-  }
-  const legacy = index.byLegacyPath.get(normalized);
-  if (legacy) {
-    return { identity: legacy, input: sourceRef, reason: 'unique-legacy-path', status: 'resolved' };
-  }
   return { identity: null, input: sourceRef, reason: 'not-found', status: 'missing' };
 }
 
@@ -588,32 +533,7 @@ export function normalizeProjectScopeSourceRef(
 ): NormalizedProjectScopeSourceRef {
   const resolution = resolveProjectScopeSourceRef(sourceRef, index);
   if (resolution.status === 'resolved' && resolution.identity) {
-    return normalizeResolvedProjectScopeSourceRef(
-      sourceRef,
-      resolution.identity,
-      resolution.reason === 'qualified-path' ? 'qualified-path' : 'unique-legacy-path'
-    );
-  }
-  if (resolution.status === 'ambiguous') {
-    return normalizeRejectedProjectScopeSourceRef(sourceRef, {
-      reason: 'ambiguous-legacy-path',
-      status: 'ambiguous',
-    });
-  }
-
-  const normalized = normalizeComparableSourcePath(sourceRef);
-  // basename alias 只接受无目录输入，避免把 `foo/database.ts` 误归到另一个仓库的同名文件。
-  if (!normalized.includes('/')) {
-    if (index.ambiguousBasenames?.has(normalized)) {
-      return normalizeRejectedProjectScopeSourceRef(sourceRef, {
-        reason: 'ambiguous-basename',
-        status: 'ambiguous',
-      });
-    }
-    const basename = index.byBasename?.get(normalized);
-    if (basename) {
-      return normalizeResolvedProjectScopeSourceRef(sourceRef, basename, 'unique-basename');
-    }
+    return normalizeResolvedProjectScopeSourceRef(sourceRef, resolution.identity, 'qualified-path');
   }
 
   return normalizeRejectedProjectScopeSourceRef(sourceRef, {
@@ -851,12 +771,6 @@ function normalizeComparableSourcePath(value: string): string {
   return value.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/+/g, '/');
 }
 
-function sourceRefBasename(value: string): string | null {
-  const normalized = normalizeComparableSourcePath(value);
-  const basename = path.posix.basename(normalized);
-  return basename && basename !== '.' ? basename : null;
-}
-
 function normalizeResolvedProjectScopeSourceRef(
   input: string,
   identity: CanonicalSourceIdentity,
@@ -868,7 +782,6 @@ function normalizeResolvedProjectScopeSourceRef(
     folderId: identity.folderId,
     folderPath: identity.folderPath,
     input,
-    legacyPath: identity.legacyPath,
     normalizedRef: identity.qualifiedPath,
     projectScopeId: identity.projectScopeId,
     qualifiedPath: identity.qualifiedPath,
@@ -881,10 +794,7 @@ function normalizeResolvedProjectScopeSourceRef(
 function normalizeRejectedProjectScopeSourceRef(
   input: string,
   output: {
-    reason: Exclude<
-      ProjectScopeSourceRefNormalizationReason,
-      'qualified-path' | 'unique-legacy-path' | 'unique-basename'
-    >;
+    reason: Exclude<ProjectScopeSourceRefNormalizationReason, 'qualified-path'>;
     status: Exclude<ProjectScopeSourceRefNormalizationStatus, 'active'>;
   }
 ): NormalizedProjectScopeSourceRef {
@@ -894,7 +804,6 @@ function normalizeRejectedProjectScopeSourceRef(
     folderId: null,
     folderPath: null,
     input,
-    legacyPath: null,
     normalizedRef: null,
     projectScopeId: null,
     qualifiedPath: null,

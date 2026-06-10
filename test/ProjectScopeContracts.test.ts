@@ -154,7 +154,7 @@ describe('ProjectScope multi-root contracts', () => {
     });
   });
 
-  it('creates canonical source identities and blocks ambiguous short sourceRefs', () => {
+  it('creates canonical source identities and rejects short sourceRefs', () => {
     const controlRoot = path.join('/workspace', 'AlembicWorkspace');
     const coreIdentity = createCanonicalSourceIdentity({
       folderDisplayName: 'AlembicCore',
@@ -176,7 +176,6 @@ describe('ProjectScope multi-root contracts', () => {
 
     expect(coreIdentity).toMatchObject({
       folderRelativeRoot: 'AlembicCore',
-      legacyPath: 'lib/index.ts',
       qualifiedPath: 'AlembicCore/lib/index.ts',
       relativePath: 'lib/index.ts',
     });
@@ -187,12 +186,12 @@ describe('ProjectScope multi-root contracts', () => {
     });
     expect(resolveProjectScopeSourceRef('lib/index.ts', index)).toMatchObject({
       identity: null,
-      reason: 'ambiguous-legacy-path',
-      status: 'ambiguous',
+      reason: 'not-found',
+      status: 'missing',
     });
   });
 
-  it('normalizes ProjectScope sourceRef aliases without activating ambiguous or missing refs', () => {
+  it('normalizes only repo-qualified ProjectScope sourceRefs', () => {
     const controlRoot = path.join('/workspace', 'AlembicWorkspace');
     const coreIndex = createCanonicalSourceIdentity({
       folderDisplayName: 'AlembicCore',
@@ -223,26 +222,31 @@ describe('ProjectScope multi-root contracts', () => {
     expect(normalizeProjectScopeSourceRef('lib/index.ts', index)).toMatchObject({
       folderId: null,
       normalizedRef: null,
-      reason: 'ambiguous-legacy-path',
-      status: 'ambiguous',
+      reason: 'not-found',
+      status: 'missing',
     });
     expect(normalizeProjectScopeSourceRef('index.ts', index)).toMatchObject({
       folderId: null,
       normalizedRef: null,
-      reason: 'ambiguous-basename',
-      status: 'ambiguous',
+      reason: 'not-found',
+      status: 'missing',
     });
     expect(normalizeProjectScopeSourceRef('bin/api-server.ts', index)).toMatchObject({
-      folderId: 'folder-alembic',
-      legacyPath: 'bin/api-server.ts',
-      normalizedRef: 'Alembic/bin/api-server.ts',
-      reason: 'unique-legacy-path',
-      status: 'active',
+      folderId: null,
+      normalizedRef: null,
+      reason: 'not-found',
+      status: 'missing',
     });
     expect(normalizeProjectScopeSourceRef('api-server.ts', index)).toMatchObject({
+      folderId: null,
+      normalizedRef: null,
+      reason: 'not-found',
+      status: 'missing',
+    });
+    expect(normalizeProjectScopeSourceRef('Alembic/bin/api-server.ts', index)).toMatchObject({
       folderId: 'folder-alembic',
       normalizedRef: 'Alembic/bin/api-server.ts',
-      reason: 'unique-basename',
+      reason: 'qualified-path',
       status: 'active',
     });
     expect(normalizeProjectScopeSourceRef('AlembicCore/src/core/database.ts', index)).toMatchObject(
@@ -258,10 +262,10 @@ describe('ProjectScope multi-root contracts', () => {
       index
     );
     expect(batch.activeSourceRefs).toEqual(['Alembic/bin/api-server.ts']);
-    expect(batch.rejected.map((sourceRef) => sourceRef.reason)).toEqual(['ambiguous-legacy-path']);
+    expect(batch.rejected.map((sourceRef) => sourceRef.reason)).toEqual(['not-found', 'not-found']);
   });
 
-  it('lets rescan audit accept qualified refs but block ambiguous legacy refs', async () => {
+  it('lets rescan audit accept qualified refs but block ambiguous unqualified refs', async () => {
     const controlRoot = path.join('/workspace', 'AlembicWorkspace');
     const coreIdentity = createCanonicalSourceIdentity({
       folderDisplayName: 'AlembicCore',

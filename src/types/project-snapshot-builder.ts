@@ -258,8 +258,7 @@ function normalizeCanonicalSourceIdentity(raw: unknown): CanonicalSourceIdentity
   const identity = raw as Record<string, unknown>;
   const relativePath = normalizeOptionalString(identity.relativePath);
   const qualifiedPath = normalizeOptionalString(identity.qualifiedPath);
-  const legacyPath = normalizeOptionalString(identity.legacyPath) ?? relativePath;
-  if (!relativePath || !qualifiedPath || !legacyPath) {
+  if (!relativePath || !qualifiedPath) {
     return undefined;
   }
   return {
@@ -268,7 +267,6 @@ function normalizeCanonicalSourceIdentity(raw: unknown): CanonicalSourceIdentity
     folderId: normalizeOptionalString(identity.folderId) ?? null,
     folderPath: normalizeOptionalString(identity.folderPath) ?? null,
     folderRelativeRoot: normalizeOptionalString(identity.folderRelativeRoot) ?? null,
-    legacyPath,
     projectScopeId: normalizeOptionalString(identity.projectScopeId) ?? null,
     qualifiedPath,
     relativePath,

@@ -66,7 +66,6 @@ export interface IDEAgentSourceRef {
   folderId?: string;
   folderRelativeRoot?: string;
   line?: number;
-  legacyPath?: string;
   projectScopeId?: string;
   qualifiedPath?: string;
   relativePath?: string;
@@ -828,7 +827,6 @@ function makeSourceRef({
     ...(identity?.folderRelativeRoot ? { folderRelativeRoot: identity.folderRelativeRoot } : {}),
     ...(identity?.relativePath ? { relativePath: identity.relativePath } : {}),
     ...(identity?.qualifiedPath ? { qualifiedPath: identity.qualifiedPath } : {}),
-    ...(identity?.legacyPath ? { legacyPath: identity.legacyPath } : {}),
     ...(typeof line === 'number' ? { line } : {}),
     ...(symbol ? { symbol } : {}),
     ...(fqn ? { fqn: normalizeFqn(fqn, projectRoot) } : {}),
@@ -1114,7 +1112,6 @@ function createFallbackSourceRef(snapshot: ProjectSnapshot): IDEAgentSourceRef {
     ...(identity?.folderRelativeRoot ? { folderRelativeRoot: identity.folderRelativeRoot } : {}),
     ...(identity?.relativePath ? { relativePath: identity.relativePath } : {}),
     ...(identity?.qualifiedPath ? { qualifiedPath: identity.qualifiedPath } : {}),
-    ...(identity?.legacyPath ? { legacyPath: identity.legacyPath } : {}),
     entityType: 'project',
     role: 'entry',
     displayName: snapshot.projectRoot ? 'Project overview' : 'Project',
@@ -1129,12 +1126,9 @@ function findTargetName(
   const paths = new Set(sourceRefs.flatMap(sourceRefComparablePaths));
   return (
     files.find((file) =>
-      [
-        file.relativePath,
-        file.path,
-        file.sourceIdentity?.legacyPath,
-        file.sourceIdentity?.qualifiedPath,
-      ].some((candidate) => candidate && paths.has(normalizeComparablePath(candidate)))
+      [file.relativePath, file.path, file.sourceIdentity?.qualifiedPath].some(
+        (candidate) => candidate && paths.has(normalizeComparablePath(candidate))
+      )
     )?.targetName || undefined
   );
 }
@@ -1148,7 +1142,7 @@ function findModuleName(
     [
       ...(module.keyFiles ?? []),
       ...(module.keyFileIdentities ?? []).flatMap((identity) => [
-        identity.legacyPath,
+        identity.relativePath,
         identity.qualifiedPath,
       ]),
     ].some((candidate) => paths.has(normalizeComparablePath(candidate)))
@@ -1166,7 +1160,6 @@ function buildSourceIdentityIndex(files: readonly SnapshotFile[]): SourceIdentit
       file.relativePath,
       file.path,
       identity.relativePath,
-      identity.legacyPath,
       identity.qualifiedPath,
     ]) {
       if (candidate) {
@@ -1182,7 +1175,7 @@ function readableSourcePath(sourceRef: IDEAgentSourceRef): string {
 }
 
 function sourceRefComparablePaths(sourceRef: IDEAgentSourceRef): string[] {
-  return [sourceRef.path, sourceRef.relativePath, sourceRef.legacyPath, sourceRef.qualifiedPath]
+  return [sourceRef.path, sourceRef.relativePath, sourceRef.qualifiedPath]
     .filter((candidate): candidate is string => Boolean(candidate))
     .map(normalizeComparablePath);
 }

@@ -107,24 +107,25 @@ describe('Core deterministic contract spine', () => {
 
   it('summarizes D19 closure categories without promoting private fields to public output', () => {
     const summary = summarizeCoreContractFieldPolicies();
-    const projectScopeLegacyPath = CORE_CONTRACT_SPINE_FIELD_POLICIES.find(
-      (policy) => policy.fieldPath === 'rows.I05.projectScope.legacyPath'
+    const projectScopeQualifiedPath = CORE_CONTRACT_SPINE_FIELD_POLICIES.find(
+      (policy) => policy.fieldPath === 'rows.I05.projectScope.qualifiedPath'
     );
 
     expect(summary.rowIds).toEqual([...CORE_CONTRACT_SPINE_ROW_IDS]);
     expect(summary.byClass).toMatchObject({
       'artifactRef-only': 1,
-      'compatibility-private': 2,
+      'compatibility-private': 1,
+      'consumer-needed': 3,
       'detailRef-only': 1,
       'hidden-reasoning': 1,
       'raw-provider': 1,
       sensitive: 1,
       'typed-extension': 1,
     });
-    expect(projectScopeLegacyPath).toMatchObject({
-      cleanupTrigger: expect.stringContaining('legacyPath/byLegacyPath'),
-      fieldClass: 'compatibility-private',
-      ordinaryOutputAllowed: false,
+    expect(projectScopeQualifiedPath).toMatchObject({
+      extensionPolicy: 'strict',
+      fieldClass: 'consumer-needed',
+      ordinaryOutputAllowed: true,
     });
   });
 
@@ -175,13 +176,13 @@ describe('Core legacy contract convergence', () => {
     const summary = summarizeCoreLegacyContractConvergence();
     expect(summary).toMatchObject({
       candidateIds: [...CORE_LEGACY_CONVERGENCE_CANDIDATE_IDS],
-      deletedCandidateIds: ['D9-C04'],
-      preservedCandidateIds: ['D9-C01', 'D9-C02', 'D9-C03'],
+      deletedCandidateIds: ['D9-C03', 'D9-C04'],
+      preservedCandidateIds: ['D9-C01', 'D9-C02'],
       statuses: {
         'already-solved': 0,
         blocked: 0,
-        deleted: 1,
-        'preserved-with-owner': 3,
+        deleted: 2,
+        'preserved-with-owner': 2,
         rewritten: 0,
       },
       version: CORE_CONTRACT_SPINE_VERSION,
@@ -238,7 +239,7 @@ describe('Core legacy contract convergence', () => {
     );
   });
 
-  it('records file monitor aliases and ProjectScope legacy refs as compatibility-only', () => {
+  it('records file monitor aliases as preserved and ProjectScope short refs as deleted', () => {
     const fileMonitor = CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES.find(
       (candidate) => candidate.id === 'D9-C02'
     );
@@ -248,7 +249,9 @@ describe('Core legacy contract convergence', () => {
 
     expect(fileMonitor?.publicExposurePolicy).toContain('canonical acceptedEventSources');
     expect(fileMonitor?.removalTrigger).toContain('compatibilityAliases');
-    expect(projectScope?.publicExposurePolicy).toContain('qualifiedPath/projectScopeId');
-    expect(projectScope?.publicExposurePolicy).toContain('ambiguous legacy refs must be rejected');
+    expect(projectScope?.status).toBe('deleted');
+    expect(projectScope?.publicExposurePolicy).toContain(
+      'projectScopeId plus repo-qualified paths'
+    );
   });
 });
