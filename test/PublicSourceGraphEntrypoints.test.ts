@@ -16,6 +16,7 @@ import {
   SOURCE_GRAPH_FRESHNESS_STATES,
   SourceGraphFreshnessService,
   SourceGraphIndexer,
+  SourceGraphQueryService,
   SourceGraphRepositoryImpl,
   SourceGraphService,
   validateSourceGraphDiagnostic,
@@ -106,11 +107,15 @@ describe('public source graph entrypoints', () => {
   it('publishes the Core source graph repository and service facade', () => {
     expect(SourceGraphIndexer).toBeDefined();
     expect(SourceGraphFreshnessService).toBeDefined();
+    expect(SourceGraphQueryService).toBeDefined();
     expect(SourceGraphRepositoryImpl).toBeDefined();
     expect(SourceGraphService).toBeDefined();
     expect(SourceGraphService.prototype.buildFullIndex).toBeDefined();
     expect(SourceGraphService.prototype.buildIncrementalIndex).toBeDefined();
     expect(SourceGraphService.prototype.inspectFreshness).toBeDefined();
+    expect(SourceGraphService.prototype.searchSourceGraph).toBeDefined();
+    expect(SourceGraphService.prototype.exploreSourceGraph).toBeDefined();
+    expect(SourceGraphService.prototype.getSourceGraphImpact).toBeDefined();
   });
 
   it('publishes CGK-15 source graph boundary states and diagnostic ownership', () => {

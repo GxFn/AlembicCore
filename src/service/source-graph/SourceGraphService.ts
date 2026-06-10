@@ -1,12 +1,9 @@
 import {
   createSourceGraphFreshness,
   createSourceGraphQueryResult,
-  createSourceSection,
   type SourceGraphDiagnosticInput,
-  type SourceGraphEdge,
   type SourceGraphQueryResult,
   type SourceGraphSnapshot,
-  type SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
 import type {
   SourceGraphReplaceInput,
@@ -22,6 +19,15 @@ import {
   SourceGraphIndexer,
   type SourceGraphIndexOptions,
 } from './SourceGraphIndexer.js';
+import {
+  type SourceGraphAffectedTestsInput,
+  type SourceGraphExploreInput,
+  type SourceGraphImpactInput,
+  type SourceGraphNodeInput,
+  SourceGraphQueryService,
+  type SourceGraphRelationInput,
+  type SourceGraphSearchInput,
+} from './SourceGraphQueryService.js';
 
 export interface SourceGraphQueryOptions extends SourceGraphSymbolSearchOptions {
   includeEdges?: boolean;
@@ -52,6 +58,34 @@ export class SourceGraphService {
     return this.repository.getFreshness(projectRoot, repoId);
   }
 
+  async searchSourceGraph(input: SourceGraphSearchInput) {
+    return new SourceGraphQueryService(this.repository).search(input);
+  }
+
+  async exploreSourceGraph(input: SourceGraphExploreInput) {
+    return new SourceGraphQueryService(this.repository).explore(input);
+  }
+
+  async getSourceGraphNode(input: SourceGraphNodeInput) {
+    return new SourceGraphQueryService(this.repository).node(input);
+  }
+
+  async getSourceGraphCallers(input: SourceGraphRelationInput) {
+    return new SourceGraphQueryService(this.repository).callers(input);
+  }
+
+  async getSourceGraphCallees(input: SourceGraphRelationInput) {
+    return new SourceGraphQueryService(this.repository).callees(input);
+  }
+
+  async getSourceGraphImpact(input: SourceGraphImpactInput) {
+    return new SourceGraphQueryService(this.repository).impact(input);
+  }
+
+  async getSourceGraphAffectedTests(input: SourceGraphAffectedTestsInput) {
+    return new SourceGraphQueryService(this.repository).affectedTests(input);
+  }
+
   async querySymbols(
     generationId: string,
     query: string,
@@ -79,29 +113,25 @@ export class SourceGraphService {
       });
     }
 
-    const symbols = await this.repository.searchSymbols(generationId, query, options);
-    const edges =
-      options.includeEdges === false ? [] : await collectSymbolEdges(this.repository, symbols);
-    const diagnostics = buildQueryDiagnostics(query, symbols, snapshot);
+    const searchResult = await this.searchSourceGraph({
+      generationId,
+      query,
+      limit: options.limit,
+      kind: options.kind,
+      filePath: options.filePath,
+      includeEdges: options.includeEdges,
+    });
+    const diagnostics = buildQueryDiagnostics(query, searchResult.symbols, snapshot);
 
     return createSourceGraphQueryResult({
       generationId,
       projectRoot: snapshot.projectRoot,
       query,
       freshness: snapshot.freshness,
-      symbols,
-      edges,
-      sourceSections: symbols.map((symbol) =>
-        createSourceSection({
-          filePath: symbol.filePath,
-          startLine: symbol.range.startLine,
-          endLine: symbol.range.endLine,
-          reason: `symbol:${symbol.kind}`,
-          freshness: snapshot.freshness,
-          symbolIds: [symbol.symbolId],
-        })
-      ),
-      impactedFiles: collectImpactedFiles(symbols, edges),
+      symbols: searchResult.symbols,
+      edges: searchResult.edges,
+      sourceSections: searchResult.sourceSections,
+      impactedFiles: searchResult.impactedFiles,
       diagnostics,
       metadata: {
         repoId: snapshot.repoId,
@@ -115,23 +145,9 @@ export class SourceGraphService {
   }
 }
 
-async function collectSymbolEdges(
-  repository: SourceGraphRepositoryImpl,
-  symbols: SourceSymbolNode[]
-): Promise<SourceGraphEdge[]> {
-  const edgeMap = new Map<string, SourceGraphEdge>();
-  for (const symbol of symbols) {
-    const edges = await repository.findEdgesForSymbol(symbol.generationId, symbol.symbolId);
-    for (const edge of edges) {
-      edgeMap.set(edge.edgeId, edge);
-    }
-  }
-  return Array.from(edgeMap.values());
-}
-
 function buildQueryDiagnostics(
   query: string,
-  symbols: SourceSymbolNode[],
+  symbols: { length: number },
   snapshot: SourceGraphSnapshot
 ): SourceGraphDiagnosticInput[] {
   const diagnostics: SourceGraphDiagnosticInput[] = [];
@@ -149,23 +165,4 @@ function buildQueryDiagnostics(
     });
   }
   return diagnostics;
-}
-
-function collectImpactedFiles(symbols: SourceSymbolNode[], edges: SourceGraphEdge[]): string[] {
-  const files = new Set<string>();
-  for (const symbol of symbols) {
-    files.add(symbol.filePath);
-  }
-  for (const edge of edges) {
-    if (edge.fromFilePath) {
-      files.add(edge.fromFilePath);
-    }
-    if (edge.toFilePath) {
-      files.add(edge.toFilePath);
-    }
-    if (edge.siteFilePath) {
-      files.add(edge.siteFilePath);
-    }
-  }
-  return Array.from(files).sort();
 }

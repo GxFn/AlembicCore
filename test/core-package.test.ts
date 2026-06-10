@@ -13,6 +13,7 @@ import {
   KnowledgeRepositoryImpl,
   ProjectIntelligenceCapability,
   resolveFolderNames,
+  SourceGraphQueryService,
   SourceGraphService,
   validateFolderNameSegment,
 } from '../src/index.js';
@@ -60,5 +61,6 @@ describe('Core package baseline', () => {
       }).freshness.status
     ).toBe('fresh');
     expect(SourceGraphService).toBeDefined();
+    expect(SourceGraphQueryService).toBeDefined();
   });
 });
