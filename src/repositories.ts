@@ -68,6 +68,17 @@ import {
   SessionRepositoryImpl,
 } from './repository/session/SessionRepository.js';
 import {
+  type SourceGraphClearResult,
+  type SourceGraphEdgeDirection,
+  type SourceGraphEdgeInsert,
+  type SourceGraphEdgeQueryOptions,
+  type SourceGraphReplaceInput,
+  SourceGraphRepositoryImpl,
+  type SourceGraphStats,
+  type SourceGraphSymbolInsert,
+  type SourceGraphSymbolSearchOptions,
+} from './repository/source-graph/SourceGraphRepository.js';
+import {
   type RecipeSourceRefEntity,
   type RecipeSourceRefInsert,
   RecipeSourceRefRepositoryImpl,
@@ -107,6 +118,14 @@ export type {
   SemanticMemoryUpdate,
   SessionEntity,
   SessionInsert,
+  SourceGraphClearResult,
+  SourceGraphEdgeDirection,
+  SourceGraphEdgeInsert,
+  SourceGraphEdgeQueryOptions,
+  SourceGraphReplaceInput,
+  SourceGraphStats,
+  SourceGraphSymbolInsert,
+  SourceGraphSymbolSearchOptions,
   SyncRepo,
   TransitionEventRow,
   ViolationRecord,
@@ -125,6 +144,7 @@ export type BootstrapRepository = BootstrapRepositoryImpl;
 export type GuardViolationRepository = GuardViolationRepositoryImpl;
 export type MemoryRepository = MemoryRepositoryImpl;
 export type SessionRepository = SessionRepositoryImpl;
+export type SourceGraphRepository = SourceGraphRepositoryImpl;
 export type SourceRefRepository = RecipeSourceRefRepositoryImpl;
 export type EvolutionProposalRepository = ProposalRepository;
 export type EvolutionWarningRepository = WarningRepository;
@@ -142,6 +162,7 @@ export {
   RawDbSyncAdapter,
   RecipeSourceRefRepositoryImpl,
   SessionRepositoryImpl,
+  SourceGraphRepositoryImpl,
   TokenUsageStore,
   WarningRepository,
   getProposalSourceLabel,
@@ -162,6 +183,7 @@ export interface AlembicRepositoryBundle {
   guardViolationRepository: GuardViolationRepository;
   memoryRepository: MemoryRepository;
   sessionRepository: SessionRepository;
+  sourceGraphRepository: SourceGraphRepository;
   proposalRepository: EvolutionProposalRepository;
   warningRepository: EvolutionWarningRepository;
   lifecycleEventRepository: EvolutionLifecycleEventRepository;
@@ -176,6 +198,7 @@ export const ALEMBIC_REPOSITORY_KEYS = [
   'guardViolationRepository',
   'memoryRepository',
   'sessionRepository',
+  'sourceGraphRepository',
   'proposalRepository',
   'warningRepository',
   'lifecycleEventRepository',
@@ -197,6 +220,7 @@ export function createAlembicRepositories(
     guardViolationRepository: new GuardViolationRepositoryImpl(drizzle),
     memoryRepository: new MemoryRepositoryImpl(drizzle),
     sessionRepository: new SessionRepositoryImpl(drizzle),
+    sourceGraphRepository: new SourceGraphRepositoryImpl(drizzle),
     proposalRepository: new ProposalRepository(drizzle),
     warningRepository: new WarningRepository(drizzle),
     lifecycleEventRepository: new LifecycleEventRepository(drizzle),

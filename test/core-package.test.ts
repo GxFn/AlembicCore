@@ -8,10 +8,12 @@ import {
 } from '../src/domain/knowledge/FieldSpec.js';
 import {
   createHostAgentWorkflowSession,
+  createSourceGraphSnapshot,
   DEFAULT_FOLDER_NAMES,
   KnowledgeRepositoryImpl,
   ProjectIntelligenceCapability,
   resolveFolderNames,
+  SourceGraphService,
   validateFolderNameSegment,
 } from '../src/index.js';
 import { ConfigLoader } from '../src/infrastructure/config/index.js';
@@ -48,5 +50,15 @@ describe('Core package baseline', () => {
     expect(KnowledgeRepositoryImpl).toBeDefined();
     expect(ProjectIntelligenceCapability).toBeDefined();
     expect(createHostAgentWorkflowSession).toBeDefined();
+  });
+
+  it('exposes source graph contracts and service through stable root aggregation', () => {
+    expect(
+      createSourceGraphSnapshot({
+        generationId: 'root-source-graph',
+        projectRoot: '/tmp/alembic-core',
+      }).freshness.status
+    ).toBe('fresh');
+    expect(SourceGraphService).toBeDefined();
   });
 });

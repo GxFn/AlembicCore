@@ -24,6 +24,6 @@ export {
   Relations,
 } from './knowledge/values/Relations.js';
 export { Stats } from './knowledge/values/Stats.js';
-
 // Snippet 相关
 export { Snippet } from './snippet/Snippet.js';
+export * from './source-graph/index.js';

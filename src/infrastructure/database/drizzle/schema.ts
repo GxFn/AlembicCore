@@ -13,6 +13,8 @@
  *   006: lifecycle_transition_events
  *   008: recipe_warnings
  *   009: knowledge_entries.dimensionId
+ *   010: source_graph_generations, source_graph_files,
+ *        source_graph_symbols, source_graph_edges
  *   内部: schema_migrations
  *
  * 注: Task 系统为纯内存 + JSONL 信号架构，不使用数据库表。
@@ -458,5 +460,163 @@ export const recipeWarnings = sqliteTable(
     index('idx_rw_type').on(table.type),
     index('idx_rw_status').on(table.status),
     index('idx_rw_detected').on(table.detectedAt),
+  ]
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 15. source_graph_generations — deterministic source graph snapshots
+// ═══════════════════════════════════════════════════════════════
+
+export const sourceGraphGenerations = sqliteTable(
+  'source_graph_generations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    generationId: text('generation_id').notNull(),
+    projectRoot: text('project_root').notNull(),
+    repoId: text('repo_id').notNull().default('default'),
+    graphRoot: text('graph_root').notNull(),
+    projectScope: text('project_scope'),
+    status: text('status').notNull().default('indexed'),
+    extractionVersion: text('extraction_version').notNull().default('source-graph-v1'),
+    startedAt: integer('started_at').notNull(),
+    completedAt: integer('completed_at'),
+    indexedAt: integer('indexed_at'),
+    freshnessStatus: text('freshness_status').notNull().default('fresh'),
+    freshnessCheckedAt: integer('freshness_checked_at').notNull(),
+    freshnessReason: text('freshness_reason'),
+    freshnessNextAction: text('freshness_next_action'),
+    pendingFileCount: integer('pending_file_count').notNull().default(0),
+    staleFileCount: integer('stale_file_count').notNull().default(0),
+    degradedReason: text('degraded_reason'),
+    languageCoverageJson: text('language_coverage_json').notNull().default('[]'),
+    fileCount: integer('file_count').notNull().default(0),
+    symbolCount: integer('symbol_count').notNull().default(0),
+    edgeCount: integer('edge_count').notNull().default(0),
+    parseErrorCount: integer('parse_error_count').notNull().default(0),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+  },
+  (table) => [
+    uniqueIndex('source_graph_generations_generation_unique').on(table.generationId),
+    index('idx_sgg_project').on(table.projectRoot, table.repoId),
+    index('idx_sgg_status').on(table.status),
+    index('idx_sgg_indexed_at').on(table.indexedAt),
+  ]
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 16. source_graph_files — indexed source files per generation
+// ═══════════════════════════════════════════════════════════════
+
+export const sourceGraphFiles = sqliteTable(
+  'source_graph_files',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    generationId: text('generation_id').notNull(),
+    projectRoot: text('project_root').notNull(),
+    repoRelativePath: text('repo_relative_path').notNull(),
+    language: text('language').notNull().default('unknown'),
+    contentHash: text('content_hash').notNull(),
+    sizeBytes: integer('size_bytes').notNull().default(0),
+    mtimeMs: integer('mtime_ms').notNull().default(0),
+    indexedAt: integer('indexed_at').notNull(),
+    classification: text('classification').notNull().default('source'),
+    parseStatus: text('parse_status').notNull().default('parsed'),
+    parseErrorsJson: text('parse_errors_json').notNull().default('[]'),
+    lineCount: integer('line_count'),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+  },
+  (table) => [
+    uniqueIndex('source_graph_files_generation_path_unique').on(
+      table.generationId,
+      table.repoRelativePath
+    ),
+    index('idx_sgf_project_path').on(table.projectRoot, table.repoRelativePath),
+    index('idx_sgf_generation').on(table.generationId),
+    index('idx_sgf_hash').on(table.contentHash),
+    index('idx_sgf_classification').on(table.classification),
+    index('idx_sgf_parse_status').on(table.parseStatus),
+  ]
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 17. source_graph_symbols — source symbols per generation
+// ═══════════════════════════════════════════════════════════════
+
+export const sourceGraphSymbols = sqliteTable(
+  'source_graph_symbols',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    generationId: text('generation_id').notNull(),
+    projectRoot: text('project_root').notNull(),
+    symbolId: text('symbol_id').notNull(),
+    displayName: text('display_name').notNull(),
+    qualifiedName: text('qualified_name'),
+    kind: text('kind').notNull(),
+    filePath: text('file_path').notNull(),
+    startLine: integer('start_line').notNull(),
+    startColumn: integer('start_column').notNull().default(0),
+    endLine: integer('end_line').notNull(),
+    endColumn: integer('end_column').notNull().default(0),
+    selectionStartLine: integer('selection_start_line'),
+    selectionStartColumn: integer('selection_start_column'),
+    selectionEndLine: integer('selection_end_line'),
+    selectionEndColumn: integer('selection_end_column'),
+    signature: text('signature'),
+    containerSymbolId: text('container_symbol_id'),
+    exported: integer('exported').notNull().default(0),
+    imported: integer('imported').notNull().default(0),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+    provenanceJson: text('provenance_json').notNull().default('{}'),
+  },
+  (table) => [
+    uniqueIndex('source_graph_symbols_generation_symbol_unique').on(
+      table.generationId,
+      table.symbolId
+    ),
+    index('idx_sgs_project').on(table.projectRoot),
+    index('idx_sgs_generation').on(table.generationId),
+    index('idx_sgs_file').on(table.filePath),
+    index('idx_sgs_kind').on(table.kind),
+    index('idx_sgs_display_name').on(table.displayName),
+    index('idx_sgs_container').on(table.containerSymbolId),
+  ]
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 18. source_graph_edges — deterministic and heuristic source relations
+// ═══════════════════════════════════════════════════════════════
+
+export const sourceGraphEdges = sqliteTable(
+  'source_graph_edges',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    generationId: text('generation_id').notNull(),
+    projectRoot: text('project_root').notNull(),
+    edgeId: text('edge_id').notNull(),
+    kind: text('kind').notNull(),
+    fromSymbolId: text('from_symbol_id'),
+    toSymbolId: text('to_symbol_id'),
+    fromFilePath: text('from_file_path'),
+    toFilePath: text('to_file_path'),
+    siteFilePath: text('site_file_path'),
+    siteStartLine: integer('site_start_line'),
+    siteStartColumn: integer('site_start_column'),
+    siteEndLine: integer('site_end_line'),
+    siteEndColumn: integer('site_end_column'),
+    provenance: text('provenance').notNull().default('deterministic'),
+    confidence: real('confidence').notNull().default(1),
+    source: text('source'),
+    metadataJson: text('metadata_json').notNull().default('{}'),
+  },
+  (table) => [
+    uniqueIndex('source_graph_edges_generation_edge_unique').on(table.generationId, table.edgeId),
+    index('idx_sge_project').on(table.projectRoot),
+    index('idx_sge_generation').on(table.generationId),
+    index('idx_sge_kind').on(table.kind),
+    index('idx_sge_from_symbol').on(table.fromSymbolId),
+    index('idx_sge_to_symbol').on(table.toSymbolId),
+    index('idx_sge_from_file').on(table.fromFilePath),
+    index('idx_sge_to_file').on(table.toFilePath),
+    index('idx_sge_provenance').on(table.provenance),
   ]
 );

@@ -16,6 +16,7 @@ import {
   ProposalRepository,
   RawDbSyncAdapter,
   RecipeSourceRefRepositoryImpl,
+  SourceGraphRepositoryImpl,
   TokenUsageStore,
   WarningRepository,
 } from '../src/repositories.js';
@@ -55,6 +56,7 @@ describe('public database and repository entrypoints', () => {
 
     expect(applied).toContain('001_initial_schema');
     expect(applied).toContain('009_knowledge_dimension_id');
+    expect(applied).toContain('010_source_graph');
   });
 
   it('creates core repositories without exposing schema tables or implementation paths', async () => {
@@ -89,10 +91,20 @@ describe('public database and repository entrypoints', () => {
       sourcePath: 'src/example.ts',
       verifiedAt: Date.now(),
     });
+    await repositories.sourceGraphRepository.createGeneration({
+      generationId: 'public-repository-source-graph',
+      projectRoot: tmpDir,
+      repoId: 'AlembicCore',
+      graphRoot: tmpDir,
+      status: 'indexed',
+    });
 
     const fetched = await repositories.knowledgeRepository.findById(entry.id);
     const memories = await repositories.memoryRepository.getAllActive({ source: 'public-db-test' });
     const sourceRefs = repositories.recipeSourceRefRepository.findByRecipeId(entry.id);
+    const sourceGraph = await repositories.sourceGraphRepository.getSnapshot(
+      'public-repository-source-graph'
+    );
 
     expect(fetched?.title).toBe('Stable repository factory');
     expect(memories).toHaveLength(1);
@@ -101,13 +113,16 @@ describe('public database and repository entrypoints', () => {
     );
     expect(sourceRefs).toHaveLength(1);
     expect(sourceRefs[0].sourcePath).toBe('src/example.ts');
+    expect(sourceGraph?.repoId).toBe('AlembicCore');
   });
 
   it('publishes stable repository keys for outer DI registration', () => {
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('knowledgeRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('memoryRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('recipeSourceRefRepository');
+    expect(ALEMBIC_REPOSITORY_KEYS).toContain('sourceGraphRepository');
     expect(isAlembicRepositoryKey('proposalRepository')).toBe(true);
+    expect(isAlembicRepositoryKey('sourceGraphRepository')).toBe(true);
     expect(isAlembicRepositoryKey('tokenUsageStore')).toBe(false);
   });
 
@@ -116,6 +131,7 @@ describe('public database and repository entrypoints', () => {
     expect(KnowledgeEdgeRepositoryImpl).toBeDefined();
     expect(CodeEntityRepositoryImpl).toBeDefined();
     expect(RecipeSourceRefRepositoryImpl).toBeDefined();
+    expect(SourceGraphRepositoryImpl).toBeDefined();
     expect(ProposalRepository).toBeDefined();
     expect(WarningRepository).toBeDefined();
     expect(RawDbSyncAdapter).toBeDefined();

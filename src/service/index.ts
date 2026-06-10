@@ -7,4 +7,5 @@ export * from './panorama/index.js';
 export * from './quality/index.js';
 export * from './recipe/index.js';
 export * from './search/index.js';
+export * from './source-graph/index.js';
 export * from './vector/index.js';

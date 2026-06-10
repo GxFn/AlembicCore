@@ -50,6 +50,7 @@ describe('DatabaseConnection and repository migration integration', () => {
       '007_evolution_type_simplification',
       '008_recipe_warnings',
       '009_knowledge_dimension_id',
+      '010_source_graph',
     ]);
 
     const tables = db
@@ -60,6 +61,10 @@ describe('DatabaseConnection and repository migration integration', () => {
     expect(tables).toContain('knowledge_entries');
     expect(tables).toContain('recipe_source_refs');
     expect(tables).toContain('evolution_proposals');
+    expect(tables).toContain('source_graph_generations');
+    expect(tables).toContain('source_graph_files');
+    expect(tables).toContain('source_graph_symbols');
+    expect(tables).toContain('source_graph_edges');
     expect(tables).not.toContain('remote_commands');
     expect(tables).not.toContain('remote_state');
   });

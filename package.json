@@ -46,6 +46,10 @@
       "types": "./dist/project-intelligence.d.ts",
       "import": "./dist/project-intelligence.js"
     },
+    "./source-graph": {
+      "types": "./dist/source-graph.d.ts",
+      "import": "./dist/source-graph.js"
+    },
     "./host-agent-workflows": {
       "types": "./dist/host-agent-workflows.d.ts",
       "import": "./dist/host-agent-workflows.js"
@@ -113,6 +117,10 @@
     "./domain/knowledge/*": {
       "types": "./dist/domain/knowledge/*.d.ts",
       "import": "./dist/domain/knowledge/*.js"
+    },
+    "./domain/source-graph": {
+      "types": "./dist/domain/source-graph/index.d.ts",
+      "import": "./dist/domain/source-graph/index.js"
     },
     "./domain/snippet/*": {
       "types": "./dist/domain/snippet/*.d.ts",
@@ -342,6 +350,10 @@
       "types": "./dist/repository/session/*.d.ts",
       "import": "./dist/repository/session/*.js"
     },
+    "./repository/source-graph": {
+      "types": "./dist/repository/source-graph/index.d.ts",
+      "import": "./dist/repository/source-graph/index.js"
+    },
     "./repository/sourceref": {
       "types": "./dist/repository/sourceref/index.d.ts",
       "import": "./dist/repository/sourceref/index.js"
@@ -441,6 +453,10 @@
     "./service/search/*": {
       "types": "./dist/service/search/*.d.ts",
       "import": "./dist/service/search/*.js"
+    },
+    "./service/source-graph": {
+      "types": "./dist/service/source-graph/index.d.ts",
+      "import": "./dist/service/source-graph/index.js"
     },
     "./service/vector": {
       "types": "./dist/service/vector/index.d.ts",
