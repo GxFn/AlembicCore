@@ -13,6 +13,15 @@ import type {
   SourceGraphRepositoryImpl,
   SourceGraphSymbolSearchOptions,
 } from '../../repository/source-graph/SourceGraphRepository.js';
+import {
+  type SourceGraphFreshnessOptions,
+  type SourceGraphFreshnessReport,
+  SourceGraphFreshnessService,
+  type SourceGraphIncrementalIndexOptions,
+  type SourceGraphIndexBuildResult,
+  SourceGraphIndexer,
+  type SourceGraphIndexOptions,
+} from './SourceGraphIndexer.js';
 
 export interface SourceGraphQueryOptions extends SourceGraphSymbolSearchOptions {
   includeEdges?: boolean;
@@ -23,6 +32,20 @@ export class SourceGraphService {
 
   async replaceSnapshot(input: SourceGraphReplaceInput): Promise<SourceGraphSnapshot> {
     return this.repository.replaceGeneration(input);
+  }
+
+  async buildFullIndex(input: SourceGraphIndexOptions): Promise<SourceGraphIndexBuildResult> {
+    return new SourceGraphIndexer(this.repository).buildFull(input);
+  }
+
+  async buildIncrementalIndex(
+    input: SourceGraphIncrementalIndexOptions
+  ): Promise<SourceGraphIndexBuildResult> {
+    return new SourceGraphIndexer(this.repository).buildIncremental(input);
+  }
+
+  async inspectFreshness(input: SourceGraphFreshnessOptions): Promise<SourceGraphFreshnessReport> {
+    return new SourceGraphFreshnessService(this.repository).inspect(input);
   }
 
   async getFreshness(projectRoot: string, repoId = 'default') {

@@ -14,6 +14,8 @@ import {
   isSourceGraphSnapshot,
   SOURCE_GRAPH_EDGE_KINDS,
   SOURCE_GRAPH_FRESHNESS_STATES,
+  SourceGraphFreshnessService,
+  SourceGraphIndexer,
   SourceGraphRepositoryImpl,
   SourceGraphService,
   validateSourceGraphDiagnostic,
@@ -102,8 +104,13 @@ describe('public source graph entrypoints', () => {
   });
 
   it('publishes the Core source graph repository and service facade', () => {
+    expect(SourceGraphIndexer).toBeDefined();
+    expect(SourceGraphFreshnessService).toBeDefined();
     expect(SourceGraphRepositoryImpl).toBeDefined();
     expect(SourceGraphService).toBeDefined();
+    expect(SourceGraphService.prototype.buildFullIndex).toBeDefined();
+    expect(SourceGraphService.prototype.buildIncrementalIndex).toBeDefined();
+    expect(SourceGraphService.prototype.inspectFreshness).toBeDefined();
   });
 
   it('publishes CGK-15 source graph boundary states and diagnostic ownership', () => {

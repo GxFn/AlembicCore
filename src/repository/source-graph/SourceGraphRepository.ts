@@ -458,6 +458,15 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
     return rows.length > 0 ? mapSymbolRow(rows[0]) : null;
   }
 
+  async listSymbols(generationId: string): Promise<SourceSymbolNode[]> {
+    const rows = this.drizzle
+      .select()
+      .from(sourceGraphSymbols)
+      .where(eq(sourceGraphSymbols.generationId, generationId))
+      .all();
+    return rows.map(mapSymbolRow);
+  }
+
   async searchSymbols(
     generationId: string,
     query: string,
