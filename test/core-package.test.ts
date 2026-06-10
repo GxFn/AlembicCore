@@ -9,6 +9,7 @@ import {
 import {
   createHostAgentWorkflowSession,
   createSourceGraphSnapshot,
+  createSourceGraphValidationPlanResult,
   DEFAULT_FOLDER_NAMES,
   KnowledgeRepositoryImpl,
   ProjectIntelligenceCapability,
@@ -62,5 +63,10 @@ describe('Core package baseline', () => {
     ).toBe('fresh');
     expect(SourceGraphService).toBeDefined();
     expect(SourceGraphQueryService).toBeDefined();
+    expect(
+      createSourceGraphValidationPlanResult({
+        projectRoot: '/tmp/alembic-core',
+      }).operation
+    ).toBe('validation-plan');
   });
 });

@@ -11,6 +11,7 @@ import {
   createSourceGraphImpactResult,
   createSourceGraphNodeResult,
   createSourceGraphSearchResult,
+  createSourceGraphValidationPlanResult,
   createSourceSection,
   type SourceFileNode,
   type SourceGraphAffectedTestsResult,
@@ -25,6 +26,9 @@ import {
   type SourceGraphNodeResult,
   type SourceGraphSearchResult,
   type SourceGraphSnapshot,
+  type SourceGraphValidationEvidenceInput,
+  type SourceGraphValidationPlanResult,
+  type SourceGraphValidationRecommendationInput,
   type SourceSection,
   type SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
@@ -75,6 +79,12 @@ export interface SourceGraphImpactInput extends SourceGraphRankingOptions {
 
 export interface SourceGraphAffectedTestsInput extends SourceGraphRankingOptions {
   changedFiles: string[];
+}
+
+export interface SourceGraphValidationPlanInput extends SourceGraphRankingOptions {
+  changedFiles?: string[];
+  symbolIds?: string[];
+  packageScripts?: Record<string, string>;
 }
 
 interface NormalizedRankingOptions {
@@ -346,6 +356,73 @@ export class SourceGraphQueryService {
       changedFiles,
       testFiles,
       unknownReason,
+    });
+  }
+
+  async validationPlan(
+    input: SourceGraphValidationPlanInput
+  ): Promise<SourceGraphValidationPlanResult> {
+    const context = await this.createContext(input);
+    const changedFiles = normalizeStringList((input.changedFiles ?? []).map(normalizeRepoPath));
+    const seedSymbols = normalizeStringList(input.symbolIds ?? []);
+    const missingSeedSymbols = seedSymbols.filter((symbolId) => !context.symbolById.has(symbolId));
+    const seedFiles = this.resolveValidationSeedFiles(context, input, changedFiles, seedSymbols);
+    const impactedEdges = collectImpactEdges(context, seedFiles, seedSymbols).slice(
+      0,
+      context.options.edgeLimit
+    );
+    const impactedFiles = normalizeStringList([...seedFiles, ...edgeFilePaths(impactedEdges)]);
+    const impactedSymbols = collectImpactedSymbols(
+      context,
+      impactedFiles,
+      impactedEdges,
+      seedSymbols
+    );
+    const testFiles = collectTestFiles(context, impactedFiles, impactedEdges);
+    const packageScripts = {
+      ...(await readPackageScripts(context.projectRoot)),
+      ...normalizeScriptRecord(input.packageScripts),
+    };
+    const diagnostics = [...context.diagnostics];
+    const evidence = buildValidationPlanEvidence(
+      changedFiles,
+      impactedFiles,
+      impactedSymbols,
+      impactedEdges
+    );
+    const buckets = createValidationPlanBuckets();
+
+    appendMissingSeedSymbolRecommendations(missingSeedSymbols, diagnostics, buckets.unknown);
+    appendAffectedTestRecommendations({
+      testFiles,
+      packageScripts,
+      graphEvidence: evidence.graph,
+      changedFiles,
+      seedSymbols,
+      impactedFiles,
+      diagnostics,
+      mustRun: buckets.mustRun,
+      unknown: buckets.unknown,
+    });
+    appendRepositoryScriptRecommendations(packageScripts, evidence.graph, buckets.recommended);
+    appendManualReviewRecommendations(changedFiles, context, buckets.manualReview);
+    appendSeedAndScriptUnknowns(changedFiles, seedSymbols, packageScripts, buckets.unknown);
+
+    return createSourceGraphValidationPlanResult({
+      generationId: context.generationId,
+      projectRoot: context.projectRoot,
+      repoId: context.repoId,
+      freshness: context.freshness,
+      diagnostics,
+      changedFiles,
+      seedSymbols,
+      impactedFiles,
+      impactedSymbols,
+      edges: context.options.includeEdges === false ? [] : impactedEdges,
+      mustRun: buckets.mustRun,
+      recommended: buckets.recommended,
+      manualReview: buckets.manualReview,
+      unknown: buckets.unknown,
     });
   }
 
@@ -723,6 +800,25 @@ export class SourceGraphQueryService {
     }
     return normalizeStringList(Array.from(files));
   }
+
+  private resolveValidationSeedFiles(
+    context: SourceGraphQueryContext,
+    input: SourceGraphValidationPlanInput,
+    changedFiles: string[],
+    seedSymbols: string[]
+  ): string[] {
+    const files = new Set<string>(changedFiles);
+    if (input.filePath) {
+      files.add(normalizeRepoPath(input.filePath));
+    }
+    for (const symbolId of seedSymbols) {
+      const symbol = context.symbolById.get(symbolId);
+      if (symbol) {
+        files.add(symbol.filePath);
+      }
+    }
+    return normalizeStringList(Array.from(files));
+  }
 }
 
 function normalizeRankingOptions(input: SourceGraphRankingOptions): NormalizedRankingOptions {
@@ -1023,18 +1119,295 @@ function collectEdgesForFiles(
   ).slice(0, limit);
 }
 
+interface ValidationPlanBuckets {
+  mustRun: SourceGraphValidationRecommendationInput[];
+  recommended: SourceGraphValidationRecommendationInput[];
+  manualReview: SourceGraphValidationRecommendationInput[];
+  unknown: SourceGraphValidationRecommendationInput[];
+}
+
+interface ValidationPlanEvidence {
+  graph: SourceGraphValidationEvidenceInput[];
+}
+
+interface AffectedTestRecommendationInput {
+  testFiles: string[];
+  packageScripts: Record<string, string>;
+  graphEvidence: SourceGraphValidationEvidenceInput[];
+  changedFiles: string[];
+  seedSymbols: string[];
+  impactedFiles: string[];
+  diagnostics: SourceGraphDiagnostic[];
+  mustRun: SourceGraphValidationRecommendationInput[];
+  unknown: SourceGraphValidationRecommendationInput[];
+}
+
+function createValidationPlanBuckets(): ValidationPlanBuckets {
+  return {
+    mustRun: [],
+    recommended: [],
+    manualReview: [],
+    unknown: [],
+  };
+}
+
+function buildValidationPlanEvidence(
+  changedFiles: string[],
+  impactedFiles: string[],
+  impactedSymbols: SourceSymbolNode[],
+  impactedEdges: SourceGraphEdge[]
+): ValidationPlanEvidence {
+  const changedEvidence = changedFiles.map((filePath) =>
+    fileEvidence('changed-file', filePath, 'Changed file seed for validation planning.', 1)
+  );
+  const impactedEvidence = impactedFiles.map((filePath) =>
+    fileEvidence('impacted-file', filePath, 'Impacted file from source graph impact edges.', 0.85)
+  );
+  const symbolEvidence = impactedSymbols.map((symbol) =>
+    symbolValidationEvidence(symbol, 'Impacted source graph symbol.')
+  );
+  const edgeEvidence = impactedEdges.map((edge) =>
+    edgeValidationEvidence(edge, 'Source graph edge used for impact-to-validation planning.')
+  );
+  return {
+    graph: [...changedEvidence, ...impactedEvidence, ...symbolEvidence, ...edgeEvidence],
+  };
+}
+
+function appendMissingSeedSymbolRecommendations(
+  missingSeedSymbols: string[],
+  diagnostics: SourceGraphDiagnostic[],
+  unknown: SourceGraphValidationRecommendationInput[]
+): void {
+  for (const symbolId of missingSeedSymbols) {
+    const diagnostic = createSourceGraphDiagnostic({
+      code: 'source-ref-unproven',
+      message: `Source graph symbol seed not found: ${symbolId}`,
+      metadata: { symbolId },
+    });
+    diagnostics.push(diagnostic);
+    unknown.push({
+      bucket: 'unknown',
+      kind: 'unknown',
+      label: `Symbol seed not found ${symbolId}`,
+      symbolId,
+      diagnosticCode: 'source-ref-unproven',
+      reason:
+        'Validation planning cannot bind impact or test evidence to an unknown source graph symbol seed.',
+      evidence: [
+        diagnosticEvidence(
+          'source-ref-unproven',
+          'The requested source graph symbol seed was not present in the snapshot.'
+        ),
+      ],
+      metadata: { symbolId },
+    });
+  }
+}
+
+function appendAffectedTestRecommendations(input: AffectedTestRecommendationInput): void {
+  for (const testFile of input.testFiles) {
+    const command = input.packageScripts.test ? `npm run test -- ${testFile}` : undefined;
+    input.mustRun.push({
+      bucket: 'mustRun',
+      kind: 'test-file',
+      label: `Run affected test ${testFile}`,
+      filePath: testFile,
+      command,
+      reason:
+        'A deterministic source graph symbol_to_test edge or indexed impacted test file maps this change to the test.',
+      evidence: [
+        ...input.graphEvidence,
+        fileEvidence('test-file', testFile, 'Deterministic affected test file.', 1),
+        ...scriptEvidence('test', command, input.packageScripts.test),
+      ],
+      metadata: { testFile },
+    });
+  }
+
+  if (input.testFiles.length > 0) {
+    return;
+  }
+
+  const diagnostic = createSourceGraphDiagnostic({
+    code: 'affected-tests-unknown',
+    message: 'No deterministic source graph test edge or indexed test file maps this change.',
+    metadata: {
+      changedFiles: input.changedFiles,
+      seedSymbols: input.seedSymbols,
+      impactedFiles: input.impactedFiles,
+    },
+  });
+  input.diagnostics.push(diagnostic);
+  input.unknown.push({
+    bucket: 'unknown',
+    kind: 'unknown',
+    label: 'Affected tests unknown',
+    command: input.packageScripts.test ? 'npm run test' : undefined,
+    diagnosticCode: 'affected-tests-unknown',
+    reason:
+      'Source graph can describe impact, but it cannot prove a deterministic test owner for this change.',
+    evidence: [
+      ...input.graphEvidence,
+      diagnosticEvidence(
+        'affected-tests-unknown',
+        'No deterministic affected-test edge was available.'
+      ),
+      ...scriptEvidence(
+        'test',
+        input.packageScripts.test ? 'npm run test' : undefined,
+        input.packageScripts.test
+      ),
+    ],
+    metadata: {
+      changedFiles: input.changedFiles,
+      seedSymbols: input.seedSymbols,
+      impactedFiles: input.impactedFiles,
+    },
+  });
+}
+
+function appendRepositoryScriptRecommendations(
+  packageScripts: Record<string, string>,
+  graphEvidence: SourceGraphValidationEvidenceInput[],
+  recommended: SourceGraphValidationRecommendationInput[]
+): void {
+  for (const scriptName of ['build:check', 'lint', 'check']) {
+    const scriptCommand = packageScripts[scriptName];
+    if (!scriptCommand) {
+      continue;
+    }
+    recommended.push({
+      bucket: 'recommended',
+      kind: 'repo-command',
+      label: `Run repository script ${scriptName}`,
+      command: `npm run ${scriptName}`,
+      reason:
+        'Repository metadata exposes this validation script; source graph recommends it without claiming acceptance.',
+      evidence: [
+        ...graphEvidence,
+        {
+          kind: 'repo-script',
+          ref: `package.json#scripts.${scriptName}`,
+          command: `npm run ${scriptName}`,
+          reason: 'Repository package script is available for validation.',
+          confidence: 1,
+          metadata: { scriptName, scriptCommand },
+        },
+      ],
+      metadata: { scriptName, scriptCommand },
+    });
+  }
+}
+
+function appendManualReviewRecommendations(
+  changedFiles: string[],
+  context: SourceGraphQueryContext,
+  manualReview: SourceGraphValidationRecommendationInput[]
+): void {
+  for (const filePath of changedFiles) {
+    const file = context.fileByPath.get(filePath);
+    if (!requiresManualReview(filePath, file)) {
+      continue;
+    }
+    manualReview.push({
+      bucket: 'manualReview',
+      kind: 'manual-review',
+      label: `Review non-source change ${filePath}`,
+      filePath,
+      reason:
+        'Configuration or unknown-file changes may affect validation outside deterministic symbol-to-test edges.',
+      evidence: [
+        fileEvidence(
+          'changed-file',
+          filePath,
+          'Changed file needs manual review before narrowing validation.',
+          0.9
+        ),
+      ],
+      metadata: {
+        classification: file?.classification ?? inferManualReviewClassification(filePath),
+      },
+    });
+  }
+}
+
+function appendSeedAndScriptUnknowns(
+  changedFiles: string[],
+  seedSymbols: string[],
+  packageScripts: Record<string, string>,
+  unknown: SourceGraphValidationRecommendationInput[]
+): void {
+  if (changedFiles.length === 0 && seedSymbols.length === 0) {
+    unknown.push({
+      bucket: 'unknown',
+      kind: 'unknown',
+      label: 'No validation seed provided',
+      reason: 'Validation planning needs changed files or symbol seeds to bind impact evidence.',
+      evidence: [
+        diagnosticEvidence(
+          'source-ref-unproven',
+          'No changed file or source graph symbol seed was provided.'
+        ),
+      ],
+      metadata: {},
+    });
+  }
+
+  if (Object.keys(packageScripts).length === 0) {
+    unknown.push({
+      bucket: 'unknown',
+      kind: 'unknown',
+      label: 'Repository validation commands unknown',
+      reason:
+        'No package.json scripts or explicit packageScripts metadata were available for command recommendations.',
+      evidence: [
+        diagnosticEvidence(
+          'source-ref-unproven',
+          'Repository command metadata was not available to Core.'
+        ),
+      ],
+      metadata: {},
+    });
+  }
+}
+
 function collectImpactEdges(
   context: SourceGraphQueryContext,
   seedFiles: string[],
-  symbolId: string | undefined
+  symbolIds: string | string[] | undefined
 ): SourceGraphEdge[] {
   const files = new Set(seedFiles.map(normalizeRepoPath));
+  const symbols = new Set(normalizeStringList(Array.isArray(symbolIds) ? symbolIds : [symbolIds]));
   return uniqueEdges(
     context.edges.filter((edge) => {
       const symbolMatch =
-        symbolId !== undefined && (edge.fromSymbolId === symbolId || edge.toSymbolId === symbolId);
+        symbols.size > 0 &&
+        ((edge.fromSymbolId !== undefined && symbols.has(edge.fromSymbolId)) ||
+          (edge.toSymbolId !== undefined && symbols.has(edge.toSymbolId)));
       return symbolMatch || edgeFilePaths([edge]).some((filePath) => files.has(filePath));
     })
+  );
+}
+
+function collectImpactedSymbols(
+  context: SourceGraphQueryContext,
+  impactedFiles: string[],
+  impactedEdges: SourceGraphEdge[],
+  seedSymbolIds: string[]
+): SourceSymbolNode[] {
+  const files = new Set(impactedFiles.map(normalizeRepoPath));
+  const symbolIds = new Set(seedSymbolIds);
+  for (const edge of impactedEdges) {
+    if (edge.fromSymbolId) {
+      symbolIds.add(edge.fromSymbolId);
+    }
+    if (edge.toSymbolId) {
+      symbolIds.add(edge.toSymbolId);
+    }
+  }
+  return uniqueSymbols(
+    context.symbols.filter((symbol) => files.has(symbol.filePath) || symbolIds.has(symbol.symbolId))
   );
 }
 
@@ -1067,6 +1440,145 @@ function collectTestFiles(
     }
   }
   return normalizeStringList(Array.from(testFiles));
+}
+
+function fileEvidence(
+  kind: 'changed-file' | 'impacted-file' | 'test-file',
+  filePath: string,
+  reason: string,
+  confidence: number
+): SourceGraphValidationEvidenceInput {
+  return {
+    kind,
+    ref: filePath,
+    filePath,
+    reason,
+    confidence,
+    metadata: {},
+  };
+}
+
+function symbolValidationEvidence(
+  symbol: SourceSymbolNode,
+  reason: string
+): SourceGraphValidationEvidenceInput {
+  return {
+    kind: 'symbol',
+    ref: symbol.symbolId,
+    symbolId: symbol.symbolId,
+    filePath: symbol.filePath,
+    reason,
+    confidence: 0.9,
+    metadata: {
+      displayName: symbol.displayName,
+      kind: symbol.kind,
+    },
+  };
+}
+
+function edgeValidationEvidence(
+  edge: SourceGraphEdge,
+  reason: string
+): SourceGraphValidationEvidenceInput {
+  return {
+    kind: 'edge',
+    ref: edge.edgeId,
+    edgeId: edge.edgeId,
+    filePath: edge.siteFilePath ?? edge.fromFilePath ?? edge.toFilePath,
+    reason,
+    confidence: edge.confidence,
+    metadata: {
+      kind: edge.kind,
+      provenance: edge.provenance,
+      fromSymbolId: edge.fromSymbolId,
+      toSymbolId: edge.toSymbolId,
+    },
+  };
+}
+
+function diagnosticEvidence(
+  diagnosticCode: NonNullable<SourceGraphValidationEvidenceInput['diagnosticCode']>,
+  reason: string
+): SourceGraphValidationEvidenceInput {
+  return {
+    kind: 'diagnostic',
+    ref: diagnosticCode,
+    diagnosticCode,
+    reason,
+    confidence: 1,
+    metadata: {},
+  };
+}
+
+function scriptEvidence(
+  scriptName: string,
+  command: string | undefined,
+  scriptCommand: string | undefined
+): SourceGraphValidationEvidenceInput[] {
+  if (!scriptCommand) {
+    return [];
+  }
+  return [
+    {
+      kind: 'repo-script',
+      ref: `package.json#scripts.${scriptName}`,
+      command,
+      reason: 'Repository package script is available for validation.',
+      confidence: 1,
+      metadata: { scriptName, scriptCommand },
+    },
+  ];
+}
+
+function requiresManualReview(filePath: string, file: SourceFileNode | undefined): boolean {
+  const classification = file?.classification ?? inferManualReviewClassification(filePath);
+  return classification === 'config' || classification === 'unknown';
+}
+
+function inferManualReviewClassification(filePath: string): SourceGraphFileClassification {
+  const normalized = normalizeRepoPath(filePath).toLowerCase();
+  if (
+    normalized.endsWith('.json') ||
+    normalized.endsWith('.yaml') ||
+    normalized.endsWith('.yml') ||
+    normalized.endsWith('.toml') ||
+    normalized.endsWith('.config.ts') ||
+    normalized.endsWith('.config.js') ||
+    normalized.includes('/config/') ||
+    normalized === 'package.json' ||
+    normalized === 'tsconfig.json'
+  ) {
+    return 'config';
+  }
+  return 'unknown';
+}
+
+async function readPackageScripts(projectRoot: string): Promise<Record<string, string>> {
+  const packageJsonPath = resolveProjectFile(projectRoot, 'package.json');
+  if (!packageJsonPath) {
+    return {};
+  }
+  try {
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, 'utf8')) as {
+      scripts?: unknown;
+    };
+    return normalizeScriptRecord(packageJson.scripts);
+  } catch {
+    return {};
+  }
+}
+
+function normalizeScriptRecord(value: unknown): Record<string, string> {
+  if (value === undefined || value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return {};
+  }
+  const scripts: Record<string, string> = {};
+  for (const [name, command] of Object.entries(value)) {
+    if (typeof command === 'string' && command.trim() !== '' && name.trim() !== '') {
+      scripts[name.trim()] = command.trim();
+    }
+  }
+  return scripts;
 }
 
 function symbolForRelationEndpoint(

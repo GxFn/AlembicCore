@@ -101,6 +101,32 @@ export const SOURCE_GRAPH_OPERATION_KINDS = [
   'callees',
   'impact',
   'affected-tests',
+  'validation-plan',
+] as const;
+
+export const SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS = [
+  'mustRun',
+  'recommended',
+  'manualReview',
+  'unknown',
+] as const;
+
+export const SOURCE_GRAPH_VALIDATION_EVIDENCE_KINDS = [
+  'changed-file',
+  'impacted-file',
+  'symbol',
+  'edge',
+  'test-file',
+  'repo-script',
+  'diagnostic',
+] as const;
+
+export const SOURCE_GRAPH_VALIDATION_RECOMMENDATION_KINDS = [
+  'test-file',
+  'repo-command',
+  'guard',
+  'manual-review',
+  'unknown',
 ] as const;
 
 export const SOURCE_GRAPH_DETAIL_REF_KINDS = [
@@ -121,6 +147,11 @@ export type SourceGraphSymbolKind = (typeof SOURCE_GRAPH_SYMBOL_KINDS)[number] |
 export type SourceGraphRedactionState = (typeof SOURCE_GRAPH_REDACTION_STATES)[number];
 export type SourceGraphDiagnosticCode = (typeof SOURCE_GRAPH_DIAGNOSTIC_CODES)[number];
 export type SourceGraphOperationKind = (typeof SOURCE_GRAPH_OPERATION_KINDS)[number];
+export type SourceGraphValidationPlanBucket = (typeof SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS)[number];
+export type SourceGraphValidationEvidenceKind =
+  (typeof SOURCE_GRAPH_VALIDATION_EVIDENCE_KINDS)[number];
+export type SourceGraphValidationRecommendationKind =
+  (typeof SOURCE_GRAPH_VALIDATION_RECOMMENDATION_KINDS)[number];
 export type SourceGraphDetailRefKind = (typeof SOURCE_GRAPH_DETAIL_REF_KINDS)[number];
 export type SourceGraphDiagnosticOwner = 'core' | 'plugin' | 'core-plugin' | 'controller' | 'test';
 
@@ -401,6 +432,33 @@ export interface SourceGraphOperationBaseInput {
   detailRefs?: SourceGraphDetailRefInput[];
 }
 
+export interface SourceGraphValidationEvidence {
+  kind: SourceGraphValidationEvidenceKind;
+  ref: string;
+  filePath?: string;
+  symbolId?: string;
+  edgeId?: string;
+  command?: string;
+  diagnosticCode?: SourceGraphDiagnosticCode;
+  reason: string;
+  confidence: number;
+  metadata: Record<string, unknown>;
+}
+
+export interface SourceGraphValidationRecommendation {
+  bucket: SourceGraphValidationPlanBucket;
+  kind: SourceGraphValidationRecommendationKind;
+  label: string;
+  command?: string;
+  filePath?: string;
+  symbolId?: string;
+  diagnosticCode?: SourceGraphDiagnosticCode;
+  reason: string;
+  confidence: number;
+  evidence: SourceGraphValidationEvidence[];
+  metadata: Record<string, unknown>;
+}
+
 export interface SourceGraphStatusResult extends SourceGraphOperationBase {
   operation: 'status';
   snapshot?: SourceGraphSnapshot;
@@ -467,6 +525,20 @@ export interface SourceGraphAffectedTestsResult extends SourceGraphOperationBase
   changedFiles: string[];
   testFiles: string[];
   unknownReason?: string;
+}
+
+export interface SourceGraphValidationPlanResult extends SourceGraphOperationBase {
+  operation: 'validation-plan';
+  changedFiles: string[];
+  seedSymbols: string[];
+  impactedFiles: string[];
+  impactedSymbols: SourceSymbolNode[];
+  edges: SourceGraphEdge[];
+  mustRun: SourceGraphValidationRecommendation[];
+  recommended: SourceGraphValidationRecommendation[];
+  manualReview: SourceGraphValidationRecommendation[];
+  unknown: SourceGraphValidationRecommendation[];
+  acceptanceBoundary: string;
 }
 
 export interface SourceGraphQueryResult {
@@ -543,6 +615,26 @@ export interface SourceSectionInput
   metadata?: Record<string, unknown>;
 }
 
+export interface SourceGraphValidationEvidenceInput
+  extends Omit<Partial<SourceGraphValidationEvidence>, 'kind' | 'ref' | 'confidence' | 'metadata'> {
+  kind: SourceGraphValidationEvidenceKind;
+  ref: string;
+  confidence?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SourceGraphValidationRecommendationInput
+  extends Omit<
+    Partial<SourceGraphValidationRecommendation>,
+    'kind' | 'label' | 'confidence' | 'evidence' | 'metadata'
+  > {
+  kind: SourceGraphValidationRecommendationKind;
+  label: string;
+  confidence?: number;
+  evidence?: SourceGraphValidationEvidenceInput[];
+  metadata?: Record<string, unknown>;
+}
+
 export interface SourceGraphQueryResultInput
   extends Omit<
     Partial<SourceGraphQueryResult>,
@@ -611,6 +703,19 @@ export interface SourceGraphAffectedTestsResultInput extends SourceGraphOperatio
   unknownReason?: string;
 }
 
+export interface SourceGraphValidationPlanResultInput extends SourceGraphOperationBaseInput {
+  changedFiles?: string[];
+  seedSymbols?: string[];
+  impactedFiles?: string[];
+  impactedSymbols?: SourceSymbolNode[];
+  edges?: SourceGraphEdge[];
+  mustRun?: SourceGraphValidationRecommendationInput[];
+  recommended?: SourceGraphValidationRecommendationInput[];
+  manualReview?: SourceGraphValidationRecommendationInput[];
+  unknown?: SourceGraphValidationRecommendationInput[];
+  acceptanceBoundary?: string;
+}
+
 export type SourceGraphOperationResult =
   | SourceGraphStatusResult
   | SourceGraphSearchResult
@@ -619,7 +724,8 @@ export type SourceGraphOperationResult =
   | SourceGraphCallersResult
   | SourceGraphCalleesResult
   | SourceGraphImpactResult
-  | SourceGraphAffectedTestsResult;
+  | SourceGraphAffectedTestsResult
+  | SourceGraphValidationPlanResult;
 
 export function createSourceGraphFreshness(
   input: SourceGraphFreshnessInput = {}
@@ -794,6 +900,63 @@ export function createSourceSection(input: SourceSectionInput): SourceSection {
       reason: optionalNonEmpty(input.redaction?.reason, 'section.redaction.reason'),
     },
     symbolIds: normalizeStringList(input.symbolIds ?? []),
+    metadata: normalizeRecord(input.metadata),
+  };
+}
+
+export function createSourceGraphValidationEvidence(
+  input: SourceGraphValidationEvidenceInput
+): SourceGraphValidationEvidence {
+  return {
+    kind: requireAllowed(input.kind, SOURCE_GRAPH_VALIDATION_EVIDENCE_KINDS, 'evidence.kind'),
+    ref: requireNonEmpty(input.ref, 'evidence.ref'),
+    filePath: optionalNonEmpty(input.filePath, 'evidence.filePath'),
+    symbolId: optionalNonEmpty(input.symbolId, 'evidence.symbolId'),
+    edgeId: optionalNonEmpty(input.edgeId, 'evidence.edgeId'),
+    command: optionalNonEmpty(input.command, 'evidence.command'),
+    diagnosticCode:
+      input.diagnosticCode === undefined
+        ? undefined
+        : requireAllowed(
+            input.diagnosticCode,
+            SOURCE_GRAPH_DIAGNOSTIC_CODES,
+            'evidence.diagnosticCode'
+          ),
+    reason: requireNonEmpty(input.reason, 'evidence.reason'),
+    confidence: normalizeConfidence(input.confidence ?? 1, 'evidence.confidence'),
+    metadata: normalizeRecord(input.metadata),
+  };
+}
+
+export function createSourceGraphValidationRecommendation(
+  input: SourceGraphValidationRecommendationInput
+): SourceGraphValidationRecommendation {
+  return {
+    bucket: requireAllowed(
+      input.bucket ?? 'recommended',
+      SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS,
+      'recommendation.bucket'
+    ),
+    kind: requireAllowed(
+      input.kind,
+      SOURCE_GRAPH_VALIDATION_RECOMMENDATION_KINDS,
+      'recommendation.kind'
+    ),
+    label: requireNonEmpty(input.label, 'recommendation.label'),
+    command: optionalNonEmpty(input.command, 'recommendation.command'),
+    filePath: optionalNonEmpty(input.filePath, 'recommendation.filePath'),
+    symbolId: optionalNonEmpty(input.symbolId, 'recommendation.symbolId'),
+    diagnosticCode:
+      input.diagnosticCode === undefined
+        ? undefined
+        : requireAllowed(
+            input.diagnosticCode,
+            SOURCE_GRAPH_DIAGNOSTIC_CODES,
+            'recommendation.diagnosticCode'
+          ),
+    reason: requireNonEmpty(input.reason, 'recommendation.reason'),
+    confidence: normalizeConfidence(input.confidence ?? 1, 'recommendation.confidence'),
+    evidence: (input.evidence ?? []).map(createSourceGraphValidationEvidence),
     metadata: normalizeRecord(input.metadata),
   };
 }
@@ -981,6 +1144,28 @@ export function createSourceGraphAffectedTestsResult(
   };
 }
 
+export function createSourceGraphValidationPlanResult(
+  input: SourceGraphValidationPlanResultInput
+): SourceGraphValidationPlanResult {
+  const base = createSourceGraphOperationBase('validation-plan', input);
+  return {
+    ...base,
+    operation: 'validation-plan',
+    changedFiles: normalizeStringList(input.changedFiles ?? []),
+    seedSymbols: normalizeStringList(input.seedSymbols ?? []),
+    impactedFiles: normalizeStringList(input.impactedFiles ?? []),
+    impactedSymbols: input.impactedSymbols ?? [],
+    edges: input.edges ?? [],
+    mustRun: normalizeValidationRecommendations(input.mustRun, 'mustRun'),
+    recommended: normalizeValidationRecommendations(input.recommended, 'recommended'),
+    manualReview: normalizeValidationRecommendations(input.manualReview, 'manualReview'),
+    unknown: normalizeValidationRecommendations(input.unknown, 'unknown'),
+    acceptanceBoundary:
+      input.acceptanceBoundary?.trim() ||
+      'Source graph validation plans are advisory evidence and do not replace controller acceptance, Guard review, or Test-window real-scenario validation.',
+  };
+}
+
 export function validateSourceGraphStatusResult(input: SourceGraphStatusResultInput): string[] {
   return collectValidationIssues(() => createSourceGraphStatusResult(input));
 }
@@ -1013,6 +1198,12 @@ export function validateSourceGraphAffectedTestsResult(
   input: SourceGraphAffectedTestsResultInput
 ): string[] {
   return collectValidationIssues(() => createSourceGraphAffectedTestsResult(input));
+}
+
+export function validateSourceGraphValidationPlanResult(
+  input: SourceGraphValidationPlanResultInput
+): string[] {
+  return collectValidationIssues(() => createSourceGraphValidationPlanResult(input));
 }
 
 export function createSourceGraphQueryResult(
@@ -1082,6 +1273,22 @@ function createSourceGraphOperationBase(
     nextActions: collectSourceGraphNextActions(freshness, diagnostics),
     detailRefs: (input.detailRefs ?? []).map(createSourceGraphDetailRef),
   };
+}
+
+function normalizeValidationRecommendations(
+  value: SourceGraphValidationRecommendationInput[] | undefined,
+  bucket: SourceGraphValidationPlanBucket
+): SourceGraphValidationRecommendation[] {
+  return (value ?? []).map((input) => {
+    const recommendation = createSourceGraphValidationRecommendation({
+      ...input,
+      bucket: input.bucket ?? bucket,
+    });
+    if (recommendation.bucket !== bucket) {
+      throw new Error(`${bucket} recommendation bucket mismatch.`);
+    }
+    return recommendation;
+  });
 }
 
 function diagnosticMessageFor(code: SourceGraphDiagnosticCode): string {

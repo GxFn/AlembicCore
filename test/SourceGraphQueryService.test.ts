@@ -154,6 +154,89 @@ describe('SourceGraphQueryService', () => {
     );
   });
 
+  it('builds validation plans from changed source files with tests, commands, and evidence', async () => {
+    const service = await buildFixtureGraph();
+
+    const plan = await service.getSourceGraphValidationPlan({
+      generationId: 'gen-query',
+      changedFiles: ['src/app.ts'],
+    });
+
+    expect(plan.operation).toBe('validation-plan');
+    expect(plan.ready).toBe(true);
+    expect(plan.changedFiles).toStrictEqual(['src/app.ts']);
+    expect(plan.impactedFiles).toEqual(
+      expect.arrayContaining(['src/app.ts', 'src/dashboard.ts', 'test/app.test.ts'])
+    );
+    expect(plan.impactedSymbols.map((symbol) => symbol.symbolId)).toEqual(
+      expect.arrayContaining(['src/app.ts#AppController', 'src/dashboard.ts#renderDashboard'])
+    );
+    expect(plan.mustRun[0]).toMatchObject({
+      bucket: 'mustRun',
+      kind: 'test-file',
+      filePath: 'test/app.test.ts',
+      command: 'npm run test -- test/app.test.ts',
+    });
+    expect(plan.mustRun[0]?.evidence.map((evidence) => evidence.kind)).toEqual(
+      expect.arrayContaining(['changed-file', 'impacted-file', 'symbol', 'edge', 'test-file'])
+    );
+    expect(plan.recommended.map((recommendation) => recommendation.command)).toEqual(
+      expect.arrayContaining(['npm run build:check', 'npm run lint', 'npm run check'])
+    );
+    expect(plan.acceptanceBoundary).toContain('do not replace controller acceptance');
+
+    const symbolSeedPlan = await service.getSourceGraphValidationPlan({
+      generationId: 'gen-query',
+      symbolIds: ['src/app.ts#bootstrapApp'],
+    });
+    expect(symbolSeedPlan.seedSymbols).toStrictEqual(['src/app.ts#bootstrapApp']);
+    expect(symbolSeedPlan.mustRun[0]?.filePath).toBe('test/app.test.ts');
+  });
+
+  it('routes config changes to manual review and keeps affected-test uncertainty explicit', async () => {
+    const service = await buildFixtureGraph();
+
+    const plan = await service.getSourceGraphValidationPlan({
+      generationId: 'gen-query',
+      changedFiles: ['package.json'],
+    });
+
+    expect(plan.ready).toBe(false);
+    expect(plan.manualReview[0]).toMatchObject({
+      bucket: 'manualReview',
+      kind: 'manual-review',
+      filePath: 'package.json',
+    });
+    expect(plan.unknown[0]).toMatchObject({
+      bucket: 'unknown',
+      kind: 'unknown',
+      diagnosticCode: 'affected-tests-unknown',
+    });
+    expect(plan.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      'affected-tests-unknown'
+    );
+  });
+
+  it('marks validation plans unknown when no deterministic test edge exists', async () => {
+    const service = await buildFixtureGraph();
+
+    const plan = await service.getSourceGraphValidationPlan({
+      generationId: 'gen-query',
+      changedFiles: ['src/dashboard.ts'],
+    });
+
+    expect(plan.ready).toBe(false);
+    expect(plan.mustRun).toHaveLength(0);
+    expect(plan.unknown[0]).toMatchObject({
+      label: 'Affected tests unknown',
+      command: 'npm run test',
+      diagnosticCode: 'affected-tests-unknown',
+    });
+    expect(plan.recommended.map((recommendation) => recommendation.command)).toContain(
+      'npm run build:check'
+    );
+  });
+
   it('gates source text when freshness is not fresh', async () => {
     const { service, sourceGraphRepository } = await buildFixtureGraphWithRepository();
     await sourceGraphRepository.completeGeneration('gen-query', {
@@ -186,6 +269,21 @@ describe('SourceGraphQueryService', () => {
   }
 
   async function buildFixtureGraphWithRepository() {
+    writeFixture(
+      'package.json',
+      JSON.stringify(
+        {
+          scripts: {
+            'build:check': 'tsc --noEmit',
+            test: 'vitest run',
+            lint: 'biome check',
+            check: 'npm run build:check && npm run test && npm run lint',
+          },
+        },
+        null,
+        2
+      )
+    );
     writeFixture(
       'src/app.ts',
       [

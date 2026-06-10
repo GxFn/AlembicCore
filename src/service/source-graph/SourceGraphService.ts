@@ -27,6 +27,7 @@ import {
   SourceGraphQueryService,
   type SourceGraphRelationInput,
   type SourceGraphSearchInput,
+  type SourceGraphValidationPlanInput,
 } from './SourceGraphQueryService.js';
 
 export interface SourceGraphQueryOptions extends SourceGraphSymbolSearchOptions {
@@ -84,6 +85,10 @@ export class SourceGraphService {
 
   async getSourceGraphAffectedTests(input: SourceGraphAffectedTestsInput) {
     return new SourceGraphQueryService(this.repository).affectedTests(input);
+  }
+
+  async getSourceGraphValidationPlan(input: SourceGraphValidationPlanInput) {
+    return new SourceGraphQueryService(this.repository).validationPlan(input);
   }
 
   async querySymbols(

@@ -9,11 +9,13 @@ import {
   createSourceGraphSearchResult,
   createSourceGraphSnapshot,
   createSourceGraphStatusResult,
+  createSourceGraphValidationPlanResult,
   createSourceSection,
   createSourceSymbolNode,
   isSourceGraphSnapshot,
   SOURCE_GRAPH_EDGE_KINDS,
   SOURCE_GRAPH_FRESHNESS_STATES,
+  SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS,
   SourceGraphFreshnessService,
   SourceGraphIndexer,
   SourceGraphQueryService,
@@ -22,6 +24,7 @@ import {
   validateSourceGraphDiagnostic,
   validateSourceGraphEdge,
   validateSourceGraphSearchResult,
+  validateSourceGraphValidationPlanResult,
   validateSourceSymbolNode,
 } from '../src/source-graph.js';
 
@@ -116,6 +119,7 @@ describe('public source graph entrypoints', () => {
     expect(SourceGraphService.prototype.searchSourceGraph).toBeDefined();
     expect(SourceGraphService.prototype.exploreSourceGraph).toBeDefined();
     expect(SourceGraphService.prototype.getSourceGraphImpact).toBeDefined();
+    expect(SourceGraphService.prototype.getSourceGraphValidationPlan).toBeDefined();
   });
 
   it('publishes CGK-15 source graph boundary states and diagnostic ownership', () => {
@@ -238,5 +242,80 @@ describe('public source graph entrypoints', () => {
     expect(affectedTestsResult.operation).toBe('affected-tests');
     expect(affectedTestsResult.ready).toBe(false);
     expect(affectedTestsResult.nextActions).toContain('run_broader_validation_or_add_test_edges');
+
+    const validationPlan = createSourceGraphValidationPlanResult({
+      projectRoot: '/tmp/alembic-core',
+      freshness,
+      changedFiles: ['src/source-graph.ts'],
+      seedSymbols: ['src/source-graph.ts#SourceGraphService'],
+      impactedFiles: ['src/source-graph.ts', 'test/source-graph.test.ts'],
+      mustRun: [
+        {
+          kind: 'test-file',
+          label: 'Run affected source graph test',
+          filePath: 'test/source-graph.test.ts',
+          command: 'npm run test -- test/source-graph.test.ts',
+          reason: 'The source graph maps the changed symbol to this test file.',
+          evidence: [
+            {
+              kind: 'changed-file',
+              ref: 'src/source-graph.ts',
+              filePath: 'src/source-graph.ts',
+              reason: 'Changed file seed.',
+            },
+          ],
+        },
+      ],
+      recommended: [
+        {
+          kind: 'repo-command',
+          label: 'Run build check',
+          command: 'npm run build:check',
+          reason: 'Repository metadata exposes build:check.',
+        },
+      ],
+      manualReview: [
+        {
+          kind: 'manual-review',
+          label: 'Review validation boundary',
+          reason: 'Source graph recommendations are not acceptance.',
+        },
+      ],
+      unknown: [
+        {
+          kind: 'unknown',
+          label: 'No broader scenario proof',
+          diagnosticCode: 'affected-tests-unknown',
+          reason: 'Real scenario acceptance still belongs to controller/Test routing.',
+        },
+      ],
+    });
+
+    expect(SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS).toStrictEqual([
+      'mustRun',
+      'recommended',
+      'manualReview',
+      'unknown',
+    ]);
+    expect(validationPlan.operation).toBe('validation-plan');
+    expect(validationPlan.mustRun[0]?.bucket).toBe('mustRun');
+    expect(validationPlan.recommended[0]?.bucket).toBe('recommended');
+    expect(validationPlan.manualReview[0]?.bucket).toBe('manualReview');
+    expect(validationPlan.unknown[0]?.bucket).toBe('unknown');
+    expect(validationPlan.acceptanceBoundary).toContain('do not replace controller acceptance');
+    expect(
+      validateSourceGraphValidationPlanResult({
+        projectRoot: '/tmp/alembic-core',
+        freshness,
+        mustRun: [
+          {
+            bucket: 'unknown',
+            kind: 'test-file',
+            label: 'Wrong bucket',
+            reason: 'The bucket does not match the property.',
+          },
+        ],
+      })
+    ).toHaveLength(1);
   });
 });
