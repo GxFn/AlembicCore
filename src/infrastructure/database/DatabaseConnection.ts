@@ -99,6 +99,15 @@ export class DatabaseConnection {
     }
     const db = this.db;
     const migrationsDir = path.join(__dirname, 'migrations');
+    // Migration numbering has known gaps; the runner is gap-tolerant by
+    // design: it applies whatever files exist in filename sort order and
+    // tracks each by name in schema_migrations, so missing numbers are not
+    // errors. Known gaps:
+    // - 002 never existed in this repository: the initial storage import
+    //   (4ed0fda) brought 001 and 003-009 from pre-extraction history
+    //   without a 002 (010 was added later).
+    // - 003_add_remote_commands was deleted in 0c64fd7 together with the
+    //   remote database schema removal.
     const migrationFiles = fs
       .readdirSync(migrationsDir)
       .filter((file) => /\.(sql|js|ts)$/.test(file) && !file.endsWith('.d.ts'))

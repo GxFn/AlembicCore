@@ -37,16 +37,6 @@
       }
     },
     {
-      "includes": ["src/core/discovery/DiscovererPreference.ts"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noConsole": "off"
-          }
-        }
-      }
-    },
-    {
       "includes": ["test/**"],
       "linter": {
         "rules": {

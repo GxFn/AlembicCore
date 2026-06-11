@@ -62,7 +62,6 @@ export {
   NodeDiscoverer,
   ProjectDiscoverer,
   PythonDiscoverer,
-  promptDiscovererChoice,
   RustDiscoverer,
   resetDiscovererRegistry,
   SpmDiscoverer,

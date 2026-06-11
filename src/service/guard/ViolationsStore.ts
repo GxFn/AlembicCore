@@ -88,6 +88,7 @@ export class ViolationsStore {
       }
     }
 
+    // Math.random here is id-uniqueness entropy only (no control-flow effect); intentionally kept under the deterministic-Core policy.
     const id = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const now = Math.floor(Date.now() / 1000);
 

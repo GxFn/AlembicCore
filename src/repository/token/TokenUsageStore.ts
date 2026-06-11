@@ -17,6 +17,15 @@ import Logger from '../../infrastructure/logging/Logger.js';
 
 const MAX_ROWS = 10000; // 自动清理: 保留最近 10000 条
 
+/**
+ * Deterministic prune cadence: prune on every Nth successful insert.
+ * Replaces the previous probabilistic trigger (random 1% chance per write),
+ * which averaged the same ~1/100 rate but had an unbounded worst-case gap
+ * between prunes and made the trigger untestable. Headless Core must not use
+ * probabilistic control flow; the cadence is pinned by a unit test.
+ */
+const PRUNE_EVERY_N_WRITES = 100;
+
 /** Token usage record input */
 interface TokenRecord {
   source: string;
@@ -71,6 +80,8 @@ export class TokenUsageStore {
   #dailyStmt;
   #bySourceStmt;
   #summaryStmt;
+  /** Successful inserts since the last prune; drives the deterministic prune trigger. */
+  #writesSinceLastPrune = 0;
   /** | null} */
   #reportCache: { data: ReportData; expireAt: number } | null = null;
 
@@ -155,8 +166,13 @@ export class TokenUsageStore {
       // 写入后使缓存失效
       this.#reportCache = null;
 
-      // 定期清理（每 100 次写入检查一次）
-      if (Math.random() < 0.01) {
+      // Deterministic periodic prune: every PRUNE_EVERY_N_WRITES-th
+      // successful insert, keep only the newest MAX_ROWS rows (semantics of
+      // the prune itself are unchanged). Skipped/failed inserts do not
+      // advance the counter, so cadence tracks actual row growth.
+      this.#writesSinceLastPrune += 1;
+      if (this.#writesSinceLastPrune >= PRUNE_EVERY_N_WRITES) {
+        this.#writesSinceLastPrune = 0;
         this.#pruneStmt.run(MAX_ROWS);
       }
     } catch (err: unknown) {
