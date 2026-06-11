@@ -16,6 +16,13 @@
  *
  * 文件名策略：trigger slug > title slug > id[:8]
  * 落盘目录：isCandidate() → candidates/  |  isActive()/deprecated → recipes/
+ *
+ * 写边界裁定（CO2 B4，详见 docs/layer-contract.md）：
+ *  - 本类是 service 层的【写策略】实现：序列化格式、文件名/目录策略、
+ *    生命周期搬移规则在这里演进；
+ *  - 持久化【写契约】由 repository/knowledge/KnowledgeFileStore 接口拥有，
+ *    持久化协调者（KnowledgeUnitOfWork 等）只依赖接口，不依赖本类；
+ *  - 不存在第二份文件写实现；新增写能力先改接口、再改本实现。
  */
 
 import { createHash } from 'node:crypto';

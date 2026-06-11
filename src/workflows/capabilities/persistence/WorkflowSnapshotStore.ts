@@ -1,3 +1,10 @@
+/**
+ * WorkflowSnapshotStore — 工作流快照存储（语义见 docs/semantic-glossary.md）：
+ * snapshot 是某时刻状态的不可变持久化投影；live 会话状态归 session
+ * （如 BootstrapSession）所有。session 写 snapshot，snapshot 不持有活动状态。
+ * D3（层契约 Known exception）：host-agent ↔ persistence 跨界耦合记录在
+ * docs/layer-contract.md，owner=AlembicCore window，触发器=post-CKG1 重构。
+ */
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { BootstrapFile, IncrementalPlan } from '../../../types/workflows.js';
 import type { MiningSessionStore } from '../host-agent/MiningSessionStore.js';

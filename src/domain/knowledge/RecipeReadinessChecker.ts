@@ -2,7 +2,14 @@
  * RecipeReadinessChecker — 共享 Recipe-Ready 字段完整性检查
  *
  * ⚠️ 已重构为 UnifiedValidator 的薄封装。
- * 保留此模块以兼容旧调用方签名，新代码请直接使用 UnifiedValidator。
+ * 保留此模块以兼容旧调用方签名，新代码请直接使用 UnifiedValidator
+ * （或 CO2 起的统一入口 validateCandidatesUnified）。
+ *
+ * 弃用归档（CO2 B7，2026-06-12 新鲜扫描）：外部四仓零消费者；仍经稳定
+ * ./knowledge 门面导出（checkRecipeReadiness / checkReadinessFromCandidate），
+ * 受“公开面形状不变”约束本波不移除。
+ * Owner: AlembicCore window；移除条件：下一次允许稳定面收缩的表面波
+ * （SD-5 phase-2 后继）+ 当时的新鲜消费者扫描为零。
  *
  * @param item 候选数据（扁平字段或含 metadata 的对象）
  * @returns }

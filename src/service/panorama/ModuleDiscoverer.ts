@@ -17,7 +17,8 @@ import path from 'node:path';
 import type { CodeEntityRepositoryImpl } from '../../repository/code/CodeEntityRepository.js';
 import type { KnowledgeEdgeRepositoryImpl } from '../../repository/knowledge/KnowledgeEdgeRepository.js';
 import { LanguageProfiles } from '../../shared/LanguageProfiles.js';
-import { inferTargetRole } from '../../workflows/capabilities/presentation/TargetClassifier.js';
+// CO2 B2: TargetClassifier lives in shared/ — no service→workflows runtime edge.
+import { inferTargetRole } from '../../shared/TargetClassifier.js';
 import type { ModuleRole } from './PanoramaTypes.js';
 import type { ModuleCandidate } from './RoleRefiner.js';
 

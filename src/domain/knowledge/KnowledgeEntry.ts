@@ -1,3 +1,8 @@
+/**
+ * KnowledgeEntry — 知识条目聚合根（语义见 docs/semantic-glossary.md）：
+ * candidate 与 recipe 不是两个实体，而是同一 KnowledgeEntry 的 lifecycle
+ * 阶段（candidate → 验证/评审 → recipe/active）。
+ */
 import { v4 as uuidv4 } from 'uuid';
 import type { KnowledgeEntryWire } from '../../types/knowledge-wire.js';
 import {

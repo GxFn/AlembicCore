@@ -70,6 +70,14 @@ export type {
   RecipeSourceRefEntity,
   RecipeSourceRefInsert,
 } from './repository/sourceref/RecipeSourceRefRepository.js';
+// CO2 B3: unified validator entry — composes UnifiedValidator + RecipeCandidateValidator +
+// CandidateAggregator so callers cannot accidentally pick a weaker subset. No enforcement.
+export {
+  type UnifiedCandidateValidationItem,
+  type UnifiedCandidateValidationOptions,
+  type UnifiedCandidateValidationResult,
+  validateCandidatesUnified,
+} from './service/candidate/CandidateValidationFacade.js';
 export {
   type ApplyReport,
   type BlockedRecipeInfo,

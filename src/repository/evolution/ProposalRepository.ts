@@ -43,7 +43,14 @@ export {
  */
 export type ProposalType = 'update' | 'deprecate';
 
-/** @deprecated 旧 ProposalType，仅用于 DB 迁移兼容 */
+/**
+ * @deprecated 旧 ProposalType，仅用于 DB 迁移兼容。
+ * 迁移状态（CO2 B7，2026-06-12）：运行时代码已全部收敛到
+ * ProposalType('update'|'deprecate')；本类型只剩类型层引用
+ * （./repositories 门面 type 再导出），无任何运行时消费。
+ * Owner: AlembicCore window；移除条件：evolution_proposals 迁移链
+ * （004 起）压缩/重建且 SD-5 phase-2 允许门面 type 收缩时一并删除。
+ */
 export type LegacyProposalType =
   | 'merge'
   | 'supersede'

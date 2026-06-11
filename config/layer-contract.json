@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "description": "Machine-readable Core layer contract (CO2). Human contract: docs/layer-contract.md — edit both together. Enforced by scripts/lint-layer-contract.mjs as a blocking step in npm run check.",
+  "typeOnlyImportsExempt": true,
+  "typeOnlyNote": "import type / export type imports are type bridges and do not create runtime coupling; runtime imports must follow allowedRuntimeImports.",
+  "areas": [
+    "shared",
+    "types",
+    "domain",
+    "core",
+    "infrastructure",
+    "repository",
+    "service",
+    "workflows",
+    "daemon",
+    "root-facade"
+  ],
+  "allowedRuntimeImports": {
+    "shared": [],
+    "types": ["shared"],
+    "domain": ["shared", "types"],
+    "core": ["shared", "types", "infrastructure"],
+    "infrastructure": ["shared", "types"],
+    "repository": ["shared", "types", "domain", "infrastructure"],
+    "service": ["shared", "types", "domain", "core", "infrastructure", "repository"],
+    "workflows": ["shared", "types", "domain", "core", "infrastructure", "repository", "service"],
+    "daemon": ["shared", "types"],
+    "root-facade": ["*"]
+  },
+  "blessedImports": [
+    {
+      "file": "src/infrastructure/database/migrations/009_knowledge_dimension_id.ts",
+      "to": "domain",
+      "reason": "Data migration backfills dimension ids and must use the single DimensionRegistry source of truth instead of duplicating the id list. Scope: this migration file only.",
+      "owner": "AlembicCore window"
+    },
+    {
+      "file": "src/infrastructure/vector/ASTChunker.ts",
+      "to": "core",
+      "reason": "Semantic chunking lazily consumes the blessed core analysis leaf (parseToTree) with graceful fallback when grammars are absent; extends the 2026-06-12 core-as-leaf ruling to vector chunking. Permanent blessing, scope: this file only.",
+      "owner": "AlembicCore window"
+    },
+    {
+      "file": "src/service/panorama/PanoramaScanner.ts",
+      "to": "workflows",
+      "reason": "TEMPORARY exception — known debt, not a blessing. PanoramaScanner dynamically imports six ProjectIntelligenceRunner phase functions (service -> workflows inversion missed by the original audit because the import is dynamic). Repair exceeds the CO2 mandate (one extraction only); routed to controller for a future wave (extract the phase runners to a contract-clean home or invert the dependency).",
+      "owner": "AlembicCore window",
+      "cleanupTrigger": "controller-routed repair wave (post-CO sequence or CKG1 area rebuild) extracting the project-intelligence phase runners out of workflows/"
+    }
+  ],
+  "matrixBlessings": [
+    {
+      "edge": "service -> core",
+      "reason": "core/ is the user-blessed importable analysis leaf (2026-06-12): GuardCheckEngine needs real AST analysis; an adapter layer would duplicate the analyzer surface."
+    },
+    {
+      "edge": "workflows -> core",
+      "reason": "core/ is the user-blessed importable analysis leaf (2026-06-12): ProjectIntelligenceRunner is the designated orchestrator of core analysis."
+    }
+  ]
+}

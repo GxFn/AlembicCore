@@ -1,3 +1,19 @@
+/**
+ * ColdStartIntent — 冷启动工作流意图（双执行者，见 docs/semantic-glossary.md）
+ *
+ * D4（CO2，docs only）：冷启动有两个并存的执行者意图，不做结构重组
+ * （CKG1 拥有该区域重建）：
+ *  - internal-agent（createInternalColdStartIntent）：进程内执行，
+ *    completionPolicy='auto-fill'，可带 internalExecution 跳过开关；
+ *  - host-agent（createHostAgentColdStartIntent）：宿主 Agent 驱动，
+ *    completionPolicy='host-agent-dimension-complete'，无内部跳过开关。
+ *
+ * B6（CO2 裁决）：skip* 布尔簇（skipGuard/skipAsyncFill/skipTargetDelivery）
+ * 经 `export *` 从包导出 ./workflows/cold-start 可达，非 internal-only，
+ * 故"布尔簇→模式类型"重构按任务规则 DEFER（owner=AlembicCore window，
+ * 触发器=CKG1 冷启动区域重建或允许 keep-provisional 类型形状变化的表面波）。
+ * 本文件类型形状保持不变。
+ */
 import { normalizeDimensionIds, type WorkflowExecutor } from '../shared/WorkflowTypes.js';
 
 export type ColdStartExecutor = WorkflowExecutor;

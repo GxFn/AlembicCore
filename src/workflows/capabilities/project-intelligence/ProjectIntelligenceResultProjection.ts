@@ -1,5 +1,5 @@
 import type { CanonicalSourceIdentity } from '../../../shared/ProjectScope.js';
-import { inferTargetRole } from '../presentation/TargetClassifier.js';
+import { inferTargetRole } from '../../../shared/TargetClassifier.js';
 
 type ProjectAnalysisTargetItem =
   | string

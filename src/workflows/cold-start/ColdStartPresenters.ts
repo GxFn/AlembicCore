@@ -1,4 +1,5 @@
 import { getInternalAgentRequiredFields } from '../../domain/knowledge/FieldSpec.js';
+import { inferTargetRole } from '../../shared/TargetClassifier.js';
 import type {
   DimensionDef,
   GuardAuditFileEntry,
@@ -10,7 +11,6 @@ import type {
 import { buildInternalNextSteps } from '../capabilities/host-agent/MissionBriefingSupport.js';
 import { buildLanguageExtension as buildProjectLanguageExtension } from '../capabilities/presentation/LanguageExtensionBuilder.js';
 import { summarizePanorama as summarizeProjectPanorama } from '../capabilities/presentation/PanoramaSummaryPresenter.js';
-import { inferTargetRole } from '../capabilities/presentation/TargetClassifier.js';
 import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';

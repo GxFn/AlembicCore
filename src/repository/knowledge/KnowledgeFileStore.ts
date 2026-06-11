@@ -8,6 +8,14 @@
  *   - .md 文件 = 唯一真相源 (Source of Truth)
  *   - DB = 索引缓存
  *   - 所有写操作必须经过此接口落盘为 .md 文件
+ *
+ * 写边界裁定（CO2 B4，详见 docs/layer-contract.md）：
+ *   - repository 层拥有【写契约】：本接口定义文件持久化的能力面，
+ *     KnowledgeUnitOfWork 等持久化协调者只依赖本接口；
+ *   - service 层拥有【写策略】：KnowledgeFileWriter 实现序列化格式、
+ *     文件名/目录策略与生命周期搬移规则；
+ *   - 二者方向合法（service→repository 接口依赖），不存在重复实现，
+ *     不做合并；新增写路径必须先扩展本接口、再在 service 实现。
  */
 
 import type { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';

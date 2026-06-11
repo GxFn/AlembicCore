@@ -532,13 +532,14 @@
     "test:coverage": "vitest run --coverage",
     "smoke:public-api": "node scripts/smoke-public-api.mjs",
     "lint:public-api-boundary": "node scripts/check-public-api-boundary.mjs",
+    "lint:layer-contract": "node scripts/lint-layer-contract.mjs",
     "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports-all.mjs",
     "report:public-api-closeout": "node scripts/report-public-api-closeout.mjs",
     "release:check": "node scripts/check-release-readiness.mjs",
     "lint": "biome check src/ test/ scripts/ *.ts",
     "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",
     "format": "biome format --write src/ test/ scripts/ *.ts",
-    "check": "npm run build:check && npm run lint:public-api-boundary && npm run lint:consumer-core-imports && npm run smoke:public-api && npm run test && npm run lint"
+    "check": "npm run build:check && npm run lint:public-api-boundary && npm run lint:layer-contract && npm run lint:consumer-core-imports && npm run smoke:public-api && npm run test && npm run lint"
   },
   "engines": {
     "node": ">=22.0.0"

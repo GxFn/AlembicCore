@@ -55,9 +55,9 @@ export const ProjectIntelligenceCapability: ProjectIntelligenceCapabilityFacade 
   },
 };
 
-export type ProjectAnalysisCapabilityRunInput = ProjectIntelligenceCapabilityRunInput;
-export type ProjectAnalysisCapabilityFacade = ProjectIntelligenceCapabilityFacade;
-export const ProjectAnalysisCapability = ProjectIntelligenceCapability;
+// CO2 B7: the ProjectAnalysisCapability back-compat aliases were removed after a fresh
+// 4-repo + Core-internal scan found zero consumers (2026-06-12). ProjectIntelligenceCapability
+// is the only name.
 
 export function collectProjectAnalysis(
   projectRoot: string,

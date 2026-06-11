@@ -1,5 +1,5 @@
+import { inferFilePriority } from '../../../shared/TargetClassifier.js';
 import { inferLang } from './LanguageExtensionBuilder.js';
-import { inferFilePriority } from './TargetClassifier.js';
 
 export interface TargetFile {
   name: string;

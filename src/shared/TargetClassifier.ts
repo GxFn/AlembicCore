@@ -4,6 +4,11 @@
  * 负责：
  *   - Target 名称 → 模块职责推断
  *   - 文件名 → 分析优先级推断
+ *
+ * 层契约（CO2 B2）：本模块原在 workflows/capabilities/presentation/，因
+ * service/panorama/ModuleDiscoverer 的运行时依赖构成 service→workflows 逆向
+ * 边而迁移到 shared 叶层。public 表面不变：presentation 门面继续原样再导出。
+ * 注意：本文件不加入 shared/index.ts（./shared 门面受 narrowness 预算约束）。
  */
 
 /** 根据 Target 名称推断模块职责 */
