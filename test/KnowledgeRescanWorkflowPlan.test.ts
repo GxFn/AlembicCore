@@ -28,6 +28,7 @@ describe('KnowledgeRescanWorkflowPlan analysis options', () => {
       maxFiles: 2000,
       contentMaxLines: 200,
     });
+    expect(plan.projectAnalysis.materialize).toMatchObject({ sourceGraph: true });
   });
 
   it('keeps default rescan scan limits when callers omit analysis options', () => {

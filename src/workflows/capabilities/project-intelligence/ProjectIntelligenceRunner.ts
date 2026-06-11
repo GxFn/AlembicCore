@@ -25,6 +25,11 @@ import {
 } from '../../../core/AstAnalyzer.js';
 import type { CallGraphResult as CallGraphAnalysisResult } from '../../../core/analysis/CallGraphAnalyzer.js';
 import { DimensionCopy } from '../../../domain/dimension/DimensionCopy.js';
+import type { SourceGraphRepositoryImpl } from '../../../repository/source-graph/SourceGraphRepository.js';
+import {
+  type SourceGraphLifecycleResult,
+  SourceGraphLifecycleService,
+} from '../../../service/source-graph/SourceGraphLifecycle.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import {
   type CanonicalSourceIdentity,
@@ -236,6 +241,7 @@ interface AllPhasesOptions {
   clearOldData?: boolean;
   generateAstContext?: boolean;
   materialize?: ProjectAnalysisMaterializationInput;
+  sourceGraph?: ProjectAnalysisSourceGraphOptions;
   maxFiles?: number;
   projectScope?: ProjectDescriptor | null;
   skipGuard?: boolean;
@@ -258,6 +264,7 @@ export interface PhaseReport {
 export interface ProjectAnalysisMaterializationOptions {
   codeEntityGraph: boolean;
   callGraph: boolean;
+  sourceGraph: boolean;
   dependencyEdges: boolean;
   moduleEntities: boolean;
   guardViolations: boolean;
@@ -271,6 +278,7 @@ export type ProjectAnalysisMaterializationInput =
 export const DEFAULT_PROJECT_ANALYSIS_MATERIALIZATION: ProjectAnalysisMaterializationOptions = {
   codeEntityGraph: true,
   callGraph: true,
+  sourceGraph: true,
   dependencyEdges: true,
   moduleEntities: true,
   guardViolations: true,
@@ -284,6 +292,7 @@ export function resolveProjectAnalysisMaterialization(
     return {
       codeEntityGraph: false,
       callGraph: false,
+      sourceGraph: false,
       dependencyEdges: false,
       moduleEntities: false,
       guardViolations: false,
@@ -296,6 +305,15 @@ export function resolveProjectAnalysisMaterialization(
   }
 
   return { ...DEFAULT_PROJECT_ANALYSIS_MATERIALIZATION, ...input };
+}
+
+export interface ProjectAnalysisSourceGraphOptions {
+  repoId?: string;
+  projectScope?: string;
+  includeExtensions?: string[];
+  maxFileSizeBytes?: number;
+  maxParseBytes?: number;
+  now?: number;
 }
 
 // ── 类型定义 ────────────────────────────────────────────────
@@ -1336,6 +1354,85 @@ export async function materializeProjectPanorama({
   return { panoramaResult, warnings };
 }
 
+export async function runPhase1_8_SourceGraphLifecycle({
+  projectRoot,
+  container,
+  logger,
+  incrementalPlan,
+  options,
+}: {
+  projectRoot: string;
+  container: PhaseContainer;
+  logger: PhaseLogger;
+  incrementalPlan: IncrementalPlan | null;
+  options: ProjectAnalysisSourceGraphOptions;
+}): Promise<{ sourceGraphResult: SourceGraphLifecycleResult | null; warnings: string[] }> {
+  const warnings: string[] = [];
+  const repository = resolveSourceGraphRepository(container);
+  if (!repository) {
+    warnings.push('Source graph lifecycle skipped: sourceGraphRepository is not available.');
+    return { sourceGraphResult: null, warnings };
+  }
+
+  try {
+    const lifecycle = new SourceGraphLifecycleService(repository);
+    const common = {
+      projectRoot,
+      repoId: options.repoId ?? 'default',
+      projectScope: options.projectScope,
+      includeExtensions: options.includeExtensions,
+      maxFileSizeBytes: options.maxFileSizeBytes,
+      maxParseBytes: options.maxParseBytes,
+      now: options.now,
+    };
+    const changedFiles = incrementalPlan?.diff
+      ? [...incrementalPlan.diff.added, ...incrementalPlan.diff.modified]
+      : [];
+    const deletedFiles = incrementalPlan?.diff?.deleted ?? [];
+    const sourceGraphResult =
+      incrementalPlan?.mode === 'incremental' && incrementalPlan.diff
+        ? await lifecycle.syncFileChanges({
+            ...common,
+            changedFiles,
+            deletedFiles,
+          })
+        : await lifecycle.buildColdStartIndex(common);
+
+    logger.info(
+      `[Bootstrap] Source Graph ${sourceGraphResult.action}: ` +
+        `${sourceGraphResult.durableTables.source_graph_files} files, ` +
+        `${sourceGraphResult.durableTables.source_graph_symbols} symbols, ` +
+        `${sourceGraphResult.durableTables.source_graph_edges} edges, ` +
+        `freshness=${sourceGraphResult.freshness.status}`
+    );
+
+    return { sourceGraphResult, warnings };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.warn(`[Bootstrap] Source Graph lifecycle failed (degraded): ${message}`);
+    warnings.push(`Source Graph lifecycle failed: ${message}`);
+    return { sourceGraphResult: null, warnings };
+  }
+}
+
+function resolveSourceGraphRepository(container: PhaseContainer): SourceGraphRepositoryImpl | null {
+  try {
+    const repository = container.get('sourceGraphRepository');
+    return isSourceGraphRepository(repository) ? repository : null;
+  } catch {
+    return null;
+  }
+}
+
+function isSourceGraphRepository(value: unknown): value is SourceGraphRepositoryImpl {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    typeof (value as { getLatestSnapshot?: unknown }).getLatestSnapshot === 'function' &&
+    typeof (value as { replaceGeneration?: unknown }).replaceGeneration === 'function'
+  );
+}
+
 // ── 一站式调用 ─────────────────────────────────────────────
 
 /**
@@ -1408,6 +1505,7 @@ export async function runAllPhases(
       warnings,
       report: report || {},
       incrementalPlan: null,
+      sourceGraphResult: null,
       panoramaResult: null,
       detectedFrameworks: [],
       isEmpty: true,
@@ -1424,6 +1522,31 @@ export async function runAllPhases(
   });
   warnings.push(...incrementalEvaluation.warnings);
   const incrementalPlan: IncrementalPlan | null = incrementalEvaluation.incrementalPlan;
+
+  let sourceGraphResult: SourceGraphLifecycleResult | null = null;
+  if (materialization.sourceGraph) {
+    const p18Start = Date.now();
+    const sourceGraph = await runPhase1_8_SourceGraphLifecycle({
+      projectRoot,
+      container: ctx.container,
+      logger: ctx.logger,
+      incrementalPlan,
+      options: options.sourceGraph ?? {},
+    });
+    sourceGraphResult = sourceGraph.sourceGraphResult;
+    warnings.push(...sourceGraph.warnings);
+    if (report) {
+      report.phases.sourceGraph = {
+        action: sourceGraphResult?.action ?? 'skipped',
+        freshness: sourceGraphResult?.freshness.status ?? 'unavailable',
+        generationId: sourceGraphResult?.generationId ?? null,
+        fileCount: sourceGraphResult?.durableTables.source_graph_files ?? 0,
+        symbolCount: sourceGraphResult?.durableTables.source_graph_symbols ?? 0,
+        edgeCount: sourceGraphResult?.durableTables.source_graph_edges ?? 0,
+        ms: Date.now() - p18Start,
+      };
+    }
+  }
 
   // ── Phase 1.5: AST 分析 ──
   const p15Start = Date.now();
@@ -1577,6 +1700,7 @@ export async function runAllPhases(
     warnings,
     report, // NEW: Phase 级报告 (null if generateReport=false)
     incrementalPlan, // NEW: 增量评估结果 (null if incremental=false)
+    sourceGraphResult,
     panoramaResult, // Phase 2.2: 全景汇总 (null if panoramaService unavailable)
     isEmpty: false,
   };

@@ -57,6 +57,11 @@ export class DatabaseConnection {
     // Ghost 模式：直接使用 WorkspaceResolver 提供的 DB 路径
     // 标准模式 / 无 resolver：使用 projectRoot 解析相对路径
     const dataRoot = this.#workspaceResolver?.dataRoot ?? null;
+    if (dataRoot) {
+      // Ghost 模式 dataRoot 位于项目外；如果宿主已先按源码根配置 PathGuard，
+      // 这里显式登记运行时数据根，只允许 DB/运行态落到 resolver 管理的外置目录。
+      pathGuard.addAllowPath(dataRoot);
+    }
     const projectRoot = dataRoot ?? pathGuard.projectRoot;
     let resolvedDbPath =
       projectRoot && !path.isAbsolute(dbPath)

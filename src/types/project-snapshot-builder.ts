@@ -71,6 +71,7 @@ export function buildProjectSnapshot(input: ProjectSnapshotInput): ProjectSnapsh
     callGraph: normalizeCallGraph(input.callGraphResult),
 
     // Phase 1.8
+    sourceGraphResult: normalizeSourceGraphResult(input.sourceGraphResult),
     panorama: normalizePanorama(input.panoramaResult),
 
     // Phase 2
@@ -182,6 +183,13 @@ function normalizeCallGraph(raw: unknown): CallGraphResult | null {
     return null;
   }
   return raw as CallGraphResult;
+}
+
+function normalizeSourceGraphResult(raw: unknown): ProjectSnapshot['sourceGraphResult'] {
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+  return raw as ProjectSnapshot['sourceGraphResult'];
 }
 
 function normalizePanorama(raw: unknown): PanoramaResult | null {

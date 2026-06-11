@@ -18,6 +18,7 @@ import {
   SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS,
   SourceGraphFreshnessService,
   SourceGraphIndexer,
+  SourceGraphLifecycleService,
   SourceGraphQueryService,
   SourceGraphRepositoryImpl,
   SourceGraphService,
@@ -110,6 +111,7 @@ describe('public source graph entrypoints', () => {
   it('publishes the Core source graph repository and service facade', () => {
     expect(SourceGraphIndexer).toBeDefined();
     expect(SourceGraphFreshnessService).toBeDefined();
+    expect(SourceGraphLifecycleService).toBeDefined();
     expect(SourceGraphQueryService).toBeDefined();
     expect(SourceGraphRepositoryImpl).toBeDefined();
     expect(SourceGraphService).toBeDefined();

@@ -198,6 +198,7 @@ export function presentInternalColdStartResponse({
           edgesCreated: snapshot.callGraph.edgesCreated || 0,
         }
       : null,
+    sourceGraph: presentSourceGraphLifecycle(snapshot),
     panorama: snapshot.panorama ? summarizeProjectPanorama(snapshot.panorama) : null,
     localPackageModules:
       snapshot.localPackageModules.length > 0 ? snapshot.localPackageModules : null,
@@ -257,6 +258,33 @@ function presentFullResetCleanup(cleanupResult: CleanupResult) {
     errors: cleanupResult.errors,
     trash: cleanupResult.trash ?? null,
     purgedTrash: cleanupResult.purgedTrash ?? null,
+  };
+}
+
+function presentSourceGraphLifecycle(snapshot: ProjectSnapshot) {
+  const result = snapshot.sourceGraphResult;
+  if (!result) {
+    return null;
+  }
+  return {
+    action: result.action,
+    generationId: result.generationId ?? null,
+    freshness: {
+      status: result.freshness.status,
+      reason: result.freshness.reason,
+      nextAction: result.freshness.nextAction,
+      pendingFileCount: result.freshness.pendingFileCount,
+      staleFileCount: result.freshness.staleFileCount,
+    },
+    durableTables: result.durableTables,
+    changedFiles: result.changedFiles,
+    deletedFiles: result.deletedFiles,
+    diagnostics: result.diagnostics.map((diagnostic) => ({
+      code: diagnostic.code,
+      message: diagnostic.message,
+      nextAction: diagnostic.nextAction,
+      blocksReady: diagnostic.blocksReady,
+    })),
   };
 }
 

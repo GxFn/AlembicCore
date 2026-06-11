@@ -68,6 +68,7 @@ export function buildColdStartWorkflowPlan({
   const materialize: ProjectAnalysisMaterializationPlan = {
     codeEntityGraph: true,
     callGraph: true,
+    sourceGraph: true,
     dependencyEdges: true,
     moduleEntities: true,
     guardViolations: true,

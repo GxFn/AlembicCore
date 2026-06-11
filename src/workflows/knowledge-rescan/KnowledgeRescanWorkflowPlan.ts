@@ -46,6 +46,7 @@ export function buildKnowledgeRescanWorkflowPlan({
   const materialize: ProjectAnalysisMaterializationPlan = {
     codeEntityGraph: true,
     callGraph: true,
+    sourceGraph: true,
     dependencyEdges: true,
     moduleEntities: true,
     guardViolations: true,

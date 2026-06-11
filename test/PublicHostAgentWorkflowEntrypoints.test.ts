@@ -59,6 +59,7 @@ describe('stable host-agent workflow entrypoint', () => {
       },
     });
     expect(coldStartPlan.response.tool).toBe('alembic_bootstrap');
+    expect(coldStartPlan.projectAnalysis.materialize).toMatchObject({ sourceGraph: true });
     expect(coldStartPlan.projectAnalysis.scan.generateAstContext).toBe(false);
   });
 

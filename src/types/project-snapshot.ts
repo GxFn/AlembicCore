@@ -14,6 +14,7 @@
  * @module types/project-snapshot
  */
 
+import type { SourceGraphLifecycleResult } from '../service/source-graph/SourceGraphLifecycle.js';
 import type { CanonicalSourceIdentity } from '../shared/ProjectScope.js';
 import type { FileDiffPlan } from './workflows.js';
 
@@ -367,7 +368,8 @@ export interface ProjectSnapshot {
   readonly codeEntityGraph: CodeEntityGraphResult | null;
   readonly callGraph: CallGraphResult | null;
 
-  // ─── Phase 1.8: 全景分析 ───
+  // ─── Phase 1.8: Source Graph 生命周期与全景分析 ───
+  readonly sourceGraphResult: SourceGraphLifecycleResult | null;
   readonly panorama: PanoramaResult | null;
 
   // ─── Phase 2: 依赖关系图 ───
@@ -422,6 +424,7 @@ export interface ProjectSnapshotInput {
   codeEntityResult: unknown;
   callGraphResult: unknown;
   // Phase 1.8
+  sourceGraphResult?: unknown;
   panoramaResult: unknown;
   // Phase 2
   depGraphData: unknown;
