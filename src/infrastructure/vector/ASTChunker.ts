@@ -147,7 +147,7 @@ export function isASTChunkerAvailable(language: string) {
   if (!_astReady || !_supportedLanguages) {
     return false;
   }
-  const langId = (LANG_ID_MAP as Record<string, any>)[language] || language;
+  const langId = (LANG_ID_MAP as Record<string, string>)[language] || language;
   const supported = _supportedLanguages();
   return supported.includes(langId);
 }

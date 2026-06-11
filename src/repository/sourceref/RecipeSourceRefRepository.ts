@@ -169,20 +169,35 @@ export class RecipeSourceRefRepositoryImpl {
 
   /** Stale counts grouped by recipe (for SourceRefReconciler signal emission) */
   getStaleCountsByRecipe(): Array<{ recipeId: string; staleCount: number; totalCount: number }> {
-    const rows = this.#drizzle
+    // CO4 defect repair: the previous correlated subquery referenced the
+    // outer table by its base name inside a scope that aliased the same
+    // table (FROM recipe_source_refs r2) — SQLite resolved it to r2,
+    // making the predicate tautological, so totalCount silently reported
+    // the WHOLE-TABLE row count instead of the per-recipe total
+    // (regression test: RecipeSourceRefRepositoryFloor.test.ts). Two
+    // grouped queries avoid correlated-scope ambiguity entirely.
+    const staleRows = this.#drizzle
       .select({
         recipeId: recipeSourceRefs.recipeId,
         staleCount: sql<number>`count(*)`,
-        totalCount: sql<number>`(SELECT count(*) FROM recipe_source_refs r2 WHERE r2.recipe_id = ${recipeSourceRefs.recipeId})`,
       })
       .from(recipeSourceRefs)
       .where(eq(recipeSourceRefs.status, 'stale'))
       .groupBy(recipeSourceRefs.recipeId)
       .all();
-    return rows.map((r) => ({
+    const totalRows = this.#drizzle
+      .select({
+        recipeId: recipeSourceRefs.recipeId,
+        totalCount: sql<number>`count(*)`,
+      })
+      .from(recipeSourceRefs)
+      .groupBy(recipeSourceRefs.recipeId)
+      .all();
+    const totals = new Map(totalRows.map((r) => [r.recipeId, Number(r.totalCount)]));
+    return staleRows.map((r) => ({
       recipeId: r.recipeId,
       staleCount: Number(r.staleCount),
-      totalCount: Number(r.totalCount),
+      totalCount: totals.get(r.recipeId) ?? Number(r.staleCount),
     }));
   }
 
