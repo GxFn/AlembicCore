@@ -7,8 +7,10 @@ export {
   BaseError,
   ConflictError,
   ConstitutionViolation,
+  DivergenceError,
   InternalError,
   NotFoundError,
   PermissionDenied,
+  PersistenceError,
   ValidationError,
 } from './BaseError.js';

@@ -4,7 +4,21 @@ export * from './constants.js';
 export * from './content-hash.js';
 export * from './developer-identity.js';
 export * from './diff-parser.js';
-export * from './errors/index.js';
+// The ./shared facade error surface is frozen at the original seven classes
+// (CO1 shrink-only narrowness budget). CO3's internal taxonomy additions
+// (PersistenceError, DivergenceError) are deliberately NOT re-exported here:
+// consumers observe them as BaseError instances with stable codes
+// (PERSISTENCE_ERROR / STATE_DIVERGENCE); promoting them onto the facade is
+// a separate export-surface decision.
+export {
+  BaseError,
+  ConflictError,
+  ConstitutionViolation,
+  InternalError,
+  NotFoundError,
+  PermissionDenied,
+  ValidationError,
+} from './errors/index.js';
 export * from './FailureTaxonomy.js';
 export * from './FieldTaxonomy.js';
 export * from './folder-names.js';

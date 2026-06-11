@@ -21,6 +21,7 @@ import { CANDIDATES_DIR, RECIPES_DIR } from '../../infrastructure/config/Default
 import Logger from '../../infrastructure/logging/Logger.js';
 import { unwrapRawDb } from '../../repository/search/SearchRepoAdapter.js';
 import { RawDbSyncAdapter, type SyncRepo } from '../../repository/sync/SyncRepoAdapter.js';
+import { PersistenceError } from '../../shared/errors/index.js';
 import { computeKnowledgeHash, parseKnowledgeMarkdown } from './KnowledgeFileWriter.js';
 
 export interface ReconcileReport {
@@ -187,6 +188,11 @@ export class KnowledgeSyncService {
 
         report.synced++;
       } catch (err: unknown) {
+        // CO3 W1 (write-strict): audit persistence failures must reach the
+        // caller; only per-file read/parse problems stay tolerant (skip).
+        if (err instanceof PersistenceError) {
+          throw err;
+        }
         this.logger.error(`KnowledgeSyncService: failed to sync ${relPath}`, {
           error: (err as Error).message,
         });
@@ -377,10 +383,13 @@ export class KnowledgeSyncService {
         0
       );
     } catch (err: unknown) {
-      this.logger.warn('KnowledgeSyncService: failed to log violation', {
-        entryId,
-        error: (err as Error).message,
-      });
+      // CO3 W1 (write-strict): a failed audit insert used to degrade to a
+      // warn log, losing the violation record. It is now a typed error.
+      throw new PersistenceError(
+        'Audit insert failed — manual-edit violation record was not persisted',
+        { operation: 'audit-insert-run', table: 'audit_logs', entryId },
+        { cause: err }
+      );
     }
   }
 

@@ -185,6 +185,14 @@ export interface SearchResponseMeta {
   resultCount: number;
   durationMs: number;
   fallbackReason?: string;
+  /**
+   * CO3 R1: true when the engine answered from a degraded index (e.g. the
+   * knowledge table was missing at build time). The read path stays usable;
+   * consumers must not mistake the response for a complete empty result.
+   */
+  degraded?: boolean;
+  /** Stable degradation reason, e.g. 'knowledge-table-missing'. */
+  degradedReason?: string;
   workspace?: SearchWorkspaceIdentity;
   timings?: SearchTimingMeta;
   residentVector?: ResidentVectorMeta;
@@ -200,6 +208,8 @@ export interface BuildSearchResponseMetaInput {
   resultCount?: number;
   durationMs?: number;
   fallbackReason?: string;
+  degraded?: boolean;
+  degradedReason?: string;
   workspace?: SearchWorkspaceIdentity;
   timings?: SearchTimingMeta;
   residentVector?: ResidentVectorMeta;
@@ -242,6 +252,12 @@ export function buildSearchResponseMeta(
   // 只在真实存在时写入，避免旧客户端把 undefined 当成显式状态。
   if (input.fallbackReason) {
     meta.fallbackReason = input.fallbackReason;
+  }
+  if (input.degraded) {
+    meta.degraded = true;
+    if (input.degradedReason) {
+      meta.degradedReason = input.degradedReason;
+    }
   }
   if (input.workspace) {
     meta.workspace = input.workspace;

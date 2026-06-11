@@ -16,6 +16,7 @@ import {
   RawDbSourceRefAdapter,
   unwrapSearchDb,
 } from '../../repository/search/SearchRepoAdapter.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import { CoarseRanker } from './CoarseRanker.js';
 import type { SearchItem } from './contextBoost.js';
 import { contextBoost } from './contextBoost.js';
@@ -86,6 +87,13 @@ export class SearchEngine {
   _fusionRecallWeight: number;
   _fusionSemanticWeight: number;
   _indexed: boolean;
+  /**
+   * CO3 R1: set when the index was built without knowledge entries because
+   * the table was missing/unreadable. Stable reason string surfaced via
+   * searchMeta.degradedReason so results are visibly degraded, never a
+   * silently empty list.
+   */
+  _indexDegradedReason: string | null = null;
   _lastIndexTime: string | null = null;
   _multiSignalRanker: MultiSignalRanker;
   _signalBus: import('../../infrastructure/signal/SignalBus.js').SignalBus | null;
@@ -149,8 +157,20 @@ export class SearchEngine {
           ...e,
           status: (e as Record<string, unknown>).lifecycle,
         })) as unknown as DbRow[];
-      } catch {
-        /* table may not exist */
+        this._indexDegradedReason = null;
+      } catch (err: unknown) {
+        // CO3 R1 (read-tolerant): a missing/unreadable knowledge table used
+        // to leave a silently empty index. The read path stays usable, but
+        // the degradation is recorded and surfaced on every response.
+        const message = err instanceof Error ? err.message : String(err);
+        this._indexDegradedReason = /no such table/i.test(message)
+          ? 'knowledge-table-missing'
+          : 'knowledge-load-failed';
+        this.logger.warn('Search index built without knowledge entries — degraded', {
+          code: CORE_DIAGNOSTIC_CODES.searchIndexTableMissing,
+          reason: this._indexDegradedReason,
+          error: message,
+        });
       }
 
       for (const r of entries) {
@@ -370,6 +390,8 @@ export class SearchEngine {
       resultCount: results.length,
       durationMs: tSearchEnd - tSearchStart,
       fallbackReason,
+      degraded: this._indexDegradedReason !== null,
+      degradedReason: this._indexDegradedReason ?? undefined,
     });
     this.logger.info(
       `Search completed: mode=${actualMode} total=${results.length} time=${Math.round(tSearchEnd - tSearchStart)}ms ranked=${response.ranked} query="${query}"`

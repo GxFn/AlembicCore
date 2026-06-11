@@ -267,6 +267,31 @@ export class KnowledgeService {
    */
   async update(id: string, data: Partial<KnowledgeEntryProps>, context: ServiceContext) {
     try {
+      // CO3 W3: lifecycle state is managed exclusively by the transition
+      // guard (_lifecycleTransition → KnowledgeEntry._transition validity
+      // check). Passing lifecycle-managed fields to update() used to be
+      // silently dropped; it is now rejected as a typed error so callers
+      // learn the supported route instead of believing the write happened.
+      const LIFECYCLE_MANAGED = [
+        'lifecycle',
+        'lifecycleHistory',
+        'publishedAt',
+        'publishedBy',
+        'reviewedBy',
+        'reviewedAt',
+        'rejectionReason',
+        'autoApprovable',
+      ];
+      const bypassFields = LIFECYCLE_MANAGED.filter(
+        (key) => (data as Record<string, unknown>)[key] !== undefined
+      );
+      if (bypassFields.length > 0) {
+        throw new ValidationError(
+          `Lifecycle fields cannot be set via update(): ${bypassFields.join(', ')} — use the lifecycle transition methods (publish/deprecate/reactivate/stage/evolve/decay/restore)`,
+          { reason: 'lifecycle-transition-bypass', fields: bypassFields }
+        );
+      }
+
       const _entry = await this._findOrThrow(id);
 
       const UPDATABLE = [

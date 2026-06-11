@@ -7,7 +7,8 @@
  *   2. 依次执行文件操作（writeFileSync 同步写入）
  *   3. 若任何文件操作失败 → 回滚已完成的文件操作，整体中止
  *   4. 全部文件操作成功 → 开启 SQLite 事务，提交所有 DB 变更
- *   5. 若 DB 事务失败 → 文件已写入，下次 SyncService 扫描自动重建 DB
+ *   5. 若 DB 事务失败 → 文件保留（真相源），抛出 DivergenceError 并发出
+ *      file/DB 分歧诊断（CO3 W2 write-strict：不再静默等待 SyncService）
  *
  * 为何 "文件优先" 而非 "DB 优先"？
  *   - .md 文件 = 唯一真相源（第一原则）
@@ -23,8 +24,11 @@
  */
 
 import type { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';
+import { isSqliteBusyError } from '../../infrastructure/database/DatabaseConnection.js';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import Logger from '../../infrastructure/logging/Logger.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
+import { DivergenceError } from '../../shared/errors/index.js';
 import type { DrizzleTx } from '../base/RepositoryBase.js';
 import type { KnowledgeFileStore } from './KnowledgeFileStore.js';
 
@@ -80,8 +84,11 @@ export class KnowledgeUnitOfWork {
    * 提交：文件操作 → DB 事务
    *
    * 失败模式:
-   *   1. 文件写失败：中止，回滚已写文件，不触碰 DB → 干净状态
-   *   2. 文件全成功 + DB 失败：文件已持久化 → SyncService 下次扫描自动补 DB
+   *   1. 文件写失败：中止，回滚已写文件，不触碰 DB → 干净状态（FileWriteError）
+   *   2. 文件全成功 + DB 失败：文件保留（真相源不回滚）→ 抛出 DivergenceError，
+   *      携带分歧明细与修复路径（KnowledgeSyncService.sync 从文件重建 DB），
+   *      并以稳定码 core.diagnostic.knowledge.file-db-divergence 记录诊断。
+   *      调用方必须感知该分歧，不得当作写入成功（CO3 W2 write-strict）。
    *   3. 文件全成功 + DB 成功：完美一致
    */
   commit(): UnitOfWorkResult {
@@ -102,7 +109,6 @@ export class KnowledgeUnitOfWork {
     }
 
     // Phase 2: DB 事务（文件已安全落盘）
-    let dbCommitted = false;
     if (this.#dbChanges.length > 0) {
       try {
         this.#drizzle.transaction((tx) => {
@@ -110,21 +116,38 @@ export class KnowledgeUnitOfWork {
             change(tx);
           }
         });
-        dbCommitted = true;
       } catch (err: unknown) {
-        // DB 失败但文件已写入 → 最终一致性
-        // SyncService.reconcile() 下次运行时会从文件重建 DB 记录
-        this.#logger.warn('UoW: DB transaction failed after file success', {
+        // CO3 W2 (write-strict): files are persisted but the DB commit
+        // failed — a real file/DB divergence. It used to degrade to a warn
+        // log and a dbCommitted=false flag nobody checked. Now: record the
+        // divergence, emit the diagnostic with a stable code, and throw a
+        // typed error that names the reconciliation path. Files are NOT
+        // rolled back — .md files are the source of truth.
+        const divergence = {
+          entryIds: this.#completedFileOps.map((op) => op.entry.id),
           fileOpsCompleted: this.#completedFileOps.length,
+          reconcileVia: 'KnowledgeSyncService.sync',
+          sqliteBusy: isSqliteBusyError(err),
+        };
+        this.#logger.error('UoW: file/DB divergence — DB transaction failed after file success', {
+          code: CORE_DIAGNOSTIC_CODES.knowledgeFileDbDivergence,
+          ...divergence,
+          ...(divergence.sqliteBusy ? { busyCode: CORE_DIAGNOSTIC_CODES.sqliteBusy } : {}),
           error: err instanceof Error ? err.message : String(err),
         });
+        this.#reset();
+        throw new DivergenceError(
+          'Knowledge files persisted but DB commit failed — run knowledge sync to rebuild DB rows from files',
+          { code: CORE_DIAGNOSTIC_CODES.knowledgeFileDbDivergence, ...divergence },
+          { cause: err }
+        );
       }
-    } else {
-      dbCommitted = true; // 无 DB 变更时视为成功
     }
 
     const result: UnitOfWorkResult = {
-      dbCommitted,
+      // commit() now throws on DB failure, so a returned result always
+      // means the DB side is consistent with the files.
+      dbCommitted: true,
       fileOpsCompleted: this.#completedFileOps.length,
     };
 

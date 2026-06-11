@@ -128,6 +128,15 @@ class PathGuard {
     this.#projectRoot = path.resolve(projectRoot);
     this.#packageRoot = packageRoot ? path.resolve(packageRoot) : null;
     this.#knowledgeBaseDir = knowledgeBaseDir || null; // 延迟解析
+    // ── Exclusion staleness policy (CO3 C6, documented decision) ──
+    // The excluded-project verdict is computed ONCE per configure() and
+    // frozen for the process lifetime (isExcludedProject additionally
+    // memoizes per path). A marker added later (e.g. dropping .asd-skip
+    // into the project) is NOT seen until the process restarts or the host
+    // calls configure() again. Re-checking per write was reviewed and
+    // rejected: the verdict depends on fs.existsSync probes, so a per-write
+    // re-check is disk I/O on every guarded write — not cheap, and the
+    // stale window only lasts one process lifetime.
     const exclusion = isExcludedProject(this.#projectRoot);
     this.#isExcludedProject = exclusion.excluded;
     this.#excludeReason = exclusion.reason;

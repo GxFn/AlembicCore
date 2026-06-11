@@ -84,4 +84,43 @@ export class InternalError extends BaseError {
   }
 }
 
+/**
+ * PersistenceError - 持久化写路径失败（CO3 write-strict 语义）
+ *
+ * Raised when a write-path persistence step (audit insert, feedback save,
+ * file/DB write) fails. Under the write-strict posture these failures must
+ * surface to the caller instead of being swallowed; `details` carries the
+ * failed operation and target so callers can decide on retry/repair.
+ */
+export class PersistenceError extends BaseError {
+  details: Record<string, unknown>;
+  constructor(message: string, details: Record<string, unknown> = {}, options?: ErrorOptions) {
+    super(message, 'PERSISTENCE_ERROR', 500);
+    this.details = details;
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
+/**
+ * DivergenceError - 文件已持久化但 DB 提交失败的状态分歧（CO3 W2）
+ *
+ * Raised when the file side of a file-first write succeeded but the DB
+ * commit failed, leaving .md files (source of truth) ahead of the DB.
+ * The divergence is recoverable: `details.reconcileVia` names the repair
+ * path (KnowledgeSyncService.sync rebuilds DB rows from files). Callers
+ * must not treat the write as silently complete.
+ */
+export class DivergenceError extends BaseError {
+  details: Record<string, unknown>;
+  constructor(message: string, details: Record<string, unknown> = {}, options?: ErrorOptions) {
+    super(message, 'STATE_DIVERGENCE', 500);
+    this.details = details;
+    if (options?.cause !== undefined) {
+      this.cause = options.cause;
+    }
+  }
+}
+
 /* 默认导出已移除 — 使用命名导入: import { ValidationError } from '...' */

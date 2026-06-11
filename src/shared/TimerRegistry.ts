@@ -9,9 +9,21 @@
  * 不替代组件内部的定时器引用（组件仍可持有 handle 做 reschedule），
  * 但保证 shutdown 时兜底清理。
  *
+ * Shutdown expectations (CO3 C8, documented contract):
+ *   - dispose() is idempotent and is the LAST lifecycle step: it clears all
+ *     registered timers, then disposes registered Disposables in parallel
+ *     (one failure does not block the others).
+ *   - Anything registered AFTER dispose() is created as requested but will
+ *     never be cleaned up by this registry. Such registrations indicate a
+ *     shutdown-ordering bug and are logged with the stable code
+ *     core.diagnostic.timer.post-dispose-registration (behavior unchanged).
+ *   - Components with pending async work must flush it themselves before
+ *     dispose() — the registry only clears timers, it does not drain queues.
+ *
  * @module shared/TimerRegistry
  */
 
+import { CORE_DIAGNOSTIC_CODES } from './DiagnosticCodes.js';
 import type { Disposable } from './lifecycle.js';
 
 type TimerHandle = ReturnType<typeof setInterval> | ReturnType<typeof setTimeout>;
@@ -43,6 +55,7 @@ class TimerRegistryImpl implements Disposable {
     label: string,
     opts?: TimerSetOptions
   ): ReturnType<typeof setInterval> {
+    this.#warnIfDisposed('setInterval', label);
     const handle = globalThis.setInterval(fn, ms);
     const blocking = opts?.blocking ?? false;
     if (!blocking && handle.unref) {
@@ -69,6 +82,7 @@ class TimerRegistryImpl implements Disposable {
     label: string,
     opts?: TimerSetOptions
   ): ReturnType<typeof setTimeout> {
+    this.#warnIfDisposed('setTimeout', label);
     const handle = globalThis.setTimeout(() => {
       this.#timers.delete(handle);
       fn();
@@ -107,7 +121,21 @@ class TimerRegistryImpl implements Disposable {
    * 注册一个 Disposable 组件（shutdown 时自动调用 dispose）
    */
   registerDisposable(label: string, disposable: Disposable): void {
+    this.#warnIfDisposed('registerDisposable', label);
     this.#disposables.set(label, disposable);
+  }
+
+  /**
+   * Post-dispose registrations escape cleanup — diagnostics only (CO3 C8),
+   * the registration itself still happens to avoid behavior change.
+   */
+  #warnIfDisposed(operation: string, label: string): void {
+    if (this.#disposed) {
+      process.stderr.write(
+        `[TimerRegistry] ${CORE_DIAGNOSTIC_CODES.timerPostDisposeRegistration}: ` +
+          `${operation}("${label}") after dispose() — it will not be cleaned up\n`
+      );
+    }
   }
 
   /**

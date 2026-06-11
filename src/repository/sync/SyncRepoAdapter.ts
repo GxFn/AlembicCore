@@ -5,6 +5,8 @@
  * 使 KnowledgeSyncService 本身不再需要 escape-hatch 标记。
  */
 
+import { PersistenceError } from '../../shared/errors/index.js';
+
 type RawDb = {
   prepare(sql: string): {
     run(...args: unknown[]): void;
@@ -21,7 +23,15 @@ export interface SyncRepo {
   /** 检查 entry 是否已存在 */
   entryExists(id: string): boolean;
 
-  /** 创建审计日志插入语句（可能失败返回 null） */
+  /**
+   * 创建审计日志插入语句
+   *
+   * Contract (CO3 W1, write-strict): implementations must NOT silently
+   * return null on preparation failure — audit records are part of the
+   * write path and their loss must surface as a typed PersistenceError.
+   * The nullable return stays only for callers that intentionally skip
+   * auditing (dryRun / skipViolations).
+   */
   createAuditInsertStmt(): { run: (...args: unknown[]) => void } | null;
 
   /** 查询所有非 deprecated 且有 sourceFile 的条目 */
@@ -62,13 +72,20 @@ export class RawDbSyncAdapter implements SyncRepo {
   }
 
   createAuditInsertStmt() {
+    // CO3 W1 (write-strict): preparation failure (e.g. audit_logs table
+    // missing) used to return null and silently drop every audit record.
+    // It now surfaces as a typed error so sync callers fail loudly.
     try {
       return this.#db.prepare(`
         INSERT INTO audit_logs (id, timestamp, actor, actor_context, action, resource, operation_data, result, error_message, duration)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-    } catch {
-      return null;
+    } catch (err: unknown) {
+      throw new PersistenceError(
+        'Audit insert statement preparation failed — audit records cannot be persisted',
+        { operation: 'audit-insert-prepare', table: 'audit_logs' },
+        { cause: err }
+      );
     }
   }
 

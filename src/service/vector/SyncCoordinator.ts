@@ -19,6 +19,7 @@ import type { EventBus } from '../../infrastructure/event/EventBus.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import { queryNonDeprecatedEntries } from '../../repository/search/SearchRepoAdapter.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import type { VectorChunkEnricher } from './EnrichmentTypes.js';
 import type { EmbedProvider } from './VectorService.js';
 
@@ -57,6 +58,7 @@ export class SyncCoordinator {
   #logger = Logger.getInstance();
   #eventBus: EventBus | null = null;
   #boundHandler: ((data: unknown) => void) | null = null;
+  #boundDeletedHandler: ((data: unknown) => void) | null = null;
 
   constructor(config: SyncCoordinatorConfig) {
     this.#vectorStore = config.vectorStore;
@@ -76,7 +78,9 @@ export class SyncCoordinator {
     };
 
     eventBus.on('knowledge:changed', this.#boundHandler);
-    eventBus.on('knowledge:deleted', (data: unknown) => {
+    // CO3 C8: keep the handler reference so destroy() can unbind it — the
+    // previous anonymous listener leaked past destroy and kept enqueueing.
+    this.#boundDeletedHandler = (data: unknown) => {
       const d = data as { id?: string; entryId?: string };
       const entryId = d.entryId || d.id;
       if (entryId) {
@@ -86,12 +90,19 @@ export class SyncCoordinator {
           timestamp: Date.now(),
         });
       }
-    });
+    };
+    eventBus.on('knowledge:deleted', this.#boundDeletedHandler);
 
     this.#logger.info('[SyncCoordinator] Bound to EventBus');
   }
 
-  /** 手动触发立即刷入（用于测试或 shutdown 前确保数据落盘） */
+  /**
+   * 手动触发立即刷入（用于测试或 shutdown 前确保数据落盘）
+   *
+   * Shutdown expectation (CO3 C8): callers that need pending changes
+   * persisted must `await flush()` BEFORE destroy(); destroy() drops the
+   * pending queue without processing it.
+   */
   async flush(): Promise<void> {
     if (this.#debounceTimer) {
       clearTimeout(this.#debounceTimer);
@@ -102,11 +113,25 @@ export class SyncCoordinator {
 
   /**
    * 启动对账: 比较 DB knowledge_entries 与向量索引，修复不一致
-   * - 孤儿向量 (在索引中但 DB 无对应) → 删除
-   * - 缺失向量 (在 DB 中但索引无对应) → 加入待同步队列
+   *
+   * Explicit reconcile contract (CO3 V1):
+   * - Orphan = an `entry_*` vector whose id has no non-deprecated DB row.
+   *   Each orphan is removed individually; a failed removal is COUNTED in
+   *   `errors` and logged with the stable code
+   *   core.diagnostic.vector.orphan-remove-failed (it is never silent).
+   * - Missing = a non-deprecated DB row without a vector. Each is
+   *   re-enqueued as an upsert and flushed before reconcile returns
+   *   (`missingSynced` counts them).
+   * - If the DB cannot be read (missing table / no connection), reconcile
+   *   returns zero counts and logs
+   *   core.diagnostic.vector.reconcile-db-unavailable — degraded but
+   *   usable, per the read-tolerant posture.
+   * - Removals stay per-item (no transactional batch): the vector store
+   *   contract has no multi-id atomic delete, and batching would change
+   *   data structures, which CO3 forbids.
    *
    * @param db - 数据库连接 (better-sqlite3 style)
-   * @returns 对账结果
+   * @returns 对账结果 { orphansRemoved, missingSynced, errors }
    */
   async reconcile(db?: {
     prepare(sql: string): {
@@ -142,8 +167,12 @@ export class SyncCoordinator {
         } else {
           return result;
         }
-      } catch {
-        // 表可能不存在
+      } catch (err: unknown) {
+        // Missing table / unavailable DB: degraded but usable (CO3 V1).
+        this.#logger.warn('[SyncCoordinator] reconcile skipped — DB unavailable', {
+          code: CORE_DIAGNOSTIC_CODES.vectorReconcileDbUnavailable,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return result;
       }
 
@@ -155,8 +184,16 @@ export class SyncCoordinator {
           try {
             await this.#vectorStore.remove(vectorId as string);
             result.orphansRemoved++;
-          } catch {
-            // 删除失败不阻塞
+          } catch (err: unknown) {
+            // CO3 V1: a failed orphan removal used to vanish — it is now
+            // counted in the contract result and logged with a stable code.
+            const message = err instanceof Error ? err.message : String(err);
+            result.errors.push(`orphan-remove-failed:${vectorId}:${message}`);
+            this.#logger.warn('[SyncCoordinator] orphan vector removal failed', {
+              code: CORE_DIAGNOSTIC_CODES.vectorOrphanRemoveFailed,
+              vectorId,
+              error: message,
+            });
           }
         }
       }
@@ -187,13 +224,32 @@ export class SyncCoordinator {
         missingSynced: result.missingSynced,
       });
     } catch (err: unknown) {
-      result.errors.push(err instanceof Error ? err.message : String(err));
+      // Contract: unexpected reconcile failures are returned in errors[]
+      // and logged — the caller sees them either way (CO3 V1).
+      const message = err instanceof Error ? err.message : String(err);
+      result.errors.push(message);
+      this.#logger.warn('[SyncCoordinator] reconcile failed', {
+        code: CORE_DIAGNOSTIC_CODES.vectorReconcileFailed,
+        error: message,
+      });
     }
 
     return result;
   }
 
-  /** 销毁: 清理定时器和事件监听 */
+  /**
+   * 销毁: 清理定时器和事件监听
+   *
+   * Shutdown contract (CO3 C8, no API change):
+   * - Idempotent; safe to call more than once.
+   * - Unbinds BOTH EventBus listeners (knowledge:changed AND
+   *   knowledge:deleted — the latter previously leaked and kept enqueueing
+   *   after destroy).
+   * - Clears the debounce timer and DROPS the pending queue without
+   *   processing; callers needing the queue persisted must flush() first.
+   * - An in-flight #processBatch() is not interrupted; it finishes on its
+   *   own promise chain.
+   */
   destroy(): void {
     if (this.#debounceTimer) {
       clearTimeout(this.#debounceTimer);
@@ -204,6 +260,11 @@ export class SyncCoordinator {
       this.#eventBus.off('knowledge:changed', this.#boundHandler);
       this.#boundHandler = null;
     }
+    if (this.#eventBus && this.#boundDeletedHandler) {
+      this.#eventBus.off('knowledge:deleted', this.#boundDeletedHandler);
+      this.#boundDeletedHandler = null;
+    }
+    this.#eventBus = null;
 
     this.#pendingChanges.clear();
     this.#logger.info('[SyncCoordinator] Destroyed');
@@ -295,8 +356,14 @@ export class SyncCoordinator {
       for (const entryId of removes) {
         try {
           await this.#vectorStore.remove(`entry_${entryId}`);
-        } catch {
-          // 删除失败不阻塞
+        } catch (err: unknown) {
+          // Removal failure does not block the batch, but it is no longer
+          // silent — reconcile() repairs leftovers (CO3 V1 diagnostics).
+          this.#logger.warn('[SyncCoordinator] vector removal failed in batch', {
+            code: CORE_DIAGNOSTIC_CODES.vectorBatchRemoveFailed,
+            entryId,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
 

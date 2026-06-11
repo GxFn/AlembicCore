@@ -13,6 +13,22 @@ import { type DrizzleDB, initDrizzle } from './drizzle/index.js';
 const __dirname = import.meta.dirname;
 
 /**
+ * Classify a SQLite contention error (CO3 C7 busy diagnostics).
+ *
+ * better-sqlite3 raises SqliteError with `code` SQLITE_BUSY (or
+ * SQLITE_BUSY_SNAPSHOT under WAL) when the busy_timeout expires without
+ * acquiring the lock. Callers use this only to enrich diagnostics — per the
+ * user-decided C7 stance there is NO retry/backoff behavior attached.
+ */
+export function isSqliteBusyError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') {
+    return false;
+  }
+  const code = (err as { code?: unknown }).code;
+  return typeof code === 'string' && code.startsWith('SQLITE_BUSY');
+}
+
+/**
  * DatabaseConnection - 数据库连接管理器
  *
  * 重要：相对 DB 路径通过 projectRoot 解析，而非 process.cwd()。
@@ -80,10 +96,18 @@ export class DatabaseConnection {
         : undefined,
     });
 
-    // 启用 WAL 模式（Write-Ahead Logging）
+    // ── Concurrency stance (CO3 C7, user-decided, documented) ──
+    // WAL allows one writer + many readers across processes; busy_timeout
+    // makes a competing writer wait up to 3s for the write lock instead of
+    // failing immediately with SQLITE_BUSY. This pair is the WHOLE
+    // contention policy: there is deliberately NO application-level
+    // retry/backoff/jitter — adding it was reviewed and deferred until real
+    // contention evidence exists. When the timeout still expires, the error
+    // propagates to the caller and diagnostics tag it via isSqliteBusyError
+    // (stable code core.diagnostic.db.sqlite-busy) so contention evidence
+    // accumulates in logs rather than being retried away invisibly.
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
-    // 多进程并发写入保护：等待最多 3 秒获取写锁，而非立即 SQLITE_BUSY
     this.db.pragma('busy_timeout = 3000');
 
     // 初始化 Drizzle ORM 包装（与 raw db 共存，操作同一连接）

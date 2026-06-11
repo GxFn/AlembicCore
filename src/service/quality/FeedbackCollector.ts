@@ -7,6 +7,9 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { WriteZone } from '../../infrastructure/io/index.js';
+import Logger from '../../infrastructure/logging/Logger.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
+import { PersistenceError, ValidationError } from '../../shared/errors/index.js';
 import pathGuard from '../../shared/PathGuard.js';
 import { DEFAULT_KNOWLEDGE_BASE_DIR } from '../../shared/ProjectMarkers.js';
 
@@ -29,6 +32,7 @@ export class FeedbackCollector {
   #events: FeedbackEvent[];
   #maxEvents;
   readonly #wz: WriteZone | null;
+  #logger = Logger.getInstance();
 
   constructor(projectRoot: string, options: FeedbackCollectorOptions = {}) {
     const kbDir = options.knowledgeBaseDir || DEFAULT_KNOWLEDGE_BASE_DIR;
@@ -42,9 +46,35 @@ export class FeedbackCollector {
 
   /**
    * 记录一个交互事件
+   *
+   * Write path (CO3 C9 + W4, write-strict): invalid input and save loss
+   * both surface as typed errors instead of silently corrupting or
+   * dropping the feedback store.
+   *
    * @param data 任意附加数据 (rating, comment, etc.)
+   * @throws ValidationError when type/recipeId/data are malformed
+   * @throws PersistenceError when the feedback store cannot be written
    */
   record(type: string, recipeId: string, data: Record<string, unknown> = {}) {
+    if (typeof type !== 'string' || type.trim() === '') {
+      throw new ValidationError('Feedback event type must be a non-empty string', {
+        field: 'type',
+        received: typeof type === 'string' ? type : typeof type,
+      });
+    }
+    if (typeof recipeId !== 'string' || recipeId.trim() === '') {
+      throw new ValidationError('Feedback recipeId must be a non-empty string', {
+        field: 'recipeId',
+        received: typeof recipeId === 'string' ? recipeId : typeof recipeId,
+      });
+    }
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) {
+      throw new ValidationError('Feedback data must be a plain object', {
+        field: 'data',
+        received: Array.isArray(data) ? 'array' : typeof data,
+      });
+    }
+
     this.#events.push({
       type,
       recipeId,
@@ -116,18 +146,28 @@ export class FeedbackCollector {
   // ─── 私有 ─────────────────────────────────────────────
 
   #load() {
+    // Read path (CO3 R2, read-tolerant): a corrupt/unreadable feedback file
+    // degrades to an empty event list so reads stay usable, but the
+    // degradation is surfaced with a stable diagnostic code instead of
+    // disappearing.
     try {
       if (existsSync(this.#feedbackPath)) {
         const data = JSON.parse(readFileSync(this.#feedbackPath, 'utf-8'));
         return Array.isArray(data) ? data : data.events || [];
       }
-    } catch {
-      /* silent */
+    } catch (err: unknown) {
+      this.#logger.warn('FeedbackCollector: feedback store unreadable — starting empty', {
+        code: CORE_DIAGNOSTIC_CODES.feedbackLoadFailed,
+        path: this.#feedbackPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
     return [];
   }
 
   #save() {
+    // Write path (CO3 W4, write-strict): a failed save used to vanish, so
+    // recorded events silently never reached disk. It is now a typed error.
     try {
       if (this.#wz) {
         this.#wz.writeFile(
@@ -141,8 +181,12 @@ export class FeedbackCollector {
         }
         writeFileSync(this.#feedbackPath, JSON.stringify(this.#events, null, 2));
       }
-    } catch {
-      /* silent */
+    } catch (err: unknown) {
+      throw new PersistenceError(
+        'Feedback events could not be persisted',
+        { operation: 'feedback-save', path: this.#feedbackPath, events: this.#events.length },
+        { cause: err }
+      );
     }
   }
 
@@ -162,8 +206,13 @@ export class FeedbackCollector {
         }
         unlinkSync(oldPath);
       }
-    } catch {
-      /* 迁移失败不阻断启动 */
+    } catch (err: unknown) {
+      // Startup must not be blocked by legacy-path migration, but the
+      // degradation gets a diagnostic instead of disappearing.
+      this.#logger.warn('FeedbackCollector: legacy feedback migration failed — continuing', {
+        code: CORE_DIAGNOSTIC_CODES.feedbackMigrateFailed,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 }

@@ -1,7 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getProjectRecipesPath } from '../../infrastructure/config/Paths.js';
+import Logger from '../../infrastructure/logging/Logger.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import { jaccardSimilarity, tokenizeForSimilarity } from '../../shared/similarity.js';
+
+/**
+ * CO3 C6 walk guards: recipes live in a shallow user-managed tree; 16
+ * levels is far beyond any legitimate layout, so deeper nesting indicates
+ * a symlink cycle or runaway structure and the walk stops with a
+ * diagnostic instead of recursing unbounded.
+ */
+const MAX_WALK_DEPTH = 16;
 
 /**
  * SimilarityService — 轻量级 Recipe 相似度检测
@@ -54,14 +64,26 @@ function loadRecipesFromDisk(recipesDir: string) {
     return recipes;
   }
 
-  const walk = (dir: string) => {
+  const logger = Logger.getInstance();
+  let truncated = false;
+  const walk = (dir: string, depth: number) => {
+    // CO3 C6 depth guard: stop instead of recursing unbounded.
+    if (depth > MAX_WALK_DEPTH) {
+      truncated = true;
+      return;
+    }
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name.startsWith('.')) {
         continue;
       }
+      // CO3 C6 symlink guard: a symlinked dir/file can point outside the
+      // recipes tree or create a cycle; the walk only follows real entries.
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(full);
+        walk(full, depth + 1);
       } else if (entry.isFile() && entry.name.endsWith('.md')) {
         try {
           const content = fs.readFileSync(full, 'utf8');
@@ -75,13 +97,27 @@ function loadRecipesFromDisk(recipesDir: string) {
             summary: summaryMatch?.[1]?.trim() || '',
             code: codeMatch?.[1]?.trim() || '',
           });
-        } catch {
-          /* skip unreadable */
+        } catch (err: unknown) {
+          // Read-tolerant skip, but no longer invisible.
+          logger.debug('SimilarityService: skip unreadable recipe file', {
+            file: full,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
     }
   };
-  walk(recipesDir);
+  walk(recipesDir, 0);
+  if (truncated) {
+    logger.warn(
+      'SimilarityService: recipe walk truncated at depth limit — results may be partial',
+      {
+        code: CORE_DIAGNOSTIC_CODES.similarityWalkTruncated,
+        recipesDir,
+        maxDepth: MAX_WALK_DEPTH,
+      }
+    );
+  }
   return recipes;
 }
 
