@@ -176,7 +176,11 @@ describe('host-agent mining workflow core', () => {
     expect(visibleText).toContain('alembic_submit_knowledge');
     expect(visibleText).toContain('ProjectSkillDeliveryReceipt');
     expect(visibleText).toContain('runtimeExport.status');
+    expect(visibleText).toContain('候选校验');
+    expect(visibleText).toContain('重复检查');
     expect(visibleText).not.toContain('knowledge({ action');
+    expect(visibleText).not.toContain('alembic_enrich_candidates');
+    expect(visibleText).not.toContain('enrichCandidates');
     expect(visibleText).not.toContain('alembic_skill');
     expect(visibleText).not.toContain('submit_batch');
   });
