@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
+  CORE_CONSUMER_REPOS,
   PUBLIC_API_CLOSEOUT_CATEGORIES,
   PUBLIC_API_FACADE_READINESS_DECISIONS,
   getPublicApiFacadeReadiness,
@@ -14,23 +15,7 @@ import {
 } from './public-api-boundary-policy.mjs';
 
 const CORE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DEFAULT_CONSUMERS = [
-  {
-    configPath: '../AlembicAgent/config/core-import-boundary.json',
-    name: 'AlembicAgent',
-    root: '../AlembicAgent',
-  },
-  {
-    configPath: '../Alembic/config/core-import-boundary.json',
-    name: 'Alembic',
-    root: '../Alembic',
-  },
-  {
-    configPath: '../AlembicPlugin/config/core-import-boundary-allowlist.json',
-    name: 'AlembicPlugin',
-    root: '../AlembicPlugin',
-  },
-];
+const DEFAULT_CONSUMERS = CORE_CONSUMER_REPOS;
 
 function parseArgs(argv) {
   const options = { format: 'text', help: false };

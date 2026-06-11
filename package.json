@@ -86,10 +86,6 @@
       "types": "./dist/shared/*.d.ts",
       "import": "./dist/shared/*.js"
     },
-    "./domain": {
-      "types": "./dist/domain/index.d.ts",
-      "import": "./dist/domain/index.js"
-    },
     "./domain/dimension": {
       "types": "./dist/domain/dimension/index.d.ts",
       "import": "./dist/domain/dimension/index.js"
@@ -106,10 +102,6 @@
       "types": "./dist/domain/knowledge/index.d.ts",
       "import": "./dist/domain/knowledge/index.js"
     },
-    "./domain/knowledge/values": {
-      "types": "./dist/domain/knowledge/values/index.d.ts",
-      "import": "./dist/domain/knowledge/values/index.js"
-    },
     "./domain/knowledge/values/*": {
       "types": "./dist/domain/knowledge/values/*.d.ts",
       "import": "./dist/domain/knowledge/values/*.js"
@@ -117,10 +109,6 @@
     "./domain/knowledge/*": {
       "types": "./dist/domain/knowledge/*.d.ts",
       "import": "./dist/domain/knowledge/*.js"
-    },
-    "./domain/source-graph": {
-      "types": "./dist/domain/source-graph/index.d.ts",
-      "import": "./dist/domain/source-graph/index.js"
     },
     "./domain/snippet/*": {
       "types": "./dist/domain/snippet/*.d.ts",
@@ -190,14 +178,6 @@
       "types": "./dist/core/*.d.ts",
       "import": "./dist/core/*.js"
     },
-    "./infrastructure": {
-      "types": "./dist/infrastructure/index.d.ts",
-      "import": "./dist/infrastructure/index.js"
-    },
-    "./infrastructure/config": {
-      "types": "./dist/infrastructure/config/index.d.ts",
-      "import": "./dist/infrastructure/config/index.js"
-    },
     "./infrastructure/config/*": {
       "types": "./dist/infrastructure/config/*.d.ts",
       "import": "./dist/infrastructure/config/*.js"
@@ -222,25 +202,13 @@
       "types": "./dist/infrastructure/database/*.d.ts",
       "import": "./dist/infrastructure/database/*.js"
     },
-    "./infrastructure/event": {
-      "types": "./dist/infrastructure/event/index.d.ts",
-      "import": "./dist/infrastructure/event/index.js"
-    },
     "./infrastructure/event/*": {
       "types": "./dist/infrastructure/event/*.d.ts",
       "import": "./dist/infrastructure/event/*.js"
     },
-    "./infrastructure/io": {
-      "types": "./dist/infrastructure/io/index.d.ts",
-      "import": "./dist/infrastructure/io/index.js"
-    },
     "./infrastructure/io/*": {
       "types": "./dist/infrastructure/io/*.d.ts",
       "import": "./dist/infrastructure/io/*.js"
-    },
-    "./infrastructure/logging": {
-      "types": "./dist/infrastructure/logging/index.d.ts",
-      "import": "./dist/infrastructure/logging/index.js"
     },
     "./infrastructure/logging/*": {
       "types": "./dist/infrastructure/logging/*.d.ts",
@@ -253,10 +221,6 @@
     "./infrastructure/report/*": {
       "types": "./dist/infrastructure/report/*.d.ts",
       "import": "./dist/infrastructure/report/*.js"
-    },
-    "./infrastructure/signal": {
-      "types": "./dist/infrastructure/signal/index.d.ts",
-      "import": "./dist/infrastructure/signal/index.js"
     },
     "./infrastructure/signal/*": {
       "types": "./dist/infrastructure/signal/*.d.ts",
@@ -350,10 +314,6 @@
       "types": "./dist/repository/session/*.d.ts",
       "import": "./dist/repository/session/*.js"
     },
-    "./repository/source-graph": {
-      "types": "./dist/repository/source-graph/index.d.ts",
-      "import": "./dist/repository/source-graph/index.js"
-    },
     "./repository/sourceref": {
       "types": "./dist/repository/sourceref/index.d.ts",
       "import": "./dist/repository/sourceref/index.js"
@@ -378,10 +338,6 @@
       "types": "./dist/repository/token/*.d.ts",
       "import": "./dist/repository/token/*.js"
     },
-    "./service": {
-      "types": "./dist/service/index.d.ts",
-      "import": "./dist/service/index.js"
-    },
     "./service/bootstrap": {
       "types": "./dist/service/bootstrap/index.d.ts",
       "import": "./dist/service/bootstrap/index.js"
@@ -398,10 +354,6 @@
       "types": "./dist/service/candidate/*.d.ts",
       "import": "./dist/service/candidate/*.js"
     },
-    "./service/evolution": {
-      "types": "./dist/service/evolution/index.d.ts",
-      "import": "./dist/service/evolution/index.js"
-    },
     "./service/evolution/*": {
       "types": "./dist/service/evolution/*.d.ts",
       "import": "./dist/service/evolution/*.js"
@@ -413,10 +365,6 @@
     "./service/guard/*": {
       "types": "./dist/service/guard/*.d.ts",
       "import": "./dist/service/guard/*.js"
-    },
-    "./service/knowledge": {
-      "types": "./dist/service/knowledge/index.d.ts",
-      "import": "./dist/service/knowledge/index.js"
     },
     "./service/knowledge/*": {
       "types": "./dist/service/knowledge/*.d.ts",
@@ -453,10 +401,6 @@
     "./service/search/*": {
       "types": "./dist/service/search/*.d.ts",
       "import": "./dist/service/search/*.js"
-    },
-    "./service/source-graph": {
-      "types": "./dist/service/source-graph/index.d.ts",
-      "import": "./dist/service/source-graph/index.js"
     },
     "./service/vector": {
       "types": "./dist/service/vector/index.d.ts",
@@ -588,13 +532,13 @@
     "test:coverage": "vitest run --coverage",
     "smoke:public-api": "node scripts/smoke-public-api.mjs",
     "lint:public-api-boundary": "node scripts/check-public-api-boundary.mjs",
-    "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports.mjs",
+    "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports-all.mjs",
     "report:public-api-closeout": "node scripts/report-public-api-closeout.mjs",
     "release:check": "node scripts/check-release-readiness.mjs",
     "lint": "biome check src/ test/ scripts/ *.ts",
     "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",
     "format": "biome format --write src/ test/ scripts/ *.ts",
-    "check": "npm run build:check && npm run lint:public-api-boundary && npm run test && npm run lint"
+    "check": "npm run build:check && npm run lint:public-api-boundary && npm run lint:consumer-core-imports && npm run smoke:public-api && npm run test && npm run lint"
   },
   "engines": {
     "node": ">=22.0.0"

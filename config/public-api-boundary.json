@@ -3,7 +3,7 @@
   "description": "AlembicCore public API boundary policy. Exact stable and provisional exports are intentional; wildcard exports are migration-only.",
   "expectedCounts": {
     "stable-public": 18,
-    "provisional-public": 24,
+    "provisional-public": 10,
     "transitional-internal": 98,
     "internal-only": 0,
     "forbidden": 0
@@ -177,37 +177,236 @@
           "decision": "consumer-ready-stable",
           "targetFacade": "./host-agent-workflows",
           "reason": "Workflow cleanup policy helpers are exported by the stable host-agent-workflows facade while concrete cleanup I/O remains injected by outer runtimes."
+        },
+        "./domain/dimension/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./dimensions",
+          "reason": "Dimension domain values and types are exported by the stable dimensions facade (A7 duplicate-pair resolution: the transitional ./domain/dimension duplicate is deprecated)."
+        },
+        "./domain/knowledge/values/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./knowledge",
+          "reason": "Knowledge value objects are exported by the stable knowledge facade; the exact ./domain/knowledge/values entry was removed 2026-06-12 with zero consumers."
+        },
+        "./daemon/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./daemon",
+          "reason": "Daemon runtime contracts, snapshots, and event helpers are exported by the stable daemon facade."
+        },
+        "./core/analysis/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./project-intelligence",
+          "reason": "Analysis entrypoints are covered by the stable project-intelligence facade."
+        },
+        "./core/discovery/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./project-intelligence",
+          "reason": "Discovery registries and language detection contracts are exposed by the stable project-intelligence facade."
+        },
+        "./core/discovery/parsers/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./project-intelligence",
+          "reason": "Parser registration is internal discovery support; project-level consumers use the stable project-intelligence facade."
+        },
+        "./infrastructure/database/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./database",
+          "reason": "Database manager and connection contracts are exported by the stable database facade; drizzle/migrations deep paths keep their own transitional entries."
+        },
+        "./infrastructure/event/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./events",
+          "reason": "EventBus and event contracts are exported by the stable events facade."
+        },
+        "./infrastructure/io/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./io",
+          "reason": "IO primitives are exported by the stable io facade."
+        },
+        "./infrastructure/logging/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./logging",
+          "reason": "Logger and logging contracts are exported by the stable logging facade."
+        },
+        "./infrastructure/vector/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./vector",
+          "reason": "Vector store contracts are exported by the stable vector facade (A7 duplicate-pair resolution for ./infrastructure/vector)."
+        },
+        "./service/guard/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./guard",
+          "reason": "Guard services are exported by the stable guard facade (A7 duplicate-pair resolution for ./service/guard)."
+        },
+        "./service/search/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./search",
+          "reason": "Search services and ranking signals are exported by the stable search facade (A7 duplicate-pair resolution for ./service/search)."
+        },
+        "./service/vector/*": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./vector",
+          "reason": "Vector sync services are exported by the stable vector facade (A7 duplicate-pair resolution for ./service/vector)."
+        },
+        "./core/enhancement/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./core/enhancement",
+          "reason": "Enhancement registry remains on the exact provisional core/enhancement facade; no stable home in this wave."
+        },
+        "./service/panorama/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./service/panorama",
+          "reason": "Panorama services remain on the exact keep-provisional facade."
+        },
+        "./workflows/shared/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/shared",
+          "reason": "Workflow shared helpers remain on the exact keep-provisional facade."
+        },
+        "./workflows/cold-start/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/cold-start",
+          "reason": "Cold-start workflows remain on the exact keep-provisional facade (CKG1 owns the area rebuild)."
+        },
+        "./workflows/knowledge-rescan/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/knowledge-rescan",
+          "reason": "Knowledge-rescan workflows remain on the exact keep-provisional facade."
+        },
+        "./workflows/capabilities/host-agent/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/capabilities/host-agent",
+          "reason": "Host-agent capability deep files are replaced by the exact keep-provisional facade."
+        },
+        "./workflows/capabilities/persistence/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/capabilities/persistence",
+          "reason": "Persistence capability deep files are replaced by the exact keep-provisional facade."
+        },
+        "./workflows/capabilities/planning/dimensions/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/capabilities/planning/dimensions",
+          "reason": "Planning-dimensions capability deep files are replaced by the exact keep-provisional facade."
+        },
+        "./workflows/capabilities/planning/knowledge/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/capabilities/planning/knowledge",
+          "reason": "Planning-knowledge capability deep files are replaced by the exact keep-provisional facade."
+        },
+        "./workflows/capabilities/presentation/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/capabilities/presentation",
+          "reason": "Presentation capability deep files are replaced by the exact keep-provisional facade."
+        },
+        "./workflows/capabilities/project-intelligence/*": {
+          "decision": "consumer-ready-provisional",
+          "targetFacade": "./workflows/capabilities/project-intelligence",
+          "reason": "Project-intelligence capability deep files are replaced by the exact keep-provisional facade."
+        },
+        "./domain/snippet/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./domain/snippet/*",
+          "reason": "Snippet domain entity has no stable facade and zero consumers (frozen census 2026-06-12); deprecated, owned transitional until SD-5 phase 2."
+        },
+        "./repository/base/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./repositories",
+          "reason": "Base repository plumbing stays transitional (must-keep); any future consumer routes through the stable repositories facade."
+        },
+        "./repository/bootstrap/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./repositories",
+          "reason": "Bootstrap repository plumbing stays transitional (must-keep); route is the stable repositories facade."
+        },
+        "./repository/code/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./repositories",
+          "reason": "Code repository plumbing stays transitional (must-keep); route is the stable repositories facade."
+        },
+        "./repository/guard/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./repositories",
+          "reason": "Guard repository implementation has zero consumers; deprecated, route for any future consumer is the stable repositories facade."
+        },
+        "./repository/search/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./repositories",
+          "reason": "Search repository implementation has zero consumers; deprecated, route for any future consumer is the stable repositories facade."
+        },
+        "./repository/session/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./repositories",
+          "reason": "Session repository implementation has zero consumers; deprecated, route for any future consumer is the stable repositories facade."
+        },
+        "./*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./*",
+          "reason": "Root catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
+        },
+        "./domain/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./domain/*",
+          "reason": "Domain catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
+        },
+        "./core/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./core/*",
+          "reason": "Core catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
+        },
+        "./infrastructure/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./infrastructure/*",
+          "reason": "Infrastructure catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
+        },
+        "./service/*": {
+          "decision": "keep-transitional",
+          "targetFacade": "./service/*",
+          "reason": "Service catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
         }
       },
       "specifiers": {
         "@alembic/core/infrastructure/config/ConfigLoader": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./config",
-          "symbols": ["ConfigLoader", "default"],
+          "symbols": [
+            "ConfigLoader",
+            "default"
+          ],
           "reason": "Default and named ConfigLoader are available from the config facade."
         },
         "@alembic/core/infrastructure/config/Defaults": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./config",
-          "symbols": ["CANDIDATES_DIR", "RECIPES_DIR", "ConfigDefaults"],
+          "symbols": [
+            "CANDIDATES_DIR",
+            "RECIPES_DIR",
+            "ConfigDefaults"
+          ],
           "reason": "Frequently used default constants are direct facade exports; namespace consumers can use ConfigDefaults."
         },
         "@alembic/core/infrastructure/config/Paths": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./config",
-          "symbols": ["getProjectSkillsPath", "ConfigPaths"],
+          "symbols": [
+            "getProjectSkillsPath",
+            "ConfigPaths"
+          ],
           "reason": "Frequently used path helpers are direct facade exports; namespace consumers can use ConfigPaths."
         },
         "@alembic/core/service/candidate/CandidateAggregator": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./service/candidate",
-          "symbols": ["aggregateCandidates"],
+          "symbols": [
+            "aggregateCandidates"
+          ],
           "reason": "Candidate aggregation is exported by the candidate facade."
         },
         "@alembic/core/service/candidate/SimilarityService": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./service/candidate",
-          "symbols": ["findSimilarRecipes"],
+          "symbols": [
+            "findSimilarRecipes"
+          ],
           "reason": "Candidate similarity is exported by the candidate facade."
         },
         "@alembic/core/core/AstAnalyzer": {
@@ -250,7 +449,10 @@
         "@alembic/core/core/enhancement": {
           "decision": "keep-transitional",
           "targetFacade": "./core/enhancement",
-          "symbols": ["getEnhancementRegistry", "initEnhancementRegistry"],
+          "symbols": [
+            "getEnhancementRegistry",
+            "initEnhancementRegistry"
+          ],
           "reason": "Enhancement registry consumers still include Alembic and AlembicPlugin runtime paths and tests. No stable replacement facade exists in this wave, so the exact provisional core/enhancement entry remains intentionally transitional."
         },
         "@alembic/core/service/evolution/ContentImpactAnalyzer": {
@@ -268,118 +470,535 @@
         "@alembic/core/shared/WorkspaceSettingsStore": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["PROVIDER_KEY_ENV", "WorkspaceSettingsStore"],
+          "symbols": [
+            "PROVIDER_KEY_ENV",
+            "WorkspaceSettingsStore"
+          ],
           "reason": "Workspace settings are shared runtime support, not a workspace-project facade contract yet."
         },
         "@alembic/core/shared/concurrency": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["cpuLimit", "createLimit", "ioLimit"],
+          "symbols": [
+            "cpuLimit",
+            "createLimit",
+            "ioLimit"
+          ],
           "reason": "Concurrency limiters are exported by the shared facade."
         },
         "@alembic/core/shared/constants": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["KNOWLEDGE_CONFIDENCE"],
+          "symbols": [
+            "KNOWLEDGE_CONFIDENCE"
+          ],
           "reason": "Shared constants are exported by the shared facade."
         },
         "@alembic/core/shared/content-hash": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["computeContentHash"],
+          "symbols": [
+            "computeContentHash"
+          ],
           "reason": "Content hash utility is exported by the shared facade."
         },
         "@alembic/core/shared/developer-identity": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["getDeveloperIdentity"],
+          "symbols": [
+            "getDeveloperIdentity"
+          ],
           "reason": "Developer identity helper is exported by the shared facade; downstream tests can mock the facade entrypoint."
         },
         "@alembic/core/shared/diff-parser": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["parseDiffHunks", "tokenizeDiffLines"],
+          "symbols": [
+            "parseDiffHunks",
+            "tokenizeDiffLines"
+          ],
           "reason": "Diff parsing helpers are exported by the shared facade."
         },
         "@alembic/core/shared/errors/BaseError": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["ConstitutionViolation", "InternalError", "PermissionDenied"],
+          "symbols": [
+            "ConstitutionViolation",
+            "InternalError",
+            "PermissionDenied"
+          ],
           "reason": "Error classes are exported through the shared errors index and shared facade."
         },
         "@alembic/core/shared/errors/index": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["NotFoundError", "ValidationError"],
+          "symbols": [
+            "NotFoundError",
+            "ValidationError"
+          ],
           "reason": "Error classes are exported through the shared facade."
         },
         "@alembic/core/shared/folder-names": {
           "decision": "consumer-ready-stable",
           "targetFacade": "./workspace",
-          "symbols": ["DEFAULT_FOLDER_NAMES", "validateFolderNameSegment"],
+          "symbols": [
+            "DEFAULT_FOLDER_NAMES",
+            "validateFolderNameSegment"
+          ],
           "reason": "Folder names are already part of the stable workspace facade."
         },
         "@alembic/core/shared/isOwnDevRepo": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["isExcludedProject"],
+          "symbols": [
+            "isExcludedProject"
+          ],
           "reason": "Development repository helpers remain shared support and are exported by the shared facade."
         },
         "@alembic/core/shared/markdown-utils": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["extractCodeBlocksFromMarkdown"],
+          "symbols": [
+            "extractCodeBlocksFromMarkdown"
+          ],
           "reason": "Markdown utilities are exported by the shared facade."
         },
         "@alembic/core/shared/schemas/common": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["PaginationSchema"],
+          "symbols": [
+            "PaginationSchema"
+          ],
           "reason": "Common schemas are exported by the shared schema index and shared facade."
         },
         "@alembic/core/shared/schemas/config": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["AppConfigSchema", "ConstitutionSchema"],
+          "symbols": [
+            "AppConfigSchema",
+            "ConstitutionSchema"
+          ],
           "reason": "Config schemas are exported by the shared schema index and shared facade."
         },
         "@alembic/core/shared/similarity": {
           "decision": "consumer-ready-stable",
           "targetFacade": "./search",
-          "symbols": ["jaccardSimilarity"],
+          "symbols": [
+            "jaccardSimilarity"
+          ],
           "reason": "Similarity helpers are already stabilized on the search facade."
         },
         "@alembic/core/shared/test-mode": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["applyTestDimensionFilter", "getTestModeConfig"],
+          "symbols": [
+            "applyTestDimensionFilter",
+            "getTestModeConfig"
+          ],
           "reason": "Test-mode helpers are exported by the shared facade; downstream tests can mock the facade entrypoint."
         },
         "@alembic/core/shared/token-utils": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./shared",
-          "symbols": ["estimateTokens"],
+          "symbols": [
+            "estimateTokens"
+          ],
           "reason": "Token utilities are exported by the shared facade."
         },
         "@alembic/core/types/reactive-evolution": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./types",
-          "symbols": ["FileChangeEvent", "FileChangeEventSource", "ImpactLevel"],
+          "symbols": [
+            "FileChangeEvent",
+            "FileChangeEventSource",
+            "ImpactLevel"
+          ],
           "reason": "Reactive evolution contracts are type-only exports from the types facade."
         },
         "@alembic/core/types/snapshot-views": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./types",
-          "symbols": ["PipelineFillView"],
+          "symbols": [
+            "PipelineFillView"
+          ],
           "reason": "Snapshot view contracts are type-only exports from the types facade."
         },
         "@alembic/core/types/workflows": {
           "decision": "consumer-ready-provisional",
           "targetFacade": "./types",
-          "symbols": ["IncrementalPlan", "McpContext", "WorkflowDatabaseLike", "WorkflowSkillHooks"],
+          "symbols": [
+            "IncrementalPlan",
+            "McpContext",
+            "WorkflowDatabaseLike",
+            "WorkflowSkillHooks"
+          ],
           "reason": "Workflow contracts are type-only exports from the types facade; Wave 3B-Core-2 keeps these as type-only facade exports."
         }
       }
+    },
+    "removedExports": {
+      "./domain": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./knowledge",
+        "note": "Domain aggregate root removed; use per-capability stable facades ./knowledge, ./evolution, ./dimensions.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./infrastructure": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./config",
+        "note": "Infrastructure aggregate root removed; use per-capability stable facades ./config, ./events, ./io, ./logging, ./database.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./service": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./knowledge",
+        "note": "Service aggregate root removed; use stable facades ./knowledge, ./evolution, ./search, ./guard or the exact provisional ./service/<area> facades.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./infrastructure/config": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./config",
+        "note": "ConfigLoader, namespaces, and path/default helpers are exported by the provisional ./config facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./infrastructure/event": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./events",
+        "note": "EventBus and event contracts are exported by the stable ./events facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./infrastructure/io": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./io",
+        "note": "IO primitives (WriteZone etc.) are exported by the stable ./io facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./infrastructure/logging": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./logging",
+        "note": "Logger and logging contracts are exported by the stable ./logging facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./infrastructure/signal": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./events",
+        "note": "Signal bus, aggregator, bridge, and trace writer contracts are exported by the stable ./events facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./domain/knowledge/values": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./knowledge",
+        "note": "Knowledge value objects are exported by the stable ./knowledge facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./domain/source-graph": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./source-graph",
+        "note": "Variant facade removed; ./source-graph is the single canonical source-graph facade (shape frozen for CKG2/CKG4).",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./repository/source-graph": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./source-graph",
+        "note": "Variant facade removed; ./source-graph is the single canonical source-graph facade (shape frozen for CKG2/CKG4).",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./service/source-graph": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./source-graph",
+        "note": "Variant facade removed; ./source-graph is the single canonical source-graph facade (shape frozen for CKG2/CKG4).",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./service/evolution": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./evolution",
+        "note": "Evolution services, diff impact helpers, planner and gateway contracts are exported by the stable ./evolution facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./service/knowledge": {
+        "removedAt": "2026-06-12",
+        "replacementFacade": "./knowledge",
+        "note": "Knowledge services, sync/path/source-ref helpers, and gateway contracts are exported by the stable ./knowledge facade.",
+        "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      }
+    },
+    "sourceGraphCanonical": {
+      "canonicalFacade": "./source-graph",
+      "shape": "frozen",
+      "appliesTo": "CKG2/CKG4 consume source-graph exclusively through ./source-graph; its export shape is frozen while CKG work is live in AlembicPlugin.",
+      "liveConsumers": "AlembicPlugin: 5 references (2 lib, 2 test, 1 dynamic script) per CO0/CO1 freeze scans.",
+      "variantFacadesRemoved": [
+        "./domain/source-graph",
+        "./repository/source-graph",
+        "./service/source-graph"
+      ],
+      "decidedAt": "2026-06-12"
+    },
+    "transitionalOwnership": {
+      "./*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Root catch-all; kept only so unforeseen migration stragglers fail loudly at review, not silently at runtime."
+      },
+      "./domain/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Domain catch-all compatibility surface."
+      },
+      "./core/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Core catch-all compatibility surface."
+      },
+      "./infrastructure/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Infrastructure catch-all compatibility surface."
+      },
+      "./service/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Service catch-all compatibility surface."
+      },
+      "./domain/snippet/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Snippet entity; no stable facade home in this wave."
+      },
+      "./repository/guard/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Guard repository implementation; route ./repositories."
+      },
+      "./repository/search/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Search repository implementation; route ./repositories."
+      },
+      "./repository/session/*": {
+        "owner": "AlembicCore window",
+        "consumer": "none (frozen census 2026-06-12: 0 references in Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)",
+        "cleanupTrigger": "SD-5 phase-2 release-aligned deletion (target 0.3.0), gated on the post-CKG AlembicPlugin vendor refresh",
+        "note": "Session repository implementation; route ./repositories."
+      },
+      "./repository/base/*": {
+        "owner": "AlembicCore window",
+        "consumer": "Core internal tests; must-keep-transitional per Wave 3A manual decision",
+        "cleanupTrigger": "review-by 2026-09-12, then SD-5 phase-2 alignment",
+        "note": "Base repository plumbing."
+      },
+      "./repository/bootstrap/*": {
+        "owner": "AlembicCore window",
+        "consumer": "Core internal tests; must-keep-transitional per Wave 3A manual decision",
+        "cleanupTrigger": "review-by 2026-09-12, then SD-5 phase-2 alignment",
+        "note": "Bootstrap repository plumbing."
+      },
+      "./repository/code/*": {
+        "owner": "AlembicCore window",
+        "consumer": "Core internal tests; must-keep-transitional per Wave 3A manual decision",
+        "cleanupTrigger": "review-by 2026-09-12, then SD-5 phase-2 alignment",
+        "note": "Code repository plumbing."
+      },
+      "plugin-keep-alive": {
+        "owner": "AlembicPlugin window",
+        "consumer": "AlembicPlugin via file:../AlembicCore live link — 37 frozen specifiers (CO1 re-freeze 2026-06-12, identical to CO0 list), incl. core/ast/lang-*, infrastructure/database/drizzle{,/schema}, infrastructure/database/migrations/*, ./source-graph",
+        "cleanupTrigger": "post-CKG AlembicPlugin migration to stable facades + vendor refresh (SD-5 phase 2); the keep-alive list may only shrink via Plugin-side commits",
+        "note": "Hard constraint: every listed specifier stays importable and behavior-identical; zero AlembicPlugin edits from Core-side waves."
+      }
+    },
+    "deprecations": {
+      "schemaVersion": 1,
+      "deprecatedAt": "2026-06-12",
+      "removalRelease": "0.3.0 — SD-5 phase 2, release-aligned, gated on the post-CKG AlembicPlugin vendor refresh",
+      "note": "Phase-1 marks only (RC6 SD-5): these zero-consumer transitional/wildcard exports are scheduled for deletion; phase-2 deletion is out of CO1 scope. A fresh consumer scan before deletion remains mandatory.",
+      "exportPaths": [
+        "./*",
+        "./core/*",
+        "./core/analysis/*",
+        "./core/capability/*",
+        "./core/discovery/*",
+        "./core/discovery/parsers/*",
+        "./core/enhancement/*",
+        "./daemon/*",
+        "./domain/*",
+        "./domain/dimension",
+        "./domain/dimension/*",
+        "./domain/evolution/*",
+        "./domain/knowledge/*",
+        "./domain/knowledge/values/*",
+        "./domain/snippet/*",
+        "./infrastructure/*",
+        "./infrastructure/config/*",
+        "./infrastructure/database/*",
+        "./infrastructure/event/*",
+        "./infrastructure/io/*",
+        "./infrastructure/logging/*",
+        "./infrastructure/report/*",
+        "./infrastructure/signal/*",
+        "./infrastructure/vector",
+        "./infrastructure/vector/*",
+        "./repository/evolution",
+        "./repository/evolution/*",
+        "./repository/guard",
+        "./repository/guard/*",
+        "./repository/knowledge",
+        "./repository/knowledge/*",
+        "./repository/memory",
+        "./repository/memory/*",
+        "./repository/search",
+        "./repository/search/*",
+        "./repository/session",
+        "./repository/session/*",
+        "./repository/sourceref",
+        "./repository/sourceref/*",
+        "./repository/token",
+        "./repository/token/*",
+        "./service/*",
+        "./service/bootstrap/*",
+        "./service/candidate/*",
+        "./service/evolution/*",
+        "./service/guard",
+        "./service/guard/*",
+        "./service/knowledge/*",
+        "./service/panorama/*",
+        "./service/quality/*",
+        "./service/recipe/*",
+        "./service/search",
+        "./service/search/*",
+        "./service/vector",
+        "./service/vector/*",
+        "./shared/*",
+        "./types/*",
+        "./workflows/capabilities/*",
+        "./workflows/capabilities/host-agent/*",
+        "./workflows/capabilities/persistence/*",
+        "./workflows/capabilities/planning/dimensions/*",
+        "./workflows/capabilities/planning/knowledge/*",
+        "./workflows/capabilities/presentation/*",
+        "./workflows/capabilities/project-intelligence/*",
+        "./workflows/cold-start/*",
+        "./workflows/knowledge-rescan/*",
+        "./workflows/shared/*"
+      ]
+    },
+    "reviewBy": {
+      "schemaVersion": 1,
+      "note": "SD-5 phase-1 review-by dates for must-keep-transitional and keep-provisional entries; review decides promote / keep / deprecate.",
+      "dates": {
+        "./core/ast": "2026-09-12",
+        "./core/ast/*": "2026-09-12",
+        "./infrastructure/database/drizzle": "2026-09-12",
+        "./infrastructure/database/drizzle/*": "2026-09-12",
+        "./infrastructure/database/migrations/*": "2026-09-12",
+        "./repository/base": "2026-09-12",
+        "./repository/base/*": "2026-09-12",
+        "./repository/bootstrap": "2026-09-12",
+        "./repository/bootstrap/*": "2026-09-12",
+        "./repository/code": "2026-09-12",
+        "./repository/code/*": "2026-09-12",
+        "./repository/sync": "2026-09-12",
+        "./repository/sync/*": "2026-09-12",
+        "./core": "2026-09-12",
+        "./core/analysis": "2026-09-12",
+        "./core/discovery": "2026-09-12",
+        "./domain/knowledge": "2026-09-12",
+        "./infrastructure/database": "2026-09-12",
+        "./repository": "2026-09-12",
+        "./service/panorama": "2026-09-12",
+        "./workflows": "2026-09-12",
+        "./workflows/capabilities": "2026-09-12",
+        "./workflows/capabilities/host-agent": "2026-09-12",
+        "./workflows/capabilities/persistence": "2026-09-12",
+        "./workflows/capabilities/planning/dimensions": "2026-09-12",
+        "./workflows/capabilities/planning/knowledge": "2026-09-12",
+        "./workflows/capabilities/presentation": "2026-09-12",
+        "./workflows/capabilities/project-intelligence": "2026-09-12",
+        "./workflows/cold-start": "2026-09-12",
+        "./workflows/knowledge-rescan": "2026-09-12",
+        "./workflows/shared": "2026-09-12"
+      }
+    },
+    "duplicateRoutes": {
+      "schemaVersion": 1,
+      "note": "A7: transitional duplicates of stable facades. The transitional duplicate carries a deprecate mark (zero-consumer) or a review-by date (manual keep); the stable facade is the named route.",
+      "pairs": {
+        "./domain/dimension": {
+          "stableRoute": "./dimensions",
+          "disposition": "deprecated 2026-06-12 (zero consumers)"
+        },
+        "./infrastructure/vector": {
+          "stableRoute": "./vector",
+          "disposition": "deprecated 2026-06-12 (zero consumers)"
+        },
+        "./service/search": {
+          "stableRoute": "./search",
+          "disposition": "deprecated 2026-06-12 (zero consumers)"
+        },
+        "./service/vector": {
+          "stableRoute": "./vector",
+          "disposition": "deprecated 2026-06-12 (zero consumers)"
+        },
+        "./service/guard": {
+          "stableRoute": "./guard",
+          "disposition": "deprecated 2026-06-12 (zero consumers)"
+        },
+        "./repository": {
+          "stableRoute": "./repositories",
+          "disposition": "keep-provisional, review-by 2026-09-12"
+        },
+        "./infrastructure/database": {
+          "stableRoute": "./database",
+          "disposition": "keep-provisional, review-by 2026-09-12"
+        },
+        "./domain/knowledge": {
+          "stableRoute": "./knowledge",
+          "disposition": "keep-provisional, review-by 2026-09-12"
+        }
+      }
+    },
+    "narrowness": {
+      "schemaVersion": 1,
+      "measuredAt": "2026-06-12",
+      "note": "Shrink-only runtime-symbol budgets for provisional facades: a provisional facade may not re-export more runtime symbols than its frozen baseline (narrowness vs its transitional predecessors as of the CO1 freeze). Lower a baseline when a facade narrows; raising one requires a controller decision recorded in this file.",
+      "baselines": {
+        "./config": 47,
+        "./core/capability": 1,
+        "./core/enhancement": 4,
+        "./infrastructure/report": 1,
+        "./service/bootstrap": 1,
+        "./service/candidate": 2,
+        "./service/quality": 2,
+        "./service/recipe": 2,
+        "./shared": 189,
+        "./types": 6
+      }
+    },
+    "trend": {
+      "schemaVersion": 1,
+      "note": "Shrink-only trend: transitional/wildcard/provisional counts and maxCounts may never exceed the last recorded entry. Append entries with check-public-api-boundary --record-trend after intentional shrink waves.",
+      "history": [
+        {
+          "date": "2026-06-12",
+          "exports": 126,
+          "stable-public": 18,
+          "provisional-public": 10,
+          "transitional-internal": 98,
+          "wildcardExports": 61,
+          "maxCounts": {
+            "transitional-internal": 98,
+            "wildcardExports": 61
+          },
+          "note": "CO1 freeze: 14 curated zero-consumer exports removed (140 -> 126)."
+        }
+      ]
     }
   },
   "stablePublicExports": [
@@ -406,25 +1025,11 @@
     "./config",
     "./core/capability",
     "./core/enhancement",
-    "./domain",
-    "./domain/knowledge/values",
-    "./domain/source-graph",
-    "./infrastructure",
-    "./infrastructure/config",
-    "./infrastructure/event",
-    "./infrastructure/io",
-    "./infrastructure/logging",
     "./infrastructure/report",
-    "./infrastructure/signal",
-    "./service",
     "./service/bootstrap",
     "./service/candidate",
-    "./service/evolution",
-    "./service/knowledge",
     "./service/quality",
     "./service/recipe",
-    "./service/source-graph",
-    "./repository/source-graph",
     "./shared",
     "./types"
   ],

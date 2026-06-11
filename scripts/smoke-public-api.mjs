@@ -1,3 +1,9 @@
+// Scope (documented honestly per CO1/A6): this smoke gate verifies IMPORT
+// ACCESSIBILITY of the built public surface — every exact export path resolves
+// and imports from dist/, required runtime symbols exist, and required type
+// names appear in the declaration files. It is NOT a behavioral contract test;
+// behavior is covered by the vitest suites. It requires a current `npm run
+// build` output.
 import { readFileSync } from 'node:fs';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
