@@ -37,6 +37,11 @@ jobs:
       - name: TypeScript check
         run: npm run build:check
 
+      # The public-api boundary narrowness validation imports compiled dist/
+      # facades, so the package output must exist before that gate runs.
+      - name: Build package output
+        run: npm run build
+
       - name: Lint
         run: npm run lint
 
@@ -45,9 +50,6 @@ jobs:
 
       - name: Test
         run: npm test
-
-      - name: Build package output
-        run: npm run build
 
       - name: Smoke test package entrypoints
         run: npm run smoke:public-api
