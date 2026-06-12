@@ -53,9 +53,16 @@ const selfAllowlisted = new Set(
 
 // 1. manifest edges
 const allowed = new Set(selfEntry.allowedDependencies ?? []);
+// Space package names come from the canonical config (P3 step 8 alignment:
+// a hardcoded 'alembic' literal went stale when the live manifest name
+// turned out to be 'alembic-ai' — deriving from repos[*].packageName keeps
+// the detector aligned with the config by construction).
+const spacePackageNames = new Set(
+  Object.values(config.repos).map((entry) => entry.packageName)
+);
 const declared = { ...pkg.dependencies, ...pkg.devDependencies, ...pkg.optionalDependencies };
 for (const [name, version] of Object.entries(declared)) {
-  const isSpacePackage = name.startsWith('@alembic/') || name === 'alembic';
+  const isSpacePackage = name.startsWith('@alembic/') || spacePackageNames.has(name);
   const isSiblingLink = typeof version === 'string' && version.startsWith('file:..');
   if ((isSpacePackage || isSiblingLink) && !allowed.has(name) && !selfAllowlisted.has(name)) {
     failures.push(

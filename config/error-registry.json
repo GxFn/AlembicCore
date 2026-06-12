@@ -71,9 +71,10 @@
       "integrationTrigger": "re-rule only if Agent failure classifications start crossing a surfaced boundary (HTTP/MCP/Dashboard); owner: AlembicAgent window"
     },
     "alembicPlugin": {
-      "status": "deferred-ic5",
-      "surface": "MCP Zod validator (derives Core shapes)",
-      "adoptionPath": "post-CKG reconciliation wave (IC5) re-verifies the validator against this registry; Plugin hands-off until then"
+      "status": "adopted",
+      "surface": "MCP Zod validator (derives Core shapes) + clean-error envelopes",
+      "adoptionProof": "AlembicPlugin commit e96dbf1 (P3 step 7): top-level toolName on clean error envelopes + error-registry adoption verified against this registry",
+      "adoptionPath": "adopted ahead of IC5 during the P3 plugin train; the post-CKG IC5 wave re-verifies only if the validator surface changes"
     },
     "alembicDashboard": {
       "status": "pending-ic2",
