@@ -131,5 +131,67 @@
   "notInThisRepo": {
     "ModelRegistry/getModelRegistry": "AlembicAgent owns it (zero hits in Core src/); the Agent AD4 leg rules its disposition",
     "F2 Alembic-side sites": "auth TOKEN_SECRET, SSE sessions, RateLimiter buckets, guard handler review state, DaemonJobRunner fallbacks, HttpServer listeners — all lib/ paths owned by the Alembic AD4 leg"
-  }
+  },
+  "lintExemptions": [
+    {
+      "file": "src/core/AstAnalyzer.ts",
+      "binding": "_langPlugins",
+      "blessedId": "ast-analyzer-caches",
+      "reason": "Plugin registry bounded by the registered language set (AD4 S11)."
+    },
+    {
+      "file": "src/core/AstAnalyzer.ts",
+      "binding": "_parserCache",
+      "blessedId": "ast-analyzer-caches",
+      "reason": "Parser cache bounded by language set; test reset hook present (AD4 S11)."
+    },
+    {
+      "file": "src/core/ast/index.ts",
+      "binding": "_loaded",
+      "blessedId": "ast-grammar-family",
+      "reason": "Set-once native-grammar load flag (AD4 S10; restart = process restart)."
+    },
+    {
+      "file": "src/core/ast/parser-init.ts",
+      "binding": "_initialized",
+      "blessedId": "ast-grammar-family",
+      "reason": "Set-once tree-sitter namespace init flag (AD4 S10)."
+    },
+    {
+      "file": "src/infrastructure/vector/ASTChunker.ts",
+      "binding": "_astReady",
+      "constantClass": true,
+      "reason": "Set-once ast-availability wiring probe (AD4 census M5, constant-class after init)."
+    },
+    {
+      "file": "src/service/guard/GuardPatternUtils.ts",
+      "binding": "_regexCache",
+      "blessedId": "memo-caches",
+      "reason": "Per-pattern regex memo bounded by the loaded guard rule set (AD4 M4)."
+    },
+    {
+      "file": "src/shared/LanguageProfiles.ts",
+      "binding": "LANG_TO_FAMILY_MAP",
+      "constantClass": true,
+      "reason": "Built at module top from static tables, never mutated after (AD4 census M3, constant-class)."
+    },
+    {
+      "file": "src/shared/LanguageProfiles.ts",
+      "binding": "FAMILY_MAP",
+      "constantClass": true,
+      "reason": "Built at module top from static tables, never mutated after (AD4 census M3, constant-class)."
+    },
+    {
+      "file": "src/shared/isOwnDevRepo.ts",
+      "binding": "_cache",
+      "blessedId": "memo-caches",
+      "reason": "Per-path memoization with _resetDevRepoCache hook (AD4 M1)."
+    },
+    {
+      "file": "src/shared/isOwnDevRepo.ts",
+      "binding": "_excludeCache",
+      "blessedId": "memo-caches",
+      "reason": "Per-path exclusion memo with reset hook + documented staleness policy (AD4 M1/C6)."
+    }
+  ]
 }
