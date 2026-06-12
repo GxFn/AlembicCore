@@ -101,7 +101,7 @@ This section is maintained by the Wakeflow runtime installer. It records this wi
 - `test/CoreDeliveryBoundary.test.ts`
 - `test/CoreToolSystemBoundary.test.ts`
 - `test/CoreCodexBoundary.test.ts`
-- `test/core-package.test.ts`
+- `test/CorePackage.test.ts`
 - 回填必须写清完成范围、提交 hash、验证命令、验证结果、下游接入建议、遗留风险和下一步建议。
 - 只改文档时也要说明为什么不需要产品构建，并至少运行 `git diff --check`。
 
