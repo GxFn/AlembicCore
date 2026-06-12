@@ -26,7 +26,7 @@
       "charter": "LLM provider/tool runtime (V2 catalog, transports, classification). Must-never: knowledge persistence; HTTP surface."
     },
     "alembic": {
-      "packageName": "alembic",
+      "packageName": "alembic-ai",
       "allowedDependencies": ["@alembic/core", "@alembic/agent"],
       "charter": "resident MCP + HTTP + daemon + CLI host over Core; owns routes, injection, sandbox, UI. Must-never: re-implement Core engine capabilities; direct DB schema ownership."
     },
