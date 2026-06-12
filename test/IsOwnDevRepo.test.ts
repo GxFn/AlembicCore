@@ -1,12 +1,13 @@
 /**
  * isOwnDevRepo — alembic-ai dev-repo marker detection.
  *
- * Pins the TRANSITIONAL dual-name bootstrap marker (Core half of the SN
- * bootstrap rename pair): lib/bootstrap.ts (pre-rename) and lib/Bootstrap.ts
- * (post-rename) must BOTH be accepted until the Alembic b2 leg lands and the
- * old-name branch is cleaned up. On case-insensitive filesystems the two
- * positive branches collapse (existsSync matches either spelling); they pin
- * distinct behavior on case-sensitive CI.
+ * Final marker semantics (post SN bootstrap rename pair; the b1 transitional
+ * dual-name arm was removed once the Alembic b2 rename landed): ONLY
+ * lib/Bootstrap.ts + SOUL.md mark the alembic-ai dev repo. Case-insensitive
+ * filesystem caveat: existsSync matches either spelling on such systems
+ * (this macOS), so the old-name-alone branch only flips to false on
+ * case-sensitive filesystems — the test probes the tmpdir and pins the
+ * behavior each filesystem actually has.
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,7 +30,14 @@ function makeAlembicRepo(bootstrapFileName: string | null): string {
   return root;
 }
 
-describe('isAlembicDevRepo bootstrap marker (transitional dual-name)', () => {
+function tmpdirIsCaseInsensitive(): boolean {
+  const probeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'case-probe-'));
+  tmpRoots.push(probeRoot);
+  fs.writeFileSync(path.join(probeRoot, 'probe-lower.txt'), '');
+  return fs.existsSync(path.join(probeRoot, 'PROBE-LOWER.TXT'));
+}
+
+describe('isAlembicDevRepo bootstrap marker (final: lib/Bootstrap.ts only)', () => {
   afterEach(() => {
     _resetDevRepoCache();
     while (tmpRoots.length > 0) {
@@ -40,17 +48,21 @@ describe('isAlembicDevRepo bootstrap marker (transitional dual-name)', () => {
     }
   });
 
-  it('accepts the pre-rename marker lib/bootstrap.ts', () => {
-    const root = makeAlembicRepo('bootstrap.ts');
-    expect(isAlembicDevRepo(root)).toBe(true);
-  });
-
-  it('accepts the post-rename marker lib/Bootstrap.ts', () => {
+  it('accepts the final marker lib/Bootstrap.ts', () => {
     const root = makeAlembicRepo('Bootstrap.ts');
     expect(isAlembicDevRepo(root)).toBe(true);
   });
 
-  it('rejects an alembic-ai package with neither bootstrap marker', () => {
+  it('rejects the retired old-name marker lib/bootstrap.ts on case-sensitive filesystems', () => {
+    // On case-insensitive filesystems existsSync('lib/Bootstrap.ts') matches
+    // the lowercase file, so the retired spelling still passes there; the
+    // branch flips to false exactly where the rename pair mattered.
+    const expected = tmpdirIsCaseInsensitive();
+    const root = makeAlembicRepo('bootstrap.ts');
+    expect(isAlembicDevRepo(root)).toBe(expected);
+  });
+
+  it('rejects an alembic-ai package with no bootstrap marker', () => {
     const root = makeAlembicRepo(null);
     expect(isAlembicDevRepo(root)).toBe(false);
   });

@@ -10,7 +10,7 @@
  *
  * isAlembicDevRepo 检测条件：
  *  1. projectRoot/package.json 的 name === 'alembic-ai'
- *  2. projectRoot/lib/bootstrap.ts 或 lib/Bootstrap.ts 存在（源码标记；双名过渡期见函数内注释）
+ *  2. projectRoot/lib/Bootstrap.ts 存在（源码标记）
  *  3. projectRoot/SOUL.md 存在（项目灵魂文档）
  * 或 package name === '@alembic/core' 且存在 AGENTS.md / src/index.ts。
  */
@@ -43,19 +43,8 @@ export function isAlembicDevRepo(dir: string): boolean {
       const pkg = JSON.parse(raw) as { name?: string };
       if (pkg.name === 'alembic-ai') {
         // 条件 2 & 3: 源码标记文件同时存在
-        // TRANSITIONAL compatibility (Core half of the SN bootstrap rename
-        // pair): Alembic renames lib/bootstrap.ts -> lib/Bootstrap.ts (sole
-        // export class Bootstrap, class-position convention); accept BOTH
-        // names so dev-repo detection survives the cross-repo rename window
-        // on case-sensitive filesystems. Consumer: the Alembic b2 rename leg.
-        // Reason: atomic cross-repo coupling (unilateral rename would
-        // silently break PathGuard excluded-project protection). Removal
-        // condition: b2 landed + accepted. Cleanup trigger: the next
-        // Core-touching packet after b2 drops the old-name branch.
-        // Owner: AlembicCore window.
-        const hasBootstrap =
-          fs.existsSync(path.join(resolved, 'lib', 'bootstrap.ts')) ||
-          fs.existsSync(path.join(resolved, 'lib', 'Bootstrap.ts'));
+        // Final marker: lib/Bootstrap.ts (post SN bootstrap rename pair).
+        const hasBootstrap = fs.existsSync(path.join(resolved, 'lib', 'Bootstrap.ts'));
         const hasSoul = fs.existsSync(path.join(resolved, 'SOUL.md'));
         result = hasBootstrap && hasSoul;
       } else if (pkg.name === '@alembic/core') {

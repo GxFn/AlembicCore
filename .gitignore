@@ -1,5 +1,7 @@
 dist/
 node_modules/
 *.tsbuildinfo
+# generated istanbul output (enforcement pending user decision C4)
+coverage/
 .DS_Store
 .claude/settings.local.json
