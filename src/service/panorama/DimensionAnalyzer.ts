@@ -21,9 +21,11 @@ import {
   resolveRecipeDimensionId,
 } from '../../domain/dimension/index.js';
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
+import { Logger } from '../../infrastructure/logging/Logger.js';
 import type { BootstrapRepositoryImpl } from '../../repository/bootstrap/BootstrapRepository.js';
 import type { CodeEntityRepositoryImpl } from '../../repository/code/CodeEntityRepository.js';
 import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import type { HealthDimension, HealthRadar, KnowledgeGap } from './PanoramaTypes.js';
 
@@ -66,16 +68,37 @@ export class DimensionAnalyzer {
     }
 
     let totalRecipes = 0;
+    const inactiveDimCounts = new Map<string, number>();
     for (const recipe of recipes) {
       totalRecipes++;
       const dimId = this.#classifyRecipe(recipe);
       if (dimId) {
-        const entry = dimensionCounts.get(dimId)!;
-        entry.count++;
-        if (entry.titles.length < 3) {
-          entry.titles.push(recipe.title);
+        const entry = dimensionCounts.get(dimId);
+        if (entry) {
+          entry.count++;
+          if (entry.titles.length < 3) {
+            entry.titles.push(recipe.title);
+          }
+        } else {
+          // Graceful degradation (H1, P5 p4 trigger): the classifier mapped
+          // this recipe into a dimension OUTSIDE the language-filtered active
+          // set (knowledge repos and dimension config bound to inconsistent
+          // trees). Skip it from radar counts — it still counts toward
+          // totalRecipes — and report the mismatch once per analyze() below
+          // instead of letting a raw TypeError escape to the wire.
+          inactiveDimCounts.set(dimId, (inactiveDimCounts.get(dimId) ?? 0) + 1);
         }
       }
+    }
+    if (inactiveDimCounts.size > 0) {
+      Logger.getInstance().warn(
+        '[DimensionAnalyzer] recipes classified into inactive dimensions — skipped from radar counts',
+        {
+          code: CORE_DIAGNOSTIC_CODES.dimensionClassificationMismatch,
+          inactiveDimensions: Object.fromEntries(inactiveDimCounts),
+          activeDimensionIds: activeDims.map((def) => def.id),
+        }
+      );
     }
 
     // 3. 计算各维度得分与状态

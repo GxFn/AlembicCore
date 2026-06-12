@@ -36,6 +36,8 @@ export const CORE_DIAGNOSTIC_CODES = {
   signalWindowOverflow: 'core.diagnostic.signal.window-overflow',
   /** C8: a timer or disposable was registered after TimerRegistry.dispose() — it will not be cleaned up. */
   timerPostDisposeRegistration: 'core.diagnostic.timer.post-dispose-registration',
+  /** H1: recipes classified into dimensions outside the active set — skipped from radar counts instead of crashing. */
+  dimensionClassificationMismatch: 'core.diagnostic.dimension.classification-mismatch',
 } as const;
 
 export type CoreDiagnosticCode = (typeof CORE_DIAGNOSTIC_CODES)[keyof typeof CORE_DIAGNOSTIC_CODES];

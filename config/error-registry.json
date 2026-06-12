@@ -44,7 +44,8 @@
     "core.diagnostic.similarity.walk-truncated",
     "core.diagnostic.db.sqlite-busy",
     "core.diagnostic.signal.window-overflow",
-    "core.diagnostic.timer.post-dispose-registration"
+    "core.diagnostic.timer.post-dispose-registration",
+    "core.diagnostic.dimension.classification-mismatch"
   ],
   "adoption": {
     "alembicCore": {
