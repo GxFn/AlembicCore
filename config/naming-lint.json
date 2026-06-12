@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "description": "SN4a naming lint config (AlembicCore, ported from the SN3/SN2/SN1 shape). Codifies the SN0 §1 dominants for the REDUCED scope only: scripts/configs kebab-case, docs kebab-case (packet rule, all conform as-found), tests ClassName.test.ts (PascalCase stem) under test/ — test support files (setup.ts, tsconfig.json, helpers/, support/) have no SN0 convention row and stay unscoped (SN2/SN3 precedent; SN6 observation). Exceptions require {file, owner, reason}; entries missing a field do not exempt.",
+  "rules": [
+    {
+      "scope": "scripts",
+      "filePattern": "\\.(mjs|cjs|js)$",
+      "namePattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.(mjs|cjs|js)$",
+      "label": "scripts are kebab-case"
+    },
+    {
+      "scope": "config",
+      "filePattern": "\\.json$",
+      "namePattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.json$",
+      "label": "configs are kebab-case"
+    },
+    {
+      "scope": "docs",
+      "filePattern": "\\.md$",
+      "namePattern": "^[a-z0-9]+(-[a-z0-9]+)*\\.md$",
+      "label": "docs are kebab-case"
+    },
+    {
+      "scope": "test",
+      "filePattern": "\\.test\\.ts$",
+      "namePattern": "^[A-Z][A-Za-z0-9]*\\.test\\.ts$",
+      "label": "tests are ClassName.test.ts (PascalCase stem) under test/"
+    }
+  ],
+  "barrelNames": ["index.ts"],
+  "exemptScopes": [],
+  "exceptions": [
+    {
+      "file": "test/resolveProjectRoot.test.ts",
+      "owner": "AlembicCore window",
+      "reason": "Named after its unit module src/shared/resolveProjectRoot.ts, a camelCase utility that stays camelCase permanently (SN0 §1 utilities row); Pascal-casing the test would break the named-after-unit principle (SN4a census judgment)."
+    }
+  ],
+  "parkedScopes": [
+    {
+      "scope": "src",
+      "status": "parked",
+      "reason": "src/ scope EXCLUDED this wave by user decision C3: all 9 package-exports wildcard subtrees cover src/ and are FROZEN until SD-5 phase-2 executes (SN0 §3). When SN4 proper un-parks, move these rules into the active 'rules' array unchanged — the migrations exempt family must stay FIRST (first matching rule wins).",
+      "rules": [
+        {
+          "scope": "src/infrastructure/database/migrations",
+          "filePattern": "\\.ts$",
+          "namePattern": "^\\d{3}_[a-z0-9_]+\\.ts$",
+          "label": "drizzle migrations are NNN_snake_case.ts — DELIBERATE exempt artifact family (SN0 §1), never rename"
+        },
+        {
+          "scope": "src",
+          "filePattern": "\\.ts$",
+          "namePattern": "^[a-zA-Z][A-Za-z0-9]*(\\.d)?\\.ts$",
+          "label": "src modules are camelCase or PascalCase (no kebab/snake)"
+        }
+      ]
+    }
+  ]
+}
