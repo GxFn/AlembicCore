@@ -10,6 +10,9 @@
 
 import { EnhancementRegistry } from './EnhancementRegistry.js';
 
+// Blessed lazy singleton (AD4 'enhancement-registry'): built once on first
+// use from the 16 stateless packs; restart semantics = deterministic rebuild
+// on next process start, no persisted state.
 let _instance: EnhancementRegistry | null = null;
 
 /**

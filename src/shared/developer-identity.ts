@@ -13,6 +13,8 @@
 import { execSync } from 'node:child_process';
 import { userInfo } from 'node:os';
 
+// Blessed memo cache (AD4 'memo-caches'): one identity value per process,
+// recomputed deterministically on restart.
 let _cached: string | null = null;
 
 /**

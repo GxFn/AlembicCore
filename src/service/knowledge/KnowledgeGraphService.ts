@@ -213,6 +213,9 @@ export class KnowledgeGraphService {
   }
 }
 
+// Blessed init-once handle (AD4 'knowledge-graph-service'): the composition
+// root injects the edge repo once per process via initKnowledgeGraphService;
+// restart semantics = host re-init on next start, no persisted state here.
 let instance: KnowledgeGraphService | null = null;
 
 export function initKnowledgeGraphService(edgeRepo: EdgeRepoLike) {

@@ -19,7 +19,12 @@ import {
 
 export const SPEC_FILENAME = MARKER_SPEC;
 
-const USER_HOME = process.env.HOME || process.env.USERPROFILE || '';
+// AD4 doctrine: env reads happen at first use, not at import. The value is
+// read per call (HOME is stable in practice; identical outputs) so importing
+// this module performs no work.
+function userHome(): string {
+  return process.env.HOME || process.env.USERPROFILE || '';
+}
 
 /** 确保目录存在（静默处理异常），供写入前调用 */
 export function ensureDir(dirPath: string) {
@@ -45,11 +50,11 @@ export function getSnippetsPath() {
     return process.env.ALEMBIC_SNIPPETS_PATH;
   }
   if (process.platform === 'darwin') {
-    return ensureDir(path.join(USER_HOME, 'Library/Developer/Xcode/UserData/CodeSnippets'));
+    return ensureDir(path.join(userHome(), 'Library/Developer/Xcode/UserData/CodeSnippets'));
   }
   // 非 macOS: 放到全局缓存目录下
   return ensureDir(
-    path.join(USER_HOME, DEFAULT_FOLDER_NAMES.global.root, DEFAULT_FOLDER_NAMES.global.snippets)
+    path.join(userHome(), DEFAULT_FOLDER_NAMES.global.root, DEFAULT_FOLDER_NAMES.global.snippets)
   );
 }
 
@@ -62,7 +67,7 @@ export function getCachePath() {
     return process.env.ALEMBIC_CACHE_PATH;
   }
   return ensureDir(
-    path.join(USER_HOME, DEFAULT_FOLDER_NAMES.global.root, DEFAULT_FOLDER_NAMES.global.cache)
+    path.join(userHome(), DEFAULT_FOLDER_NAMES.global.root, DEFAULT_FOLDER_NAMES.global.cache)
   );
 }
 

@@ -19,6 +19,9 @@ interface SessionManagerContainer {
   register?: (name: string, factory: () => unknown) => void;
 }
 
+// Blessed lazy singleton (AD4 'bootstrap-session-manager'): sessions carry
+// their own 2h TTL; restart semantics = in-flight sessions drop on process
+// restart and hosts start fresh ones (documented, accepted).
 let sessionManager: BootstrapSessionManager | null = null;
 
 export function getOrCreateSessionManager(

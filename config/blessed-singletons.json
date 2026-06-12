@@ -1,0 +1,135 @@
+{
+  "schemaVersion": 1,
+  "owner": "AlembicCore",
+  "title": "Blessed singletons — exhaustive doctrine exception list (AD4)",
+  "doctrineRef": "AD0 side-effect doctrine (user-confirmed 2026-06-12): no import-time work; effects behind injected, disposable boundaries; mandatory listener disposal; module-scope mutable state only inside managed lifecycles; blessed singletons enumerated here exhaustively — a module-scope singleton or mutable cache NOT on this list is a doctrine violation, not an implicit exception. Census evidence: P2 state-root ad4-core-doctrine-census-2026-06-12.md.",
+  "blessed": [
+    {
+      "id": "path-guard",
+      "module": "src/shared/PathGuard.ts",
+      "export": "pathGuard (default)",
+      "kind": "eager-singleton",
+      "owner": "AlembicCore window",
+      "reason": "Process-global write-safety boundary; only unbypassable as a singleton. 53 cross-repo direct imports; two-layer checks rated healthy by the AD findings.",
+      "lifecycle": "process; configure() per host start; exclusion verdict frozen per configure (documented staleness policy)",
+      "resetHook": "_reset (test-only)"
+    },
+    {
+      "id": "timer-registry",
+      "module": "src/shared/TimerRegistry.ts",
+      "export": "timerRegistry",
+      "kind": "eager-singleton",
+      "owner": "AlembicCore window",
+      "reason": "The disposal manager itself — the boundary other effects dispose through. Idempotent dispose, unref discipline, post-dispose registration diagnostics (CO3 C8).",
+      "lifecycle": "process; dispose() at shutdown",
+      "resetHook": "_resetForTesting"
+    },
+    {
+      "id": "logger",
+      "module": "src/infrastructure/logging/Logger.ts",
+      "export": "Logger (static instance)",
+      "kind": "static-lazy-singleton",
+      "owner": "AlembicCore window",
+      "reason": "Winston logger with in-place reconfiguration preserving module-level references; transports are the managed resource.",
+      "lifecycle": "process; getInstance(config) reconfigures in place; close() releases transports",
+      "resetHook": "instance.close() + instance=null (test idiom)"
+    },
+    {
+      "id": "config-loader",
+      "module": "src/infrastructure/config/ConfigLoader.ts",
+      "export": "ConfigLoader (static getInstance)",
+      "kind": "static-lazy-singleton",
+      "owner": "AlembicCore window",
+      "reason": "Single parsed-config authority per process; construction-time file reads (no import-time work).",
+      "lifecycle": "process",
+      "resetHook": null
+    },
+    {
+      "id": "drizzle-handle",
+      "module": "src/infrastructure/database/drizzle/index.ts",
+      "export": "_drizzle via getDrizzle/initDrizzle",
+      "kind": "lazy-module-singleton",
+      "owner": "AlembicCore window",
+      "reason": "better-sqlite3 single-connection design; raw db and ORM share one handle. Known limitation (t1 probe): no :memory: targeting, global mutation — the recorded removal trigger for the drizzle keep-alive row is a future test-fixture facade, not an AD4 repair.",
+      "lifecycle": "process; initialized by DatabaseConnection.connect()",
+      "resetHook": "resetDrizzle"
+    },
+    {
+      "id": "enhancement-registry",
+      "module": "src/core/enhancement/index.ts",
+      "export": "_instance (lazy EnhancementRegistry)",
+      "kind": "lazy-module-singleton",
+      "owner": "AlembicCore window",
+      "reason": "Registry of the 16 stateless enhancement packs (constant-class instances); built once on first use.",
+      "lifecycle": "process; deterministic rebuild on restart",
+      "resetHook": null
+    },
+    {
+      "id": "discoverer-registry",
+      "module": "src/core/discovery/index.ts",
+      "export": "_registry (lazy DiscovererRegistry)",
+      "kind": "lazy-module-singleton",
+      "owner": "AlembicCore window",
+      "reason": "Project-type discoverer catalog; built once on first use.",
+      "lifecycle": "process; deterministic rebuild on restart",
+      "resetHook": "resetDiscovererRegistry"
+    },
+    {
+      "id": "knowledge-graph-service",
+      "module": "src/service/knowledge/KnowledgeGraphService.ts",
+      "export": "instance via initKnowledgeGraphService/getKnowledgeGraphService",
+      "kind": "init-once-handle",
+      "owner": "AlembicCore window",
+      "reason": "Host wires the edge repository once at startup; consumers read the handle (constructed injection at the composition root, held as a module handle).",
+      "lifecycle": "process; re-init on host restart",
+      "resetHook": null
+    },
+    {
+      "id": "bootstrap-session-manager",
+      "module": "src/workflows/capabilities/host-agent/SessionSupport.ts",
+      "export": "sessionManager (lazy)",
+      "kind": "lazy-module-singleton",
+      "owner": "AlembicCore window",
+      "reason": "Host-agent bootstrap sessions; the sessions themselves carry a 2h TTL — the manager is the managed lifecycle.",
+      "lifecycle": "process; sessions expire by TTL; restart drops in-flight sessions (documented)",
+      "resetHook": null
+    },
+    {
+      "id": "ast-grammar-family",
+      "module": "src/core/ast/* (parser-init.ts, index.ts, lang-*.ts _grammar x10)",
+      "export": "lazy native grammar handles",
+      "kind": "lazy-native-handle-family",
+      "owner": "AlembicCore window",
+      "reason": "tree-sitter native modules and grammars load lazily on first parse; native handles are not safely reloadable in-process.",
+      "lifecycle": "process; restart = process restart (documented)",
+      "resetHook": null
+    },
+    {
+      "id": "ast-analyzer-caches",
+      "module": "src/core/AstAnalyzer.ts",
+      "export": "_langPlugins (plugin registry), _parserCache (parser cache)",
+      "kind": "bounded-cache",
+      "owner": "AlembicCore window",
+      "reason": "Cache policy (AD4, closing the F2 'no policy' finding): both maps are bounded by the registered language set (about a dozen entries), live for the process, and rebuild deterministically; the parser cache has a test reset hook.",
+      "lifecycle": "process; bounded by language count",
+      "resetHook": "_resetAstParserCacheForTesting"
+    },
+    {
+      "id": "memo-caches",
+      "module": "src/shared/isOwnDevRepo.ts (_cache/_excludeCache), src/shared/developer-identity.ts (_cached), src/service/guard/GuardPatternUtils.ts (_regexCache)",
+      "export": "memoization caches",
+      "kind": "bounded-memo-family",
+      "owner": "AlembicCore window",
+      "reason": "Per-key memoization bounded by distinct probed paths / one identity value / distinct guard rule patterns; deterministic recomputation.",
+      "lifecycle": "process",
+      "resetHook": "_resetDevRepoCache (isOwnDevRepo); others rebuild deterministically"
+    }
+  ],
+  "constantClass": {
+    "note": "NOT singletons under the doctrine — deterministic constant construction with no I/O and no mutation after build: the 16 enhancement pack instances (core/enhancement/*-enhancement.ts), language tables (shared/LanguageProfiles.ts, shared/LanguageService.ts lazy regex), CallSiteExtractor._extractors literal map, ASTChunker set-once wiring probes."
+  },
+  "notInThisRepo": {
+    "ModelRegistry/getModelRegistry": "AlembicAgent owns it (zero hits in Core src/); the Agent AD4 leg rules its disposition",
+    "F2 Alembic-side sites": "auth TOKEN_SECRET, SSE sessions, RateLimiter buckets, guard handler review state, DaemonJobRunner fallbacks, HttpServer listeners — all lib/ paths owned by the Alembic AD4 leg"
+  }
+}

@@ -517,7 +517,17 @@ function supportedLanguages() {
 // 内部实现 — Parser 管理
 // ──────────────────────────────────────────────────────────────────
 
+// Cache policy (AD4, blessed-singletons 'ast-analyzer-caches'): bounded by
+// the registered language set (~a dozen entries), lives for the process,
+// rebuilds deterministically from grammars. _langPlugins is the plugin
+// REGISTRY (registrations, never evicted); _parserCache holds one parser
+// per language and may be cleared between tests.
 const _parserCache: Map<string, TreeSitterParser> = new Map();
+
+/** Test-only: drop cached parsers (grammars re-instantiate deterministically). */
+export function _resetAstParserCacheForTesting(): void {
+  _parserCache.clear();
+}
 
 function _getParser(lang: string): TreeSitterParser | null {
   const ParserClass = getParserClass();
