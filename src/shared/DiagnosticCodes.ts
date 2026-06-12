@@ -32,6 +32,8 @@ export const CORE_DIAGNOSTIC_CODES = {
   similarityWalkTruncated: 'core.diagnostic.similarity.walk-truncated',
   /** C7: a SQLite operation failed with SQLITE_BUSY despite busy_timeout (contention evidence). */
   sqliteBusy: 'core.diagnostic.db.sqlite-busy',
+  /** AD5: a signal window hit its ring cap — oldest entries dropped; aggregates cover the capped window. */
+  signalWindowOverflow: 'core.diagnostic.signal.window-overflow',
   /** C8: a timer or disposable was registered after TimerRegistry.dispose() — it will not be cleaned up. */
   timerPostDisposeRegistration: 'core.diagnostic.timer.post-dispose-registration',
 } as const;

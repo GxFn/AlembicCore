@@ -6,6 +6,7 @@ import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { getDrizzle } from '../../infrastructure/database/drizzle/index.js';
 import { knowledgeEntries } from '../../infrastructure/database/drizzle/schema.js';
+import { prepareCached } from '../../infrastructure/database/PreparedStatementCache.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { safeJsonParse, safeJsonStringify, unixNow } from '../../shared/utils/common.js';
 
@@ -295,14 +296,18 @@ export class KnowledgeRepositoryImpl {
     this._assertSafeColumn(orderBy);
     const orderClause = ` ORDER BY ${orderBy} ${order === 'ASC' ? 'ASC' : 'DESC'}`;
 
+    // AD5 hot path: pagination queries reuse prepared statements (the WHERE/
+    // ORDER shapes are few and repeat heavily across list/search calls).
     const total = (
-      this.db
-        .prepare(`SELECT COUNT(*) as count FROM knowledge_entries${where}`)
-        .get(...params) as KnowledgeCountRow
+      prepareCached<{ get(...args: unknown[]): unknown }>(
+        this.db,
+        `SELECT COUNT(*) as count FROM knowledge_entries${where}`
+      ).get(...params) as KnowledgeCountRow
     ).count;
-    const data = this.db
-      .prepare(`SELECT * FROM knowledge_entries${where}${orderClause} LIMIT ? OFFSET ?`)
-      .all(...params, pageSize, offset);
+    const data = prepareCached<{ all(...args: unknown[]): unknown[] }>(
+      this.db,
+      `SELECT * FROM knowledge_entries${where}${orderClause} LIMIT ? OFFSET ?`
+    ).all(...params, pageSize, offset);
 
     return {
       data: data.map((row: unknown) => this._rowToEntity(row as Record<string, unknown>)),

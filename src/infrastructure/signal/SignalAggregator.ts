@@ -6,15 +6,31 @@
  * @module infrastructure/signal/SignalAggregator
  */
 
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import type { Startable } from '../../shared/lifecycle.js';
 import { timerRegistry } from '../../shared/TimerRegistry.js';
+import Logger from '../logging/Logger.js';
 import type { ReportStore } from '../report/ReportStore.js';
 import type { Signal, SignalBus } from './SignalBus.js';
 
 interface SlidingWindow {
   entries: Array<{ value: number; ts: number }>;
   baseline: number;
+  /** Entries dropped by the ring cap since the last flush (AD5 backpressure). */
+  droppedSinceFlush: number;
 }
+
+/**
+ * Ring cap per signal type (AD5): a hot producer cannot grow a window
+ * unbounded between flushes. Drop policy: oldest entries are discarded
+ * (ring semantics) — aggregates then cover the most recent CAP entries of
+ * the window, and every flush that experienced drops reports a
+ * backpressure diagnostic with the drop count (stable code
+ * core.diagnostic.signal.window-overflow) plus droppedCount in the
+ * written report row. 5000 entries ≈ 80+ signals/second sustained over
+ * the default 60s flush interval — far above any observed rate.
+ */
+const MAX_WINDOW_ENTRIES = 5000;
 
 export class SignalAggregator implements Startable {
   readonly #bus: SignalBus;
@@ -64,14 +80,24 @@ export class SignalAggregator implements Startable {
     this.stop();
   }
 
+  /** Flush immediately (shutdown/test seam; same path as the timer flush). */
+  async flushNow(): Promise<void> {
+    await this.#flush();
+  }
+
   #record(signal: Signal): void {
     const key = signal.type;
     let win = this.#windows.get(key);
     if (!win) {
-      win = { entries: [], baseline: 0 };
+      win = { entries: [], baseline: 0, droppedSinceFlush: 0 };
       this.#windows.set(key, win);
     }
     win.entries.push({ value: signal.value, ts: signal.timestamp });
+    if (win.entries.length > MAX_WINDOW_ENTRIES) {
+      const overflow = win.entries.length - MAX_WINDOW_ENTRIES;
+      win.entries.splice(0, overflow);
+      win.droppedSinceFlush += overflow;
+    }
   }
 
   async #flush(): Promise<void> {
@@ -88,6 +114,17 @@ export class SignalAggregator implements Startable {
       const max = Math.max(...win.entries.map((e) => e.value));
       const min = Math.min(...win.entries.map((e) => e.value));
 
+      // Backpressure diagnostics (AD5): drops are reported per flush, not
+      // per record, so a hot producer cannot flood the log either.
+      if (win.droppedSinceFlush > 0) {
+        Logger.getInstance().warn('[SignalAggregator] window overflow — oldest entries dropped', {
+          code: CORE_DIAGNOSTIC_CODES.signalWindowOverflow,
+          type,
+          dropped: win.droppedSinceFlush,
+          cap: MAX_WINDOW_ENTRIES,
+        });
+      }
+
       // 周期统计 → Report
       await this.#reportStore.write({
         category: 'metrics',
@@ -100,9 +137,11 @@ export class SignalAggregator implements Startable {
           max,
           min,
           baseline: win.baseline,
+          droppedCount: win.droppedSinceFlush,
         },
         timestamp: now,
       });
+      win.droppedSinceFlush = 0;
 
       // 异常检测 → Signal（信号量突增 3 倍）
       if (win.baseline > 0 && count > win.baseline * 3) {

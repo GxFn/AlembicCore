@@ -15,9 +15,20 @@
  */
 
 import { createLimit } from '../../shared/concurrency.js';
+import Logger from '../logging/Logger.js';
 
 export interface EmbeddingProvider {
   embed(text: string | string[]): Promise<number[] | number[][]>;
+  /**
+   * Optional transport capacity hint (AD5; AlembicAgent 637d094 contract):
+   * mirrors the provider's live request gate so Core batches at the exact
+   * ceiling embedding calls already queue against.
+   */
+  getEmbeddingCapacityHint?(): {
+    provider: string;
+    maxInFlightEmbeddings: number;
+    source: string;
+  };
 }
 
 export class BatchEmbedder {
@@ -32,7 +43,27 @@ export class BatchEmbedder {
   ) {
     this.#embeddingProvider = embeddingProvider;
     this.#batchSize = options.batchSize || 32;
-    this.#maxConcurrency = options.maxConcurrency || 2;
+    // Concurrency resolution (AD5 provider-aware upgrade): explicit option
+    // wins; otherwise the injected provider's transport capacity hint;
+    // otherwise the historical default of 2. The chosen value and its
+    // source are logged once per embedder so throttling stays observable.
+    let concurrency = 2;
+    let concurrencySource = 'default';
+    const hint = embeddingProvider?.getEmbeddingCapacityHint?.();
+    if (typeof hint?.maxInFlightEmbeddings === 'number' && hint.maxInFlightEmbeddings >= 1) {
+      concurrency = Math.floor(hint.maxInFlightEmbeddings);
+      concurrencySource = `provider-hint(${hint.provider}/${hint.source})`;
+    }
+    if (options.maxConcurrency) {
+      concurrency = options.maxConcurrency;
+      concurrencySource = 'options';
+    }
+    this.#maxConcurrency = concurrency;
+    Logger.getInstance().debug('[BatchEmbedder] concurrency resolved', {
+      concurrency,
+      source: concurrencySource,
+      batchSize: this.#batchSize,
+    });
   }
 
   /**

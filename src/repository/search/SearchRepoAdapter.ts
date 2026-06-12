@@ -6,6 +6,15 @@
  * 放在 lib/repository/ 下，允许使用 raw SQL（lint 白名单目录）。
  */
 
+import { prepareCached } from '../../infrastructure/database/PreparedStatementCache.js';
+
+// AD5 hot path: search reads reuse prepared statements via the bounded LRU.
+type SearchStatement = {
+  all(...args: unknown[]): Array<Record<string, unknown>>;
+  get(...args: unknown[]): unknown;
+  run(...args: unknown[]): unknown;
+};
+
 export interface SearchDb {
   prepare(sql: string): { all(...args: unknown[]): Record<string, unknown>[] };
 }
@@ -65,25 +74,23 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   }
 
   findNonDeprecatedSync() {
-    return this.#db
-      .prepare(
-        `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind,
+    return prepareCached<SearchStatement>(
+      this.#db,
+      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind,
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
                 updatedAt, createdAt
          FROM knowledge_entries WHERE lifecycle != 'deprecated'`
-      )
-      .all();
+    ).all();
   }
 
   keywordSearchSync(pattern: string, limit: number) {
-    return this.#db
-      .prepare(
-        `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, lifecycle as status, content, trigger, headers, moduleName, 'knowledge' as type
+    return prepareCached<SearchStatement>(
+      this.#db,
+      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, lifecycle as status, content, trigger, headers, moduleName, 'knowledge' as type
          FROM knowledge_entries
          WHERE lifecycle != 'deprecated' AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR trigger LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')
          LIMIT ?`
-      )
-      .all(pattern, pattern, pattern, pattern, limit);
+    ).all(pattern, pattern, pattern, pattern, limit);
   }
 
   findByIdsDetailSync(ids: string[]) {
@@ -91,25 +98,23 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       return [];
     }
     const placeholders = ids.map(() => '?').join(',');
-    return this.#db
-      .prepare(
-        `SELECT id, content, description, trigger, headers, moduleName,
+    return prepareCached<SearchStatement>(
+      this.#db,
+      `SELECT id, content, description, trigger, headers, moduleName,
                 tags, language, ${this.#dimensionIdSelect}, category, updatedAt, createdAt, quality, stats, difficulty,
                 whenClause, doClause
          FROM knowledge_entries WHERE id IN (${placeholders})`
-      )
-      .all(...ids);
+    ).all(...ids);
   }
 
   findUpdatedSinceSync(sinceIso: string) {
-    return this.#db
-      .prepare(
-        `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind,
+    return prepareCached<SearchStatement>(
+      this.#db,
+      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind,
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
                 updatedAt, createdAt
          FROM knowledge_entries WHERE updatedAt > ?`
-      )
-      .all(sinceIso);
+    ).all(sinceIso);
   }
 }
 
@@ -139,13 +144,12 @@ export class RawDbSourceRefAdapter implements SearchSourceRefRepo {
       return [];
     }
     const placeholders = ids.map(() => '?').join(',');
-    return this.#db
-      .prepare(
-        `SELECT recipe_id, source_path, status, new_path
+    return prepareCached<SearchStatement>(
+      this.#db,
+      `SELECT recipe_id, source_path, status, new_path
          FROM recipe_source_refs
          WHERE recipe_id IN (${placeholders}) AND status != 'stale'`
-      )
-      .all(...ids) as unknown as Array<{
+    ).all(...ids) as unknown as Array<{
       recipeId: string;
       sourcePath: string;
       status: string;
@@ -184,23 +188,21 @@ export class RawDbGuardAdapter implements GuardKnowledgeRepo {
 
   findGuardRulesSync(lifecycles: readonly string[]) {
     const placeholders = lifecycles.map(() => '?').join(',');
-    return this.#db
-      .prepare(
-        `SELECT id, title, description, language, scope, constraints, lifecycle
+    return prepareCached<SearchStatement>(
+      this.#db,
+      `SELECT id, title, description, language, scope, constraints, lifecycle
          FROM knowledge_entries WHERE kind = 'rule' AND lifecycle IN (${placeholders})`
-      )
-      .all(...lifecycles);
+    ).all(...lifecycles);
   }
 
   incrementGuardHitsSync(id: string, hits: number) {
-    this.#db
-      .prepare(
-        `UPDATE knowledge_entries
+    prepareCached<SearchStatement>(
+      this.#db,
+      `UPDATE knowledge_entries
          SET stats = json_set(COALESCE(stats, '{}'), '$.guardHits', COALESCE(json_extract(stats, '$.guardHits'), 0) + ?),
              updatedAt = strftime('%s', 'now')
          WHERE id = ?`
-      )
-      .run(hits, id);
+    ).run(hits, id);
   }
 }
 
