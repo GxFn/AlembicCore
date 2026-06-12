@@ -16,8 +16,13 @@ const DEFAULT_IGNORE_GLOBS = [
   'vendor/**',
 ];
 
+// Statement-level matchers (CO1-SCANNER-MULTILINE-BLIND-SPOT fix): the
+// specifier-list part must span newlines — multi-line `import { a,\n b }
+// from '@alembic/core/x'` statements were invisible to the old `[^'";\n]*?`
+// class. `[^'";]*?` keeps the match inside one statement (specifier lists
+// never contain quotes or semicolons), same approach as the layer lint.
 const IMPORT_PATTERNS = [
-  /\b(?:import|export)\s+(?:type\s+)?[^'";\n]*?\s+from\s*['"](@alembic\/core(?:\/[^'"]+)?)['"]/g,
+  /\b(?:import|export)\s+(?:type\s+)?[^'";]*?\s+from\s*['"](@alembic\/core(?:\/[^'"]+)?)['"]/g,
   /\b(?:import|export)\s*['"](@alembic\/core(?:\/[^'"]+)?)['"]/g,
   /\b(?:import|require)\s*\(\s*['"](@alembic\/core(?:\/[^'"]+)?)['"]/g,
 ];
