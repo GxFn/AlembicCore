@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "owner": "AlembicCore",
+  "title": "Space dependency DAG — canonical allowed-edge config (AD1)",
+  "description": "Machine-readable authority for which repo may depend on which inside the Alembic space. Encodes the P0 fact-freeze §2 DAG verified against live package manifests on 2026-06-12: Core ← Agent ← Alembic; Core ← Plugin; Dashboard zero-package-dependency. Every repo's boundary gate consumes this config READ-ONLY and verifies its OWN edges; AlembicCore's gate is scripts/check-space-edges.mjs. Edge changes require a controller decision recorded here plus the affected repos' gates updated in the same wave.",
+  "consumerContract": {
+    "access": "Consumer repos read this file READ-ONLY through their existing Core link (node_modules/@alembic/core/config/space-allowed-edges.json via the file: dependency) or the sibling checkout path; they never copy or fork it.",
+    "perRepoDuty": "Each repo's gate asserts exactly its own entry: its package manifest's space dependencies equal allowedDependencies, and (where the repo has source-level import gates) no space-package import escapes that set. Cross-repo verification belongs to the owning repo's gate, never to another repo's.",
+    "stages": {
+      "alembicCore": "this stage (pA1): scripts/check-space-edges.mjs wired into npm run check",
+      "alembic": "P2 consumer stage: edge assertion gate rides the existing check pipeline",
+      "alembicAgent": "P2 consumer stage: edge assertion gate rides the existing check pipeline",
+      "alembicDashboard": "P2 consumer stage: zero-package-dependency gate (closes the P0 §2 'no Dashboard zero-dep gate' hole)",
+      "alembicPlugin": "owner+trigger record only until CKG resumption — owner: AlembicPlugin window; trigger: P3 step 2 (IC5) / CKG resumption package; the vendored Core snapshot remains a distribution artifact, not a dependency edge"
+    }
+  },
+  "repos": {
+    "alembicCore": {
+      "packageName": "@alembic/core",
+      "allowedDependencies": [],
+      "charter": "knowledge/search/graph/guard/vector/evolution engine + persistence + migrations + shared taxonomy/errors; importable leaf core/ analysis. Must-never: host/UI/transport specifics."
+    },
+    "alembicAgent": {
+      "packageName": "@alembic/agent",
+      "allowedDependencies": ["@alembic/core"],
+      "charter": "LLM provider/tool runtime (V2 catalog, transports, classification). Must-never: knowledge persistence; HTTP surface."
+    },
+    "alembic": {
+      "packageName": "alembic",
+      "allowedDependencies": ["@alembic/core", "@alembic/agent"],
+      "charter": "resident MCP + HTTP + daemon + CLI host over Core; owns routes, injection, sandbox, UI. Must-never: re-implement Core engine capabilities; direct DB schema ownership."
+    },
+    "alembicDashboard": {
+      "packageName": "alembic-dashboard",
+      "allowedDependencies": [],
+      "zeroPackageDependency": true,
+      "charter": "zero-dependency UI consumer of the HTTP contract via generated types. Must-never: @alembic package imports; business logic beyond projection."
+    },
+    "alembicPlugin": {
+      "packageName": "@alembic/plugin",
+      "allowedDependencies": ["@alembic/core"],
+      "gateParticipation": "post-CKG (owner: AlembicPlugin window; trigger: CKG resumption / P3 IC5)",
+      "charter": "Codex/Claude-Code host shells + plugin MCP surface + vendored Core runtime + distribution packaging. Must-never: fork Core semantics; main-repo route duplication beyond the declared overlay."
+    }
+  },
+  "charterRefs": {
+    "source": "P0 unified fact freeze §7 charter DRAFTS (wakeflow-ledger/requirement-designs/alembic-portfolio-execution-plan/p0-unified-fact-freeze-2026-06-12.md)",
+    "status": "drafts — confirmed at AD2; the charter strings above are projections of those drafts, not yet user-confirmed charters"
+  },
+  "exactEdgeAllowlist": [],
+  "exactEdgeAllowlistContract": "Each entry requires {repo, dependency, owner, reason, cleanupTrigger}; entries without all five fields fail the gate. Empty today — the verified DAG needs no exceptions.",
+  "toolchainFloor": {
+    "description": "Space toolchain floor derived from CURRENT repo facts (engines fields + pinned/installed gate tooling) — floors record what is already true, never aspirations. Drift note rule: raising or lowering any floor requires a wakeflow-ledger note naming the wave that re-measured it; gates fail below floor with an explicit message.",
+    "node": ">=22.0.0",
+    "typescript": "5.9.x",
+    "biome": "2.4.6",
+    "vitest": ">=4",
+    "facts": {
+      "engines.node": ">=22.0.0 in Core/Alembic/Agent/Plugin manifests (Dashboard has no engines field)",
+      "typescript": "Core devDependencies ^5.9.3; tsc 5.9.3 runs the build gates",
+      "biome": "pinned 2.4.6 in Core",
+      "vitest": "Core ^4.0.18 with @vitest/coverage-v8 ^4.1.6"
+    }
+  }
+}
