@@ -1,4 +1,5 @@
 import { resolveRecipeDimensionId } from '../../../../domain/dimension/RecipeDimension.js';
+import { CORE_CONTENT_SLICE_BUDGETS as SLICE_BUDGETS } from '../../../../shared/OutputBudget.js';
 import type { DimensionDef } from '../../../../types/project-snapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import type {
@@ -178,12 +179,15 @@ export function projectHostAgentRescanEvidencePlan(
         lifecycle: snapshotEntry?.lifecycle || 'active',
         content: content
           ? {
-              markdown: truncate(content.markdown, 500),
-              rationale: truncate(content.rationale, 200),
-              coreCode: truncate(content.coreCode, 400),
+              markdown: truncate(content.markdown, SLICE_BUDGETS.rescanEvidenceMarkdownChars),
+              rationale: truncate(content.rationale, SLICE_BUDGETS.rescanEvidenceRationaleChars),
+              coreCode: truncate(content.coreCode, SLICE_BUDGETS.rescanEvidenceCoreCodeChars),
             }
           : null,
-        sourceRefs: (snapshotEntry?.sourceRefs ?? []).slice(0, 5),
+        sourceRefs: (snapshotEntry?.sourceRefs ?? []).slice(
+          0,
+          SLICE_BUDGETS.rescanEvidenceSourceRefs
+        ),
         auditHint: {
           relevanceScore: result.relevanceScore,
           verdict: result.verdict as 'healthy' | 'watch' | 'decay' | 'severe',

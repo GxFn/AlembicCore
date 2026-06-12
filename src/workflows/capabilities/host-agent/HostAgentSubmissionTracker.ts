@@ -24,6 +24,8 @@
  * @module bootstrap/HostAgentSubmissionTracker
  */
 
+import { CORE_CONTENT_SLICE_BUDGETS } from '../../../shared/OutputBudget.js';
+
 // ── 常量 ────────────────────────────────────────────────────
 
 /** 单个维度最大追踪提交数 */
@@ -158,7 +160,10 @@ export class HostAgentSubmissionTracker {
       kind: submissionArgs.kind || '',
       category: submissionArgs.category || '',
       sources: submissionArgs.reasoning?.sources || [],
-      coreCodePreview: (submissionArgs.coreCode || '').substring(0, 200),
+      coreCodePreview: (submissionArgs.coreCode || '').substring(
+        0,
+        CORE_CONTENT_SLICE_BUDGETS.submissionCoreCodePreviewChars
+      ),
       contentLength: submissionArgs.content?.markdown?.length || 0,
       confidence: submissionArgs.reasoning?.confidence || 0,
       submittedAt: Date.now(),

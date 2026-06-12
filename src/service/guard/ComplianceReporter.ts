@@ -92,7 +92,13 @@ interface ViolationItem {
 }
 
 interface ViolationsStoreLike {
-  appendRun(run: { filePath: string; violations: ViolationItem[]; summary: string }): string;
+  appendRun(run: {
+    filePath: string;
+    violations: ViolationItem[];
+    summary: string;
+    tool?: string | null;
+    surface?: string | null;
+  }): string;
   getTrend(): { errorsChange: number; warningsChange: number; hasHistory: boolean };
 }
 
@@ -425,6 +431,8 @@ export class ComplianceReporter {
           filePath: projectRoot,
           violations: allViolations,
           summary: `Compliance scan: score=${complianceScore} ${gateStatus} | ${summary.errors}E ${summary.warnings}W | cov=${coverageScore} conf=${confidenceScore}`,
+          tool: null,
+          surface: 'guard/compliance-report',
         });
       }
     } catch {

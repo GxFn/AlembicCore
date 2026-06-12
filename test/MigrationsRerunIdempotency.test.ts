@@ -23,6 +23,7 @@ const EXPECTED_VERSIONS = [
   '008_recipe_warnings',
   '009_knowledge_dimension_id',
   '010_source_graph',
+  '011_guard_violations_attribution',
 ];
 
 describe('Migrations re-run / idempotency (fresh DB)', () => {

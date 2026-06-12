@@ -166,6 +166,10 @@ export const guardViolations = sqliteTable(
     summary: text('summary'),
     violationsJson: text('violations_json').default('[]'),
     createdAt: integer('created_at').notNull(),
+    // Writer attribution (migration 011): which tool/surface wrote the row.
+    // Nullable — pre-011 rows and writers that don't know their tool stay NULL.
+    tool: text('tool'),
+    surface: text('surface'),
   },
   (table) => [
     index('idx_guard_violations_file').on(table.filePath),

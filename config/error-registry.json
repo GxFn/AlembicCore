@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "owner": "AlembicCore",
+  "title": "Cross-repo error/problem registry (IC4, Train A)",
+  "description": "Script-readable registry of every failure surface Core owns and how each repo adopts it. Kept in sync with the compiled sources by test/ErrorRegistry.test.ts (drift fails the Core test gate). Source files: src/shared/FailureTaxonomy.ts (kinds), src/shared/errors/BaseError.ts (classes), src/shared/DiagnosticCodes.ts (diagnostic reason codes).",
+  "failureKinds": [
+    "invalid-input",
+    "unavailable",
+    "capability-mismatch",
+    "not-found",
+    "conflict",
+    "permission-denied",
+    "timeout",
+    "cancelled",
+    "partial",
+    "degraded",
+    "needs-confirmation",
+    "provider-error",
+    "host-failure",
+    "internal-error",
+    "schema-drift",
+    "sensitive-leak"
+  ],
+  "errorClasses": {
+    "BaseError": null,
+    "PermissionDenied": "PERMISSION_DENIED",
+    "ConstitutionViolation": "CONSTITUTION_VIOLATION",
+    "ValidationError": "VALIDATION_ERROR",
+    "NotFoundError": "NOT_FOUND",
+    "ConflictError": "CONFLICT",
+    "InternalError": "INTERNAL_ERROR",
+    "PersistenceError": "PERSISTENCE_ERROR",
+    "DivergenceError": "STATE_DIVERGENCE"
+  },
+  "diagnosticCodes": [
+    "core.diagnostic.knowledge.file-db-divergence",
+    "core.diagnostic.search.index-table-missing",
+    "core.diagnostic.feedback.load-failed",
+    "core.diagnostic.feedback.migrate-failed",
+    "core.diagnostic.vector.orphan-remove-failed",
+    "core.diagnostic.vector.reconcile-db-unavailable",
+    "core.diagnostic.vector.reconcile-failed",
+    "core.diagnostic.vector.batch-remove-failed",
+    "core.diagnostic.similarity.walk-truncated",
+    "core.diagnostic.db.sqlite-busy",
+    "core.diagnostic.timer.post-dispose-registration"
+  ],
+  "adoption": {
+    "alembicCore": {
+      "status": "authority",
+      "proof": "test/ErrorRegistry.test.ts verifies this registry byte-matches the compiled taxonomy, error classes and diagnostic codes; test/FailureTaxonomy.test.ts validates the taxonomy invariants."
+    },
+    "alembic": {
+      "status": "adopted-complete",
+      "surface": "lib/http/problem-taxonomy.ts",
+      "detail": "buildAlembicHttpProblem maps all 16 failure kinds to HTTP problems via getCoreFailureTaxonomyEntry (@alembic/core/shared); httpStatus/retryPolicy/exposure come from the Core entries.",
+      "adoptionPath": "already consuming Core authority; no further step this wave"
+    },
+    "alembicAgent": {
+      "status": "documented-independent",
+      "surface": "src/ai/shared/error-classify.ts (classifyLlmError)",
+      "decision": "DOCUMENT, do not integrate (Train A IC4 ruling, 2026-06-12)",
+      "reasoning": "classifyLlmError is transport-level retry/circuit-breaker classification for outbound LLM provider calls (abort/network/429/5xx + 7 undici/network cause codes). Its output never crosses a user-facing wire: callers are AiProvider retry orchestration and reliability.ts circuit breaking. Integrating it with the Core failure taxonomy would couple Agent's hot retry path to a registry designed for surfaced failures, with no consumer benefit and a real regression risk in retry semantics.",
+      "mappingToCoreFailureKinds": {
+        "isAbort": "cancelled",
+        "isNetworkError": "unavailable",
+        "status 429 / 5xx (isRetryable)": "provider-error",
+        "ETIMEDOUT / UND_ERR_CONNECT_TIMEOUT": "timeout",
+        "other non-retryable provider responses": "provider-error"
+      },
+      "integrationTrigger": "re-rule only if Agent failure classifications start crossing a surfaced boundary (HTTP/MCP/Dashboard); owner: AlembicAgent window"
+    },
+    "alembicPlugin": {
+      "status": "deferred-ic5",
+      "surface": "MCP Zod validator (derives Core shapes)",
+      "adoptionPath": "post-CKG reconciliation wave (IC5) re-verifies the validator against this registry; Plugin hands-off until then"
+    },
+    "alembicDashboard": {
+      "status": "pending-ic2",
+      "surface": "loose hand-projection in src/types.ts",
+      "adoptionPath": "Train B IC2 generated artifact carries the failure-kind enum + problem envelope from this registry's sources"
+    }
+  },
+  "staged": {
+    "CO3-TAXONOMY-FACADE-PROMOTION": {
+      "stagedFor": "release wave 0.3.0",
+      "change": "promote PersistenceError and DivergenceError onto the ./shared facade (src/shared/index.ts explicit error re-export list gains both names)",
+      "gateImpact": "closeout.narrowness.baselines['./shared'] must be raised 189 -> 191 in config/public-api-boundary.json — a shrink-only budget raise that REQUIRES a controller decision recorded in the policy file (per docs/public-api-gates.md)",
+      "notShippedReason": "boundary gate pins ./shared at 189; consumers currently match the classes via BaseError + stable codes PERSISTENCE_ERROR / STATE_DIVERGENCE",
+      "owner": "AlembicCore window",
+      "trigger": "0.3.0 release wave executes the two-line facade edit + the recorded budget decision together"
+    }
+  }
+}

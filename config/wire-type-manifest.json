@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "owner": "AlembicCore",
+  "title": "Wire-type single-sourcing manifest (IC1, Train A)",
+  "description": "Script-readable map of every shared wire concept to its ONE compiled Core authority. The Train B generator (Alembic side, P0 §8) reads this manifest to emit AlembicDashboard/src/generated/api-types.ts; test/WireTypeManifest.test.ts keeps the runtime-verifiable member lists in sync with the compiled sources. Glossary terms for the generated artifact header come from docs/semantic-glossary.md.",
+  "glossaryRef": "docs/semantic-glossary.md",
+  "authorities": {
+    "knowledgeEntryWire": {
+      "type": "KnowledgeEntryWire",
+      "module": "src/types/knowledge-wire.ts",
+      "specifier": "@alembic/core/types",
+      "declaration": "dist/types/knowledge-wire.d.ts",
+      "note": "60+-field wire contract. Known Dashboard hand-copy drift (types.ts:697): missing usageGuide, agentNotes typed string[] instead of string — Train B's generated artifact replaces that copy."
+    },
+    "knowledgeLifecycle": {
+      "type": "KnowledgeLifecycle",
+      "module": "src/types/knowledge-wire.ts",
+      "specifier": "@alembic/core/types",
+      "members": ["pending", "staging", "active", "evolving", "decaying", "deprecated"]
+    },
+    "knowledgeKind": {
+      "type": "KnowledgeKind",
+      "module": "src/types/knowledge-wire.ts",
+      "specifier": "@alembic/core/types",
+      "members": ["rule", "pattern", "fact"]
+    },
+    "candidateStates": {
+      "const": "CANDIDATE_STATES",
+      "module": "src/domain/knowledge/Lifecycle.ts",
+      "specifier": "@alembic/core/knowledge",
+      "members": ["pending", "staging"],
+      "locatorRuling": "P0 OPEN item CLOSED (Train A, 2026-06-12): NO separate candidate-status enum exists anywhere in the space. Candidates are knowledge entries whose lifecycle is in CANDIDATE_STATES — the unified lifecycle state machine is the single authority. Located duplications to retire via Train B: AlembicDashboard src/types.ts:629 hand-copies KnowledgeLifecycle; src/api.ts:3103 hardcodes new Set(['pending','staging']); src/types.ts:812 hand-copies ProposalStatus."
+    },
+    "proposalStatus": {
+      "type": "ProposalStatus",
+      "module": "src/repository/evolution/ProposalRepository.ts",
+      "specifier": "@alembic/core/repositories",
+      "members": ["pending", "observing", "executed", "rejected", "expired"],
+      "note": "Separate state machine from knowledge lifecycle (evolution proposals)."
+    },
+    "failureKinds": {
+      "const": "CORE_FAILURE_TAXONOMY (kind column)",
+      "module": "src/shared/FailureTaxonomy.ts",
+      "specifier": "@alembic/core/shared",
+      "registry": "config/error-registry.json",
+      "note": "16 kinds; the problem envelope authority. Full per-repo adoption map lives in the error registry (IC4)."
+    },
+    "jobKinds": {
+      "const": "ALEMBIC_JOB_KINDS",
+      "module": "src/daemon/RuntimeContracts.ts",
+      "specifier": "@alembic/core/daemon",
+      "members": ["bootstrap", "rescan"],
+      "note": "Already singular: Alembic aliases it as DAEMON_JOB_KINDS (lib/daemon/RuntimeBoundary.ts); no consumer defines its own copy."
+    }
+  }
+}

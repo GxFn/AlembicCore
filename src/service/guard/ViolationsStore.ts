@@ -24,6 +24,14 @@ interface RunInput {
   filePath?: string;
   violations?: ViolationRecord[];
   summary?: string;
+  /**
+   * Writer attribution (Train A, misuse-harvest S2): the MCP tool (e.g.
+   * 'alembic_code_guard') and Core surface (e.g. 'guard/compliance-report')
+   * that produced this run. Optional — unknown writers record NULL instead
+   * of inventing identities.
+   */
+  tool?: string | null;
+  surface?: string | null;
 }
 
 interface RunOutput {
@@ -102,6 +110,8 @@ export class ViolationsStore {
         summary: run.summary || '',
         violationsJson,
         createdAt: now,
+        tool: run.tool ?? null,
+        surface: run.surface ?? null,
       })
       .run();
 

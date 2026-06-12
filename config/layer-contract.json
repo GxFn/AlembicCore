@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Machine-readable Core layer contract (CO2). Human contract: docs/layer-contract.md — edit both together. Enforced by scripts/lint-layer-contract.mjs as a blocking step in npm run check.",
+  "description": "Machine-readable Core layer contract (CO2). Human contract: docs/layer-contract.md \u2014 edit both together. Enforced by scripts/lint-layer-contract.mjs as a blocking step in npm run check.",
   "typeOnlyImportsExempt": true,
   "typeOnlyNote": "import type / export type imports are type bridges and do not create runtime coupling; runtime imports must follow allowedRuntimeImports.",
   "areas": [
@@ -17,15 +17,52 @@
   ],
   "allowedRuntimeImports": {
     "shared": [],
-    "types": ["shared"],
-    "domain": ["shared", "types"],
-    "core": ["shared", "types", "infrastructure"],
-    "infrastructure": ["shared", "types"],
-    "repository": ["shared", "types", "domain", "infrastructure"],
-    "service": ["shared", "types", "domain", "core", "infrastructure", "repository"],
-    "workflows": ["shared", "types", "domain", "core", "infrastructure", "repository", "service"],
-    "daemon": ["shared", "types"],
-    "root-facade": ["*"]
+    "types": [
+      "shared"
+    ],
+    "domain": [
+      "shared",
+      "types"
+    ],
+    "core": [
+      "shared",
+      "types",
+      "infrastructure"
+    ],
+    "infrastructure": [
+      "shared",
+      "types"
+    ],
+    "repository": [
+      "shared",
+      "types",
+      "domain",
+      "infrastructure"
+    ],
+    "service": [
+      "shared",
+      "types",
+      "domain",
+      "core",
+      "infrastructure",
+      "repository"
+    ],
+    "workflows": [
+      "shared",
+      "types",
+      "domain",
+      "core",
+      "infrastructure",
+      "repository",
+      "service"
+    ],
+    "daemon": [
+      "shared",
+      "types"
+    ],
+    "root-facade": [
+      "*"
+    ]
   },
   "blessedImports": [
     {
@@ -39,13 +76,6 @@
       "to": "core",
       "reason": "Semantic chunking lazily consumes the blessed core analysis leaf (parseToTree) with graceful fallback when grammars are absent; extends the 2026-06-12 core-as-leaf ruling to vector chunking. Permanent blessing, scope: this file only.",
       "owner": "AlembicCore window"
-    },
-    {
-      "file": "src/service/panorama/PanoramaScanner.ts",
-      "to": "workflows",
-      "reason": "TEMPORARY exception — known debt, not a blessing. PanoramaScanner dynamically imports six ProjectIntelligenceRunner phase functions (service -> workflows inversion missed by the original audit because the import is dynamic). Repair exceeds the CO2 mandate (one extraction only); routed to controller for a future wave (extract the phase runners to a contract-clean home or invert the dependency).",
-      "owner": "AlembicCore window",
-      "cleanupTrigger": "controller-routed repair wave (post-CO sequence or CKG1 area rebuild) extracting the project-intelligence phase runners out of workflows/"
     }
   ],
   "matrixBlessings": [

@@ -9,6 +9,25 @@ import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities
 import type { CleanupResult, RecipeSnapshot } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
 
+/**
+ * Destructive-reset honesty (MT2 / MT1 P1 finding): the rescan response
+ * claims retention ("preservedRecipes") while the cleanup deletes file
+ * projections — previously without surfacing whether a snapshot exists.
+ * Both presenters now ship the archive ref when the cleanup produced one,
+ * and an explicit archiveMissing signal when files were deleted with NO
+ * snapshot (the silent-data-loss case the shared OutputBudget
+ * DestructiveResetReport contract forbids).
+ */
+function presentRescanArchive(cleanResult: CleanupResult): {
+  archive: { folder: string; movedItems: number; dbSnapshotRows: number } | null;
+  archiveMissing: boolean;
+} {
+  return {
+    archive: cleanResult.trash ?? null,
+    archiveMissing: cleanResult.deletedFiles > 0 && !cleanResult.trash,
+  };
+}
+
 export type KnowledgeRescanTargetFileMap = Record<string, Array<Record<string, unknown>>>;
 
 export function presentInternalKnowledgeRescanEmptyProject({
@@ -86,6 +105,7 @@ export function presentInternalKnowledgeRescanResponse({
       cleanedTables: cleanResult.clearedTables.length,
       cleanedFiles: cleanResult.deletedFiles,
       reason: reason || null,
+      ...presentRescanArchive(cleanResult),
     },
     relevanceAudit: presentRelevanceAudit(auditSummary),
     evolutionAudit: evolutionAudit
@@ -193,6 +213,7 @@ export function presentHostAgentKnowledgeRescanResponse({
         preservedRecipes: recipeSnapshot.count,
         cleanedTables: cleanResult.clearedTables.length,
         cleanedFiles: cleanResult.deletedFiles,
+        ...presentRescanArchive(cleanResult),
         reason: reason || null,
       },
       relevanceAudit: presentRelevanceAudit(auditSummary),
