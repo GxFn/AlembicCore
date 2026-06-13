@@ -170,6 +170,12 @@
       "reason": "Per-pattern regex memo bounded by the loaded guard rule set (AD4 M4)."
     },
     {
+      "file": "src/workflows/capabilities/host-agent/SessionSupport.ts",
+      "binding": "sessionManagers",
+      "blessedId": "bootstrap-session-manager",
+      "reason": "Per-dataRoot BootstrapSessionManager cache with durable .asd/bootstrap-sessions index and test reset hook."
+    },
+    {
       "file": "src/shared/LanguageProfiles.ts",
       "binding": "LANG_TO_FAMILY_MAP",
       "constantClass": true,

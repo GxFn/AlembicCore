@@ -1,7 +1,7 @@
 /**
- * CapabilityProbe — 子仓库能力探针
+ * CapabilityProbe - 子仓库写入能力探针
  *
- * 通过 `git push --dry-run` 探测当前用户对子仓库的物理写权限。
+ * 通过本地目录/remote 状态和 `git push --dry-run` 探测当前工作区的写入范围。
  * 探测结果被缓存（默认 24h）以避免重复执行。
  *
  * 子仓库默认指向 `Alembic/recipes/`（可通过 config 或 options 自定义）。
@@ -10,14 +10,14 @@
  *   2. `.asd/config.json` 中 `core.subRepoDir`
  *   3. 默认 `Alembic/recipes`
  *
- * 三种探测结果：
- *   'admin'       — 无子仓库（个人项目）/ 有 push 权限 → developer
- *   'contributor'  — 有子仓库但无 push 权限 → developer（本地用户 = 项目 Owner）
- *   'visitor'      — noRemote=deny 严格模式 → developer（仅探针级别区分，角色统一为 developer）
+ * 三种探测结果只描述写入范围，不表达产品职责角色：
+ *   'local-write'  — 本地项目或无 remote 且策略允许本地写入
+ *   'remote-write' — remote dry-run 表明当前 checkout 可推送
+ *   'read-only'    — 严格无 remote、dry-run 被拒绝或探测不确定
  *
- * 当没有 remote 时根据 constitution capabilities.git_write.no_remote 策略决定：
- *   'allow' (默认) — 本地开发，视为 admin
- *   'deny'          — 严格模式，视为 visitor
+ * 当没有 remote 时根据 noRemote 策略决定：
+ *   'allow' (默认) — 本地开发，返回 local-write
+ *   'deny'          — 严格模式，返回 read-only
  */
 
 import { execSync } from 'node:child_process';
@@ -26,13 +26,29 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import { readSubRepoUrlFromConfig, resolveSubRepoPath } from '../../shared/ProjectMarkers.js';
 import { resolveProjectRoot } from '../../shared/resolveProjectRoot.js';
 
-export type ProbeResult = 'admin' | 'contributor' | 'visitor';
+export type CapabilityProbeResult = 'local-write' | 'remote-write' | 'read-only';
+
+export type CapabilityProbeReason =
+  | 'no-sub-repo'
+  | 'not-git-repo'
+  | 'no-remote-allowed'
+  | 'no-remote-denied'
+  | 'push-dry-run-ok'
+  | 'push-denied'
+  | 'push-inconclusive'
+  | 'probe-error';
+
+export interface CapabilityProbeStatus {
+  result: CapabilityProbeResult;
+  canWrite: boolean;
+  reason: CapabilityProbeReason;
+  detail: string;
+}
 
 export interface ProbeCache {
-  result: ProbeResult;
+  status: CapabilityProbeStatus;
   cachedAt: number;
   expiresAt: number;
-  detail: string;
 }
 
 export interface CapabilityProbeOptions {
@@ -65,57 +81,34 @@ export class CapabilityProbe {
   //  Public API
   // ═══════════════════════════════════════════════════
 
-  /** 执行探测，返回角色级别 */
-  probe(): ProbeResult {
+  /** 执行探测，返回当前 checkout 的写入范围。 */
+  probe(): CapabilityProbeResult {
+    return this.probeStatus().result;
+  }
+
+  /** 执行探测，返回写入范围和判定原因。 */
+  probeStatus(): CapabilityProbeStatus {
     // 命中缓存
     if (this._cache && Date.now() < this._cache.expiresAt) {
-      this.logger.debug('CapabilityProbe: cache hit', { result: this._cache.result });
-      return this._cache.result;
+      this.logger.debug('CapabilityProbe: cache hit', { result: this._cache.status.result });
+      return this._cache.status;
     }
 
-    const result = this._runProbe();
+    const status = this._runProbe();
     this._cache = {
-      result,
+      status,
       cachedAt: Date.now(),
       expiresAt: Date.now() + this.cacheTTL,
-      detail: `probed at ${new Date().toISOString()}`,
     };
 
     this.logger.info('CapabilityProbe: probed', {
       subRepoPath: this.subRepoPath,
-      result,
+      result: status.result,
+      reason: status.reason,
+      canWrite: status.canWrite,
     });
 
-    return result;
-  }
-
-  /**
-   * 将探测结果映射为 Constitution 角色 ID
-   *
-   * 映射规则：
-   *   'admin'       → 'developer'    有 push 权限 / 无子仓库（个人项目）→ 完整权限
-   *   'contributor'  → 'contributor'   有子仓库但无 push 权限 → 只读，禁止提交 Recipe
-   *   'visitor'      → 'visitor'       noRemote=deny 严格模式 → 最小权限
-   */
-  toRole(probeResult: ProbeResult): string {
-    switch (probeResult) {
-      case 'admin':
-        return 'developer';
-      case 'contributor':
-        return 'contributor';
-      case 'visitor':
-        return 'visitor';
-      default:
-        return 'contributor';
-    }
-  }
-
-  /**
-   * 一步到位：探测并返回角色
-   * @returns Constitution role ID
-   */
-  probeRole(): string {
-    return this.toRole(this.probe());
+    return status;
   }
 
   /** 获取当前缓存状态（for dashboard display） */
@@ -125,7 +118,10 @@ export class CapabilityProbe {
     }
     return {
       cached: true,
-      result: this._cache.result,
+      result: this._cache.status.result,
+      canWrite: this._cache.status.canWrite,
+      reason: this._cache.status.reason,
+      detail: this._cache.status.detail,
       cachedAt: this._cache.cachedAt,
       expiresAt: this._cache.expiresAt,
       expired: Date.now() >= this._cache.expiresAt,
@@ -158,21 +154,19 @@ export class CapabilityProbe {
   }
 
   /** 执行实际探测 */
-  _runProbe(): ProbeResult {
-    // Case 1: 子仓库路径不存在 → 个人项目模式，全权限
+  _runProbe(): CapabilityProbeStatus {
+    // Case 1: 子仓库路径不存在 → 本地项目可继续写入本地工作区
     if (!this.subRepoPath || !fs.existsSync(this.subRepoPath)) {
-      this.logger.debug('CapabilityProbe: no sub-repo — personal project, granting admin');
-      return 'admin';
+      this.logger.debug('CapabilityProbe: no sub-repo - using local write scope');
+      return this._status('local-write', 'no-sub-repo', 'Sub-repository path is absent.');
     }
 
     // Case 2: 检查是否是 git 仓库
     const isGitRepo = this._isGitRepo(this.subRepoPath);
     if (!isGitRepo) {
-      // 有目录但不是 git 仓库 → 本地个人项目（alembic setup 创建），给全权限
-      this.logger.debug(
-        'CapabilityProbe: directory exists but not a git repo — local project, granting admin'
-      );
-      return 'admin';
+      // 有目录但不是 git 仓库 → 本地项目（alembic setup 创建），可继续写入本地工作区
+      this.logger.debug('CapabilityProbe: directory exists but not a git repo - local write scope');
+      return this._status('local-write', 'not-git-repo', 'Sub-repository path is not a git repo.');
     }
 
     // Case 3: 检查是否有 remote
@@ -180,7 +174,9 @@ export class CapabilityProbe {
     if (!hasRemote) {
       // 无 remote，根据策略决定
       this.logger.debug('CapabilityProbe: no remote', { noRemote: this.noRemote });
-      return this.noRemote === 'allow' ? 'admin' : 'visitor';
+      return this.noRemote === 'allow'
+        ? this._status('local-write', 'no-remote-allowed', 'No remote is configured.')
+        : this._status('read-only', 'no-remote-denied', 'No remote is configured in strict mode.');
     }
 
     // Case 4: 有 remote → 执行 git push --dry-run 探测写权限
@@ -190,8 +186,21 @@ export class CapabilityProbe {
       this.logger.warn('CapabilityProbe: push probe failed', {
         error: err instanceof Error ? err.message : String(err),
       });
-      return 'contributor';
+      return this._status('read-only', 'probe-error', 'Push dry-run probe failed.');
     }
+  }
+
+  _status(
+    result: CapabilityProbeResult,
+    reason: CapabilityProbeReason,
+    detail: string
+  ): CapabilityProbeStatus {
+    return {
+      result,
+      canWrite: result !== 'read-only',
+      reason,
+      detail,
+    };
   }
 
   _isGitRepo(repoPath: string): boolean {
@@ -226,7 +235,7 @@ export class CapabilityProbe {
   }
 
   /** git push --dry-run 探测 */
-  _probePush(repoPath: string): ProbeResult {
+  _probePush(repoPath: string): CapabilityProbeStatus {
     try {
       execSync('git push --dry-run 2>&1', {
         cwd: repoPath,
@@ -234,8 +243,8 @@ export class CapabilityProbe {
         timeout: 15000,
         encoding: 'utf8',
       });
-      // 成功 → 有写权限
-      return 'admin';
+      // 成功 → remote 写入探测通过
+      return this._status('remote-write', 'push-dry-run-ok', 'Push dry-run completed.');
     } catch (err: unknown) {
       const execErr = err as {
         stderr?: string | Buffer;
@@ -245,7 +254,7 @@ export class CapabilityProbe {
       const stderr = (execErr.stderr || execErr.stdout || execErr.message || '').toString();
       // "Everything up-to-date" 也算成功
       if (stderr.includes('Everything up-to-date') || stderr.includes('up to date')) {
-        return 'admin';
+        return this._status('remote-write', 'push-dry-run-ok', 'Push dry-run is up to date.');
       }
       // 明确被拒绝
       if (
@@ -254,13 +263,13 @@ export class CapabilityProbe {
         stderr.includes('403') ||
         stderr.includes('401')
       ) {
-        return 'contributor';
+        return this._status('read-only', 'push-denied', 'Push dry-run was denied.');
       }
-      // 网络错误等 → 降级为 contributor
+      // 网络错误等 → 降级为只读，避免把不确定状态解释成可写。
       this.logger.debug('CapabilityProbe: push dry-run inconclusive', {
         stderr: stderr.slice(0, 200),
       });
-      return 'contributor';
+      return this._status('read-only', 'push-inconclusive', 'Push dry-run was inconclusive.');
     }
   }
 }
