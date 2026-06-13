@@ -36,6 +36,14 @@ describe('Core package baseline', () => {
     expect(second.project.recipes).toBe(DEFAULT_FOLDER_NAMES.project.recipes);
   });
 
+  it('keeps package skills under the neutral internalSkills schema only', () => {
+    const legacyPackageSkillsKey = ['injectable', 'Skills'].join('');
+
+    expect(DEFAULT_FOLDER_NAMES.package.internalSkills).toBe('skills');
+    expect(Object.hasOwn(DEFAULT_FOLDER_NAMES.package, legacyPackageSkillsKey)).toBe(false);
+    expect(Object.hasOwn(resolveFolderNames().package, legacyPackageSkillsKey)).toBe(false);
+  });
+
   it('exposes stage 2 infrastructure entrypoints', () => {
     expect(ConfigLoader).toBeDefined();
     expect(WriteZone).toBeDefined();

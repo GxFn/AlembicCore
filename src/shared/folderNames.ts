@@ -2,7 +2,6 @@ export interface AlembicFolderNames {
   package: {
     config: string;
     dashboard: string;
-    injectableSkills: string;
     internalSkills: string;
     resources: string;
     templates: string;
@@ -39,7 +38,6 @@ export const DEFAULT_FOLDER_NAMES: AlembicFolderNames = {
   package: {
     config: 'config',
     dashboard: 'dashboard',
-    injectableSkills: 'injectable-skills',
     internalSkills: 'skills',
     resources: 'resources',
     templates: 'templates',

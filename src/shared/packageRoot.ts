@@ -7,7 +7,7 @@
  *
  * @example
  * ```ts
- * import { PACKAGE_ROOT, INJECTABLE_SKILLS_DIR, RESOURCES_DIR } from '../../shared/packageRoot.js';
+ * import { PACKAGE_ROOT, INTERNAL_SKILLS_DIR, RESOURCES_DIR } from '../../shared/packageRoot.js';
  * ```
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -60,15 +60,6 @@ export const INTERNAL_SKILLS_DIR = path.join(
   PACKAGE_ROOT,
   DEFAULT_FOLDER_NAMES.package.internalSkills
 );
-
-/** `<root>/injectable-skills/` — 产品内置注入 Skill 源目录 */
-export const INJECTABLE_SKILLS_DIR = path.join(
-  PACKAGE_ROOT,
-  DEFAULT_FOLDER_NAMES.package.injectableSkills
-);
-
-/** @deprecated Use INJECTABLE_SKILLS_DIR for product builtin skills. */
-export const SKILLS_DIR = INJECTABLE_SKILLS_DIR;
 
 /** `<root>/templates/` — 模板目录 */
 export const TEMPLATES_DIR = path.join(PACKAGE_ROOT, DEFAULT_FOLDER_NAMES.package.templates);
