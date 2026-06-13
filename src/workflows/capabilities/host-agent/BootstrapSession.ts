@@ -1,34 +1,41 @@
 /**
  * BootstrapSession — 宿主 Agent 驱动的 Bootstrap 会话状态管理
  *
- * 跨多次 MCP 调用保持状态（进程生命周期内有效）。
- * 通过 ServiceContainer 单例注册，每个项目同时只有一个 active session。
- *
- * 职责：
- *   - 维度完成状态跟踪
- *   - Phase 缓存（供 wiki_plan 复用）
- *   - EpisodicMemory 管理
- *   - Cross-dimension hints 收集与分发
- *   - 进度查询
- *   - Session 过期与恢复
+ * 会话状态会写入 dataRoot/.asd/bootstrap-sessions/active-sessions.json。
+ * 这让 host-agent 在 MCP/Core 进程重启后仍可通过 bootstrapSessionRef
+ * 恢复同一条会话，同时用项目级 lease 阻止并发重建覆盖已有会话。
  *
  * @module bootstrap/BootstrapSession
  */
 
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
 import type { SessionCacheShape } from '../../../types/SnapshotViews.js';
-import type { DimensionQualityReport } from './HostAgentSubmissionTracker.js';
-import { HostAgentSubmissionTracker } from './HostAgentSubmissionTracker.js';
-import { SessionStore } from './MiningSessionStore.js';
+import {
+  type DimensionQualityReport,
+  HostAgentSubmissionTracker,
+  type HostAgentSubmissionTrackerSerialized,
+} from './HostAgentSubmissionTracker.js';
+import { type MiningSessionStoreSerialized, SessionStore } from './MiningSessionStore.js';
 
 // ── 本地类型定义 ─────────────────────────────────────────────
 
 /** Bootstrap 会话构造参数 */
-interface BootstrapSessionOpts {
+export interface BootstrapSessionOpts {
   projectRoot: string;
   dimensions: DimensionDef[];
   projectContext?: Record<string, unknown>;
+  id?: string;
+  startedAt?: number;
+  expiresAt?: number;
+  completedDimensions?: Record<string, DimensionCompletion>;
+  crossDimensionHints?: Record<string, CrossDimensionHint[]>;
+  snapshotCache?: SessionCacheShape | null;
+  sessionStore?: MiningSessionStoreSerialized;
+  submissionTracker?: HostAgentSubmissionTrackerSerialized;
+  onChange?: () => void;
 }
 
 /** 维度完成报告 */
@@ -43,19 +50,121 @@ interface DimensionReport {
 }
 
 /** 维度完成记录（带时间戳） */
-interface DimensionCompletion extends DimensionReport {
+export interface DimensionCompletion extends DimensionReport {
   completedAt: number;
 }
 
 /** 跨维度 hint 条目 */
-interface CrossDimensionHint {
+export interface CrossDimensionHint {
   fromDim: string;
   hint: string;
 }
 
+export interface BootstrapSessionSnapshot {
+  id: string;
+  projectRoot: string;
+  dimensions: DimensionDef[];
+  projectContext: Record<string, unknown>;
+  startedAt: number;
+  expiresAt: number;
+  completedDimensions: Record<string, DimensionCompletion>;
+  crossDimensionHints: Record<string, CrossDimensionHint[]>;
+  snapshotCache: SessionCacheShape | null;
+  sessionStore: MiningSessionStoreSerialized;
+  submissionTracker: HostAgentSubmissionTrackerSerialized;
+  savedAt: number;
+}
+
+export interface BootstrapSessionManagerOptions {
+  dataRoot?: string | null;
+}
+
+export interface BootstrapSessionLookupOptions {
+  projectRoot?: string;
+}
+
+export type BootstrapSessionPublicState =
+  | 'active'
+  | 'bootstrap_in_progress'
+  | 'expired'
+  | 'session_not_found'
+  | 'session_project_mismatch';
+
+export interface BootstrapSessionStatus {
+  state: BootstrapSessionPublicState;
+  reason: string;
+  sessionId?: string;
+  activeSessionId?: string;
+  projectRoot?: string;
+  activeProjectRoot?: string;
+  expiresAt?: number;
+  errorCode?: string;
+  failureKind?: string;
+  httpStatus?: number;
+  mcpErrorCode?: string;
+  problemClass?: string;
+  reasonCode?: string;
+  retryable?: boolean;
+  statusCode?: number;
+}
+
+interface BootstrapSessionStoreFile {
+  version: 1;
+  savedAt: number;
+  sessions: BootstrapSessionSnapshot[];
+}
+
 // ── 常量 ────────────────────────────────────────────────────
 
-const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 小时
+export const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 小时
+
+const STORE_RELATIVE_PATH = path.join('.asd', 'bootstrap-sessions', 'active-sessions.json');
+
+// ── BootstrapSession errors ─────────────────────────────────
+
+export class BootstrapSessionLeaseError extends Error {
+  readonly code = 'BOOTSTRAP_IN_PROGRESS';
+  readonly errorCode = 'BOOTSTRAP_IN_PROGRESS';
+  readonly failureKind = 'core.failure.conflict';
+  readonly httpStatus = 409;
+  readonly mcpErrorCode = 'core.failure.conflict';
+  readonly problemClass = 'state-conflict';
+  readonly reasonCode = 'conflict';
+  readonly retryable = true;
+  readonly state = 'bootstrap_in_progress';
+  readonly statusCode = 409;
+  readonly activeSessionId: string;
+  readonly activeProjectRoot: string;
+  readonly expiresAt: number;
+
+  constructor(activeSession: BootstrapSession) {
+    super(
+      `Bootstrap already in progress for project "${activeSession.projectRoot}" with session "${activeSession.id}".`
+    );
+    this.name = 'BootstrapSessionLeaseError';
+    this.activeSessionId = activeSession.id;
+    this.activeProjectRoot = activeSession.projectRoot;
+    this.expiresAt = activeSession.expiresAt;
+  }
+
+  toJSON(): BootstrapSessionStatus {
+    return {
+      state: this.state,
+      reason: 'bootstrap_in_progress',
+      activeSessionId: this.activeSessionId,
+      activeProjectRoot: this.activeProjectRoot,
+      expiresAt: this.expiresAt,
+      errorCode: this.errorCode,
+      failureKind: this.failureKind,
+      httpStatus: this.httpStatus,
+      mcpErrorCode: this.mcpErrorCode,
+      problemClass: this.problemClass,
+      reasonCode: this.reasonCode,
+      retryable: this.retryable,
+      statusCode: this.statusCode,
+    };
+  }
+}
 
 // ── BootstrapSession ────────────────────────────────────────
 
@@ -71,31 +180,62 @@ export class BootstrapSession {
   snapshotCache: SessionCacheShape | null;
   sessionStore: SessionStore;
   submissionTracker: HostAgentSubmissionTracker;
+  #onChange: (() => void) | null;
+  #projectContext: Record<string, unknown>;
+
   /**
    * @param opts.projectRoot 项目根目录
    * @param opts.dimensions 激活的维度定义列表
    * @param [opts.projectContext] 传给 EpisodicMemory 的项目元数据
    */
-  constructor({ projectRoot, dimensions, projectContext = {} }: BootstrapSessionOpts) {
-    this.id = `bs-${crypto.randomUUID()}`;
-    this.projectRoot = projectRoot;
+  constructor({
+    projectRoot,
+    dimensions,
+    projectContext = {},
+    id,
+    startedAt,
+    expiresAt,
+    completedDimensions,
+    crossDimensionHints,
+    snapshotCache,
+    sessionStore,
+    submissionTracker,
+    onChange,
+  }: BootstrapSessionOpts) {
+    this.#onChange = onChange ?? null;
+    this.#projectContext = { ...projectContext };
+    this.id = id ?? `bs-${crypto.randomUUID()}`;
+    this.projectRoot = normalizeProjectRoot(projectRoot);
     this.dimensions = dimensions;
-    this.completedDimensions = new Map<string, DimensionCompletion>(); // dimId → { report, completedAt, recipeIds }
-    this.sessionStore = new SessionStore(projectContext);
+    this.completedDimensions = new Map<string, DimensionCompletion>(
+      Object.entries(completedDimensions ?? {})
+    );
+    this.sessionStore = sessionStore
+      ? SessionStore.fromJSON(sessionStore as unknown as Record<string, unknown>)
+      : new SessionStore(projectContext);
 
     /** 宿主 Agent 提交追踪 (v2: 对标内部 Agent 的 EvidenceCollector) */
-    this.submissionTracker = new HostAgentSubmissionTracker();
+    this.submissionTracker = submissionTracker
+      ? HostAgentSubmissionTracker.fromJSON(submissionTracker, {
+          onChange: () => this.#emitChange(),
+        })
+      : new HostAgentSubmissionTracker({ onChange: () => this.#emitChange() });
 
     /** Phase 1-4 分析结果缓存，供 wiki_plan 复用 */
-    this.snapshotCache = null;
+    this.snapshotCache = snapshotCache ?? null;
 
     /** 跨维度 hints 收集 */
-    this.crossDimensionHints = {}; // targetDimId → [{ fromDim, hint }]
+    this.crossDimensionHints = normalizeHints(crossDimensionHints);
 
     this._activeSession = null;
 
-    this.startedAt = Date.now();
-    this.expiresAt = Date.now() + SESSION_TTL_MS;
+    this.startedAt = startedAt ?? Date.now();
+    this.expiresAt = expiresAt ?? Date.now() + SESSION_TTL_MS;
+  }
+
+  setOnChange(onChange?: (() => void) | null): void {
+    this.#onChange = onChange ?? null;
+    this.submissionTracker.setOnChange(() => this.#emitChange());
   }
 
   // ── 状态查询 ──────────────────────────────────────────────
@@ -122,6 +262,11 @@ export class BootstrapSession {
   /** 检查某个维度是否已完成 */
   isDimensionComplete(dimId: string): boolean {
     return this.completedDimensions.has(dimId);
+  }
+
+  extendTtl(minimumTtlMs = 60 * 60 * 1000): void {
+    this.expiresAt = Math.max(this.expiresAt, Date.now() + minimumTtlMs);
+    this.#emitChange();
   }
 
   // ── 维度完成 ──────────────────────────────────────────────
@@ -159,6 +304,7 @@ export class BootstrapSession {
       report.referencedFiles || []
     );
 
+    this.#emitChange();
     return { updated, qualityReport };
   }
 
@@ -190,6 +336,7 @@ export class BootstrapSession {
         hint: String(hintText),
       });
     }
+    this.#emitChange();
   }
 
   /**
@@ -218,6 +365,7 @@ export class BootstrapSession {
    */
   setSnapshotCache(cache: SessionCacheShape | null) {
     this.snapshotCache = cache;
+    this.#emitChange();
   }
 
   /** 获取 Snapshot 缓存（wiki_plan / dimension-complete 复用） */
@@ -227,15 +375,37 @@ export class BootstrapSession {
 
   // ── 序列化 ────────────────────────────────────────────────
 
+  toSnapshot(): BootstrapSessionSnapshot {
+    return {
+      id: this.id,
+      projectRoot: this.projectRoot,
+      dimensions: this.dimensions,
+      projectContext: { ...this.#projectContext },
+      startedAt: this.startedAt,
+      expiresAt: this.expiresAt,
+      completedDimensions: Object.fromEntries(this.completedDimensions),
+      crossDimensionHints: normalizeHints(this.crossDimensionHints),
+      snapshotCache: this.snapshotCache,
+      sessionStore: this.sessionStore.toJSON(),
+      submissionTracker: this.submissionTracker.toJSON(),
+      savedAt: Date.now(),
+    };
+  }
+
   toJSON() {
     return {
       id: this.id,
       projectRoot: this.projectRoot,
       startedAt: this.startedAt,
       expiresAt: this.expiresAt,
+      state: this.isExpired ? 'expired' : 'active',
       progress: this.getProgress(),
       dimensionCount: this.dimensions.length,
     };
+  }
+
+  #emitChange(): void {
+    this.#onChange?.();
   }
 }
 
@@ -244,54 +414,318 @@ export class BootstrapSession {
 /**
  * BootstrapSessionManager — 管理 active session
  *
- * 设计为进程级单例，通过 ServiceContainer 注册。
- * 同时只有一个 active session（单项目场景）。
+ * 设计为进程级 lazy lifecycle，通过 ServiceContainer 注册。
+ * 每个项目同一时间只有一个未过期 session；dataRoot 可用时写入 durable
+ * session index，使新进程能从 bootstrapSessionRef 重建同一条会话。
  */
 export class BootstrapSessionManager {
   _activeSession: BootstrapSession | null;
-  constructor() {
+  #sessionsByProject = new Map<string, BootstrapSession>();
+  #storePath: string | null;
+
+  constructor(options: BootstrapSessionManagerOptions = {}) {
     this._activeSession = null;
+    this.#storePath = options.dataRoot
+      ? path.join(normalizeProjectRoot(options.dataRoot), STORE_RELATIVE_PATH)
+      : null;
+    this.#loadFromDisk();
+    this.#rememberNewestSession();
   }
 
   /**
-   * 创建新的 bootstrap session
-   * @param opts 传给 BootstrapSession 构造函数的参数
+   * 创建新的 bootstrap session。
+   *
+   * 同项目已有未过期 session 时抛出 BootstrapSessionLeaseError，外层可将
+   * errorCode/state 映射为 clean output 的 bootstrap_in_progress 状态。
    */
-  createSession(opts: BootstrapSessionOpts): BootstrapSession {
-    // 如果有旧的未过期 session，先标记过期
-    if (this._activeSession && !this._activeSession.isExpired) {
-      this._activeSession.expiresAt = Date.now(); // 强制过期
+  createSession(opts: BootstrapSessionOpts, options: { replace?: boolean } = {}): BootstrapSession {
+    this.#loadFromDisk();
+    const projectKey = sessionProjectKey(opts.projectRoot);
+    const existing = this.#sessionsByProject.get(projectKey);
+    if (existing?.isExpired) {
+      this.#sessionsByProject.delete(projectKey);
+    } else if (existing && !options.replace) {
+      throw new BootstrapSessionLeaseError(existing);
     }
-    this._activeSession = new BootstrapSession(opts);
-    return this._activeSession;
+
+    const session = new BootstrapSession({
+      ...opts,
+      onChange: () => this.#persist(),
+    });
+    this.#sessionsByProject.set(projectKey, session);
+    this._activeSession = session;
+    this.#persist();
+    return session;
   }
 
   /**
-   * 获取 active session
+   * 获取 active session。
    * @param [sessionId] 可选，用于验证 session ID
    */
-  getSession(sessionId?: string): BootstrapSession | null {
-    if (!this._activeSession) {
+  getSession(
+    sessionId?: string,
+    options: BootstrapSessionLookupOptions = {}
+  ): BootstrapSession | null {
+    const session = this.#findSession(sessionId, options);
+    if (
+      !session ||
+      session.isExpired ||
+      (options.projectRoot &&
+        sessionProjectKey(options.projectRoot) !== sessionProjectKey(session.projectRoot))
+    ) {
       return null;
     }
-    if (this._activeSession.isExpired) {
-      return null;
-    }
-    if (sessionId && this._activeSession.id !== sessionId) {
-      return null;
-    }
-    return this._activeSession;
+    return session;
   }
 
-  /** 获取 active session，无论是否过期（用于恢复场景） */
-  getAnySession() {
-    return this._activeSession;
+  /** 获取 active session，无论是否过期（用于兼容恢复场景） */
+  getAnySession(
+    sessionId?: string,
+    options: BootstrapSessionLookupOptions = {}
+  ): BootstrapSession | null {
+    const session = this.#findSession(sessionId, options);
+    if (
+      session &&
+      options.projectRoot &&
+      sessionProjectKey(options.projectRoot) !== sessionProjectKey(session.projectRoot)
+    ) {
+      return null;
+    }
+    return session;
   }
 
-  /** 清除 active session */
-  clearSession() {
-    this._activeSession = null;
+  getSessionStatus(
+    sessionId?: string,
+    options: BootstrapSessionLookupOptions = {}
+  ): BootstrapSessionStatus {
+    const session = this.#findSession(sessionId, options);
+    if (session) {
+      if (
+        options.projectRoot &&
+        sessionProjectKey(options.projectRoot) !== sessionProjectKey(session.projectRoot)
+      ) {
+        return {
+          state: 'session_project_mismatch',
+          reason: 'session_project_mismatch',
+          sessionId: session.id,
+          projectRoot: normalizeProjectRoot(options.projectRoot),
+          activeProjectRoot: session.projectRoot,
+          errorCode: 'BOOTSTRAP_SESSION_PROJECT_MISMATCH',
+          failureKind: 'core.failure.invalid-input',
+          problemClass: 'request-problem',
+        };
+      }
+      if (session.isExpired) {
+        return {
+          state: 'expired',
+          reason: 'session_expired',
+          sessionId: session.id,
+          projectRoot: session.projectRoot,
+          expiresAt: session.expiresAt,
+          errorCode: 'BOOTSTRAP_SESSION_EXPIRED',
+          failureKind: 'core.failure.invalid-input',
+          problemClass: 'request-problem',
+        };
+      }
+      return {
+        state: 'active',
+        reason: 'session_active',
+        sessionId: session.id,
+        projectRoot: session.projectRoot,
+        expiresAt: session.expiresAt,
+      };
+    }
+
+    if (options.projectRoot) {
+      const activeForProject = this.#sessionsByProject.get(sessionProjectKey(options.projectRoot));
+      if (activeForProject && !activeForProject.isExpired) {
+        return new BootstrapSessionLeaseError(activeForProject).toJSON();
+      }
+    }
+
+    return {
+      state: 'session_not_found',
+      reason: 'session_not_found',
+      ...(sessionId ? { sessionId } : {}),
+      ...(options.projectRoot ? { projectRoot: normalizeProjectRoot(options.projectRoot) } : {}),
+      errorCode: 'BOOTSTRAP_SESSION_NOT_FOUND',
+      failureKind: 'core.failure.invalid-input',
+      problemClass: 'request-problem',
+    };
   }
+
+  /** 清除 active session；传 sessionId 时只释放对应 lease。 */
+  clearSession(sessionId?: string): void {
+    if (!sessionId) {
+      this.#sessionsByProject.clear();
+      this._activeSession = null;
+      this.#persist();
+      return;
+    }
+
+    for (const [projectKey, session] of this.#sessionsByProject) {
+      if (session.id === sessionId) {
+        this.#sessionsByProject.delete(projectKey);
+      }
+    }
+    this.#rememberNewestSession();
+    this.#persist();
+  }
+
+  releaseProjectLease(projectRoot: string): boolean {
+    const deleted = this.#sessionsByProject.delete(sessionProjectKey(projectRoot));
+    this.#rememberNewestSession();
+    if (deleted) {
+      this.#persist();
+    }
+    return deleted;
+  }
+
+  #findSession(
+    sessionId?: string,
+    options: BootstrapSessionLookupOptions = {}
+  ): BootstrapSession | null {
+    if (sessionId) {
+      for (const session of this.#sessionsByProject.values()) {
+        if (session.id === sessionId) {
+          return session;
+        }
+      }
+      return null;
+    }
+
+    if (options.projectRoot) {
+      return this.#sessionsByProject.get(sessionProjectKey(options.projectRoot)) ?? null;
+    }
+
+    return this.#selectNewestSession({ includeExpired: false });
+  }
+
+  #rememberNewestSession(): void {
+    this._activeSession = this.#selectNewestSession({ includeExpired: true });
+  }
+
+  #selectNewestSession({ includeExpired }: { includeExpired: boolean }): BootstrapSession | null {
+    let newest: BootstrapSession | null = null;
+    for (const session of this.#sessionsByProject.values()) {
+      if (!includeExpired && session.isExpired) {
+        continue;
+      }
+      if (!newest || session.startedAt > newest.startedAt) {
+        newest = session;
+      }
+    }
+    return newest;
+  }
+
+  #loadFromDisk(): void {
+    if (!this.#storePath || !fs.existsSync(this.#storePath)) {
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(fs.readFileSync(this.#storePath, 'utf8'));
+    } catch {
+      return;
+    }
+    if (!isStoreFile(parsed)) {
+      return;
+    }
+
+    const sessionsByProject = new Map<string, BootstrapSession>();
+    for (const snapshot of parsed.sessions) {
+      if (!isSessionSnapshot(snapshot)) {
+        continue;
+      }
+      const session = new BootstrapSession({
+        ...snapshot,
+        onChange: () => this.#persist(),
+      });
+      sessionsByProject.set(sessionProjectKey(session.projectRoot), session);
+    }
+    this.#sessionsByProject = sessionsByProject;
+    this.#rememberNewestSession();
+  }
+
+  #persist(): void {
+    if (!this.#storePath) {
+      return;
+    }
+
+    const payload: BootstrapSessionStoreFile = {
+      version: 1,
+      savedAt: Date.now(),
+      sessions: [...this.#sessionsByProject.values()].map((session) => session.toSnapshot()),
+    };
+    const dir = path.dirname(this.#storePath);
+    fs.mkdirSync(dir, { recursive: true });
+    const tempPath = path.join(
+      dir,
+      `.active-sessions.${process.pid}.${Date.now()}.${crypto.randomUUID()}.tmp`
+    );
+    fs.writeFileSync(tempPath, JSON.stringify(payload, null, 2), 'utf8');
+    fs.renameSync(tempPath, this.#storePath);
+  }
+}
+
+function sessionProjectKey(projectRoot: string): string {
+  return normalizeProjectRoot(projectRoot);
+}
+
+function normalizeProjectRoot(projectRoot: string): string {
+  return path.resolve(projectRoot);
+}
+
+function normalizeHints(
+  hints: Record<string, CrossDimensionHint[]> | null | undefined
+): Record<string, CrossDimensionHint[]> {
+  const normalized: Record<string, CrossDimensionHint[]> = {};
+  if (!hints || typeof hints !== 'object') {
+    return normalized;
+  }
+  for (const [targetDim, entries] of Object.entries(hints)) {
+    if (!Array.isArray(entries)) {
+      continue;
+    }
+    normalized[targetDim] = entries
+      .filter(isRecord)
+      .map((entry) => ({
+        fromDim: typeof entry.fromDim === 'string' ? entry.fromDim : '',
+        hint: typeof entry.hint === 'string' ? entry.hint : '',
+      }))
+      .filter((entry) => entry.fromDim.length > 0 && entry.hint.length > 0);
+  }
+  return normalized;
+}
+
+function isStoreFile(value: unknown): value is BootstrapSessionStoreFile {
+  return (
+    isRecord(value) &&
+    value.version === 1 &&
+    Array.isArray(value.sessions) &&
+    typeof value.savedAt === 'number'
+  );
+}
+
+function isSessionSnapshot(value: unknown): value is BootstrapSessionSnapshot {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.projectRoot === 'string' &&
+    Array.isArray(value.dimensions) &&
+    typeof value.startedAt === 'number' &&
+    typeof value.expiresAt === 'number' &&
+    isRecord(value.projectContext) &&
+    isRecord(value.completedDimensions) &&
+    isRecord(value.crossDimensionHints) &&
+    isRecord(value.sessionStore) &&
+    isRecord(value.submissionTracker)
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export default BootstrapSession;

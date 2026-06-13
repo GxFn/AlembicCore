@@ -52,6 +52,11 @@ describe('Blessed singletons (config/blessed-singletons.json)', () => {
       ['discoverer-registry', 'src/core/discovery/index.ts', 'resetDiscovererRegistry'],
       ['ast-analyzer-caches', 'src/core/AstAnalyzer.ts', '_resetAstParserCacheForTesting'],
       ['memo-caches', 'src/shared/isOwnDevRepo.ts', '_resetDevRepoCache'],
+      [
+        'bootstrap-session-manager',
+        'src/workflows/capabilities/host-agent/SessionSupport.ts',
+        '_resetBootstrapSessionManagersForTesting',
+      ],
     ];
     for (const [id, module, hook] of hookProbes) {
       const entry = config.blessed.find((candidate: { id: string }) => candidate.id === id);

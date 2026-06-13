@@ -6,6 +6,7 @@
  */
 
 import path from 'node:path';
+import { resolveDataRoot } from '../../../shared/resolveProjectRoot.js';
 import type { DimensionDef, ProjectSnapshot } from '../../../types/ProjectSnapshot.js';
 import { toSessionCache } from '../../../types/SnapshotViews.js';
 import { BootstrapSessionManager } from './BootstrapSession.js';
@@ -19,10 +20,10 @@ interface SessionManagerContainer {
   register?: (name: string, factory: () => unknown) => void;
 }
 
-// Blessed lazy singleton (AD4 'bootstrap-session-manager'): sessions carry
-// their own 2h TTL; restart semantics = in-flight sessions drop on process
-// restart and hosts start fresh ones (documented, accepted).
-let sessionManager: BootstrapSessionManager | null = null;
+// Blessed lazy lifecycle (AD4 'bootstrap-session-manager'): one manager per
+// dataRoot so host-agent sessions survive MCP/Core process restarts without
+// mixing project leases.
+const sessionManagers = new Map<string, BootstrapSessionManager>();
 
 export function getOrCreateSessionManager(
   container: SessionManagerContainer
@@ -36,8 +37,12 @@ export function getOrCreateSessionManager(
     // Not registered yet.
   }
 
+  const dataRoot = resolveSessionDataRoot(container);
+  const managerKey = dataRoot ?? '__memory__';
+  let sessionManager = sessionManagers.get(managerKey);
   if (!sessionManager) {
-    sessionManager = new BootstrapSessionManager();
+    sessionManager = new BootstrapSessionManager({ dataRoot });
+    sessionManagers.set(managerKey, sessionManager);
   }
 
   try {
@@ -47,6 +52,18 @@ export function getOrCreateSessionManager(
   }
 
   return sessionManager;
+}
+
+export function _resetBootstrapSessionManagersForTesting(): void {
+  sessionManagers.clear();
+}
+
+function resolveSessionDataRoot(container: SessionManagerContainer): string | null {
+  try {
+    return resolveDataRoot(container as never);
+  } catch {
+    return null;
+  }
 }
 
 // ═══════════════════════════════════════════════════════════

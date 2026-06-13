@@ -93,6 +93,7 @@ export interface HostAgentWorkflowSession {
     remainingDimIds: string[];
   };
   readonly isComplete: boolean;
+  extendTtl?(minimumTtlMs?: number): void;
   markDimensionComplete(
     dimensionId: string,
     report: {
@@ -391,6 +392,10 @@ async function resolveHostAgentCompletionSession({
 }
 
 function extendSessionTtl(session: HostAgentWorkflowSession): void {
+  if (session.extendTtl) {
+    session.extendTtl(60 * 60 * 1000);
+    return;
+  }
   if (session.expiresAt) {
     session.expiresAt = Math.max(session.expiresAt, Date.now() + 60 * 60 * 1000);
   }

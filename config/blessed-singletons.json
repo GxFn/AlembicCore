@@ -87,12 +87,12 @@
     {
       "id": "bootstrap-session-manager",
       "module": "src/workflows/capabilities/host-agent/SessionSupport.ts",
-      "export": "sessionManager (lazy)",
+      "export": "sessionManagers (lazy per dataRoot)",
       "kind": "lazy-module-singleton",
       "owner": "AlembicCore window",
-      "reason": "Host-agent bootstrap sessions; the sessions themselves carry a 2h TTL — the manager is the managed lifecycle.",
-      "lifecycle": "process; sessions expire by TTL; restart drops in-flight sessions (documented)",
-      "resetHook": null
+      "reason": "Host-agent bootstrap sessions; managers are keyed by dataRoot and persist session/lease snapshots under .asd/bootstrap-sessions so process restarts can resume by bootstrapSessionRef.",
+      "lifecycle": "process plus dataRoot-local durable index; sessions expire by 2h TTL; same-project concurrent bootstrap is refused as bootstrap_in_progress",
+      "resetHook": "_resetBootstrapSessionManagersForTesting"
     },
     {
       "id": "ast-grammar-family",

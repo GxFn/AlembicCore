@@ -37,7 +37,7 @@ const MAX_NEGATIVE_SIGNALS = 30;
 // ── 类型定义 ────────────────────────────────────────────────
 
 /** 一次 knowledge 提交的提交记录 */
-interface SubmissionRecord {
+export interface HostAgentSubmissionRecord {
   recipeId: string;
   title: string;
   knowledgeType: string;
@@ -51,7 +51,7 @@ interface SubmissionRecord {
 }
 
 /** 负空间信号 */
-interface NegativeSignal {
+export interface HostAgentNegativeSignal {
   pattern: string;
   source: string;
   dimId?: string;
@@ -105,27 +105,49 @@ interface CompletedDimSummary {
 export interface AccumulatedEvidence {
   completedDimSummaries: CompletedDimSummary[];
   sharedFiles: SharedFileInfo[];
-  negativeSignals: NegativeSignal[];
+  negativeSignals: HostAgentNegativeSignal[];
   usedTriggers: string[];
+}
+
+export interface HostAgentSubmissionTrackerSerialized {
+  dimensionSubmissions: Record<string, HostAgentSubmissionRecord[]>;
+  fileEvidenceMap: Record<string, string[]>;
+  negativeSignals: HostAgentNegativeSignal[];
+  rejections: Record<string, string[]>;
+  usedTriggers: string[];
+}
+
+export interface HostAgentSubmissionTrackerOptions {
+  onChange?: () => void;
 }
 
 // ── 主类 ────────────────────────────────────────────────────
 
 export class HostAgentSubmissionTracker {
   /** dimId → 提交记录列表 */
-  #dimensionSubmissions = new Map<string, SubmissionRecord[]>();
+  #dimensionSubmissions = new Map<string, HostAgentSubmissionRecord[]>();
 
   /** filePath → 引用此文件的 dimId 集合 */
   #fileEvidenceMap = new Map<string, Set<string>>();
 
   /** 负空间信号 */
-  #negativeSignals: NegativeSignal[] = [];
+  #negativeSignals: HostAgentNegativeSignal[] = [];
 
   /** dimId → 被拒绝的提交标题列表 */
   #rejections = new Map<string, string[]>();
 
   /** 已使用的唯一 trigger 集合 (跨维度) */
   #usedTriggers = new Set<string>();
+
+  #onChange: (() => void) | null;
+
+  constructor(options: HostAgentSubmissionTrackerOptions = {}) {
+    this.#onChange = options.onChange ?? null;
+  }
+
+  setOnChange(onChange?: (() => void) | null): void {
+    this.#onChange = onChange ?? null;
+  }
 
   // ─── 提交记录 ─────────────────────────────────────────
 
@@ -145,15 +167,19 @@ export class HostAgentSubmissionTracker {
 
     if (submissions.length >= MAX_SUBMISSIONS_PER_DIM) {
       // 超过追踪上限，记录警告信息而非静默丢弃
-      this.#addNegativeSignal(
-        `Dimension "${dimId}" exceeded ${MAX_SUBMISSIONS_PER_DIM} submissions tracking limit — quality scoring may be lower than actual`,
-        'tracker-overflow',
-        dimId
-      );
+      if (
+        this.#addNegativeSignal(
+          `Dimension "${dimId}" exceeded ${MAX_SUBMISSIONS_PER_DIM} submissions tracking limit — quality scoring may be lower than actual`,
+          'tracker-overflow',
+          dimId
+        )
+      ) {
+        this.#emitChange();
+      }
       return;
     }
 
-    const record = {
+    const record: HostAgentSubmissionRecord = {
       recipeId,
       title: submissionArgs.title || '',
       knowledgeType: submissionArgs.knowledgeType || '',
@@ -186,6 +212,7 @@ export class HostAgentSubmissionTracker {
       }
       dimensionIds.add(dimId);
     }
+    this.#emitChange();
   }
 
   /**
@@ -204,6 +231,7 @@ export class HostAgentSubmissionTracker {
 
     // 拒绝也是一种负空间信号
     this.#addNegativeSignal(`Rejected submission "${title}": ${reason}`, 'rejection', dimId);
+    this.#emitChange();
   }
 
   // ─── 负空间信号 ───────────────────────────────────────
@@ -230,18 +258,22 @@ export class HostAgentSubmissionTracker {
       /(?:与预期不同|contrary to|unlike|despite|although)[^。.\n]{10,80}/gi,
     ];
 
+    let changed = false;
     for (const pattern of negativePatterns) {
       let match: RegExpExecArray | null;
       while ((match = pattern.exec(analysisText)) !== null) {
-        this.#addNegativeSignal(match[0].trim(), 'analysisText', dimId);
+        changed = this.#addNegativeSignal(match[0].trim(), 'analysisText', dimId) || changed;
       }
+    }
+    if (changed) {
+      this.#emitChange();
     }
   }
 
   /** 添加负空间信号 (去重) */
-  #addNegativeSignal(pattern: string, source: string, dimId?: string) {
+  #addNegativeSignal(pattern: string, source: string, dimId?: string): boolean {
     if (this.#negativeSignals.length >= MAX_NEGATIVE_SIGNALS) {
-      return;
+      return false;
     }
 
     // 去重: 相同 pattern 不重复添加
@@ -251,7 +283,71 @@ export class HostAgentSubmissionTracker {
     );
     if (!exists) {
       this.#negativeSignals.push({ pattern, source, dimId });
+      return true;
     }
+    return false;
+  }
+
+  #emitChange(): void {
+    this.#onChange?.();
+  }
+
+  toJSON(): HostAgentSubmissionTrackerSerialized {
+    return {
+      dimensionSubmissions: Object.fromEntries(
+        [...this.#dimensionSubmissions].map(([dimId, submissions]) => [
+          dimId,
+          submissions.map((submission) => ({ ...submission })),
+        ])
+      ),
+      fileEvidenceMap: Object.fromEntries(
+        [...this.#fileEvidenceMap].map(([filePath, dimIds]) => [filePath, [...dimIds]])
+      ),
+      negativeSignals: this.#negativeSignals.map((signal) => ({ ...signal })),
+      rejections: Object.fromEntries(
+        [...this.#rejections].map(([dimId, rejections]) => [dimId, [...rejections]])
+      ),
+      usedTriggers: [...this.#usedTriggers],
+    };
+  }
+
+  static fromJSON(
+    json: HostAgentSubmissionTrackerSerialized | Record<string, unknown>,
+    options: HostAgentSubmissionTrackerOptions = {}
+  ): HostAgentSubmissionTracker {
+    const tracker = new HostAgentSubmissionTracker(options);
+
+    if (isRecord(json.dimensionSubmissions)) {
+      for (const [dimId, submissions] of Object.entries(json.dimensionSubmissions)) {
+        tracker.#dimensionSubmissions.set(dimId, normalizeSubmissionRecords(submissions));
+      }
+    }
+
+    if (isRecord(json.fileEvidenceMap)) {
+      for (const [filePath, dimIds] of Object.entries(json.fileEvidenceMap)) {
+        tracker.#fileEvidenceMap.set(filePath, new Set(stringArray(dimIds)));
+      }
+    }
+
+    if (Array.isArray(json.negativeSignals)) {
+      tracker.#negativeSignals = json.negativeSignals
+        .filter(isRecord)
+        .map((signal) => ({
+          pattern: typeof signal.pattern === 'string' ? signal.pattern : '',
+          source: typeof signal.source === 'string' ? signal.source : 'unknown',
+          ...(typeof signal.dimId === 'string' ? { dimId: signal.dimId } : {}),
+        }))
+        .filter((signal) => signal.pattern.length > 0);
+    }
+
+    if (isRecord(json.rejections)) {
+      for (const [dimId, rejections] of Object.entries(json.rejections)) {
+        tracker.#rejections.set(dimId, stringArray(rejections));
+      }
+    }
+
+    tracker.#usedTriggers = new Set(stringArray(json.usedTriggers));
+    return tracker;
   }
 
   // ─── 质量评估 ─────────────────────────────────────────
@@ -279,7 +375,7 @@ export class HostAgentSubmissionTracker {
     analysisText = '',
     referencedFiles: string[] = []
   ): DimensionQualityReport {
-    const submissions: SubmissionRecord[] = this.#dimensionSubmissions.get(dimId) || [];
+    const submissions: HostAgentSubmissionRecord[] = this.#dimensionSubmissions.get(dimId) || [];
     const rejections: string[] = this.#rejections.get(dimId) || [];
     const scores = {} as QualityScores;
     const suggestions: string[] = [];
@@ -380,10 +476,12 @@ export class HostAgentSubmissionTracker {
       completedDimSummaries.push({
         dimId,
         submissionCount: submissions.length,
-        titles: submissions.map((s: SubmissionRecord) => s.title),
-        knowledgeTypes: [...new Set(submissions.map((s: SubmissionRecord) => s.knowledgeType))],
+        titles: submissions.map((s: HostAgentSubmissionRecord) => s.title),
+        knowledgeTypes: [
+          ...new Set(submissions.map((s: HostAgentSubmissionRecord) => s.knowledgeType)),
+        ],
         referencedFiles: [
-          ...new Set(submissions.flatMap((s: SubmissionRecord) => s.sources)),
+          ...new Set(submissions.flatMap((s: HostAgentSubmissionRecord) => s.sources)),
         ].slice(0, 15),
       });
     }
@@ -407,7 +505,7 @@ export class HostAgentSubmissionTracker {
   // ─── 查询 API ─────────────────────────────────────────
 
   /** 获取指定维度的提交列表 */
-  getSubmissions(dimId: string): SubmissionRecord[] {
+  getSubmissions(dimId: string): HostAgentSubmissionRecord[] {
     return this.#dimensionSubmissions.get(dimId) || [];
   }
 
@@ -469,6 +567,34 @@ export class HostAgentSubmissionTracker {
   getAllSubmittedTriggers(): Set<string> {
     return new Set([...this.#usedTriggers].map((trigger) => trigger.toLowerCase().trim()));
   }
+}
+
+function normalizeSubmissionRecords(value: unknown): HostAgentSubmissionRecord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((record) => ({
+    recipeId: typeof record.recipeId === 'string' ? record.recipeId : '',
+    title: typeof record.title === 'string' ? record.title : '',
+    knowledgeType: typeof record.knowledgeType === 'string' ? record.knowledgeType : '',
+    kind: typeof record.kind === 'string' ? record.kind : '',
+    category: typeof record.category === 'string' ? record.category : '',
+    sources: stringArray(record.sources),
+    coreCodePreview: typeof record.coreCodePreview === 'string' ? record.coreCodePreview : '',
+    contentLength: typeof record.contentLength === 'number' ? record.contentLength : 0,
+    confidence: typeof record.confidence === 'number' ? record.confidence : 0,
+    submittedAt: typeof record.submittedAt === 'number' ? record.submittedAt : Date.now(),
+  }));
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export default HostAgentSubmissionTracker;
