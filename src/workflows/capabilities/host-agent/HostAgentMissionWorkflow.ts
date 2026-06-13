@@ -3,8 +3,8 @@ import type {
   DimensionDef,
   MissionBriefingResult,
   ProjectSnapshot,
-} from '../../../types/project-snapshot.js';
-import { toSessionCache } from '../../../types/snapshot-views.js';
+} from '../../../types/ProjectSnapshot.js';
+import { toSessionCache } from '../../../types/SnapshotViews.js';
 import { buildLanguageExtension } from '../presentation/LanguageExtensionBuilder.js';
 import { buildMissionBriefing } from './MissionBriefingBuilder.js';
 import type { BriefingProfile, RescanBriefingInput } from './MissionBriefingSupport.js';

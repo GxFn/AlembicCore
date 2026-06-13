@@ -29,7 +29,7 @@ import type {
   GuardViolation,
   IncrementalPlan,
   LocalPackageModule,
-} from '../../../types/project-snapshot.js';
+} from '../../../types/ProjectSnapshot.js';
 import { TierScheduler } from '../planning/dimensions/TierScheduler.js';
 import { buildEvidenceStarters } from './EvidenceStarterBuilder.js';
 import {

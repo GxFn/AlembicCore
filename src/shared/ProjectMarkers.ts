@@ -17,7 +17,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_FOLDER_NAMES } from './folder-names.js';
+import { DEFAULT_FOLDER_NAMES } from './folderNames.js';
 import { ProjectRegistry } from './ProjectRegistry.js';
 
 // ─── 目录名常量 ──────────────────────────────────────────────

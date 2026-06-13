@@ -1,14 +1,14 @@
 /**
- * diff-parser — Git diff 获取与解析
+ * diffParser — Git diff 获取与解析
  *
  * 通过 `git diff -U0` 获取文件的行级变更内容，
  * 解析 unified diff 格式，提取变更行中的代码标识符。
  *
- * @module shared/diff-parser
+ * @module shared/diffParser
  */
 
 import { execFileSync } from 'node:child_process';
-import { tokenizeIdentifiers } from './recipe-tokens.js';
+import { tokenizeIdentifiers } from './recipeTokens.js';
 
 /* ────────────── Types ────────────── */
 

@@ -14,7 +14,7 @@ export interface PaginatedResult {
  * KnowledgeRepository — 统一知识实体仓储接口
  *
  * 替代 CandidateRepository + RecipeRepository。
- * 实现类见 lib/repository/knowledge/KnowledgeRepository.impl.js
+ * 实现类见 lib/repository/knowledge/KnowledgeRepositoryImpl.js
  */
 export class KnowledgeRepository {
   async create(entry: KnowledgeEntry): Promise<KnowledgeEntry> {

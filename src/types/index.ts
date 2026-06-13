@@ -1,9 +1,9 @@
 export * from './evolution.js';
-export * from './knowledge-wire.js';
-export * from './project-snapshot.js';
-export * from './project-snapshot-builder.js';
-export * from './reactive-evolution.js';
-export * from './snapshot-views.js';
+export * from './KnowledgeWire.js';
+export * from './ProjectSnapshot.js';
+export * from './projectSnapshotBuilder.js';
+export * from './ReactiveEvolution.js';
+export * from './SnapshotViews.js';
 export type {
   BootstrapFile,
   DimensionCheckpointResult,

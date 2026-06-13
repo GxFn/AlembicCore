@@ -1,5 +1,5 @@
 /**
- * @module ast/parser-init
+ * @module ast/parserInit
  * @description web-tree-sitter 初始化器
  *
  * 统一管理 WASM 版 Parser 的生命周期：
@@ -13,7 +13,7 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { RESOURCES_DIR } from '../../shared/package-root.js';
+import { RESOURCES_DIR } from '../../shared/packageRoot.js';
 
 /** 预编译 .wasm 文件存放目录 */
 const GRAMMARS_DIR = path.resolve(RESOURCES_DIR, 'grammars');

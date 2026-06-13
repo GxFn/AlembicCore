@@ -11,15 +11,15 @@
  *
  * 不支持 git 的场景直接跳过，不做降级。
  *
- * Token 提取基础设施已移至 shared/recipe-tokens.ts，本模块聚焦 diff 影响评估。
+ * Token 提取基础设施已移至 shared/recipeTokens.ts，本模块聚焦 diff 影响评估。
  *
  * @module service/evolution/ContentImpactAnalyzer
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { getFileDiff, parseDiffHunks, tokenizeDiffLines } from '../../shared/diff-parser.js';
-import type { ImpactLevel } from '../../types/reactive-evolution.js';
+import { getFileDiff, parseDiffHunks, tokenizeDiffLines } from '../../shared/diffParser.js';
+import type { ImpactLevel } from '../../types/ReactiveEvolution.js';
 
 // Re-export from shared module for backward compatibility
 export {
@@ -27,10 +27,10 @@ export {
   extractRecipeTokens,
   type RecipeTokens,
   tokenizeIdentifiers,
-} from '../../shared/recipe-tokens.js';
+} from '../../shared/recipeTokens.js';
 
-import type { RecipeTokens } from '../../shared/recipe-tokens.js';
-import { tokenizeIdentifiers } from '../../shared/recipe-tokens.js';
+import type { RecipeTokens } from '../../shared/recipeTokens.js';
+import { tokenizeIdentifiers } from '../../shared/recipeTokens.js';
 
 /** Diff 影响评估结果 */
 export interface DiffImpactResult {

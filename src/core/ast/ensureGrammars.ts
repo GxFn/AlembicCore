@@ -1,5 +1,5 @@
 /**
- * @module ast/ensure-grammars
+ * @module ast/ensureGrammars
  * @description 检查 .wasm 语法文件可用性
  *
  * 迁移至 web-tree-sitter (WASM) 后，不再需要运行时 npm install。
@@ -7,14 +7,14 @@
  * 此模块保留旧接口以兼容调用方，但内部逻辑改为检查 .wasm 文件。
  *
  * 使用方式:
- *   import { ensureGrammars } from '../core/ast/ensure-grammars.js';
+ *   import { ensureGrammars } from '../core/ast/ensureGrammars.js';
  *   const result = await ensureGrammars(['typescript', 'javascript'], { logger });
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { LanguageService } from '../../shared/LanguageService.js';
-import { RESOURCES_DIR } from '../../shared/package-root.js';
+import { RESOURCES_DIR } from '../../shared/packageRoot.js';
 
 /** .wasm 文件存放目录 */
 const GRAMMARS_DIR = path.resolve(RESOURCES_DIR, 'grammars');

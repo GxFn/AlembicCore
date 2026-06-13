@@ -16,7 +16,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
 import {
   buildProjectScopeSourceRefIndex,

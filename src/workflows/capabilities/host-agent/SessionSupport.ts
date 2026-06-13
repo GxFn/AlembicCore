@@ -6,8 +6,8 @@
  */
 
 import path from 'node:path';
-import type { DimensionDef, ProjectSnapshot } from '../../../types/project-snapshot.js';
-import { toSessionCache } from '../../../types/snapshot-views.js';
+import type { DimensionDef, ProjectSnapshot } from '../../../types/ProjectSnapshot.js';
+import { toSessionCache } from '../../../types/SnapshotViews.js';
 import { BootstrapSessionManager } from './BootstrapSession.js';
 
 // ═══════════════════════════════════════════════════════════

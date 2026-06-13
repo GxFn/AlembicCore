@@ -12,7 +12,7 @@ export class ConfigLoader {
 
   /**
    * 沿目录树向上查找包含 Alembic package.json 的目录。
-   * ConfigLoader 是最早加载的模块之一，不能依赖 package-root.ts，因此内联实现。
+   * ConfigLoader 是最早加载的模块之一，不能依赖 packageRoot.ts，因此内联实现。
    */
   static _findPackageRoot(): string {
     let dir = import.meta.dirname;

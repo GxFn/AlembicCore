@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { buildProjectSnapshot } from '../src/project-intelligence.js';
-import type { DimensionDef, ProjectSnapshot } from '../src/types/project-snapshot.js';
+import type { DimensionDef, ProjectSnapshot } from '../src/types/ProjectSnapshot.js';
 import {
   buildColdStartSelectionSummary,
   createInternalColdStartIntent,

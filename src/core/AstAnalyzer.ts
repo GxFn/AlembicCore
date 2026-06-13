@@ -18,7 +18,7 @@ import {
   defaultExtractCallSites,
   getCallSiteExtractor,
 } from './analysis/CallSiteExtractor.js';
-import { getParserClass, isParserReady } from './ast/parser-init.js';
+import { getParserClass, isParserReady } from './ast/parserInit.js';
 
 // ── Type Definitions ────────────────────────────────────────────
 

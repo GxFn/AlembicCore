@@ -14,7 +14,7 @@
 
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import { unixNow } from '../../shared/utils/common.js';
 
 /* ────────────────────── Types ────────────────────── */

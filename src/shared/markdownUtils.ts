@@ -1,12 +1,12 @@
 /**
- * markdown-utils — Markdown 代码块提取工具
+ * markdownUtils — Markdown 代码块提取工具
  *
  * 从 Markdown 文本中提取 fenced code blocks，
  * 供 ContentImpactAnalyzer 等模块提取 Recipe 中嵌入的真实代码。
  *
  * 提取自 RecipeExtractor.#extractCodeBlocks 的公共版本。
  *
- * @module shared/markdown-utils
+ * @module shared/markdownUtils
  */
 
 export interface CodeBlock {

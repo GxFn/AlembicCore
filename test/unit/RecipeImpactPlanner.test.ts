@@ -84,7 +84,7 @@ function makeKnowledgeRepo(
     findById: vi.fn((id: string) => entries[id] ?? null),
     findAllIdAndReasoning: vi.fn(() => []),
   } as unknown as InstanceType<
-    typeof import('../../src/repository/knowledge/KnowledgeRepository.impl.js').default
+    typeof import('../../src/repository/knowledge/KnowledgeRepositoryImpl.js').default
   >;
 }
 

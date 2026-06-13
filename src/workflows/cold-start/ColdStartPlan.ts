@@ -1,4 +1,4 @@
-import type { DimensionDef, ProjectSnapshot } from '../../types/project-snapshot.js';
+import type { DimensionDef, ProjectSnapshot } from '../../types/ProjectSnapshot.js';
 import type {
   ProjectAnalysisMaterializationPlan,
   ProjectAnalysisPreparationOptions,

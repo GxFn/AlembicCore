@@ -1,4 +1,4 @@
-import type { DimensionDef, GuardAudit, ProjectSnapshot } from '../../types/project-snapshot.js';
+import type { DimensionDef, GuardAudit, ProjectSnapshot } from '../../types/ProjectSnapshot.js';
 import type {
   HostAgentRescanEvidencePlan,
   InternalRescanGapPlan,

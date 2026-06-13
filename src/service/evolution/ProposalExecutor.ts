@@ -26,7 +26,7 @@ import type {
   ProposalType,
 } from '../../repository/evolution/ProposalRepository.js';
 import type { KnowledgeEdgeRepositoryImpl } from '../../repository/knowledge/KnowledgeEdgeRepository.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { ContentPatcher } from './ContentPatcher.js';
 import type { LifecycleStateMachine } from './LifecycleStateMachine.js';
 

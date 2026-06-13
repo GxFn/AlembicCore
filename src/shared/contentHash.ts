@@ -1,5 +1,5 @@
 /**
- * content-hash — 统一 SHA256-hex16 内容哈希
+ * contentHash — 统一 SHA256-hex16 内容哈希
  *
  * 项目中多处使用完全相同的 SHA256 前 16 字符 hex 哈希算法，
  * 统一提取为公共函数，消除重复实现。
@@ -10,7 +10,7 @@
  *   - IndexingPipeline: 向量索引去重
  *   - KnowledgeFileWriter: Recipe 内容完整性
  *
- * @module shared/content-hash
+ * @module shared/contentHash
  */
 
 import { createHash } from 'node:crypto';

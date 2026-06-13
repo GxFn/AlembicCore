@@ -26,7 +26,7 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type { LifecycleEventRepository } from '../../repository/evolution/LifecycleEventRepository.js';
 import type { ProposalRepository } from '../../repository/evolution/ProposalRepository.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type {
   LifecycleHealthSummary,
   TimeoutCheckResult,

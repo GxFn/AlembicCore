@@ -20,13 +20,13 @@
  */
 
 import { registerLanguage } from '../AstAnalyzer.js';
-import { initParser, isParserReady, loadLanguageWasm } from './parser-init.js';
+import { initParser, isParserReady, loadLanguageWasm } from './parserInit.js';
 
 let _loaded = false;
 
 /**
  * 重置加载标志，允许 loadPlugins() 再次执行
- * 仅由 ensure-grammars.js 在安装新包后调用
+ * 仅由 ensureGrammars.js 在安装新包后调用
  */
 export function _resetForReload() {
   _loaded = false;

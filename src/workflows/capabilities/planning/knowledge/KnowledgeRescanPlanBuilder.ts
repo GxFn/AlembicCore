@@ -1,5 +1,5 @@
 import { recipeBelongsToDimension } from '../../../../domain/dimension/RecipeDimension.js';
-import type { DimensionDef } from '../../../../types/project-snapshot.js';
+import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import type { RelevanceAuditResult, RelevanceAuditSummary } from './KnowledgeRescanPlanner.js';
 

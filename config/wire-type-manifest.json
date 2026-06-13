@@ -7,20 +7,20 @@
   "authorities": {
     "knowledgeEntryWire": {
       "type": "KnowledgeEntryWire",
-      "module": "src/types/knowledge-wire.ts",
+      "module": "src/types/KnowledgeWire.ts",
       "specifier": "@alembic/core/types",
-      "declaration": "dist/types/knowledge-wire.d.ts",
+      "declaration": "dist/types/KnowledgeWire.d.ts",
       "note": "60+-field wire contract. Known Dashboard hand-copy drift (types.ts:697): missing usageGuide, agentNotes typed string[] instead of string — Train B's generated artifact replaces that copy."
     },
     "knowledgeLifecycle": {
       "type": "KnowledgeLifecycle",
-      "module": "src/types/knowledge-wire.ts",
+      "module": "src/types/KnowledgeWire.ts",
       "specifier": "@alembic/core/types",
       "members": ["pending", "staging", "active", "evolving", "decaying", "deprecated"]
     },
     "knowledgeKind": {
       "type": "KnowledgeKind",
-      "module": "src/types/knowledge-wire.ts",
+      "module": "src/types/KnowledgeWire.ts",
       "specifier": "@alembic/core/types",
       "members": ["rule", "pattern", "fact"]
     },

@@ -10,7 +10,7 @@
 import type { BootstrapRepositoryImpl } from '../../src/repository/bootstrap/BootstrapRepository.js';
 import type { CodeEntityRepositoryImpl } from '../../src/repository/code/CodeEntityRepository.js';
 import type { KnowledgeEdgeRepositoryImpl } from '../../src/repository/knowledge/KnowledgeEdgeRepository.js';
-import type { KnowledgeRepositoryImpl } from '../../src/repository/knowledge/KnowledgeRepository.impl.js';
+import type { KnowledgeRepositoryImpl } from '../../src/repository/knowledge/KnowledgeRepositoryImpl.js';
 
 /* ═══ Types ═══════════════════════════════════════════════ */
 

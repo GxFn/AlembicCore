@@ -53,7 +53,7 @@ import {
   type KnowledgeEdge,
   KnowledgeEdgeRepositoryImpl,
 } from './repository/knowledge/KnowledgeEdgeRepository.js';
-import { KnowledgeRepositoryImpl } from './repository/knowledge/KnowledgeRepository.impl.js';
+import { KnowledgeRepositoryImpl } from './repository/knowledge/KnowledgeRepositoryImpl.js';
 import {
   MemoryRepositoryImpl,
   type MemoryStats,

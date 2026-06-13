@@ -18,7 +18,7 @@ import {
   type GatewaySource,
   getGatewaySourceLabel,
   getGatewaySourceUserId,
-} from '../../shared/source-contracts.js';
+} from '../../shared/sourceContracts.js';
 import type { BootstrapDedup, CandidateSummary } from '../bootstrap/BootstrapDedup.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
@@ -29,12 +29,12 @@ interface GatewayLogger {
 
 /* ═══════════════════ Types ═══════════════════ */
 
-export type { GatewaySource } from '../../shared/source-contracts.js';
+export type { GatewaySource } from '../../shared/sourceContracts.js';
 export {
   getGatewaySourceLabel,
   getGatewaySourceUserId,
   normalizeGatewaySource,
-} from '../../shared/source-contracts.js';
+} from '../../shared/sourceContracts.js';
 
 export interface CreateRecipeItem {
   title?: string;

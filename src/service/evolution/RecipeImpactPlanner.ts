@@ -13,9 +13,9 @@
 
 import { isConsumable, isDegraded } from '../../domain/knowledge/Lifecycle.js';
 import type { ProposalSource } from '../../repository/evolution/ProposalRepository.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
-import { extractRecipeTokens } from '../../shared/recipe-tokens.js';
+import { extractRecipeTokens } from '../../shared/recipeTokens.js';
 import { assessImpactUnified } from './ContentImpactAnalyzer.js';
 import type { EvolutionAction, EvolutionDecision, EvolutionResult } from './EvolutionGateway.js';
 

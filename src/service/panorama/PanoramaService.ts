@@ -16,7 +16,7 @@
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type { KnowledgeEdgeRepositoryImpl } from '../../repository/knowledge/KnowledgeEdgeRepository.js';
-import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { ModuleDiscoverer } from './ModuleDiscoverer.js';
 import type { PanoramaAggregator } from './PanoramaAggregator.js';
 import type { PanoramaScanner } from './PanoramaScanner.js';

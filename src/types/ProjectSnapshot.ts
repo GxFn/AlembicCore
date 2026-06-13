@@ -11,7 +11,7 @@
  *   3. **类型化** — 每个字段有明确接口，不使用 `any`
  *   4. **单一定义** — 项目分析数据的唯一类型来源
  *
- * @module types/project-snapshot
+ * @module types/ProjectSnapshot
  */
 
 import type { SourceGraphLifecycleResult } from '../service/source-graph/SourceGraphLifecycle.js';
@@ -344,7 +344,7 @@ export interface MissionBriefingResult {
  * 用法：
  * - `buildProjectSnapshot()` 从 runAllPhases() 返回值构建
  * - 4 个 handler 从 snapshot 读取数据，不再解构/重组
- * - `snapshot-views.ts` 提供面向消费者的衍生视图
+ * - `SnapshotViews.ts` 提供面向消费者的衍生视图
  */
 export interface ProjectSnapshot {
   // ─── 元数据 ───

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
-import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepository.impl.js';
+import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
 import pathGuard from '../src/shared/PathGuard.js';
 
 describe('DatabaseConnection and repository migration integration', () => {

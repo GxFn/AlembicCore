@@ -11,7 +11,7 @@ import {
   getRequiredFieldNames,
   getRequiredFieldsDescription,
 } from '../../../domain/knowledge/FieldSpec.js';
-import type { DimensionDef } from '../../../types/project-snapshot.js';
+import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
 import { TierScheduler } from '../planning/dimensions/TierScheduler.js';
 import type { HostAgentRescanEvidencePlan } from '../planning/knowledge/KnowledgeRescanPlanner.js';
 

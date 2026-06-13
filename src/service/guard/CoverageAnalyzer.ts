@@ -6,7 +6,7 @@
  */
 
 import type { GuardViolationRepositoryImpl } from '../../repository/guard/GuardViolationRepository.js';
-import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 
 /* ────────────────────── Types ────────────────────── */

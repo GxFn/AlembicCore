@@ -1,4 +1,4 @@
-import type { AstSummary, DependencyGraph } from '../../../../types/project-snapshot.js';
+import type { AstSummary, DependencyGraph } from '../../../../types/ProjectSnapshot.js';
 
 export function extractCodeEntities(
   astProjectSummary: AstSummary | null | undefined

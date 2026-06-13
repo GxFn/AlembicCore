@@ -11,7 +11,7 @@
  *   content (0.30) — 全字段代码标识符 token Jaccard（语义相似度）
  *   guard   (0.15) — guardPattern 精确匹配 (0 | 1)
  *
- * content 维度复用 shared/recipe-tokens 的 extractRecipeTokens()，
+ * content 维度复用 shared/recipeTokens 的 extractRecipeTokens()，
  * 从 coreCode + content.markdown 代码块 + content.pattern + content.steps
  * 提取 API 标识符，做 Jaccard 集合比对。
  *
@@ -24,7 +24,7 @@
  * @module domain/evolution/RecipeSimilarity
  */
 
-import { extractRecipeTokens } from '../../shared/recipe-tokens.js';
+import { extractRecipeTokens } from '../../shared/recipeTokens.js';
 
 /* ────────────────────── Stop Words ────────────────────── */
 
@@ -250,7 +250,7 @@ export class RecipeSimilarity {
   /**
    * 维度 5: 全字段代码标识符 token Jaccard（语义相似度）
    *
-   * 使用 shared/recipe-tokens.extractRecipeTokens() 从两条 Recipe 的
+   * 使用 shared/recipeTokens.extractRecipeTokens() 从两条 Recipe 的
    * coreCode + content.markdown 代码块 + content.pattern + content.steps
    * 提取 API 标识符集合，计算 Jaccard 相似度。
    *

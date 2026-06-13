@@ -252,7 +252,7 @@ export class KnowledgeSyncService {
 
   /**
    * 从 parseKnowledgeMarkdown 的结果构建 DB row
-   * wire format → DB 列映射（与 KnowledgeRepository.impl 对齐）
+   * wire format → DB 列映射（与 KnowledgeRepositoryImpl 对齐）
    */
   _buildDbRow(parsed: Record<string, unknown>, relPath: string, rawContent: string) {
     const now = Math.floor(Date.now() / 1000);

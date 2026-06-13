@@ -6,7 +6,7 @@
  *   2. 默认值填充
  *   3. 不可变冻结（Object.freeze）
  *
- * @module types/project-snapshot-builder
+ * @module types/ProjectSnapshot-builder
  */
 
 import type { CanonicalSourceIdentity } from '../shared/ProjectScope.js';
@@ -28,7 +28,7 @@ import type {
   ProjectSnapshotInput,
   SnapshotFile,
   SnapshotTarget,
-} from './project-snapshot.js';
+} from './ProjectSnapshot.js';
 
 const SNAPSHOT_VERSION = '1.0.0';
 

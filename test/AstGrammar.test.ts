@@ -4,7 +4,7 @@ import {
   ensureGrammars,
   inferLanguagesFromStats,
   reloadPlugins,
-} from '../src/core/ast/ensure-grammars.js';
+} from '../src/core/ast/ensureGrammars.js';
 
 describe('AST grammar resources', () => {
   test('detects packaged grammar wasm files and reloads plugins', async () => {

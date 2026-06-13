@@ -1,4 +1,4 @@
-import { getTestModeConfig } from '../../../../shared/test-mode.js';
+import { getTestModeConfig } from '../../../../shared/testMode.js';
 
 export type BootstrapTerminalToolset =
   | 'baseline'

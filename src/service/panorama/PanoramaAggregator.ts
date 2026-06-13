@@ -10,7 +10,7 @@
 import type { BootstrapRepositoryImpl } from '../../repository/bootstrap/BootstrapRepository.js';
 import type { CodeEntityRepositoryImpl } from '../../repository/code/CodeEntityRepository.js';
 import type { KnowledgeEdgeRepositoryImpl } from '../../repository/knowledge/KnowledgeEdgeRepository.js';
-import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { CouplingAnalyzer } from './CouplingAnalyzer.js';
 import { DimensionAnalyzer } from './DimensionAnalyzer.js';
 import type { ConfigLayer, LayerInferrer } from './LayerInferrer.js';

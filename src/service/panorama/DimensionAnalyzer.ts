@@ -24,7 +24,7 @@ import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import { Logger } from '../../infrastructure/logging/Logger.js';
 import type { BootstrapRepositoryImpl } from '../../repository/bootstrap/BootstrapRepository.js';
 import type { CodeEntityRepositoryImpl } from '../../repository/code/CodeEntityRepository.js';
-import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import type { HealthDimension, HealthRadar, KnowledgeGap } from './PanoramaTypes.js';

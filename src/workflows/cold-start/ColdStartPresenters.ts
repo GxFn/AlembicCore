@@ -7,7 +7,7 @@ import type {
   MissionBriefingResult,
   PhaseReport,
   ProjectSnapshot,
-} from '../../types/project-snapshot.js';
+} from '../../types/ProjectSnapshot.js';
 import { buildInternalNextSteps } from '../capabilities/host-agent/MissionBriefingSupport.js';
 import { buildLanguageExtension as buildProjectLanguageExtension } from '../capabilities/presentation/LanguageExtensionBuilder.js';
 import { summarizePanorama as summarizeProjectPanorama } from '../capabilities/presentation/PanoramaSummaryPresenter.js';

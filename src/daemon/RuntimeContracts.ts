@@ -9,7 +9,7 @@ import {
   type CanonicalFileChangeEventSource,
   HOST_EDIT_SOURCE,
   LEGACY_IDE_EDIT_SOURCE,
-} from '../shared/source-contracts.js';
+} from '../shared/sourceContracts.js';
 import {
   ALEMBIC_JOB_PROCESS_EVENTS_PATH,
   createJobProcessEventEndpointCapability,

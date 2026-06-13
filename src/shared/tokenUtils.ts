@@ -1,5 +1,5 @@
 /**
- * token-utils — 统一 Token 估算工具
+ * tokenUtils — 统一 Token 估算工具
  *
  * 项目内所有 token 估算统一使用此模块，避免各处使用不同的字符/token 比率。
  *
@@ -9,7 +9,7 @@
  *   - Gemini (SentencePiece): 类似比率
  *   - 本实现取保守值, 宁多不少
  *
- * @module shared/token-utils
+ * @module shared/tokenUtils
  */
 
 /**

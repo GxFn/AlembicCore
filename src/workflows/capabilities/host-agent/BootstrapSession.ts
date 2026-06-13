@@ -16,8 +16,8 @@
  */
 
 import crypto from 'node:crypto';
-import type { DimensionDef } from '../../../types/project-snapshot.js';
-import type { SessionCacheShape } from '../../../types/snapshot-views.js';
+import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
+import type { SessionCacheShape } from '../../../types/SnapshotViews.js';
 import type { DimensionQualityReport } from './HostAgentSubmissionTracker.js';
 import { HostAgentSubmissionTracker } from './HostAgentSubmissionTracker.js';
 import { SessionStore } from './MiningSessionStore.js';

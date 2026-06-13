@@ -11,7 +11,7 @@ export type {
   MissionBriefingResult,
   ProjectSnapshot,
   ProjectSnapshotInput,
-} from './types/project-snapshot.js';
+} from './types/ProjectSnapshot.js';
 export * from './workflows/capabilities/host-agent/index.js';
 export type {
   ProjectSkillAssetKind,

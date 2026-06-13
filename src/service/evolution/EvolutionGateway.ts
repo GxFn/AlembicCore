@@ -19,7 +19,7 @@ import type {
   ProposalRepository,
   ProposalSource,
 } from '../../repository/evolution/ProposalRepository.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { LifecycleStateMachine } from './LifecycleStateMachine.js';
 
 /* ────────────────────── Types ────────────────────── */

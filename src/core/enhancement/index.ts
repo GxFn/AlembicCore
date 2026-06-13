@@ -41,20 +41,20 @@ export async function initEnhancementRegistry() {
   _instance = new EnhancementRegistry();
 
   const packImports = [
-    import('./react-enhancement.js'),
-    import('./nextjs-enhancement.js'),
-    import('./vue-enhancement.js'),
-    import('./node-server-enhancement.js'),
-    import('./django-enhancement.js'),
-    import('./fastapi-enhancement.js'),
-    import('./ml-enhancement.js'),
-    import('./langchain-enhancement.js'),
-    import('./spring-enhancement.js'),
-    import('./android-enhancement.js'),
-    import('./go-web-enhancement.js'),
-    import('./go-grpc-enhancement.js'),
-    import('./rust-web-enhancement.js'),
-    import('./rust-tokio-enhancement.js'),
+    import('./ReactEnhancement.js'),
+    import('./NextjsEnhancement.js'),
+    import('./VueEnhancement.js'),
+    import('./NodeServerEnhancement.js'),
+    import('./DjangoEnhancement.js'),
+    import('./FastAPIEnhancement.js'),
+    import('./MLEnhancement.js'),
+    import('./LangChainEnhancement.js'),
+    import('./SpringEnhancement.js'),
+    import('./AndroidEnhancement.js'),
+    import('./GoWebEnhancement.js'),
+    import('./GoGrpcEnhancement.js'),
+    import('./RustWebEnhancement.js'),
+    import('./RustTokioEnhancement.js'),
   ];
 
   const results = await Promise.allSettled(packImports);

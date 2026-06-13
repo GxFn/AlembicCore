@@ -1,18 +1,18 @@
 /**
- * recipe-tokens — Recipe 代码标识符提取（共享基础设施）
+ * recipeTokens — Recipe 代码标识符提取（共享基础设施）
  *
  * 从 Recipe 全字段（coreCode、content.markdown 代码块、content.pattern、content.steps）
  * 提取有意义的 API 标识符，供以下模块复用：
  *
  *   - ContentImpactAnalyzer: diff token 与 recipe token 交集 → 影响级别
  *   - RecipeSimilarity: 两条 recipe token 集合 Jaccard → 内容相似度
- *   - diff-parser: tokenizeIdentifiers 用于 diff 行标识符提取
+ *   - diffParser: tokenizeIdentifiers 用于 diff 行标识符提取
  *
- * @module shared/recipe-tokens
+ * @module shared/recipeTokens
  */
 
 import { LanguageService } from './LanguageService.js';
-import { extractCodeBlocksFromMarkdown } from './markdown-utils.js';
+import { extractCodeBlocksFromMarkdown } from './markdownUtils.js';
 
 const LANGUAGE_KEYWORDS = LanguageService.languageKeywords;
 

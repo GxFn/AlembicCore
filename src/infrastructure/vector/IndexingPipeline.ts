@@ -11,7 +11,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
-import { computeContentHash } from '../../shared/content-hash.js';
+import { computeContentHash } from '../../shared/contentHash.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import { KNOWLEDGE_BASE_DIR } from '../config/Defaults.js';
 import { BatchEmbedder } from './BatchEmbedder.js';

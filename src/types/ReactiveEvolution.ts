@@ -1,17 +1,17 @@
 /**
- * reactive-evolution.ts — ReactiveEvolution 类型定义
+ * ReactiveEvolution.ts — ReactiveEvolution 类型定义
  *
  * 文件变更事件驱动的 Recipe 实时进化。
  */
 
-import type { FileChangeEventSource } from '../shared/source-contracts.js';
+import type { FileChangeEventSource } from '../shared/sourceContracts.js';
 
-export type { FileChangeEventSource } from '../shared/source-contracts.js';
+export type { FileChangeEventSource } from '../shared/sourceContracts.js';
 export {
   getFileChangeEventSourceLabel,
   isLegacyFileChangeEventSource,
   normalizeFileChangeEventSource,
-} from '../shared/source-contracts.js';
+} from '../shared/sourceContracts.js';
 
 /* ═══════════════════ File Change Events ═══════════════════ */
 

@@ -23,13 +23,13 @@ import {
   normalizeProposalSource,
   type ProposalSource,
   proposalSourceStorageValues,
-} from '../../shared/source-contracts.js';
+} from '../../shared/sourceContracts.js';
 
 export {
   getProposalSourceLabel,
   normalizeProposalSource,
   proposalSourceStorageValues,
-} from '../../shared/source-contracts.js';
+} from '../../shared/sourceContracts.js';
 
 /* ────────────────────── Types ────────────────────── */
 
@@ -61,7 +61,7 @@ export type LegacyProposalType =
   | 'correction';
 
 /** Proposal 来源；`ide-agent` 仅作为旧数据/旧调用方兼容值保留。 */
-export type { ProposalSource } from '../../shared/source-contracts.js';
+export type { ProposalSource } from '../../shared/sourceContracts.js';
 
 /** Proposal 状态 */
 export type ProposalStatus = 'pending' | 'observing' | 'executed' | 'rejected' | 'expired';

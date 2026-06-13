@@ -15,7 +15,7 @@ import { CONSUMABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { ReportStore } from '../../infrastructure/report/ReportStore.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 
 /* ────────────────────── Types ────────────────────── */
 

@@ -22,7 +22,7 @@ import {
 } from '../../domain/evolution/RecipeSimilarity.js';
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 
 /* ────────────────────── Types ────────────────────── */
 

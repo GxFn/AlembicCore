@@ -17,13 +17,13 @@ import {
   ensureGrammars,
   inferLanguagesFromStats,
   reloadPlugins,
-} from './core/ast/ensure-grammars.js';
+} from './core/ast/ensureGrammars.js';
 import { loadPlugins } from './core/ast/index.js';
 import ProjectGraph from './core/ast/ProjectGraph.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from './core/discovery/index.js';
 import type { LanguageService as LanguageServiceType } from './shared/LanguageService.js';
 import LanguageService from './shared/LanguageService.js';
-import { RESOURCES_DIR } from './shared/package-root.js';
+import { RESOURCES_DIR } from './shared/packageRoot.js';
 
 export * from './core/analysis/index.js';
 export {
@@ -163,8 +163,8 @@ export type {
   ProjectSnapshotInput,
   SnapshotFile,
   SnapshotTarget,
-} from './types/project-snapshot.js';
-export { buildProjectSnapshot } from './types/project-snapshot-builder.js';
+} from './types/ProjectSnapshot.js';
+export { buildProjectSnapshot } from './types/projectSnapshotBuilder.js';
 export * from './workflows/capabilities/project-intelligence/index.js';
 
 export const CORE_GRAMMAR_RESOURCE_FILES = Object.freeze([

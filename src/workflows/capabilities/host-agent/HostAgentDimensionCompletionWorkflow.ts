@@ -1,8 +1,8 @@
 import { dimensionTags } from '../../../domain/dimension/RecipeDimension.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
-import { getDeveloperIdentity } from '../../../shared/developer-identity.js';
+import { getDeveloperIdentity } from '../../../shared/developerIdentity.js';
 import { resolveDataRoot } from '../../../shared/resolveProjectRoot.js';
-import type { DimensionDef } from '../../../types/project-snapshot.js';
+import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
 import { saveDimensionCheckpoint } from '../persistence/DimensionCheckpoint.js';
 import { getActiveHostAgentWorkflowSession } from './HostAgentMissionWorkflow.js';
 

@@ -1,6 +1,6 @@
 import { resolveRecipeDimensionId } from '../../../../domain/dimension/RecipeDimension.js';
 import { CORE_CONTENT_SLICE_BUDGETS as SLICE_BUDGETS } from '../../../../shared/OutputBudget.js';
-import type { DimensionDef } from '../../../../types/project-snapshot.js';
+import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import type {
   AuditVerdict,

@@ -3,14 +3,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { computeContentHash } from '../src/shared/content-hash.js';
-import { getFileDiff, parseDiffHunks } from '../src/shared/diff-parser.js';
-import { extractCodeBlocksFromMarkdown } from '../src/shared/markdown-utils.js';
-import { tokenizeIdentifiers } from '../src/shared/recipe-tokens.js';
+import { computeContentHash } from '../src/shared/contentHash.js';
+import { getFileDiff, parseDiffHunks } from '../src/shared/diffParser.js';
+import { extractCodeBlocksFromMarkdown } from '../src/shared/markdownUtils.js';
+import { tokenizeIdentifiers } from '../src/shared/recipeTokens.js';
 import { ContentSchema } from '../src/shared/schemas/common.js';
 import { textSimilarity } from '../src/shared/similarity.js';
-import { applyTestDimensionFilter, getTestModeConfig } from '../src/shared/test-mode.js';
-import { estimateTokens, estimateTokensFast } from '../src/shared/token-utils.js';
+import { applyTestDimensionFilter, getTestModeConfig } from '../src/shared/testMode.js';
+import { estimateTokens, estimateTokensFast } from '../src/shared/tokenUtils.js';
 
 describe('shared基础工具', () => {
   it('估算 token 时区分 CJK 和 ASCII 快速路径', () => {

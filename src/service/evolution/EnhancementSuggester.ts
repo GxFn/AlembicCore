@@ -13,7 +13,7 @@ import { Lifecycle, PUBLISHED_LIFECYCLES } from '../../domain/knowledge/Lifecycl
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { ReportStore } from '../../infrastructure/report/ReportStore.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 
 export type EnhancementType =
   | 'missing_code_example'

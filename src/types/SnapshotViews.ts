@@ -4,7 +4,7 @@
  * 核心理念：消费者不应直接操作 ProjectSnapshot 的每一个字段。
  * View Factory 提供针对特定消费场景的轻量级投影。
  *
- * @module types/snapshot-views
+ * @module types/SnapshotViews
  */
 
 import type { EvolutionPrescreen } from '../workflows/capabilities/planning/knowledge/EvolutionPrescreen.js';
@@ -21,7 +21,7 @@ import type {
   ProjectSnapshot,
   SnapshotFile,
   SnapshotTarget,
-} from './project-snapshot.js';
+} from './ProjectSnapshot.js';
 
 // ─── H4: SessionCacheShape ───────────────────────────────────
 

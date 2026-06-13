@@ -12,7 +12,7 @@
  * @module infrastructure/vector/ASTChunker
  */
 
-import { estimateTokens } from '../../shared/token-utils.js';
+import { estimateTokens } from '../../shared/tokenUtils.js';
 
 /** Minimal AST node shape from tree-sitter */
 interface ASTNode {

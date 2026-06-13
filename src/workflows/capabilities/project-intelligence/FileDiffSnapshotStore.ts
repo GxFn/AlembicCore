@@ -20,7 +20,7 @@ import {
   bootstrapDimFiles,
   bootstrapSnapshots,
 } from '../../../infrastructure/database/drizzle/schema.js';
-import { computeContentHash } from '../../../shared/content-hash.js';
+import { computeContentHash } from '../../../shared/contentHash.js';
 import type { LoggerLike } from '../../../types/workflows.js';
 
 // ──────────────────────────────────────────────────────────────────

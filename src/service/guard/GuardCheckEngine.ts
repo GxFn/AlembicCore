@@ -9,7 +9,7 @@ import * as AstAnalyzerModule from '../../core/AstAnalyzer.js';
 import { GUARD_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
-import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type { KnowledgeRepositoryImpl } from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { GuardKnowledgeRepo } from '../../repository/search/SearchRepoAdapter.js';
 import { RawDbGuardAdapter, unwrapRawDb } from '../../repository/search/SearchRepoAdapter.js';
 import { LanguageService } from '../../shared/LanguageService.js';

@@ -3,7 +3,7 @@ import { EvolutionPolicy } from '../../../../domain/evolution/EvolutionPolicy.js
 import type { RecipeSourceRefRepositoryImpl } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
 import type { EvolutionCandidatePlan } from '../../../../service/evolution/RecipeImpactPlanner.js';
 import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
-import type { DimensionDef } from '../../../../types/project-snapshot.js';
+import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
 import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
 import { buildEvolutionPrescreen, type EvolutionPrescreen } from './EvolutionPrescreen.js';
 import {

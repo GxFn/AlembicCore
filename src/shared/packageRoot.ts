@@ -1,5 +1,5 @@
 /**
- * package-root.ts — 统一的包根目录定位工具
+ * packageRoot.ts — 统一的包根目录定位工具
  *
  * 通过沿目录树向上查找 package.json 来确定包根目录。
  * 在源码布局（lib/shared/）和编译布局（dist/lib/shared/）下都能正确工作，
@@ -7,12 +7,12 @@
  *
  * @example
  * ```ts
- * import { PACKAGE_ROOT, INJECTABLE_SKILLS_DIR, RESOURCES_DIR } from '../../shared/package-root.js';
+ * import { PACKAGE_ROOT, INJECTABLE_SKILLS_DIR, RESOURCES_DIR } from '../../shared/packageRoot.js';
  * ```
  */
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_FOLDER_NAMES } from './folder-names.js';
+import { DEFAULT_FOLDER_NAMES } from './folderNames.js';
 
 const __dirname = import.meta.dirname;
 

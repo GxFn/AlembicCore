@@ -35,7 +35,7 @@ import {
   type ProjectDescriptor,
   type ProjectFolderDescriptor,
 } from '../../shared/ProjectScope.js';
-import type { GuardAudit } from '../../types/project-snapshot.js';
+import type { GuardAudit } from '../../types/ProjectSnapshot.js';
 
 /** Logger with required info/warn (compatible with Logger singleton) */
 export interface PhaseLogger {
@@ -544,7 +544,7 @@ export async function runPhase1_5_AstAnalysis(
   // Phase 1.5a: 按需安装缺失的 tree-sitter 语法包
   try {
     const { ensureGrammars, inferLanguagesFromStats, reloadPlugins } = await import(
-      '../../core/ast/ensure-grammars.js'
+      '../../core/ast/ensureGrammars.js'
     );
     const neededLangs = inferLanguagesFromStats(langStats);
     if (neededLangs.length > 0) {

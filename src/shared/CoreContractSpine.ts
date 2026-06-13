@@ -371,7 +371,7 @@ export const CORE_CONTRACT_SPINE_ROWS = [
     observabilityKeys: ['source', 'eventId', 'operation', 'reasonCode', 'failureCode', 'logRef'],
     removalBlocker: 'Diagnostics are required for runtime verification and troubleshooting.',
     requiredExportPaths: ['./daemon', './shared'],
-    sourceFiles: ['src/shared/source-contracts.ts', 'src/daemon/RuntimeContracts.ts'],
+    sourceFiles: ['src/shared/sourceContracts.ts', 'src/daemon/RuntimeContracts.ts'],
     title: 'File changes, signals, audit, monitoring, logs',
     validationCommands: ['npm run build:check', 'npm run test'],
   },
@@ -607,7 +607,7 @@ export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
     replacementContract:
       'Explicit file monitor capability discovery with canonical acceptedEventSources and source-contract normalizers.',
     requiredExportPaths: ['./daemon', './shared'],
-    sourceFiles: ['src/daemon/RuntimeContracts.ts', 'src/shared/source-contracts.ts'],
+    sourceFiles: ['src/daemon/RuntimeContracts.ts', 'src/shared/sourceContracts.ts'],
     status: 'preserved-with-owner',
     validationCommands: [
       'npm run test -- RuntimeContracts SourceContracts',

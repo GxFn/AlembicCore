@@ -1,5 +1,5 @@
 import { isAbsolute, relative } from 'node:path';
-import { computeContentHash } from '../../../shared/content-hash.js';
+import { computeContentHash } from '../../../shared/contentHash.js';
 import type { CanonicalSourceIdentity } from '../../../shared/ProjectScope.js';
 import type {
   AstClassInfo,
@@ -15,8 +15,8 @@ import type {
   PanoramaResult,
   ProjectSnapshot,
   SnapshotFile,
-} from '../../../types/project-snapshot.js';
-import { buildProjectSnapshot } from '../../../types/project-snapshot-builder.js';
+} from '../../../types/ProjectSnapshot.js';
+import { buildProjectSnapshot } from '../../../types/projectSnapshotBuilder.js';
 import type { ProjectAnalysisResult } from './ProjectIntelligenceCapability.js';
 
 export type IDEAgentAnalysisPacketProfile = 'cold-start' | 'rescan';

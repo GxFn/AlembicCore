@@ -96,7 +96,7 @@
     },
     {
       "id": "ast-grammar-family",
-      "module": "src/core/ast/* (parser-init.ts, index.ts, lang-*.ts _grammar x10)",
+      "module": "src/core/ast/* (parserInit.ts, index.ts, lang-*.ts _grammar x10)",
       "export": "lazy native grammar handles",
       "kind": "lazy-native-handle-family",
       "owner": "AlembicCore window",
@@ -116,7 +116,7 @@
     },
     {
       "id": "memo-caches",
-      "module": "src/shared/isOwnDevRepo.ts (_cache/_excludeCache), src/shared/developer-identity.ts (_cached), src/service/guard/GuardPatternUtils.ts (_regexCache)",
+      "module": "src/shared/isOwnDevRepo.ts (_cache/_excludeCache), src/shared/developerIdentity.ts (_cached), src/service/guard/GuardPatternUtils.ts (_regexCache)",
       "export": "memoization caches",
       "kind": "bounded-memo-family",
       "owner": "AlembicCore window",
@@ -152,7 +152,7 @@
       "reason": "Set-once native-grammar load flag (AD4 S10; restart = process restart)."
     },
     {
-      "file": "src/core/ast/parser-init.ts",
+      "file": "src/core/ast/parserInit.ts",
       "binding": "_initialized",
       "blessedId": "ast-grammar-family",
       "reason": "Set-once tree-sitter namespace init flag (AD4 S10)."

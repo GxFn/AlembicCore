@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import type { DimensionDef } from '../../src/types/project-snapshot.js';
+import type { DimensionDef } from '../../src/types/ProjectSnapshot.js';
 import { BootstrapSession } from '../../src/workflows/capabilities/host-agent/BootstrapSession.js';
 import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/capabilities/host-agent/HostAgentDimensionCompletionWorkflow.js';
 import { buildMissionBriefing } from '../../src/workflows/capabilities/host-agent/MissionBriefingBuilder.js';

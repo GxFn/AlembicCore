@@ -4,7 +4,7 @@ export {
   type PartialAlembicFolderNames,
   resolveFolderNames,
   validateFolderNameSegment,
-} from './shared/folder-names.js';
+} from './shared/folderNames.js';
 export {
   DEFAULT_KNOWLEDGE_BASE_DIR,
   DEFAULT_SUB_REPO_DIR,

@@ -30,8 +30,8 @@ describe('Wire-type manifest (config/wire-type-manifest.json)', () => {
 
   test('knowledge lifecycle members match the compiled Lifecycle authority', () => {
     expect(manifest.authorities.knowledgeLifecycle.members).toEqual(Object.values(Lifecycle));
-    // The wire union in types/knowledge-wire.ts carries the same members.
-    const wireSource = sourceOf('src/types/knowledge-wire.ts');
+    // The wire union in types/KnowledgeWire.ts carries the same members.
+    const wireSource = sourceOf('src/types/KnowledgeWire.ts');
     for (const member of manifest.authorities.knowledgeLifecycle.members) {
       expect(wireSource).toContain(`'${member}'`);
     }

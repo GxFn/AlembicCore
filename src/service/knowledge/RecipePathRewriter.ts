@@ -16,7 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepository.impl.js';
+import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 
 export interface PathRename {
   oldPath: string;

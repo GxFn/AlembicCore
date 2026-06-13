@@ -6,7 +6,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename } from 'node:path';
-import { computeContentHash } from '../../shared/content-hash.js';
+import { computeContentHash } from '../../shared/contentHash.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 
 interface ExtractorOptions {
