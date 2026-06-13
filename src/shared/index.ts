@@ -5,11 +5,12 @@ export * from './content-hash.js';
 export * from './developer-identity.js';
 export * from './diff-parser.js';
 // The ./shared facade error surface is frozen at the original seven classes
-// (CO1 shrink-only narrowness budget). CO3's internal taxonomy additions
+// (CO1 shrink-only narrowness budget). CO3's taxonomy additions
 // (PersistenceError, DivergenceError) are deliberately NOT re-exported here:
 // consumers observe them as BaseError instances with stable codes
-// (PERSISTENCE_ERROR / STATE_DIVERGENCE); promoting them onto the facade is
-// a separate export-surface decision.
+// (PERSISTENCE_ERROR / STATE_DIVERGENCE). SD-5 phase-2 (B2=re-point) routes
+// their named import path through the ROOT facade (@alembic/core), not this
+// frozen ./shared facade — see src/index.ts.
 export {
   BaseError,
   ConflictError,

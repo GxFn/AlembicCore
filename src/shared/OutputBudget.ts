@@ -20,6 +20,10 @@
  * Adoption: Core presenters own the content-slice budgets below; the
  * response-level budgets are adopted by the Alembic resident handlers now
  * and the Plugin MCP handlers post-CKG (they serialize the final result).
+ * Import route (SD-5 phase-2, B2=re-point): consumers adopt this mechanism
+ * through the ROOT facade `@alembic/core` (applyOutputBudget,
+ * CORE_TOOL_OUTPUT_BUDGETS), not a deep `@alembic/core/shared/*` path — the
+ * ./shared/* wildcard export is removed in SD-5 phase-2.
  *
  * @module shared/OutputBudget
  */

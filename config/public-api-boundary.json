@@ -538,6 +538,26 @@
           ],
           "reason": "Error classes are exported through the shared facade."
         },
+        "@alembic/core/shared/errors/taxonomy": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": ".",
+          "symbols": [
+            "DivergenceError",
+            "PersistenceError"
+          ],
+          "reason": "SD-5 phase-2 (B2=re-point): the CO3 taxonomy error classes are re-pointed onto the ROOT facade @alembic/core; the frozen ./shared facade stays at its seven-class CO1 budget."
+        },
+        "@alembic/core/shared/OutputBudget": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": ".",
+          "symbols": [
+            "CORE_CONTENT_SLICE_BUDGETS",
+            "CORE_TOOL_OUTPUT_BUDGETS",
+            "applyOutputBudget",
+            "assertDestructiveResetHasArchive"
+          ],
+          "reason": "SD-5 phase-2 (B2=re-point): the MT2 output-budget mechanism is adopted through the ROOT facade @alembic/core, not the deep ./shared/* path removed in phase-2."
+        },
         "@alembic/core/shared/folder-names": {
           "decision": "consumer-ready-stable",
           "targetFacade": "./workspace",
