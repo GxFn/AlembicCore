@@ -17,9 +17,12 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
 import pathGuard from '../src/shared/PathGuard.js';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function listTree(root: string): string[] {
   const out: string[] = [];
@@ -43,17 +46,20 @@ describe('Entrypoint effects (AD6 inflow/outflow audit)', () => {
       // Import the heaviest facade families in a clean child process whose
       // cwd is an empty temp dir; any import-time write would land there
       // (or throw on a guard) — both fail the snapshot.
+      const distRoot = path.join(repoRoot, 'dist');
       const script = [
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/index.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/knowledge.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/search.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/guard.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/vector.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/project-intelligence.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/daemon/index.js');",
-        "await import('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore/dist/shared/index.js');",
-        "console.log('imports-ok');",
-      ].join('\n');
+        path.join(distRoot, 'index.js'),
+        path.join(distRoot, 'knowledge.js'),
+        path.join(distRoot, 'search.js'),
+        path.join(distRoot, 'guard.js'),
+        path.join(distRoot, 'vector.js'),
+        path.join(distRoot, 'project-intelligence.js'),
+        path.join(distRoot, 'daemon/index.js'),
+        path.join(distRoot, 'shared/index.js'),
+      ]
+        .map((modulePath) => `await import(${JSON.stringify(pathToFileURL(modulePath).href)});`)
+        .concat(["console.log('imports-ok');"])
+        .join('\n');
       const stdout = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
         cwd: tmpCwd,
         encoding: 'utf8',
@@ -95,12 +101,7 @@ describe('Entrypoint effects (AD6 inflow/outflow audit)', () => {
   });
 
   test('the package ships no bin entries (CLI family is local gate tooling only)', () => {
-    const pkg = JSON.parse(
-      fs.readFileSync(
-        path.join('/Users/gaoxuefeng/Documents/AlembicWorkspace/AlembicCore', 'package.json'),
-        'utf8'
-      )
-    );
+    const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     expect(pkg.bin).toBeUndefined();
     // The shipped scripts are the read-only gate tools named in files[].
     const shippedScripts = (pkg.files as string[]).filter((entry) => entry.startsWith('scripts/'));
