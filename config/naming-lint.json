@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "SN4a naming lint config (AlembicCore, ported from the SN3/SN2/SN1 shape). Codifies the SN0 §1 dominants for the REDUCED scope only: scripts/configs kebab-case, docs kebab-case (packet rule, all conform as-found), tests ClassName.test.ts (PascalCase stem) under test/ — test support files (setup.ts, tsconfig.json, helpers/, support/) have no SN0 convention row and stay unscoped (SN2/SN3 precedent; SN6 observation). Exceptions require {file, owner, reason}; entries missing a field do not exempt.",
+  "description": "SN4 naming lint config (AlembicCore). SN4a codified scripts/configs/docs kebab + tests ClassName.test.ts. SN4 (0.3.0 RW3) UN-PARKS the src scope now that SD-5 phase-2 removed the src-covering wildcard exports: src modules are camelCase or PascalCase (no kebab/snake) by SN0 §1 export-shape; the drizzle migrations NNN_snake family is the FIRST src rule (first-match-wins) and stays EXEMPT. Exceptions require {file, owner, reason}; entries missing a field do not exempt.",
   "rules": [
     {
       "scope": "scripts",
@@ -25,6 +25,18 @@
       "filePattern": "\\.test\\.ts$",
       "namePattern": "^[A-Z][A-Za-z0-9]*\\.test\\.ts$",
       "label": "tests are ClassName.test.ts (PascalCase stem) under test/"
+    },
+    {
+      "scope": "src/infrastructure/database/migrations",
+      "filePattern": "\\.ts$",
+      "namePattern": "^\\d{3}_[a-z0-9_]+\\.ts$",
+      "label": "drizzle migrations are NNN_snake_case.ts — DELIBERATE exempt artifact family (SN0 §1), never rename"
+    },
+    {
+      "scope": "src",
+      "filePattern": "\\.ts$",
+      "namePattern": "^[a-zA-Z][A-Za-z0-9]*(\\.d)?\\.ts$",
+      "label": "src modules are camelCase or PascalCase (no kebab/snake)"
     }
   ],
   "barrelNames": ["index.ts"],
@@ -34,27 +46,72 @@
       "file": "test/resolveProjectRoot.test.ts",
       "owner": "AlembicCore window",
       "reason": "Named after its unit module src/shared/resolveProjectRoot.ts, a camelCase utility that stays camelCase permanently (SN0 §1 utilities row); Pascal-casing the test would break the named-after-unit principle (SN4a census judgment)."
+    },
+    {
+      "file": "src/project-intelligence.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./project-intelligence (export target). Barrel re-export, not a class-position straggler; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels (SN4 census)."
+    },
+    {
+      "file": "src/source-graph.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./source-graph (export target; empty primary export = pure re-export). Exempt like index.ts barrels (SN4 census)."
+    },
+    {
+      "file": "src/host-agent-workflows.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./host-agent-workflows (export target). Exempt like index.ts barrels (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-dart.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family: the kebab lang-<id> name mirrors the grammar registry langId in core/ast/index.ts, which loads each via await import(entry.module) where entry.module is the registry string './lang-<id>.js'. Renaming would desync the langId↔file correspondence; exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-go.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-java.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-javascript.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-kotlin.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-objc.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-python.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-rust.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-swift.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/core/ast/lang-typescript.ts",
+      "owner": "AlembicCore window",
+      "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts; also serves langId tsx); exempt like the migrations family (SN4 census)."
     }
   ],
-  "parkedScopes": [
-    {
-      "scope": "src",
-      "status": "parked",
-      "reason": "src/ scope EXCLUDED this wave by user decision C3: all 9 package-exports wildcard subtrees cover src/ and are FROZEN until SD-5 phase-2 executes (SN0 §3). When SN4 proper un-parks, move these rules into the active 'rules' array unchanged — the migrations exempt family must stay FIRST (first matching rule wins).",
-      "rules": [
-        {
-          "scope": "src/infrastructure/database/migrations",
-          "filePattern": "\\.ts$",
-          "namePattern": "^\\d{3}_[a-z0-9_]+\\.ts$",
-          "label": "drizzle migrations are NNN_snake_case.ts — DELIBERATE exempt artifact family (SN0 §1), never rename"
-        },
-        {
-          "scope": "src",
-          "filePattern": "\\.ts$",
-          "namePattern": "^[a-zA-Z][A-Za-z0-9]*(\\.d)?\\.ts$",
-          "label": "src modules are camelCase or PascalCase (no kebab/snake)"
-        }
-      ]
-    }
-  ]
+  "parkedScopes": []
 }
