@@ -18,7 +18,7 @@
     "alembicCore": {
       "packageName": "@alembic/core",
       "allowedDependencies": [],
-      "charter": "knowledge/search/graph/guard/vector/evolution engine + persistence + migrations + shared taxonomy/errors; importable leaf core/ analysis. Must-never: host/UI/transport specifics."
+      "charter": "knowledge/search/graph/guard/vector/evolution engine + persistence + migrations + shared taxonomy/errors + host-integration contract types (./daemon ResidentServiceContracts, types-only, no hosting); importable leaf core/ analysis. Must-never: host/UI/transport specifics."
     },
     "alembicAgent": {
       "packageName": "@alembic/agent",
@@ -28,24 +28,24 @@
     "alembic": {
       "packageName": "alembic-ai",
       "allowedDependencies": ["@alembic/core", "@alembic/agent"],
-      "charter": "resident MCP + HTTP + daemon + CLI host over Core; owns routes, injection, sandbox, UI. Must-never: re-implement Core engine capabilities; direct DB schema ownership."
+      "charter": "HTTP/daemon + CLI host over Core; owns routes, injection, sandbox, UI, tools host adapters (lib/tools), governance decision-register (lib/governance), workflows (lib/workflows). Must-never: re-implement Core engine capabilities; direct DB schema ownership."
     },
     "alembicDashboard": {
       "packageName": "alembic-dashboard",
       "allowedDependencies": [],
       "zeroPackageDependency": true,
-      "charter": "zero-dependency UI consumer of the HTTP contract via generated types. Must-never: @alembic package imports; business logic beyond projection."
+      "charter": "zero-dependency UI consumer of the HTTP contract via generated types; state realized by hooks + theme + i18n. Must-never: @alembic package imports; business logic beyond projection."
     },
     "alembicPlugin": {
       "packageName": "@alembic/plugin",
       "allowedDependencies": ["@alembic/core"],
       "gateParticipation": "post-CKG (owner: AlembicPlugin window; trigger: CKG resumption / P3 IC5)",
-      "charter": "Codex/Claude-Code host shells + plugin MCP surface + vendored Core runtime + distribution packaging. Must-never: fork Core semantics; main-repo route duplication beyond the declared overlay."
+      "charter": "Codex/Claude-Code host shells + plugin MCP surface + vendored Core runtime + distribution packaging. Must-never: fork Core semantics; main-repo route duplication."
     }
   },
   "charterRefs": {
     "source": "P0 unified fact freeze §7 charter DRAFTS (wakeflow-ledger/requirement-designs/alembic-portfolio-execution-plan/p0-unified-fact-freeze-2026-06-12.md)",
-    "status": "drafts — confirmed at AD2; the charter strings above are projections of those drafts, not yet user-confirmed charters"
+    "status": "user-confirmed via GD1 charter-wording batch (governance-decision-enactment, 2026-06-13): AD2 register absorptions enacted — B7 three Alembic areas, W1-core host-integration contract types, W1-dashboard hooks/theme/i18n, B1 Alembic 'resident MCP'→'HTTP/daemon' (registry deleted g1 188938e), W1-plugin overlay clause dropped (R-1 overlays deleted A3 28ed99c). Reverse-check clean: every charter line maps to live code."
   },
   "exactEdgeAllowlist": [],
   "exactEdgeAllowlistContract": "Each entry requires {repo, dependency, owner, reason, cleanupTrigger}; entries without all five fields fail the gate. Empty today — the verified DAG needs no exceptions.",
