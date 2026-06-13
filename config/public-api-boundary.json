@@ -4,7 +4,7 @@
   "expectedCounts": {
     "stable-public": 18,
     "provisional-public": 10,
-    "transitional-internal": 98,
+    "transitional-internal": 31,
     "internal-only": 0,
     "forbidden": 0
   },
@@ -13,8 +13,8 @@
     "schemaVersion": 1,
     "description": "Wave 3A closeout inventory. Manual categories override consumer-derived categories; remaining consumed transitional/wildcard exports are consumer-replace-first, and remaining unconsumed exports are no-consumer-deprecate-candidate.",
     "maxCounts": {
-      "transitional-internal": 98,
-      "wildcardExports": 61
+      "transitional-internal": 31,
+      "wildcardExports": 7
     },
     "manualCategories": {
       "promote-to-stable": [],
@@ -58,90 +58,15 @@
       "schemaVersion": 1,
       "description": "Wave 3B readiness map for shared/config/types/candidate deep imports. This does not delete wildcard exports; it tells consumers which exact facade can replace each deep specifier.",
       "groups": {
-        "./shared/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./shared",
-          "reason": "The shared exact facade re-exports current shared helpers, schemas, errors, test-mode, concurrency, workspace settings, markdown/diff utilities and tokens."
-        },
-        "./infrastructure/config/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./config",
-          "reason": "The config exact facade exposes ConfigLoader, namespaces, and direct path/default helpers used by consumers."
-        },
-        "./types/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./types",
-          "reason": "The types exact facade is type-only and re-exports workflow, snapshot and reactive evolution contracts."
-        },
-        "./service/candidate/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./service/candidate",
-          "reason": "The candidate exact facade re-exports candidate aggregation and similarity services without stabilizing the whole service tree."
-        },
-        "./service/knowledge/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./knowledge",
-          "reason": "The stable knowledge facade now exposes high-reference knowledge service classes, sync/path/source-ref helpers, and production gateway contracts used by outer repositories."
-        },
-        "./service/evolution/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./evolution",
-          "reason": "The stable evolution facade now exposes high-reference evolution services, diff impact helpers, planner contracts, and gateway contracts used by outer repositories."
-        },
-        "./repository/evolution/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./repositories",
-          "reason": "The stable repositories facade now exposes evolution repositories and their record/input/status contracts without requiring deep repository paths."
-        },
-        "./repository/knowledge/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./repositories",
-          "reason": "The stable repositories facade now exposes knowledge repository implementations and edge/file-store contracts needed by current consumers."
-        },
-        "./repository/sourceref/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./repositories",
-          "reason": "The stable repositories facade now exposes recipe source-ref repository contracts and implementation used by rescan workflows."
-        },
         "./repository/sync/*": {
           "decision": "consumer-ready-stable",
           "targetFacade": "./repositories",
           "reason": "The stable repositories facade now exposes the sync repository adapter consumed by knowledge sync CLI/runtime code."
         },
-        "./repository/token/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./repositories",
-          "reason": "The stable repositories facade now exposes TokenUsageStore for outer DI modules while keeping construction ownership with the outer runtime."
-        },
-        "./infrastructure/signal/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./events",
-          "reason": "Signal bus, aggregator, bridge, and trace writer contracts are already re-exported from the stable events facade."
-        },
-        "./infrastructure/report/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./infrastructure/report",
-          "reason": "ReportStore is still infrastructure support without a stable report facade; consumers can leave file-level deep imports for the exact provisional report entrypoint first."
-        },
-        "./core/capability/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./core/capability",
-          "reason": "CapabilityProbe is exported by the exact provisional capability facade; it remains runtime capability support rather than a stable root contract."
-        },
         "./core/ast/*": {
           "decision": "keep-transitional",
           "targetFacade": "./core/ast/*",
           "reason": "Language-specific AST modules are still test and grammar registration support. Project-level consumers should prefer the stable project-intelligence facade, but lang-* files are not collapsed in this wave."
-        },
-        "./domain/evolution/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./evolution",
-          "reason": "EvolutionPolicy is a pure evolution domain policy and is now exported by the stable evolution facade."
-        },
-        "./domain/knowledge/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./knowledge",
-          "reason": "Knowledge field specs, readiness checks, validators, lifecycle contracts and value objects are exported by the stable knowledge facade."
         },
         "./infrastructure/database/drizzle/*": {
           "decision": "keep-transitional",
@@ -152,161 +77,6 @@
           "decision": "keep-transitional",
           "targetFacade": "./infrastructure/database/migrations/*",
           "reason": "Migration modules are fixture-like schema boundaries for database tests and migrations; consumers must not treat them as stable product API."
-        },
-        "./repository/memory/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./memory",
-          "reason": "Semantic memory repository construction and repository implementation are exposed by the stable memory facade."
-        },
-        "./service/bootstrap/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./service/bootstrap",
-          "reason": "BootstrapDedup is exported by the exact provisional bootstrap service facade and remains workflow support rather than stable root API."
-        },
-        "./service/quality/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./service/quality",
-          "reason": "FeedbackCollector and QualityScorer are exported by the exact provisional quality service facade for outer DI replacement."
-        },
-        "./service/recipe/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./service/recipe",
-          "reason": "RecipeCandidateValidator and RecipeParser are exported by the exact provisional recipe service facade for outer DI replacement."
-        },
-        "./workflows/capabilities/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./host-agent-workflows",
-          "reason": "Workflow cleanup policy helpers are exported by the stable host-agent-workflows facade while concrete cleanup I/O remains injected by outer runtimes."
-        },
-        "./domain/dimension/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./dimensions",
-          "reason": "Dimension domain values and types are exported by the stable dimensions facade (A7 duplicate-pair resolution: the transitional ./domain/dimension duplicate is deprecated)."
-        },
-        "./domain/knowledge/values/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./knowledge",
-          "reason": "Knowledge value objects are exported by the stable knowledge facade; the exact ./domain/knowledge/values entry was removed 2026-06-12 with zero consumers."
-        },
-        "./daemon/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./daemon",
-          "reason": "Daemon runtime contracts, snapshots, and event helpers are exported by the stable daemon facade."
-        },
-        "./core/analysis/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./project-intelligence",
-          "reason": "Analysis entrypoints are covered by the stable project-intelligence facade."
-        },
-        "./core/discovery/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./project-intelligence",
-          "reason": "Discovery registries and language detection contracts are exposed by the stable project-intelligence facade."
-        },
-        "./core/discovery/parsers/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./project-intelligence",
-          "reason": "Parser registration is internal discovery support; project-level consumers use the stable project-intelligence facade."
-        },
-        "./infrastructure/database/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./database",
-          "reason": "Database manager and connection contracts are exported by the stable database facade; drizzle/migrations deep paths keep their own transitional entries."
-        },
-        "./infrastructure/event/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./events",
-          "reason": "EventBus and event contracts are exported by the stable events facade."
-        },
-        "./infrastructure/io/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./io",
-          "reason": "IO primitives are exported by the stable io facade."
-        },
-        "./infrastructure/logging/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./logging",
-          "reason": "Logger and logging contracts are exported by the stable logging facade."
-        },
-        "./infrastructure/vector/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./vector",
-          "reason": "Vector store contracts are exported by the stable vector facade (A7 duplicate-pair resolution for ./infrastructure/vector)."
-        },
-        "./service/guard/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./guard",
-          "reason": "Guard services are exported by the stable guard facade (A7 duplicate-pair resolution for ./service/guard)."
-        },
-        "./service/search/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./search",
-          "reason": "Search services and ranking signals are exported by the stable search facade (A7 duplicate-pair resolution for ./service/search)."
-        },
-        "./service/vector/*": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./vector",
-          "reason": "Vector sync services are exported by the stable vector facade (A7 duplicate-pair resolution for ./service/vector)."
-        },
-        "./core/enhancement/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./core/enhancement",
-          "reason": "Enhancement registry remains on the exact provisional core/enhancement facade; no stable home in this wave."
-        },
-        "./service/panorama/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./service/panorama",
-          "reason": "Panorama services remain on the exact keep-provisional facade."
-        },
-        "./workflows/shared/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/shared",
-          "reason": "Workflow shared helpers remain on the exact keep-provisional facade."
-        },
-        "./workflows/cold-start/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/cold-start",
-          "reason": "Cold-start workflows remain on the exact keep-provisional facade (CKG1 owns the area rebuild)."
-        },
-        "./workflows/knowledge-rescan/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/knowledge-rescan",
-          "reason": "Knowledge-rescan workflows remain on the exact keep-provisional facade."
-        },
-        "./workflows/capabilities/host-agent/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/capabilities/host-agent",
-          "reason": "Host-agent capability deep files are replaced by the exact keep-provisional facade."
-        },
-        "./workflows/capabilities/persistence/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/capabilities/persistence",
-          "reason": "Persistence capability deep files are replaced by the exact keep-provisional facade."
-        },
-        "./workflows/capabilities/planning/dimensions/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/capabilities/planning/dimensions",
-          "reason": "Planning-dimensions capability deep files are replaced by the exact keep-provisional facade."
-        },
-        "./workflows/capabilities/planning/knowledge/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/capabilities/planning/knowledge",
-          "reason": "Planning-knowledge capability deep files are replaced by the exact keep-provisional facade."
-        },
-        "./workflows/capabilities/presentation/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/capabilities/presentation",
-          "reason": "Presentation capability deep files are replaced by the exact keep-provisional facade."
-        },
-        "./workflows/capabilities/project-intelligence/*": {
-          "decision": "consumer-ready-provisional",
-          "targetFacade": "./workflows/capabilities/project-intelligence",
-          "reason": "Project-intelligence capability deep files are replaced by the exact keep-provisional facade."
-        },
-        "./domain/snippet/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./domain/snippet/*",
-          "reason": "Snippet domain entity has no stable facade and zero consumers (frozen census 2026-06-12); deprecated, owned transitional until SD-5 phase 2."
         },
         "./repository/base/*": {
           "decision": "keep-transitional",
@@ -322,46 +92,6 @@
           "decision": "keep-transitional",
           "targetFacade": "./repositories",
           "reason": "Code repository plumbing stays transitional (must-keep); route is the stable repositories facade."
-        },
-        "./repository/guard/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./repositories",
-          "reason": "Guard repository implementation has zero consumers; deprecated, route for any future consumer is the stable repositories facade."
-        },
-        "./repository/search/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./repositories",
-          "reason": "Search repository implementation has zero consumers; deprecated, route for any future consumer is the stable repositories facade."
-        },
-        "./repository/session/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./repositories",
-          "reason": "Session repository implementation has zero consumers; deprecated, route for any future consumer is the stable repositories facade."
-        },
-        "./*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./*",
-          "reason": "Root catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
-        },
-        "./domain/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./domain/*",
-          "reason": "Domain catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
-        },
-        "./core/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./core/*",
-          "reason": "Core catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
-        },
-        "./infrastructure/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./infrastructure/*",
-          "reason": "Infrastructure catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
-        },
-        "./service/*": {
-          "decision": "keep-transitional",
-          "targetFacade": "./service/*",
-          "reason": "Service catch-all wildcard is migration-only compatibility surface; owned transitional, removed in SD-5 phase 2."
         }
       },
       "specifiers": {
@@ -740,6 +470,408 @@
         "replacementFacade": "./knowledge",
         "note": "Knowledge services, sync/path/source-ref helpers, and gateway contracts are exported by the stable ./knowledge facade.",
         "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./core/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./core/analysis/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./core/capability/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./core/discovery/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./core/discovery/parsers/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./core/enhancement/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./daemon/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/dimension": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/dimension/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/evolution/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/knowledge/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/knowledge/values/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./domain/snippet/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/config/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/database/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/event/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/io/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/logging/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/report/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/signal/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/vector": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./infrastructure/vector/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/evolution": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/evolution/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/guard": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/guard/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/knowledge": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/knowledge/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/memory": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/memory/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/search": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/search/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/session": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/session/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/sourceref": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/sourceref/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/token": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./repository/token/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/bootstrap/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/candidate/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/evolution/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/guard": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/guard/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/knowledge/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/panorama/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/quality/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/recipe/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/search": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/search/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/vector": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./service/vector/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./shared/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface. MT2 OutputBudget + CO3 errors re-pointed onto the root facade in RW1 (7777dcb).",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./types/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/host-agent/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/persistence/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/planning/dimensions/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/planning/knowledge/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/presentation/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/capabilities/project-intelligence/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/cold-start/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/knowledge-rescan/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
+      },
+      "./workflows/shared/*": {
+        "removedAt": "2026-06-13",
+        "replacementFacade": ".",
+        "note": "SD-5 phase-2 deletion (0.3.0 release wave RW2); zero consumers; future needs route through the 18 stable / 10 provisional facades via the root surface.",
+        "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
       }
     },
     "sourceGraphCanonical": {
@@ -837,77 +969,9 @@
     "deprecations": {
       "schemaVersion": 1,
       "deprecatedAt": "2026-06-12",
-      "removalRelease": "0.3.0 — SD-5 phase 2, release-aligned, gated on the post-CKG AlembicPlugin vendor refresh",
+      "removalRelease": "0.3.0 — SD-5 phase 2 EXECUTED (RW2, 2026-06-13): the 67 marks were removed; see closeout.removedExports.",
       "note": "Phase-1 marks only (RC6 SD-5): these zero-consumer transitional/wildcard exports are scheduled for deletion; phase-2 deletion is out of CO1 scope. A fresh consumer scan before deletion remains mandatory.",
-      "exportPaths": [
-        "./*",
-        "./core/*",
-        "./core/analysis/*",
-        "./core/capability/*",
-        "./core/discovery/*",
-        "./core/discovery/parsers/*",
-        "./core/enhancement/*",
-        "./daemon/*",
-        "./domain/*",
-        "./domain/dimension",
-        "./domain/dimension/*",
-        "./domain/evolution/*",
-        "./domain/knowledge/*",
-        "./domain/knowledge/values/*",
-        "./domain/snippet/*",
-        "./infrastructure/*",
-        "./infrastructure/config/*",
-        "./infrastructure/database/*",
-        "./infrastructure/event/*",
-        "./infrastructure/io/*",
-        "./infrastructure/logging/*",
-        "./infrastructure/report/*",
-        "./infrastructure/signal/*",
-        "./infrastructure/vector",
-        "./infrastructure/vector/*",
-        "./repository/evolution",
-        "./repository/evolution/*",
-        "./repository/guard",
-        "./repository/guard/*",
-        "./repository/knowledge",
-        "./repository/knowledge/*",
-        "./repository/memory",
-        "./repository/memory/*",
-        "./repository/search",
-        "./repository/search/*",
-        "./repository/session",
-        "./repository/session/*",
-        "./repository/sourceref",
-        "./repository/sourceref/*",
-        "./repository/token",
-        "./repository/token/*",
-        "./service/*",
-        "./service/bootstrap/*",
-        "./service/candidate/*",
-        "./service/evolution/*",
-        "./service/guard",
-        "./service/guard/*",
-        "./service/knowledge/*",
-        "./service/panorama/*",
-        "./service/quality/*",
-        "./service/recipe/*",
-        "./service/search",
-        "./service/search/*",
-        "./service/vector",
-        "./service/vector/*",
-        "./shared/*",
-        "./types/*",
-        "./workflows/capabilities/*",
-        "./workflows/capabilities/host-agent/*",
-        "./workflows/capabilities/persistence/*",
-        "./workflows/capabilities/planning/dimensions/*",
-        "./workflows/capabilities/planning/knowledge/*",
-        "./workflows/capabilities/presentation/*",
-        "./workflows/capabilities/project-intelligence/*",
-        "./workflows/cold-start/*",
-        "./workflows/knowledge-rescan/*",
-        "./workflows/shared/*"
-      ]
+      "exportPaths": []
     },
     "reviewBy": {
       "schemaVersion": 1,
@@ -1017,6 +1081,18 @@
             "wildcardExports": 61
           },
           "note": "CO1 freeze: 14 curated zero-consumer exports removed (140 -> 126)."
+        },
+        {
+          "date": "2026-06-13",
+          "exports": 59,
+          "stable-public": 18,
+          "provisional-public": 10,
+          "transitional-internal": 31,
+          "wildcardExports": 7,
+          "maxCounts": {
+            "transitional-internal": 31,
+            "wildcardExports": 7
+          }
         }
       ]
     }
@@ -1058,28 +1134,15 @@
     "./core/analysis",
     "./core/ast",
     "./core/discovery",
-    "./domain/dimension",
     "./domain/knowledge",
     "./infrastructure/database",
     "./infrastructure/database/drizzle",
-    "./infrastructure/vector",
     "./repository",
     "./repository/base",
     "./repository/bootstrap",
     "./repository/code",
-    "./repository/evolution",
-    "./repository/guard",
-    "./repository/knowledge",
-    "./repository/memory",
-    "./repository/search",
-    "./repository/session",
-    "./repository/sourceref",
     "./repository/sync",
-    "./repository/token",
-    "./service/guard",
     "./service/panorama",
-    "./service/search",
-    "./service/vector",
     "./workflows",
     "./workflows/capabilities",
     "./workflows/cold-start",

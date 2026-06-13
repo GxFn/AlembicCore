@@ -82,49 +82,13 @@
       "types": "./dist/shared/index.d.ts",
       "import": "./dist/shared/index.js"
     },
-    "./shared/*": {
-      "types": "./dist/shared/*.d.ts",
-      "import": "./dist/shared/*.js"
-    },
-    "./domain/dimension": {
-      "types": "./dist/domain/dimension/index.d.ts",
-      "import": "./dist/domain/dimension/index.js"
-    },
-    "./domain/dimension/*": {
-      "types": "./dist/domain/dimension/*.d.ts",
-      "import": "./dist/domain/dimension/*.js"
-    },
-    "./domain/evolution/*": {
-      "types": "./dist/domain/evolution/*.d.ts",
-      "import": "./dist/domain/evolution/*.js"
-    },
     "./domain/knowledge": {
       "types": "./dist/domain/knowledge/index.d.ts",
       "import": "./dist/domain/knowledge/index.js"
     },
-    "./domain/knowledge/values/*": {
-      "types": "./dist/domain/knowledge/values/*.d.ts",
-      "import": "./dist/domain/knowledge/values/*.js"
-    },
-    "./domain/knowledge/*": {
-      "types": "./dist/domain/knowledge/*.d.ts",
-      "import": "./dist/domain/knowledge/*.js"
-    },
-    "./domain/snippet/*": {
-      "types": "./dist/domain/snippet/*.d.ts",
-      "import": "./dist/domain/snippet/*.js"
-    },
-    "./domain/*": {
-      "types": "./dist/domain/*.d.ts",
-      "import": "./dist/domain/*.js"
-    },
     "./daemon": {
       "types": "./dist/daemon/index.d.ts",
       "import": "./dist/daemon/index.js"
-    },
-    "./daemon/*": {
-      "types": "./dist/daemon/*.d.ts",
-      "import": "./dist/daemon/*.js"
     },
     "./core": {
       "types": "./dist/core/index.d.ts",
@@ -133,10 +97,6 @@
     "./core/analysis": {
       "types": "./dist/core/analysis/index.d.ts",
       "import": "./dist/core/analysis/index.js"
-    },
-    "./core/analysis/*": {
-      "types": "./dist/core/analysis/*.d.ts",
-      "import": "./dist/core/analysis/*.js"
     },
     "./core/ast": {
       "types": "./dist/core/ast/index.d.ts",
@@ -150,37 +110,13 @@
       "types": "./dist/core/capability/index.d.ts",
       "import": "./dist/core/capability/index.js"
     },
-    "./core/capability/*": {
-      "types": "./dist/core/capability/*.d.ts",
-      "import": "./dist/core/capability/*.js"
-    },
     "./core/discovery": {
       "types": "./dist/core/discovery/index.d.ts",
       "import": "./dist/core/discovery/index.js"
     },
-    "./core/discovery/parsers/*": {
-      "types": "./dist/core/discovery/parsers/*.d.ts",
-      "import": "./dist/core/discovery/parsers/*.js"
-    },
-    "./core/discovery/*": {
-      "types": "./dist/core/discovery/*.d.ts",
-      "import": "./dist/core/discovery/*.js"
-    },
     "./core/enhancement": {
       "types": "./dist/core/enhancement/index.d.ts",
       "import": "./dist/core/enhancement/index.js"
-    },
-    "./core/enhancement/*": {
-      "types": "./dist/core/enhancement/*.d.ts",
-      "import": "./dist/core/enhancement/*.js"
-    },
-    "./core/*": {
-      "types": "./dist/core/*.d.ts",
-      "import": "./dist/core/*.js"
-    },
-    "./infrastructure/config/*": {
-      "types": "./dist/infrastructure/config/*.d.ts",
-      "import": "./dist/infrastructure/config/*.js"
     },
     "./infrastructure/database": {
       "types": "./dist/infrastructure/database/index.d.ts",
@@ -198,45 +134,9 @@
       "types": "./dist/infrastructure/database/migrations/*.d.ts",
       "import": "./dist/infrastructure/database/migrations/*.js"
     },
-    "./infrastructure/database/*": {
-      "types": "./dist/infrastructure/database/*.d.ts",
-      "import": "./dist/infrastructure/database/*.js"
-    },
-    "./infrastructure/event/*": {
-      "types": "./dist/infrastructure/event/*.d.ts",
-      "import": "./dist/infrastructure/event/*.js"
-    },
-    "./infrastructure/io/*": {
-      "types": "./dist/infrastructure/io/*.d.ts",
-      "import": "./dist/infrastructure/io/*.js"
-    },
-    "./infrastructure/logging/*": {
-      "types": "./dist/infrastructure/logging/*.d.ts",
-      "import": "./dist/infrastructure/logging/*.js"
-    },
     "./infrastructure/report": {
       "types": "./dist/infrastructure/report/index.d.ts",
       "import": "./dist/infrastructure/report/index.js"
-    },
-    "./infrastructure/report/*": {
-      "types": "./dist/infrastructure/report/*.d.ts",
-      "import": "./dist/infrastructure/report/*.js"
-    },
-    "./infrastructure/signal/*": {
-      "types": "./dist/infrastructure/signal/*.d.ts",
-      "import": "./dist/infrastructure/signal/*.js"
-    },
-    "./infrastructure/vector": {
-      "types": "./dist/infrastructure/vector/index.d.ts",
-      "import": "./dist/infrastructure/vector/index.js"
-    },
-    "./infrastructure/vector/*": {
-      "types": "./dist/infrastructure/vector/*.d.ts",
-      "import": "./dist/infrastructure/vector/*.js"
-    },
-    "./infrastructure/*": {
-      "types": "./dist/infrastructure/*.d.ts",
-      "import": "./dist/infrastructure/*.js"
     },
     "./repository": {
       "types": "./dist/repository/index.d.ts",
@@ -266,62 +166,6 @@
       "types": "./dist/repository/code/*.d.ts",
       "import": "./dist/repository/code/*.js"
     },
-    "./repository/evolution": {
-      "types": "./dist/repository/evolution/index.d.ts",
-      "import": "./dist/repository/evolution/index.js"
-    },
-    "./repository/evolution/*": {
-      "types": "./dist/repository/evolution/*.d.ts",
-      "import": "./dist/repository/evolution/*.js"
-    },
-    "./repository/guard": {
-      "types": "./dist/repository/guard/index.d.ts",
-      "import": "./dist/repository/guard/index.js"
-    },
-    "./repository/guard/*": {
-      "types": "./dist/repository/guard/*.d.ts",
-      "import": "./dist/repository/guard/*.js"
-    },
-    "./repository/knowledge": {
-      "types": "./dist/repository/knowledge/index.d.ts",
-      "import": "./dist/repository/knowledge/index.js"
-    },
-    "./repository/knowledge/*": {
-      "types": "./dist/repository/knowledge/*.d.ts",
-      "import": "./dist/repository/knowledge/*.js"
-    },
-    "./repository/memory": {
-      "types": "./dist/repository/memory/index.d.ts",
-      "import": "./dist/repository/memory/index.js"
-    },
-    "./repository/memory/*": {
-      "types": "./dist/repository/memory/*.d.ts",
-      "import": "./dist/repository/memory/*.js"
-    },
-    "./repository/search": {
-      "types": "./dist/repository/search/index.d.ts",
-      "import": "./dist/repository/search/index.js"
-    },
-    "./repository/search/*": {
-      "types": "./dist/repository/search/*.d.ts",
-      "import": "./dist/repository/search/*.js"
-    },
-    "./repository/session": {
-      "types": "./dist/repository/session/index.d.ts",
-      "import": "./dist/repository/session/index.js"
-    },
-    "./repository/session/*": {
-      "types": "./dist/repository/session/*.d.ts",
-      "import": "./dist/repository/session/*.js"
-    },
-    "./repository/sourceref": {
-      "types": "./dist/repository/sourceref/index.d.ts",
-      "import": "./dist/repository/sourceref/index.js"
-    },
-    "./repository/sourceref/*": {
-      "types": "./dist/repository/sourceref/*.d.ts",
-      "import": "./dist/repository/sourceref/*.js"
-    },
     "./repository/sync": {
       "types": "./dist/repository/sync/index.d.ts",
       "import": "./dist/repository/sync/index.js"
@@ -330,97 +174,29 @@
       "types": "./dist/repository/sync/*.d.ts",
       "import": "./dist/repository/sync/*.js"
     },
-    "./repository/token": {
-      "types": "./dist/repository/token/index.d.ts",
-      "import": "./dist/repository/token/index.js"
-    },
-    "./repository/token/*": {
-      "types": "./dist/repository/token/*.d.ts",
-      "import": "./dist/repository/token/*.js"
-    },
     "./service/bootstrap": {
       "types": "./dist/service/bootstrap/index.d.ts",
       "import": "./dist/service/bootstrap/index.js"
-    },
-    "./service/bootstrap/*": {
-      "types": "./dist/service/bootstrap/*.d.ts",
-      "import": "./dist/service/bootstrap/*.js"
     },
     "./service/candidate": {
       "types": "./dist/service/candidate/index.d.ts",
       "import": "./dist/service/candidate/index.js"
     },
-    "./service/candidate/*": {
-      "types": "./dist/service/candidate/*.d.ts",
-      "import": "./dist/service/candidate/*.js"
-    },
-    "./service/evolution/*": {
-      "types": "./dist/service/evolution/*.d.ts",
-      "import": "./dist/service/evolution/*.js"
-    },
-    "./service/guard": {
-      "types": "./dist/service/guard/index.d.ts",
-      "import": "./dist/service/guard/index.js"
-    },
-    "./service/guard/*": {
-      "types": "./dist/service/guard/*.d.ts",
-      "import": "./dist/service/guard/*.js"
-    },
-    "./service/knowledge/*": {
-      "types": "./dist/service/knowledge/*.d.ts",
-      "import": "./dist/service/knowledge/*.js"
-    },
     "./service/panorama": {
       "types": "./dist/service/panorama/index.d.ts",
       "import": "./dist/service/panorama/index.js"
-    },
-    "./service/panorama/*": {
-      "types": "./dist/service/panorama/*.d.ts",
-      "import": "./dist/service/panorama/*.js"
     },
     "./service/quality": {
       "types": "./dist/service/quality/index.d.ts",
       "import": "./dist/service/quality/index.js"
     },
-    "./service/quality/*": {
-      "types": "./dist/service/quality/*.d.ts",
-      "import": "./dist/service/quality/*.js"
-    },
     "./service/recipe": {
       "types": "./dist/service/recipe/index.d.ts",
       "import": "./dist/service/recipe/index.js"
     },
-    "./service/recipe/*": {
-      "types": "./dist/service/recipe/*.d.ts",
-      "import": "./dist/service/recipe/*.js"
-    },
-    "./service/search": {
-      "types": "./dist/service/search/index.d.ts",
-      "import": "./dist/service/search/index.js"
-    },
-    "./service/search/*": {
-      "types": "./dist/service/search/*.d.ts",
-      "import": "./dist/service/search/*.js"
-    },
-    "./service/vector": {
-      "types": "./dist/service/vector/index.d.ts",
-      "import": "./dist/service/vector/index.js"
-    },
-    "./service/vector/*": {
-      "types": "./dist/service/vector/*.d.ts",
-      "import": "./dist/service/vector/*.js"
-    },
-    "./service/*": {
-      "types": "./dist/service/*.d.ts",
-      "import": "./dist/service/*.js"
-    },
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js"
-    },
-    "./types/*": {
-      "types": "./dist/types/*.d.ts",
-      "import": "./dist/types/*.js"
     },
     "./workflows": {
       "types": "./dist/workflows/index.d.ts",
@@ -430,85 +206,41 @@
       "types": "./dist/workflows/shared/index.d.ts",
       "import": "./dist/workflows/shared/index.js"
     },
-    "./workflows/shared/*": {
-      "types": "./dist/workflows/shared/*.d.ts",
-      "import": "./dist/workflows/shared/*.js"
-    },
     "./workflows/cold-start": {
       "types": "./dist/workflows/cold-start/index.d.ts",
       "import": "./dist/workflows/cold-start/index.js"
-    },
-    "./workflows/cold-start/*": {
-      "types": "./dist/workflows/cold-start/*.d.ts",
-      "import": "./dist/workflows/cold-start/*.js"
     },
     "./workflows/knowledge-rescan": {
       "types": "./dist/workflows/knowledge-rescan/index.d.ts",
       "import": "./dist/workflows/knowledge-rescan/index.js"
     },
-    "./workflows/knowledge-rescan/*": {
-      "types": "./dist/workflows/knowledge-rescan/*.d.ts",
-      "import": "./dist/workflows/knowledge-rescan/*.js"
-    },
     "./workflows/capabilities": {
       "types": "./dist/workflows/capabilities/index.d.ts",
       "import": "./dist/workflows/capabilities/index.js"
-    },
-    "./workflows/capabilities/*": {
-      "types": "./dist/workflows/capabilities/*.d.ts",
-      "import": "./dist/workflows/capabilities/*.js"
     },
     "./workflows/capabilities/host-agent": {
       "types": "./dist/workflows/capabilities/host-agent/index.d.ts",
       "import": "./dist/workflows/capabilities/host-agent/index.js"
     },
-    "./workflows/capabilities/host-agent/*": {
-      "types": "./dist/workflows/capabilities/host-agent/*.d.ts",
-      "import": "./dist/workflows/capabilities/host-agent/*.js"
-    },
     "./workflows/capabilities/persistence": {
       "types": "./dist/workflows/capabilities/persistence/index.d.ts",
       "import": "./dist/workflows/capabilities/persistence/index.js"
-    },
-    "./workflows/capabilities/persistence/*": {
-      "types": "./dist/workflows/capabilities/persistence/*.d.ts",
-      "import": "./dist/workflows/capabilities/persistence/*.js"
     },
     "./workflows/capabilities/planning/dimensions": {
       "types": "./dist/workflows/capabilities/planning/dimensions/index.d.ts",
       "import": "./dist/workflows/capabilities/planning/dimensions/index.js"
     },
-    "./workflows/capabilities/planning/dimensions/*": {
-      "types": "./dist/workflows/capabilities/planning/dimensions/*.d.ts",
-      "import": "./dist/workflows/capabilities/planning/dimensions/*.js"
-    },
     "./workflows/capabilities/planning/knowledge": {
       "types": "./dist/workflows/capabilities/planning/knowledge/index.d.ts",
       "import": "./dist/workflows/capabilities/planning/knowledge/index.js"
-    },
-    "./workflows/capabilities/planning/knowledge/*": {
-      "types": "./dist/workflows/capabilities/planning/knowledge/*.d.ts",
-      "import": "./dist/workflows/capabilities/planning/knowledge/*.js"
     },
     "./workflows/capabilities/presentation": {
       "types": "./dist/workflows/capabilities/presentation/index.d.ts",
       "import": "./dist/workflows/capabilities/presentation/index.js"
     },
-    "./workflows/capabilities/presentation/*": {
-      "types": "./dist/workflows/capabilities/presentation/*.d.ts",
-      "import": "./dist/workflows/capabilities/presentation/*.js"
-    },
     "./workflows/capabilities/project-intelligence": {
       "types": "./dist/workflows/capabilities/project-intelligence/index.d.ts",
       "import": "./dist/workflows/capabilities/project-intelligence/index.js"
-    },
-    "./workflows/capabilities/project-intelligence/*": {
-      "types": "./dist/workflows/capabilities/project-intelligence/*.d.ts",
-      "import": "./dist/workflows/capabilities/project-intelligence/*.js"
-    },
-    "./*": {
-      "types": "./dist/*.d.ts",
-      "import": "./dist/*.js"
     }
   },
   "files": [
