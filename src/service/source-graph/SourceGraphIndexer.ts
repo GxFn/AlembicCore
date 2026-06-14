@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
 import {
   createSourceGraphDiagnostic,
   createSourceGraphFreshness,
@@ -20,6 +19,12 @@ import {
   type SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
+import {
+  listProjectScopeFolders,
+  type ProjectDescriptor,
+  type ProjectFolderDescriptor,
+  readProjectScopeFromWorkspaceConfig,
+} from '../../shared/ProjectScope.js';
 
 export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v1';
 
@@ -27,6 +32,8 @@ export interface SourceGraphIndexOptions {
   projectRoot: string;
   repoId?: string;
   projectScope?: string;
+  projectScopeDescriptor?: ProjectDescriptor | null;
+  workspaceConfigProjectScope?: boolean;
   generationId?: string;
   extractorVersion?: string;
   now?: number;
@@ -71,6 +78,7 @@ interface NormalizedIndexOptions {
   repoId: string;
   projectScope?: string;
   graphRoot: string;
+  graphRoots: string[];
   extractorVersion: string;
   now: number;
   includeExtensions: Set<string>;
@@ -94,6 +102,11 @@ interface ParsedFile {
   symbols: SourceSymbolNode[];
   edges: SourceGraphEdgeInput[];
   diagnostics: SourceGraphDiagnosticInput[];
+}
+
+interface SourceGraphSourceRoots {
+  graphRoots: string[];
+  projectScope?: string;
 }
 
 const DEFAULT_INCLUDE_EXTENSIONS = [
@@ -395,12 +408,14 @@ export class SourceGraphFreshnessService {
 function normalizeIndexOptions(input: SourceGraphIndexOptions): NormalizedIndexOptions {
   const projectRoot = path.resolve(input.projectRoot);
   const projectScope = normalizeProjectScope(input.projectScope);
+  const sourceRoots = resolveSourceGraphSourceRoots(projectRoot, input, projectScope);
   const graphRoot = projectScope ? path.join(projectRoot, projectScope) : projectRoot;
   return {
     projectRoot,
     repoId: input.repoId?.trim() || 'default',
-    projectScope,
+    projectScope: projectScope ?? sourceRoots.projectScope,
     graphRoot,
+    graphRoots: sourceRoots.graphRoots,
     extractorVersion: input.extractorVersion?.trim() || SOURCE_GRAPH_INDEXER_VERSION,
     now: input.now ?? Date.now(),
     includeExtensions: new Set(
@@ -412,9 +427,50 @@ function normalizeIndexOptions(input: SourceGraphIndexOptions): NormalizedIndexO
   };
 }
 
+function resolveSourceGraphSourceRoots(
+  projectRoot: string,
+  input: SourceGraphIndexOptions,
+  projectScope: string | undefined
+): SourceGraphSourceRoots {
+  if (projectScope) {
+    return { graphRoots: [path.join(projectRoot, projectScope)], projectScope };
+  }
+
+  const explicitFolders = activeProjectScopeFolders(input.projectScopeDescriptor);
+  if (explicitFolders.length > 0) {
+    return {
+      graphRoots: explicitFolders.map((folder) => folder.path),
+      projectScope: input.projectScopeDescriptor?.projectScopeId,
+    };
+  }
+
+  if (input.workspaceConfigProjectScope !== false) {
+    const workspaceScope = readProjectScopeFromWorkspaceConfig(projectRoot);
+    const workspaceFolders = activeProjectScopeFolders(workspaceScope);
+    if (workspaceFolders.length > 0) {
+      return {
+        graphRoots: workspaceFolders.map((folder) => folder.path),
+        projectScope: workspaceScope?.projectScopeId,
+      };
+    }
+  }
+
+  return { graphRoots: [projectRoot], projectScope: undefined };
+}
+
+function activeProjectScopeFolders(
+  projectScope: ProjectDescriptor | null | undefined
+): ProjectFolderDescriptor[] {
+  return projectScope
+    ? listProjectScopeFolders(projectScope).filter((folder) => folder.state === 'active')
+    : [];
+}
+
 async function collectInventory(options: NormalizedIndexOptions): Promise<InventoryFile[]> {
   const files: InventoryFile[] = [];
-  await walkDirectory(options.graphRoot, options, files);
+  for (const graphRoot of options.graphRoots) {
+    await walkDirectory(graphRoot, options, files);
+  }
   return files.sort((left, right) => left.repoRelativePath.localeCompare(right.repoRelativePath));
 }
 

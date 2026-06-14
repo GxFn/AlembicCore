@@ -76,6 +76,51 @@ describe('SourceGraphIndexer', () => {
     });
   });
 
+  it('uses workspace.config repoNames as the default source graph boundary', async () => {
+    writeFixture(
+      'workspace.config.json',
+      JSON.stringify(
+        {
+          repoNames: ['Alembic', 'AlembicCore', 'AlembicPlugin'],
+          repositories: [
+            { name: 'Alembic', mode: 'external', path: 'Alembic' },
+            { name: 'AlembicCore', mode: 'external', path: 'AlembicCore' },
+            { name: 'AlembicPlugin', mode: 'external', path: 'AlembicPlugin' },
+            { name: 'Test', mode: 'internal', path: 'Test' },
+          ],
+        },
+        null,
+        2
+      )
+    );
+    writeFixture('Alembic/src/index.ts', 'export const alembic = 1;\n');
+    writeFixture('AlembicCore/src/index.ts', 'export const core = 1;\n');
+    writeFixture('AlembicPlugin/src/index.ts', 'export const plugin = 1;\n');
+    writeFixture('Test/src/index.ts', 'export const test = 1;\n');
+    writeFixture('wakeflow-ledger/src/index.ts', 'export const ledger = 1;\n');
+
+    const repositories = createAlembicRepositories(runtime.connection);
+    const indexer = new SourceGraphIndexer(repositories.sourceGraphRepository);
+    const result = await indexer.buildFull({
+      projectRoot: tmpDir,
+      repoId: 'fixture',
+      generationId: 'gen-workspace-config',
+      now: 1500,
+      includeExtensions: ['.ts'],
+    });
+
+    expect(result.files.map((file) => file.repoRelativePath).sort()).toEqual([
+      'Alembic/src/index.ts',
+      'AlembicCore/src/index.ts',
+      'AlembicPlugin/src/index.ts',
+    ]);
+    expect(result.files.map((file) => file.repoRelativePath).join('\n')).not.toContain('Test/');
+    expect(result.files.map((file) => file.repoRelativePath).join('\n')).not.toContain(
+      'wakeflow-ledger/'
+    );
+    expect(result.snapshot.projectScope).toMatch(/^project-scope-/);
+  });
+
   it('detects stale filesystem changes and builds an incremental generation with deletion cleanup', async () => {
     writeFixture(
       'src/index.ts',

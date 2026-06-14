@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -20,6 +23,7 @@ import {
   parseGradleProject,
   resetDiscovererRegistry,
   resetProjectDiscovererRegistry,
+  tryBuildProjectGraph,
 } from '../src/project-intelligence.js';
 
 describe('stable project intelligence entrypoint', () => {
@@ -97,4 +101,48 @@ describe('stable project intelligence entrypoint', () => {
     expect(snapshot.projectRoot).toBe('/project');
     expect(snapshot.language.primaryLang).toBe('typescript');
   });
+
+  it('uses workspace.config repoNames as the default ProjectGraph boundary', async () => {
+    const controlRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'project-graph-workspace-config-'));
+    try {
+      writeFixture(
+        controlRoot,
+        'workspace.config.json',
+        JSON.stringify({
+          repoNames: ['Alembic', 'AlembicCore'],
+          repositories: [
+            { name: 'Alembic', mode: 'external', path: 'Alembic' },
+            { name: 'AlembicCore', mode: 'external', path: 'AlembicCore' },
+            { name: 'Test', mode: 'internal', path: 'Test' },
+          ],
+        })
+      );
+      writeFixture(controlRoot, 'Alembic/src/index.ts', 'export class AlembicApp {}\n');
+      writeFixture(controlRoot, 'AlembicCore/src/index.ts', 'export class CoreApp {}\n');
+      writeFixture(controlRoot, 'Test/src/index.ts', 'export class TestApp {}\n');
+      writeFixture(controlRoot, 'wakeflow-ledger/src/index.ts', 'export class LedgerApp {}\n');
+
+      const result = await tryBuildProjectGraph(controlRoot, {
+        extensions: ['.ts'],
+        maxFiles: 20,
+        reloadAstPlugins: true,
+      });
+      if (!result.available) {
+        throw new Error(`ProjectGraph unavailable: ${result.reason}`);
+      }
+
+      expect(result.graph.getAllFilePaths().sort()).toEqual([
+        'Alembic/src/index.ts',
+        'AlembicCore/src/index.ts',
+      ]);
+    } finally {
+      fs.rmSync(controlRoot, { recursive: true, force: true });
+    }
+  });
 });
+
+function writeFixture(root: string, relativePath: string, content: string): void {
+  const filePath = path.join(root, relativePath);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, content);
+}

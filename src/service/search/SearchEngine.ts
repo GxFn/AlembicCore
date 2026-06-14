@@ -49,6 +49,7 @@ export type {
   DbRow,
   DocMeta,
   RankingContext,
+  ResolveSearchWorkspaceIdentityInput,
   RrfHit,
   Scorer,
   ScorerResult,
@@ -71,6 +72,7 @@ export {
   groupByKind,
   inferSearchSemanticUsage,
   inferSearchVectorUsage,
+  resolveSearchWorkspaceIdentity,
   slimSearchResult,
 } from './SearchTypes.js';
 export { tokenize } from './tokenizer.js';

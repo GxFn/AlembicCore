@@ -16,6 +16,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LanguageService } from '../../shared/LanguageService.js';
+import {
+  listProjectScopeFolders,
+  type ProjectDescriptor,
+  readProjectScopeFromWorkspaceConfig,
+} from '../../shared/ProjectScope.js';
 import { analyzeFile, isAvailable } from '../AstAnalyzer.js';
 
 // ──────────────────────────────────────────────────────────────────
@@ -42,6 +47,18 @@ const DEFAULTS = {
     '.tsx': 'tsx', // tree-sitter 需要独立的 tsx 解析器
   },
 };
+
+export interface ProjectGraphBuildOptions {
+  extensions?: string[];
+  onProgress?: (parsed: number, total: number) => void;
+  timeoutMs?: number;
+  maxFiles?: number;
+  maxFileSizeBytes?: number;
+  extensionToLang?: Record<string, string>;
+  excludePatterns?: string[];
+  projectScope?: ProjectDescriptor | string | null;
+  workspaceConfigProjectScope?: boolean;
+}
 
 // ──────────────────────────────────────────────────────────────────
 // ProjectGraph
@@ -83,7 +100,7 @@ export default class ProjectGraph {
    * @param [options.extensions] 例如 ['.m', '.h', '.swift']
    * @param [options.onProgress] (parsed, total) => void
    */
-  static async build(projectRoot: any, options: any = {}) {
+  static async build(projectRoot: string, options: ProjectGraphBuildOptions = {}) {
     if (!isAvailable()) {
       throw new Error('Tree-sitter not available — cannot build ProjectGraph');
     }
@@ -92,7 +109,7 @@ export default class ProjectGraph {
     const opts = { ...DEFAULTS, ...options };
 
     // 1. 收集文件列表
-    const extToLang = opts.extensionToLang || DEFAULTS.extensionToLang;
+    const extToLang: Record<string, string> = opts.extensionToLang || DEFAULTS.extensionToLang;
     const extensions = options.extensions ? options.extensions : Object.keys(extToLang);
 
     const files = collectSourceFiles(projectRoot, extensions, opts);
@@ -704,12 +721,20 @@ export default class ProjectGraph {
 // ──────────────────────────────────────────────────────────────────
 
 /** 递归收集匹配扩展名的源文件 */
-function collectSourceFiles(dir: any, extensions: any, opts: any) {
+function collectSourceFiles(
+  projectRoot: string,
+  extensions: string[],
+  opts: ProjectGraphBuildOptions
+) {
   const results: string[] = [];
   const extSet = new Set(extensions);
+  const maxFiles = opts.maxFiles ?? DEFAULTS.maxFiles;
+  const maxFileSizeBytes = opts.maxFileSizeBytes ?? DEFAULTS.maxFileSizeBytes;
+  const excludePatterns = opts.excludePatterns ?? DEFAULTS.excludePatterns;
+  const sourceRoots = resolveProjectGraphSourceRoots(projectRoot, opts);
 
-  function walk(currentDir: any) {
-    if (results.length >= opts.maxFiles) {
+  function walk(currentDir: string) {
+    if (results.length >= maxFiles) {
       return;
     }
 
@@ -721,15 +746,15 @@ function collectSourceFiles(dir: any, extensions: any, opts: any) {
     }
 
     for (const entry of entries) {
-      if (results.length >= opts.maxFiles) {
+      if (results.length >= maxFiles) {
         return;
       }
 
       const fullPath = path.join(currentDir, entry.name);
-      const relativePath = path.relative(dir, fullPath);
+      const relativePath = path.relative(projectRoot, fullPath);
 
       // 排除模式检查
-      if (opts.excludePatterns.some((p: any) => relativePath.includes(p))) {
+      if (excludePatterns.some((pattern) => relativePath.includes(pattern))) {
         continue;
       }
 
@@ -744,7 +769,7 @@ function collectSourceFiles(dir: any, extensions: any, opts: any) {
         // 跳过过大的文件
         try {
           const stat = fs.statSync(fullPath);
-          if (stat.size > opts.maxFileSizeBytes) {
+          if (stat.size > maxFileSizeBytes) {
             continue;
           }
         } catch {
@@ -756,6 +781,37 @@ function collectSourceFiles(dir: any, extensions: any, opts: any) {
     }
   }
 
-  walk(dir);
+  for (const sourceRoot of sourceRoots) {
+    walk(sourceRoot);
+  }
   return results;
+}
+
+function resolveProjectGraphSourceRoots(
+  projectRoot: string,
+  options: ProjectGraphBuildOptions
+): string[] {
+  const normalizedProjectRoot = path.resolve(projectRoot);
+  if (typeof options.projectScope === 'string' && options.projectScope.trim().length > 0) {
+    return [path.join(normalizedProjectRoot, normalizeRepoRelative(options.projectScope))];
+  }
+  if (options.projectScope && typeof options.projectScope === 'object') {
+    const folders = listProjectScopeFolders(options.projectScope).filter(
+      (folder) => folder.state === 'active'
+    );
+    if (folders.length > 0) {
+      return folders.map((folder) => folder.path);
+    }
+  }
+  if (options.workspaceConfigProjectScope !== false) {
+    const workspaceScope = readProjectScopeFromWorkspaceConfig(normalizedProjectRoot);
+    if (workspaceScope?.folders.length) {
+      return listProjectScopeFolders(workspaceScope).map((folder) => folder.path);
+    }
+  }
+  return [normalizedProjectRoot];
+}
+
+function normalizeRepoRelative(value: string): string {
+  return value.replaceAll(path.sep, '/').replace(/^\.\//, '');
 }

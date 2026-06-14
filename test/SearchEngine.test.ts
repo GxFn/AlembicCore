@@ -1,7 +1,11 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { vi } from 'vitest';
 import {
   BM25Scorer,
   buildSearchResponseMeta,
+  resolveSearchWorkspaceIdentity,
   SearchEngine,
   tokenize,
 } from '../src/service/search/SearchEngine.js';
@@ -425,6 +429,23 @@ describe('SearchEngine', () => {
       residentVector: { available: true, endpoint: '/api/v1/search' },
       timings: { embedMs: 2, vectorMs: 4, totalMs: 6 },
     });
+  });
+
+  test('resolveSearchWorkspaceIdentity derives a project id from projectRoot', () => {
+    const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'search-project-identity-'));
+    try {
+      const workspace = resolveSearchWorkspaceIdentity({ projectRoot });
+
+      expect(workspace).toMatchObject({
+        dataRoot: projectRoot,
+        projectRoot,
+        workspaceMode: 'standard',
+      });
+      expect(workspace?.projectId).toMatch(/^[a-f0-9]{8}$/);
+      expect(workspace?.projectId).not.toBe('project:unknown');
+    } finally {
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 
   test('refreshIndex should rebuild index', () => {

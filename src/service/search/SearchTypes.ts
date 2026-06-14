@@ -7,7 +7,10 @@
  * @module SearchTypes
  */
 
+import path from 'node:path';
+
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
+import { ProjectRegistry } from '../../shared/ProjectRegistry.js';
 
 /** Internal scorer document representation */
 export interface ScorerDocument {
@@ -160,6 +163,14 @@ export interface SearchWorkspaceIdentity {
   [key: string]: unknown;
 }
 
+export interface ResolveSearchWorkspaceIdentityInput {
+  dataRoot?: string | null;
+  projectId?: string | null;
+  projectRoot?: string | null;
+  workspaceMode?: string | null;
+  [key: string]: unknown;
+}
+
 export interface SearchTimingMeta {
   totalMs?: number;
   embedMs?: number;
@@ -270,6 +281,43 @@ export function buildSearchResponseMeta(
   }
 
   return meta;
+}
+
+export function resolveSearchWorkspaceIdentity(
+  input: ResolveSearchWorkspaceIdentityInput = {}
+): SearchWorkspaceIdentity | undefined {
+  const projectRoot = normalizeSearchIdentityString(input.projectRoot);
+  const inspection = projectRoot ? inspectSearchProjectRoot(projectRoot) : null;
+  const projectId =
+    normalizeSearchIdentityString(input.projectId) ??
+    inspection?.projectId ??
+    inspection?.expectedProjectId;
+  const dataRoot = normalizeSearchIdentityString(input.dataRoot) ?? inspection?.dataRoot;
+  const workspaceMode =
+    normalizeSearchIdentityString(input.workspaceMode) ?? inspection?.mode ?? undefined;
+
+  if (!projectId && !projectRoot && !dataRoot && !workspaceMode) {
+    return undefined;
+  }
+
+  return {
+    ...(projectId ? { projectId } : {}),
+    ...(projectRoot ? { projectRoot: path.resolve(projectRoot) } : {}),
+    ...(dataRoot ? { dataRoot } : {}),
+    ...(workspaceMode ? { workspaceMode } : {}),
+  };
+}
+
+function inspectSearchProjectRoot(projectRoot: string) {
+  try {
+    return ProjectRegistry.inspect(projectRoot);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeSearchIdentityString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 /** Search response envelope */

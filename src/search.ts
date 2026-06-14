@@ -41,6 +41,7 @@ export type {
   DocMeta,
   RankingContext,
   ResidentVectorMeta,
+  ResolveSearchWorkspaceIdentityInput,
   RrfHit,
   Scorer,
   ScorerResult,
@@ -66,6 +67,7 @@ export {
   groupByKind,
   inferSearchSemanticUsage,
   inferSearchVectorUsage,
+  resolveSearchWorkspaceIdentity,
   slimSearchResult,
 } from './service/search/SearchTypes.js';
 export { tokenize } from './service/search/tokenizer.js';

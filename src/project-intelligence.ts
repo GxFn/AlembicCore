@@ -23,6 +23,7 @@ import ProjectGraph from './core/ast/ProjectGraph.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from './core/discovery/index.js';
 import type { LanguageService as LanguageServiceType } from './shared/LanguageService.js';
 import LanguageService from './shared/LanguageService.js';
+import type { ProjectDescriptor } from './shared/ProjectScope.js';
 import { RESOURCES_DIR } from './shared/packageRoot.js';
 
 export * from './core/analysis/index.js';
@@ -214,6 +215,8 @@ export interface TryBuildProjectGraphOptions {
   timeoutMs?: number;
   maxFiles?: number;
   maxFileSizeBytes?: number;
+  projectScope?: ProjectDescriptor | string | null;
+  workspaceConfigProjectScope?: boolean;
   reloadAstPlugins?: boolean;
 }
 

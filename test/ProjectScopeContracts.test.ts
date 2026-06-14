@@ -7,6 +7,7 @@ import {
   createCanonicalSourceIdentity,
   createProjectDescriptor,
   createProjectScopeEndpointCapability,
+  createProjectScopeFromWorkspaceConfig,
   createProjectScopeRegistryDocument,
   createProjectScopeSourceRef,
   listProjectScopeFolders,
@@ -18,6 +19,7 @@ import {
   resolveProjectScopeForFolder,
   resolveProjectScopeRegistryFolder,
   resolveProjectScopeSourceRef,
+  resolveWorkspaceConfigProjectFolders,
   summarizeProjectScopeDescriptor,
 } from '../src/shared/index.js';
 import { auditRecipesForRescan } from '../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
@@ -116,6 +118,38 @@ describe('ProjectScope multi-root contracts', () => {
       supportsFolderRemove: false,
       supportsStandardStorage: false,
     });
+  });
+
+  it('derives default source folders from workspace repoNames without internal surfaces', () => {
+    const controlRoot = path.join('/workspace', 'AlembicWorkspace');
+    const config = {
+      repoNames: ['Alembic', 'AlembicCore', 'AlembicPlugin'],
+      repositories: [
+        { name: 'Alembic', mode: 'external', path: 'Alembic' },
+        { name: 'AlembicCore', mode: 'external', path: 'AlembicCore' },
+        { name: 'AlembicPlugin', mode: 'external', path: 'AlembicPlugin' },
+        { name: 'Test', mode: 'internal', path: 'Test' },
+      ],
+    };
+
+    const folders = resolveWorkspaceConfigProjectFolders(controlRoot, config);
+    const scope = createProjectScopeFromWorkspaceConfig(controlRoot, config, {
+      dataRoot: path.join('/ghost', 'scope-config'),
+      projectScopeId: 'scope-config',
+    });
+
+    expect(folders.map((folder) => folder.displayName)).toEqual([
+      'Alembic',
+      'AlembicCore',
+      'AlembicPlugin',
+    ]);
+    expect(folders.map((folder) => folder.displayName)).not.toContain('Test');
+    expect(scope?.folders.map((folder) => folder.path)).toEqual([
+      path.join(controlRoot, 'Alembic'),
+      path.join(controlRoot, 'AlembicCore'),
+      path.join(controlRoot, 'AlembicPlugin'),
+    ]);
+    expect(scope?.controlRoot.includedInFolders).toBe(false);
   });
 
   it('rejects controlRoot as a source folder and bans standard/project-root storage for new entries', () => {
