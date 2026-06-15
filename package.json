@@ -42,10 +42,6 @@
       "types": "./dist/guard.d.ts",
       "import": "./dist/guard.js"
     },
-    "./project-intelligence": {
-      "types": "./dist/project-intelligence.d.ts",
-      "import": "./dist/project-intelligence.js"
-    },
     "./project-context": {
       "types": "./dist/project-context.d.ts",
       "import": "./dist/project-context.js"
@@ -182,10 +178,6 @@
       "types": "./dist/service/candidate/index.d.ts",
       "import": "./dist/service/candidate/index.js"
     },
-    "./service/panorama": {
-      "types": "./dist/service/panorama/index.d.ts",
-      "import": "./dist/service/panorama/index.js"
-    },
     "./service/quality": {
       "types": "./dist/service/quality/index.d.ts",
       "import": "./dist/service/quality/index.js"
@@ -237,10 +229,6 @@
     "./workflows/capabilities/presentation": {
       "types": "./dist/workflows/capabilities/presentation/index.d.ts",
       "import": "./dist/workflows/capabilities/presentation/index.js"
-    },
-    "./workflows/capabilities/project-intelligence": {
-      "types": "./dist/workflows/capabilities/project-intelligence/index.d.ts",
-      "import": "./dist/workflows/capabilities/project-intelligence/index.js"
     }
   },
   "files": [

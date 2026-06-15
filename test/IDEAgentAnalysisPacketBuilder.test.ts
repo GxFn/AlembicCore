@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BootstrapSession,
-  buildIDEAgentAnalysisPacket,
   buildIDEAgentAnalysisPacketFromProjectContext,
-  buildIDEAgentAnalysisPacketFromSnapshot,
   buildMissionBriefing,
   buildProjectContextMissionBriefing,
   createIDEAgentAnalysisProgressSeed,
@@ -12,7 +10,6 @@ import {
   type DimensionDef,
 } from '../src/host-agent-workflows.js';
 import {
-  buildIDEAgentAnalysisPacket as buildPacketFromRoot,
   buildProjectContextMissionBriefing as buildProjectContextMissionBriefingFromRoot,
   buildIDEAgentAnalysisPacketFromProjectContext as buildProjectContextPacketFromRoot,
 } from '../src/index.js';
@@ -22,7 +19,10 @@ import {
   type ProjectContextResult,
 } from '../src/project-context.js';
 import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
-import { buildIDEAgentAnalysisPacketFromSnapshot as buildPacketFromProjectIntelligence } from '../src/workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
+import {
+  buildIDEAgentAnalysisPacket,
+  buildIDEAgentAnalysisPacketFromSnapshot,
+} from '../src/workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
 import { ProjectIntelligenceCapability } from '../src/workflows/capabilities/project-intelligence/ProjectIntelligenceCapability.js';
 
 const dimensions: DimensionDef[] = [
@@ -273,13 +273,22 @@ function makeProjectContextEnvelopes(): ProjectContextEnvelope<ProjectContextRes
 }
 
 describe('IDEAgentAnalysisPacketBuilder', () => {
-  it('is exported by stable public Core entrypoints', () => {
+  it('keeps snapshot packet builders internal while exposing ProjectContext public entrypoints', async () => {
+    const rootModule = (await import('../src/index.js')) as Record<string, unknown>;
+    const hostAgentModule = (await import('../src/host-agent-workflows.js')) as Record<
+      string,
+      unknown
+    >;
+
     expect(ProjectIntelligenceCapability.run).toBeInstanceOf(Function);
     expect(buildIDEAgentAnalysisPacket).toBeInstanceOf(Function);
-    expect(buildPacketFromRoot).toBeInstanceOf(Function);
+    expect(buildIDEAgentAnalysisPacketFromSnapshot).toBeInstanceOf(Function);
+    expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacketFromSnapshot')).toBe(false);
+    expect(Object.hasOwn(hostAgentModule, 'buildIDEAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(hostAgentModule, 'buildIDEAgentAnalysisPacketFromSnapshot')).toBe(false);
     expect(buildProjectContextPacketFromRoot).toBeInstanceOf(Function);
     expect(buildProjectContextMissionBriefingFromRoot).toBeInstanceOf(Function);
-    expect(buildPacketFromProjectIntelligence).toBeInstanceOf(Function);
   });
 
   it('builds deterministic packet units without leaking source bodies', () => {

@@ -57,6 +57,59 @@ export { NodeDiscoverer } from './NodeDiscoverer.js';
 // Re-exports
 export { ProjectDiscoverer } from './ProjectDiscoverer.js';
 export { PythonDiscoverer } from './PythonDiscoverer.js';
+export type {
+  CMakeLinkDep,
+  CMakeTarget,
+  ParsedCMakeProject,
+} from './parsers/CMakeParser.js';
+export { parseCMakeProject } from './parsers/CMakeParser.js';
+export type {
+  GradleDep,
+  GradleModule,
+  ParsedGradleProject,
+} from './parsers/GradleDslParser.js';
+export {
+  inferConventionRole,
+  isKmpBuildFile,
+  parseGradleProject,
+} from './parsers/GradleDslParser.js';
+export type {
+  FlutterPlugin,
+  NxProject,
+  ParsedFlutterPluginsDeps,
+  ParsedNxWorkspace,
+  ParsedReactNativeProject,
+} from './parsers/JsonConfigParser.js';
+export {
+  parseFlutterPluginsDeps,
+  parseNxWorkspace,
+  parseReactNativeProject,
+} from './parsers/JsonConfigParser.js';
+export type {
+  ParsedLayer,
+  ParsedModule,
+  ParsedModuleSpec,
+  ParsedProjectConfig,
+} from './parsers/RubyDslParser.js';
+export {
+  parseBoxfile,
+  parseModuleSpec,
+} from './parsers/RubyDslParser.js';
+export type {
+  LoadStatement,
+  ParsedBuildFile,
+  StarlarkTarget,
+} from './parsers/StarlarkParser.js';
+export {
+  parseStarlarkBuildFile,
+  RULE_TO_LANGUAGE,
+} from './parsers/StarlarkParser.js';
+export {
+  extractXcodeGenDependencyEdges,
+  parseMelosProject,
+  parseXcodeGenProject,
+  parseXcodeGenTarget,
+} from './parsers/YamlConfigParser.js';
 export { RustDiscoverer } from './RustDiscoverer.js';
 export {
   COMMON_SOURCE_SCAN_EXCLUDE_DIRS,

@@ -1,9 +1,31 @@
 export * from './evolution.js';
 export * from './KnowledgeWire.js';
-export * from './ProjectSnapshot.js';
-export * from './projectSnapshotBuilder.js';
+export type {
+  AstSummary,
+  BootstrapSessionShape,
+  CallGraphResult,
+  CodeEntityGraphResult,
+  DependencyEdge,
+  DependencyGraph,
+  DependencyNode,
+  DimensionDef,
+  DiscovererInfo,
+  EnhancementPackInfo,
+  ExistingRecipeInfo,
+  GuardAudit,
+  GuardAuditFileEntry,
+  GuardAuditSummary,
+  GuardViolation,
+  LanguageProfile,
+  LocalPackageModule,
+  MissionBriefingResult,
+  PanoramaResult,
+  PhaseReport,
+  ProjectMetrics,
+  SnapshotFile,
+  SnapshotTarget,
+} from './ProjectSnapshot.js';
 export * from './ReactiveEvolution.js';
-export * from './SnapshotViews.js';
 export type {
   BootstrapFile,
   DimensionCheckpointResult,

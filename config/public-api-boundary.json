@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "description": "AlembicCore public API boundary policy. Exact stable and provisional exports are intentional; wildcard exports are migration-only.",
   "expectedCounts": {
-    "stable-public": 18,
+    "stable-public": 17,
     "provisional-public": 10,
-    "transitional-internal": 31,
+    "transitional-internal": 29,
     "internal-only": 0,
     "forbidden": 0
   },
@@ -13,7 +13,7 @@
     "schemaVersion": 1,
     "description": "Wave 3A closeout inventory. Manual categories override consumer-derived categories; remaining consumed transitional/wildcard exports are consumer-replace-first, and remaining unconsumed exports are no-consumer-deprecate-candidate.",
     "maxCounts": {
-      "transitional-internal": 31,
+      "transitional-internal": 29,
       "wildcardExports": 7
     },
     "manualCategories": {
@@ -25,7 +25,6 @@
         "./domain/knowledge",
         "./infrastructure/database",
         "./repository",
-        "./service/panorama",
         "./workflows",
         "./workflows/capabilities",
         "./workflows/capabilities/host-agent",
@@ -33,7 +32,6 @@
         "./workflows/capabilities/planning/dimensions",
         "./workflows/capabilities/planning/knowledge",
         "./workflows/capabilities/presentation",
-        "./workflows/capabilities/project-intelligence",
         "./workflows/cold-start",
         "./workflows/knowledge-rescan",
         "./workflows/shared"
@@ -141,36 +139,32 @@
         },
         "@alembic/core/core/AstAnalyzer": {
           "decision": "consumer-ready-stable",
-          "targetFacade": "./project-intelligence",
+          "targetFacade": "./core",
           "symbols": [
             "analyzeFile",
             "analyzeSourceFile",
-            "isProjectAstAvailable",
             "parseToTree"
           ],
-          "reason": "Alembic benchmarking scripts that need file-level AST analysis use the stable project-intelligence facade; project-level context queries route through ./project-context."
+          "reason": "File-level AST analysis is a generic syntax utility and stays on ./core; project-level context queries route through ./project-context."
         },
         "@alembic/core/core/ast": {
           "decision": "consumer-ready-stable",
-          "targetFacade": "./project-intelligence",
+          "targetFacade": "./core/ast",
           "symbols": [
             "CORE_GRAMMAR_RESOURCE_FILES",
             "ensureProjectGrammarResources",
             "reloadProjectAstPlugins"
           ],
-          "reason": "Grammar resource and AST plugin reload contracts are available from the stable project-intelligence facade; project graph construction routes through ./project-context instead of the project-intelligence facade."
+          "reason": "Grammar resource and AST plugin reload contracts are generic AST support and stay on ./core/ast; project-information answers route through ./project-context."
         },
         "@alembic/core/core/discovery": {
           "decision": "consumer-ready-stable",
-          "targetFacade": "./project-intelligence",
+          "targetFacade": "./core/discovery",
           "symbols": [
             "getDiscovererRegistry",
-            "getProjectDiscovererRegistry",
-            "LanguageService",
-            "resetDiscovererRegistry",
-            "resetProjectDiscovererRegistry"
+            "resetDiscovererRegistry"
           ],
-          "reason": "Discovery registry and language detection contracts are exposed by the stable project-intelligence facade, so Alembic scripts can leave the transitional core/discovery path."
+          "reason": "Discovery registry contracts are generic project-shape support and stay on ./core/discovery; language detection is exposed by ./shared and project-information answers route through ./project-context."
         },
         "@alembic/core/core/enhancement": {
           "decision": "keep-transitional",
@@ -460,6 +454,24 @@
         "replacementFacade": "./project-context",
         "note": "Public project-information answers now route through ./project-context; source graph DTOs, repositories and services stay available only through Core internal implementation paths.",
         "scanEvidence": "PCU-4 AlembicCore pre/post import scan and public boundary tests; state-root evidence/target-pcu4-core-consumer-replacement-public-deletion-evidence-2026-06-15.md"
+      },
+      "./project-intelligence": {
+        "removedAt": "2026-06-15",
+        "replacementFacade": "./project-context",
+        "note": "Public project-information answers now route through ./project-context; generic AST, grammar and discovery utilities are exposed through ./core, ./core/ast, ./core/discovery and ./shared instead of a project-information facade.",
+        "scanEvidence": "PCI-1B retry consumer gate: npm run lint:consumer-core-imports passed; production rg over Alembic/lib, Alembic/bin and AlembicPlugin/lib found no retired Core project-information imports."
+      },
+      "./service/panorama": {
+        "removedAt": "2026-06-15",
+        "replacementFacade": "./project-context",
+        "note": "Panorama is no longer a public project-information query route; surviving module/map facts route through ./project-context while service/panorama implementation remains internal to Core.",
+        "scanEvidence": "PCI-1B retry consumer gate: npm run lint:consumer-core-imports passed; production rg over Alembic/lib, Alembic/bin and AlembicPlugin/lib found no @alembic/core/service/panorama imports."
+      },
+      "./workflows/capabilities/project-intelligence": {
+        "removedAt": "2026-06-15",
+        "replacementFacade": "./host-agent-workflows",
+        "note": "The old public project scan runner route is withdrawn; ProjectContext-backed host-agent producer contracts are exposed through ./host-agent-workflows and project facts route through ./project-context.",
+        "scanEvidence": "PCI-1B retry consumer gate: npm run lint:consumer-core-imports passed; production rg over Alembic/lib, Alembic/bin and AlembicPlugin/lib found no @alembic/core/workflows/capabilities/project-intelligence imports."
       },
       "./service/evolution": {
         "removedAt": "2026-06-12",
@@ -986,7 +998,6 @@
         "./domain/knowledge": "2026-09-12",
         "./infrastructure/database": "2026-09-12",
         "./repository": "2026-09-12",
-        "./service/panorama": "2026-09-12",
         "./workflows": "2026-09-12",
         "./workflows/capabilities": "2026-09-12",
         "./workflows/capabilities/host-agent": "2026-09-12",
@@ -994,7 +1005,6 @@
         "./workflows/capabilities/planning/dimensions": "2026-09-12",
         "./workflows/capabilities/planning/knowledge": "2026-09-12",
         "./workflows/capabilities/presentation": "2026-09-12",
-        "./workflows/capabilities/project-intelligence": "2026-09-12",
         "./workflows/cold-start": "2026-09-12",
         "./workflows/knowledge-rescan": "2026-09-12",
         "./workflows/shared": "2026-09-12"
@@ -1083,6 +1093,19 @@
             "transitional-internal": 31,
             "wildcardExports": 7
           }
+        },
+        {
+          "date": "2026-06-15",
+          "exports": 56,
+          "stable-public": 17,
+          "provisional-public": 10,
+          "transitional-internal": 29,
+          "wildcardExports": 7,
+          "maxCounts": {
+            "transitional-internal": 29,
+            "wildcardExports": 7
+          },
+          "note": "PCI-1B retry: retired public project-information routes ./project-intelligence, ./service/panorama, and ./workflows/capabilities/project-intelligence after consumer/import gates passed."
         }
       ]
     }
@@ -1101,7 +1124,6 @@
     "./logging",
     "./memory",
     "./project-context",
-    "./project-intelligence",
     "./repositories",
     "./search",
     "./vector",
@@ -1132,7 +1154,6 @@
     "./repository/bootstrap",
     "./repository/code",
     "./repository/sync",
-    "./service/panorama",
     "./workflows",
     "./workflows/capabilities",
     "./workflows/cold-start",
@@ -1142,7 +1163,6 @@
     "./workflows/capabilities/persistence",
     "./workflows/capabilities/planning/dimensions",
     "./workflows/capabilities/planning/knowledge",
-    "./workflows/capabilities/presentation",
-    "./workflows/capabilities/project-intelligence"
+    "./workflows/capabilities/presentation"
   ]
 }

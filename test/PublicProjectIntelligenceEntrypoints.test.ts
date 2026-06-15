@@ -1,22 +1,23 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ProjectContext } from '../src/project-context.js';
 import {
   analyzeSourceFile,
   CORE_GRAMMAR_RESOURCE_FILES,
   ensureProjectGrammarResources,
-  getDiscovererRegistry,
-  getProjectDiscovererRegistry,
-  isProjectAstAvailable,
-  LanguageService,
+  isParserReady,
   listCoreGrammarResources,
+} from '../src/core/ast/index.js';
+import {
+  getDiscovererRegistry,
   parseCMakeProject,
   parseGradleProject,
   resetDiscovererRegistry,
-  resetProjectDiscovererRegistry,
-} from '../src/project-intelligence.js';
+} from '../src/core/discovery/index.js';
+import { ProjectContext } from '../src/project-context.js';
+import LanguageService from '../src/shared/LanguageService.js';
 
-describe('stable project intelligence entrypoint', () => {
-  it('exposes language, grammar resource, and file-level AST contracts', async () => {
+describe('retired project intelligence public entrypoint', () => {
+  it('routes language, grammar resource, and file-level AST contracts through generic core/shared routes', async () => {
     const resources = listCoreGrammarResources();
     const grammarResult = await ensureProjectGrammarResources({ ts: 1, py: 1, swift: 1 });
     const summary = analyzeSourceFile(
@@ -38,23 +39,19 @@ describe('stable project intelligence entrypoint', () => {
       expect.arrayContaining(['typescript', 'python', 'swift'])
     );
     expect(grammarResult.reloaded).toBe(true);
-    expect(isProjectAstAvailable).toBeInstanceOf(Function);
+    expect(isParserReady).toBeInstanceOf(Function);
     expect(summary?.classes.some((item) => item.name === 'UserService')).toBe(true);
   });
 
-  it('exposes discovery parser contracts without returning project-information answers', () => {
+  it('keeps discovery parser contracts on core/discovery instead of the retired facade', () => {
     resetDiscovererRegistry();
-    const directRegistry = getDiscovererRegistry();
-    const directDiscovererIds = directRegistry.getAll().map((discoverer) => discoverer.id);
-    resetProjectDiscovererRegistry();
-    const registry = getProjectDiscovererRegistry();
+    const registry = getDiscovererRegistry();
     const discovererIds = registry.getAll().map((discoverer) => discoverer.id);
     const cmake = parseCMakeProject(
       'project(Core VERSION 1.0)\nadd_library(core STATIC src/a.cpp)'
     );
     const gradle = parseGradleProject('rootProject.name = "demo"\ninclude(":app", ":core")');
 
-    expect(directDiscovererIds).toEqual(discovererIds);
     expect(discovererIds).toEqual(expect.arrayContaining(['node', 'spm', 'generic']));
     expect(cmake.projectName).toBe('Core');
     expect(cmake.targets[0]?.name).toBe('core');
@@ -62,18 +59,31 @@ describe('stable project intelligence entrypoint', () => {
     expect(gradle.includedModules.map((module) => module.path)).toEqual([':app', ':core']);
   });
 
-  it('withdraws project-information outputs in favor of ProjectContext', async () => {
-    const projectIntelligenceModule = (await import('../src/project-intelligence.js')) as Record<
+  it('withdraws the public project-information routes in favor of ProjectContext', async () => {
+    const packageJson = JSON.parse(
+      fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+    ) as { exports: Record<string, unknown> };
+    const rootModule = (await import('../src/index.js')) as Record<string, unknown>;
+    const hostAgentModule = (await import('../src/host-agent-workflows.js')) as Record<
+      string,
+      unknown
+    >;
+    const capabilitiesModule = (await import('../src/workflows/capabilities/index.js')) as Record<
       string,
       unknown
     >;
 
     expect(ProjectContext.execute).toBeInstanceOf(Function);
-    expect(Object.hasOwn(projectIntelligenceModule, 'ProjectGraph')).toBe(false);
-    expect(Object.hasOwn(projectIntelligenceModule, 'tryBuildProjectGraph')).toBe(false);
-    expect(Object.hasOwn(projectIntelligenceModule, 'PanoramaService')).toBe(false);
-    expect(Object.hasOwn(projectIntelligenceModule, 'ProjectIntelligenceCapability')).toBe(false);
-    expect(Object.hasOwn(projectIntelligenceModule, 'buildProjectSnapshot')).toBe(false);
-    expect(Object.hasOwn(projectIntelligenceModule, 'runAllPhases')).toBe(false);
+    expect(packageJson.exports['./project-intelligence']).toBeUndefined();
+    expect(packageJson.exports['./service/panorama']).toBeUndefined();
+    expect(packageJson.exports['./workflows/capabilities/project-intelligence']).toBeUndefined();
+    expect(Object.hasOwn(rootModule, 'ProjectIntelligenceCapability')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacketFromSnapshot')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'ProjectSnapshot')).toBe(false);
+    expect(Object.hasOwn(hostAgentModule, 'buildIDEAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(hostAgentModule, 'buildIDEAgentAnalysisPacketFromSnapshot')).toBe(false);
+    expect(Object.hasOwn(capabilitiesModule, 'ProjectIntelligenceCapability')).toBe(false);
+    expect(Object.hasOwn(capabilitiesModule, 'runAllPhases')).toBe(false);
   });
 });

@@ -15,6 +15,8 @@ const requiredRootExports = [
   'createHostAgentWorkflowSession',
 ];
 const forbiddenRootExports = [
+  'buildIDEAgentAnalysisPacket',
+  'buildIDEAgentAnalysisPacketFromSnapshot',
   'ProjectIntelligenceCapability',
   'SourceGraphQueryService',
   'SourceGraphService',
@@ -22,6 +24,11 @@ const forbiddenRootExports = [
   'createSourceGraphValidationPlanResult',
 ];
 const forbiddenExportPaths = ['./source-graph'];
+forbiddenExportPaths.push(
+  './project-intelligence',
+  './service/panorama',
+  './workflows/capabilities/project-intelligence'
+);
 const requiredSubpathExports = {
   '@alembic/core/config': [
     'CANDIDATES_DIR',

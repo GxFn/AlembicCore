@@ -9,8 +9,6 @@
 export type {
   DimensionDef,
   MissionBriefingResult,
-  ProjectSnapshot,
-  ProjectSnapshotInput,
 } from './types/ProjectSnapshot.js';
 export * from './workflows/capabilities/host-agent/index.js';
 export type {
@@ -34,7 +32,31 @@ export * from './workflows/capabilities/persistence/index.js';
 export * from './workflows/capabilities/planning/dimensions/index.js';
 export * from './workflows/capabilities/planning/knowledge/index.js';
 export * from './workflows/capabilities/presentation/index.js';
-export * from './workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
+export {
+  buildIDEAgentAnalysisPacketFromProjectContext,
+  createIDEAgentAnalysisProgressSeed,
+  createIDEAgentAnalysisUnitKey,
+  createIDEAgentAnalysisUnitProgress,
+  type IDEAgentAnalysisDegradedReason,
+  type IDEAgentAnalysisPacket,
+  type IDEAgentAnalysisPacketBuilderOptions,
+  type IDEAgentAnalysisPacketProfile,
+  type IDEAgentAnalysisProgressSeed,
+  type IDEAgentAnalysisUnit,
+  type IDEAgentAnalysisUnitCheckpointLink,
+  type IDEAgentAnalysisUnitProgress,
+  type IDEAgentAnalysisUnitStatus,
+  type IDEAgentCompletionContract,
+  type IDEAgentDependencyHint,
+  type IDEAgentProjectContextPacketInput,
+  type IDEAgentSourceRef,
+  type IDEAgentSourceRefRole,
+  type IDEAgentStableUnitKey,
+  type IDEAgentStableUnitKeyInput,
+  type IDEAgentStructuralEvidenceKind,
+  type IDEAgentStructuralEvidenceRef,
+  type IDEAgentStructuralHints,
+} from './workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
 export * from './workflows/capabilities/RecipeSnapshotTypes.js';
 export * from './workflows/capabilities/WorkflowCleanupPolicies.js';
 export * from './workflows/cold-start/index.js';

@@ -19,8 +19,14 @@
  *   await loadPlugins();
  */
 
-import { registerLanguage } from '../AstAnalyzer.js';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { RESOURCES_DIR } from '../../shared/packageRoot.js';
+import { analyzeFile, registerLanguage } from '../AstAnalyzer.js';
+import { ensureGrammars, inferLanguagesFromStats, reloadPlugins } from './ensureGrammars.js';
 import { initParser, isParserReady, loadLanguageWasm } from './parserInit.js';
+
+export { getParserClass, isParserReady } from './parserInit.js';
 
 let _loaded = false;
 
@@ -31,6 +37,97 @@ let _loaded = false;
 export function _resetForReload() {
   _loaded = false;
 }
+
+export const CORE_GRAMMAR_RESOURCE_FILES = Object.freeze([
+  'tree-sitter-dart.wasm',
+  'tree-sitter-go.wasm',
+  'tree-sitter-java.wasm',
+  'tree-sitter-javascript.wasm',
+  'tree-sitter-kotlin.wasm',
+  'tree-sitter-objc.wasm',
+  'tree-sitter-python.wasm',
+  'tree-sitter-rust.wasm',
+  'tree-sitter-swift.wasm',
+  'tree-sitter-tsx.wasm',
+  'tree-sitter-typescript.wasm',
+] as const);
+
+export type CoreGrammarResourceFile = (typeof CORE_GRAMMAR_RESOURCE_FILES)[number];
+
+export interface GrammarResourceEntry {
+  file: CoreGrammarResourceFile;
+  path: string;
+  available: boolean;
+}
+
+export interface GrammarResourceLogger {
+  info?(message: string): void;
+  warn?(message: string): void;
+}
+
+export interface EnsureProjectGrammarResourcesOptions {
+  logger?: GrammarResourceLogger;
+  reload?: boolean;
+}
+
+export interface EnsureProjectGrammarResourcesResult {
+  languages: string[];
+  installed: string[];
+  skipped: string[];
+  failed: string[];
+  alreadyAvailable: string[];
+  reloaded: boolean;
+}
+
+export function resolveCoreGrammarResourcesDir(): string {
+  return join(RESOURCES_DIR, 'grammars');
+}
+
+export function listCoreGrammarResources(): GrammarResourceEntry[] {
+  const grammarDir = resolveCoreGrammarResourcesDir();
+  return CORE_GRAMMAR_RESOURCE_FILES.map((file) => {
+    const resourcePath = join(grammarDir, file);
+    return {
+      file,
+      path: resourcePath,
+      available: existsSync(resourcePath),
+    };
+  });
+}
+
+export async function ensureProjectGrammarResources(
+  detectedLanguagesOrStats: readonly string[] | Record<string, number>,
+  options: EnsureProjectGrammarResourcesOptions = {}
+): Promise<EnsureProjectGrammarResourcesResult> {
+  const languages = Array.isArray(detectedLanguagesOrStats)
+    ? [...detectedLanguagesOrStats]
+    : (inferLanguagesFromStats(detectedLanguagesOrStats) as string[]);
+  const result = await ensureGrammars(languages, { logger: options.logger });
+  const shouldReload = options.reload !== false && result.failed.length === 0;
+
+  if (shouldReload) {
+    await reloadPlugins();
+  }
+
+  return {
+    languages,
+    installed: result.installed,
+    skipped: result.skipped,
+    failed: result.failed,
+    alreadyAvailable: result.alreadyAvailable,
+    reloaded: shouldReload,
+  };
+}
+
+export function analyzeSourceFile(
+  content: string,
+  language: string,
+  options?: Parameters<typeof analyzeFile>[2]
+): Record<string, unknown> | null {
+  return analyzeFile(content, language, options) as Record<string, unknown> | null;
+}
+
+export { reloadPlugins as reloadProjectAstPlugins };
 
 /**
  * 语言注册表 — langId → { wasmFile, module, setGrammarFn, langId, tsxWasmFile?, setTsxGrammarFn? }

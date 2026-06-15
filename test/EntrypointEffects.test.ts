@@ -53,7 +53,7 @@ describe('Entrypoint effects (AD6 inflow/outflow audit)', () => {
         path.join(distRoot, 'search.js'),
         path.join(distRoot, 'guard.js'),
         path.join(distRoot, 'vector.js'),
-        path.join(distRoot, 'project-intelligence.js'),
+        path.join(distRoot, 'project-context.js'),
         path.join(distRoot, 'daemon/index.js'),
         path.join(distRoot, 'shared/index.js'),
       ]

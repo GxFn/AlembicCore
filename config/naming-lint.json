@@ -48,11 +48,6 @@
       "reason": "Named after its unit module src/shared/resolveProjectRoot.ts, a camelCase utility that stays camelCase permanently (SN0 §1 utilities row); Pascal-casing the test would break the named-after-unit principle (SN4a census judgment)."
     },
     {
-      "file": "src/project-intelligence.ts",
-      "owner": "AlembicCore window",
-      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./project-intelligence (export target). Barrel re-export, not a class-position straggler; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels (SN4 census)."
-    },
-    {
       "file": "src/project-context.ts",
       "owner": "AlembicCore window",
       "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./project-context (export target). Barrel re-export, not a class-position straggler; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels (SN4 census)."
