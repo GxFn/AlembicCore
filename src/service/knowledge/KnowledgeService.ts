@@ -32,6 +32,8 @@ interface EventBusLike {
 
 type AfterPublishHook = () => void | Promise<void>;
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 interface EdgeRepoLike {
   deleteOutgoing(fromId: string, fromType: string): Promise<number>;
   deleteByEntryId(entryId: string): Promise<number>;
@@ -198,7 +200,7 @@ export class KnowledgeService {
       const saved = await this.repository.create(entry);
 
       // 同步 relations → knowledge_edges
-      this._syncRelationsToGraph(saved.id, saved.relations);
+      await this._syncRelationsToGraph(saved.id, saved.relations);
 
       // 自动发现同域条目建立 related 边（best effort, 不阻塞）
       this._autoDiscoverRelations(saved.id, saved).catch((err) =>
@@ -404,7 +406,7 @@ export class KnowledgeService {
 
       // 若 relations 变更，同步到 knowledge_edges
       if (dbUpdates.relations) {
-        this._syncRelationsToGraph(id, data.relations);
+        await this._syncRelationsToGraph(id, data.relations);
       }
 
       await this._audit('update_knowledge', id, context.userId, {
@@ -1065,7 +1067,7 @@ export class KnowledgeService {
   }
 
   /** 将 relations 同步到 knowledge_edges 表 */
-  _syncRelationsToGraph(id: string, relations: unknown) {
+  async _syncRelationsToGraph(id: string, relations: unknown) {
     const gs = this._knowledgeGraphService;
     if (!gs) {
       return;
@@ -1073,7 +1075,7 @@ export class KnowledgeService {
 
     try {
       if (this._edgeRepo) {
-        this._edgeRepo.deleteOutgoing(id, 'knowledge');
+        await this._edgeRepo.deleteOutgoing(id, 'knowledge');
       }
 
       if (!relations || typeof relations !== 'object') {
@@ -1087,20 +1089,20 @@ export class KnowledgeService {
           : relations
       ) as Record<string, unknown[]>;
 
-      // UUID v4 格式：仅同步指向真实知识条目的边，过滤掉类名等非 UUID 目标
-      const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
       for (const [relType, targets] of Object.entries(relObj)) {
         if (!Array.isArray(targets)) {
           continue;
         }
         for (const t of targets) {
           const item = t as Record<string, unknown>;
-          const targetId =
+          const target =
             (item.target as string) || (item.id as string) || (typeof t === 'string' ? t : null);
+          const targetId = this._normalizeKnowledgeRelationTarget(target);
           if (targetId && UUID_RE.test(targetId)) {
-            gs.addEdge(id, 'knowledge', targetId, 'knowledge', relType, {
+            await gs.addEdge(id, 'knowledge', targetId, 'knowledge', relType, {
               weight: (item.weight as number) || 1.0,
+              description: typeof item.description === 'string' ? item.description : '',
+              source: 'knowledge-entry-relations',
             });
           }
         }
@@ -1111,6 +1113,20 @@ export class KnowledgeService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  _normalizeKnowledgeRelationTarget(target: unknown): string | null {
+    if (typeof target !== 'string') {
+      return null;
+    }
+    const trimmed = target.trim();
+    if (UUID_RE.test(trimmed)) {
+      return trimmed;
+    }
+    const knowledgeRef = trimmed.match(
+      /^knowledge:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+    );
+    return knowledgeRef?.[1] ?? null;
   }
 
   /** 删除所有关联边 */

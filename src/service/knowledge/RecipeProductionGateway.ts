@@ -14,6 +14,7 @@
  */
 
 import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
+import { RELATION_BUCKETS } from '../../domain/knowledge/values/Relations.js';
 import {
   type GatewaySource,
   getGatewaySourceLabel,
@@ -55,11 +56,22 @@ export interface CreateRecipeItem {
   scope?: string;
   complexity?: string;
   sourceFile?: string;
+  sourceCandidateId?: string;
   dimensionId?: string;
   knowledgeType?: string;
   language?: string;
   category?: string;
   source?: string;
+  moduleName?: string;
+  headerPaths?: string[];
+  includeHeaders?: boolean;
+  relations?: unknown;
+  agentNotes?: string | null;
+  aiInsight?: string | null;
+  localRelationKey?: string;
+  relationKey?: string;
+  stableRelationKey?: string;
+  metadata?: Record<string, unknown>;
   [key: string]: unknown;
 }
 
@@ -163,6 +175,17 @@ interface GatewayKnowledgeService {
     kind?: string;
     [key: string]: unknown;
   }>;
+  update(
+    id: string,
+    data: Record<string, unknown>,
+    context: { userId: string }
+  ): Promise<{
+    id: string;
+    title: string;
+    lifecycle: string;
+    kind?: string;
+    [key: string]: unknown;
+  }>;
   updateQuality(id: string, context: { userId: string }): Promise<unknown>;
 }
 
@@ -220,6 +243,15 @@ type GatewaySimilarityFn = (
   candidate: { title: string; summary: string; code: string },
   opts: { threshold: number; topK: number }
 ) => { file: string; title: string; similarity: number }[];
+
+type NormalizedRelationEntry = {
+  target: string;
+  description: string;
+  [key: string]: unknown;
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const RELATION_BUCKET_SET = new Set<string>(RELATION_BUCKETS);
 
 export interface GatewayDeps {
   knowledgeService: GatewayKnowledgeService;
@@ -515,6 +547,11 @@ export class RecipeProductionGateway {
     // ── Step 4: Create via KnowledgeService ──
     const createdIds: string[] = [];
     const createdByIndex = new Map<number, CreatedRecipeInfo>();
+    const createdByLocalRelationKey = new Map<string, CreatedRecipeInfo>();
+    const createdWorkItems: Array<{
+      item: CreateRecipeItem;
+      created: CreatedRecipeInfo;
+    }> = [];
 
     for (const { item, index } of submittableItems) {
       try {
@@ -531,6 +568,12 @@ export class RecipeProductionGateway {
         result.created.push(created);
         createdByIndex.set(index, created);
         createdIds.push(saved.id);
+        createdWorkItems.push({ item, created });
+
+        const localRelationKey = this.#getLocalRelationKey(item);
+        if (localRelationKey) {
+          createdByLocalRelationKey.set(localRelationKey, created);
+        }
 
         // Register to bootstrap session dedup cache
         options.bootstrapDedup?.register({
@@ -560,6 +603,36 @@ export class RecipeProductionGateway {
         this.#logger?.warn(
           `[Gateway] ✗ create failed for "${item.title}": ${err instanceof Error ? err.message : String(err)}`
         );
+      }
+    }
+
+    if (createdByLocalRelationKey.size > 0) {
+      for (const { item, created } of createdWorkItems) {
+        const resolved = this.#resolveBatchRelations(item.relations, createdByLocalRelationKey);
+        if (!resolved.changed) {
+          continue;
+        }
+        try {
+          const updated = await this.#knowledgeService.update(
+            created.id,
+            { relations: resolved.relations },
+            { userId }
+          );
+          created.raw = updated as Record<string, unknown>;
+        } catch (err: unknown) {
+          result.rejected.push({
+            index: created.index,
+            title: created.title,
+            reason: 'relation_resolution_failed',
+            errors: [err instanceof Error ? err.message : String(err)],
+            warnings: resolved.unresolvedTargets.map(
+              (target) => `unresolved batch relation target: ${target}`
+            ),
+          });
+          this.#logger?.warn(
+            `[Gateway] ✗ relation resolution failed for "${created.title}": ${err instanceof Error ? err.message : String(err)}`
+          );
+        }
       }
     }
 
@@ -640,6 +713,7 @@ export class RecipeProductionGateway {
     source: GatewaySource,
     _userId: string
   ): Record<string, unknown> {
+    const metadata = this.#readMetadata(item);
     const contentObj =
       item.content && typeof item.content === 'object'
         ? item.content
@@ -672,19 +746,205 @@ export class RecipeProductionGateway {
       coreCode: item.coreCode || (contentObj.pattern as string) || '',
       sourceRefs: item.sourceRefs || [],
       content: contentObj,
+      relations: item.relations ?? metadata.relations ?? {},
       reasoning,
       headers: item.headers || [],
+      headerPaths: item.headerPaths || this.#readStringArray(metadata.headerPaths),
+      moduleName: item.moduleName || this.#readString(metadata.moduleName) || '',
+      includeHeaders: item.includeHeaders ?? this.#readBoolean(metadata.includeHeaders) ?? false,
       usageGuide: item.usageGuide || '',
       scope: item.scope || '',
       complexity: item.complexity || '',
-      sourceFile: '',
-      agentNotes: (item as Record<string, unknown>).agentNotes || null,
-      aiInsight: reasoning.whyStandard || item.description || null,
+      sourceFile: item.sourceFile || this.#readString(metadata.sourceFile) || '',
+      sourceCandidateId:
+        item.sourceCandidateId || this.#readString(metadata.sourceCandidateId) || null,
+      agentNotes:
+        item.agentNotes ??
+        this.#readString(metadata.agentNotes) ??
+        this.#stringifyMetadataNotes(metadata),
+      aiInsight: item.aiInsight ?? reasoning.whyStandard ?? item.description ?? null,
     };
   }
 
   #sourceLabel(source: GatewaySource): string {
     return getGatewaySourceLabel(source);
+  }
+
+  #readMetadata(item: CreateRecipeItem): Record<string, unknown> {
+    return item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)
+      ? item.metadata
+      : {};
+  }
+
+  #readString(value: unknown): string | null {
+    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+  }
+
+  #readBoolean(value: unknown): boolean | null {
+    return typeof value === 'boolean' ? value : null;
+  }
+
+  #readStringArray(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+  }
+
+  #stringifyMetadataNotes(metadata: Record<string, unknown>): string | null {
+    if (Object.keys(metadata).length === 0) {
+      return null;
+    }
+    return JSON.stringify({ metadata });
+  }
+
+  #getLocalRelationKey(item: CreateRecipeItem): string | null {
+    const metadata = this.#readMetadata(item);
+    return (
+      this.#readString(item.localRelationKey) ||
+      this.#readString(item.relationKey) ||
+      this.#readString(item.stableRelationKey) ||
+      this.#readString(metadata.localRelationKey) ||
+      this.#readString(metadata.relationKey) ||
+      this.#readString(metadata.stableRelationKey)
+    );
+  }
+
+  #resolveBatchRelations(
+    relations: unknown,
+    createdByLocalRelationKey: Map<string, CreatedRecipeInfo>
+  ): {
+    changed: boolean;
+    relations: Record<string, NormalizedRelationEntry[]>;
+    unresolvedTargets: string[];
+  } {
+    const buckets = this.#normalizeRelationBuckets(relations);
+    const unresolvedTargets: string[] = [];
+    let changed = false;
+
+    for (const entries of Object.values(buckets)) {
+      for (const entry of entries) {
+        const resolved = this.#resolveRelationTarget(entry.target, createdByLocalRelationKey);
+        if (resolved.unresolvedLocalTarget) {
+          unresolvedTargets.push(entry.target);
+        }
+        if (resolved.target !== entry.target) {
+          entry.target = resolved.target;
+          changed = true;
+        }
+      }
+    }
+
+    return { changed, relations: buckets, unresolvedTargets };
+  }
+
+  #normalizeRelationBuckets(relations: unknown): Record<string, NormalizedRelationEntry[]> {
+    const buckets = Object.fromEntries(
+      RELATION_BUCKETS.map((bucket) => [bucket, [] as NormalizedRelationEntry[]])
+    );
+
+    if (!relations) {
+      return buckets;
+    }
+
+    if (Array.isArray(relations)) {
+      for (const relation of relations) {
+        const record = this.#asRecord(relation);
+        const bucket = this.#normalizeRelationBucket(record?.type);
+        const entry = this.#normalizeRelationEntry(relation);
+        if (bucket && entry) {
+          buckets[bucket].push(entry);
+        }
+      }
+      return buckets;
+    }
+
+    const record = this.#asRecord(relations);
+    if (!record) {
+      return buckets;
+    }
+
+    for (const [bucket, values] of Object.entries(record)) {
+      const normalizedBucket = this.#normalizeRelationBucket(bucket);
+      if (!normalizedBucket || !Array.isArray(values)) {
+        continue;
+      }
+      for (const value of values) {
+        const entry = this.#normalizeRelationEntry(value);
+        if (entry) {
+          buckets[normalizedBucket].push(entry);
+        }
+      }
+    }
+
+    return buckets;
+  }
+
+  #normalizeRelationBucket(value: unknown): string | null {
+    const bucket = typeof value === 'string' && value.trim() ? value.trim() : 'related';
+    return RELATION_BUCKET_SET.has(bucket) ? bucket : null;
+  }
+
+  #normalizeRelationEntry(value: unknown): NormalizedRelationEntry | null {
+    if (typeof value === 'string') {
+      const target = value.trim();
+      return target ? { target, description: '' } : null;
+    }
+
+    const record = this.#asRecord(value);
+    if (!record) {
+      return null;
+    }
+
+    const target = this.#readString(record.target) || this.#readString(record.id);
+    if (!target) {
+      return null;
+    }
+
+    return {
+      ...record,
+      target,
+      description: this.#readString(record.description) || '',
+    };
+  }
+
+  #resolveRelationTarget(
+    target: string,
+    createdByLocalRelationKey: Map<string, CreatedRecipeInfo>
+  ): { target: string; unresolvedLocalTarget: boolean } {
+    const directKnowledgeId = this.#normalizeKnowledgeTargetId(target);
+    if (directKnowledgeId) {
+      return { target: directKnowledgeId, unresolvedLocalTarget: false };
+    }
+
+    const localKey = this.#extractLocalRelationKey(target);
+    const created = createdByLocalRelationKey.get(localKey);
+    if (created) {
+      return { target: created.id, unresolvedLocalTarget: false };
+    }
+
+    return { target, unresolvedLocalTarget: localKey !== target };
+  }
+
+  #extractLocalRelationKey(target: string): string {
+    return target.replace(/^(?:local|relation|relation-key|batch):/i, '').trim();
+  }
+
+  #normalizeKnowledgeTargetId(target: string): string | null {
+    const trimmed = target.trim();
+    if (UUID_RE.test(trimmed)) {
+      return trimmed;
+    }
+    const match = trimmed.match(
+      /^knowledge:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i
+    );
+    return match?.[1] ?? null;
+  }
+
+  #asRecord(value: unknown): Record<string, unknown> | null {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : null;
   }
 
   async #createProposalFromAdvice(

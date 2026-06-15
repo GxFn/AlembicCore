@@ -59,6 +59,13 @@ function makeMockKnowledgeService() {
         return { id: this.id, title: this.title, lifecycle: this.lifecycle };
       },
     })),
+    update: vi.fn(async (id: string, data: Record<string, unknown>) => ({
+      id,
+      title: `updated-${id}`,
+      lifecycle: 'staging',
+      kind: 'pattern',
+      ...data,
+    })),
     updateQuality: vi.fn(async () => ({ score: 0.85 })),
   };
 }
@@ -536,6 +543,94 @@ describe('RecipeProductionGateway', () => {
       expect(data.category).toBe('Network');
       expect(data.trigger).toBe('@websocket-client-async');
       expect(data.sourceFile).toBe('');
+    });
+
+    it('应透传关系、模块和宿主分析元数据到 KnowledgeService', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      await gateway.create({
+        source: 'host-agent',
+        items: [
+          makeItem({
+            moduleName: 'Networking',
+            headerPaths: ['Sources/Networking/WebSocketClient.swift'],
+            includeHeaders: true,
+            sourceFile: 'Sources/Networking/WebSocketClient.swift',
+            sourceCandidateId: 'candidate-1',
+            relations: {
+              depends_on: [
+                {
+                  target: '00000000-0000-4000-a000-000000000001',
+                  description: 'uses transport abstraction',
+                },
+              ],
+            },
+            metadata: {
+              sourceGraphRef: 'source-graph:g1',
+              sourceSliceRef: 'source-slice:s1',
+            },
+          }),
+        ],
+        options: { skipSimilarityCheck: true, skipConsolidation: true },
+      });
+
+      const createCall = (deps.knowledgeService.create as ReturnType<typeof vi.fn>).mock.calls[0];
+      const data = createCall[0] as Record<string, unknown>;
+
+      expect(data.moduleName).toBe('Networking');
+      expect(data.headerPaths).toEqual(['Sources/Networking/WebSocketClient.swift']);
+      expect(data.includeHeaders).toBe(true);
+      expect(data.sourceFile).toBe('Sources/Networking/WebSocketClient.swift');
+      expect(data.sourceCandidateId).toBe('candidate-1');
+      expect(data.relations).toEqual({
+        depends_on: [
+          {
+            target: '00000000-0000-4000-a000-000000000001',
+            description: 'uses transport abstraction',
+          },
+        ],
+      });
+      expect(data.agentNotes).toBe(
+        JSON.stringify({
+          metadata: { sourceGraphRef: 'source-graph:g1', sourceSliceRef: 'source-slice:s1' },
+        })
+      );
+    });
+
+    it('应将同批稳定关系键解析为真实 Recipe UUID 后回写 relations', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      const result = await gateway.create({
+        source: 'host-agent',
+        items: [
+          makeItem({
+            title: 'Base network transport pattern',
+            trigger: '@base-network-transport',
+            localRelationKey: 'transport-base',
+          }),
+          makeItem({
+            title: 'WebSocket stream adapter pattern',
+            trigger: '@websocket-stream-adapter',
+            relations: {
+              depends_on: [{ target: 'local:transport-base', description: 'uses base transport' }],
+            },
+          }),
+        ],
+        options: { skipSimilarityCheck: true, skipConsolidation: true },
+      });
+
+      expect(result.created).toHaveLength(2);
+      expect(deps.knowledgeService.update).toHaveBeenCalledWith(
+        'recipe-2',
+        expect.objectContaining({
+          relations: expect.objectContaining({
+            depends_on: [{ target: 'recipe-1', description: 'uses base transport' }],
+          }),
+        }),
+        { userId: 'host-agent' }
+      );
     });
 
     it('应使用正确的 userId', async () => {

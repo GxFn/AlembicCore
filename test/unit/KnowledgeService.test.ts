@@ -290,6 +290,33 @@ describe('KnowledgeService', () => {
 
       expect(graph.addEdge).toHaveBeenCalledTimes(1);
     });
+
+    test('创建条目 — 同步 knowledge:UUID relation refs 到 graph', async () => {
+      const graph = mockGraphService();
+      const { service } = createService({ graphService: graph });
+      const targetId = '00000000-0000-4000-a000-000000000002';
+
+      await service.create(
+        makeWireData({
+          relations: {
+            depends_on: [{ target: `knowledge:${targetId}`, description: 'published target' }],
+          },
+        }),
+        { userId: 'user1' }
+      );
+
+      expect(graph.addEdge).toHaveBeenCalledWith(
+        expect.any(String),
+        'knowledge',
+        targetId,
+        'knowledge',
+        'depends_on',
+        expect.objectContaining({
+          description: 'published target',
+          source: 'knowledge-entry-relations',
+        })
+      );
+    });
   });
 
   /* ─── get ─── */
