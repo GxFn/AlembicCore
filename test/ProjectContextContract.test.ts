@@ -34,8 +34,12 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       import: './dist/project-context.js',
       types: './dist/project-context.d.ts',
     });
-    expect(Object.keys(publicModule)).toEqual(['ProjectContext']);
+    expect(Object.keys(publicModule).sort()).toEqual([
+      'ProjectContext',
+      'buildProjectContextPresenterInput',
+    ]);
     expect(ProjectContext.execute).toBeInstanceOf(Function);
+    expect(publicModule.buildProjectContextPresenterInput).toBeInstanceOf(Function);
   });
 
   it('keeps public request kinds exact and ordered for deterministic dispatch', () => {

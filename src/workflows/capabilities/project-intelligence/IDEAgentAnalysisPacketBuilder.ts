@@ -1,4 +1,11 @@
 import { isAbsolute, relative } from 'node:path';
+import {
+  buildProjectContextPresenterInput,
+  type ProjectContextEnvelope,
+  type ProjectContextPresenterInput,
+  type ProjectContextRef,
+  type ProjectContextResult,
+} from '../../../domain/project-context/index.js';
 import { computeContentHash } from '../../../shared/contentHash.js';
 import type { CanonicalSourceIdentity } from '../../../shared/ProjectScope.js';
 import type {
@@ -29,6 +36,7 @@ export type IDEAgentSourceRefRole =
   | 'guard'
   | 'example'
   | 'module'
+  | 'project-context'
   | 'symbol';
 
 export type IDEAgentStructuralEvidenceKind =
@@ -39,7 +47,8 @@ export type IDEAgentStructuralEvidenceKind =
   | 'panorama'
   | 'target'
   | 'module'
-  | 'file';
+  | 'file'
+  | 'project-context';
 
 export type IDEAgentAnalysisDegradedReason =
   | 'ast-unavailable'
@@ -49,6 +58,7 @@ export type IDEAgentAnalysisDegradedReason =
   | 'depgraph-unavailable'
   | 'guard-unavailable'
   | 'panorama-unavailable'
+  | 'project-context-unavailable'
   | 'source-path-compressed'
   | 'empty-read-set';
 
@@ -114,6 +124,7 @@ export interface IDEAgentStructuralHints {
   dataFlowHints?: string[];
   guardFindings?: string[];
   panorama?: string[];
+  projectContext?: string[];
   aliases?: string[];
 }
 
@@ -201,7 +212,7 @@ export interface IDEAgentAnalysisPacket {
   meta: {
     compressionIndependent: true;
     builder: 'IDEAgentAnalysisPacketBuilder';
-    source: 'project-intelligence-result' | 'project-snapshot';
+    source: 'project-context' | 'project-intelligence-result' | 'project-snapshot';
   };
 }
 
@@ -214,6 +225,14 @@ export interface IDEAgentAnalysisPacketBuilderOptions {
 
 export interface IDEAgentAnalysisPacketBuilderInput {
   result: ProjectAnalysisResult | ProjectSnapshot;
+  options?: IDEAgentAnalysisPacketBuilderOptions;
+}
+
+export interface IDEAgentProjectContextPacketInput {
+  projectContext:
+    | ProjectContextPresenterInput
+    | readonly ProjectContextEnvelope<ProjectContextResult>[];
+  dimensions?: readonly DimensionDef[];
   options?: IDEAgentAnalysisPacketBuilderOptions;
 }
 
@@ -329,6 +348,95 @@ export function buildIDEAgentAnalysisPacketFromSnapshot(
       compressionIndependent: true,
       builder: 'IDEAgentAnalysisPacketBuilder',
       source: options.source ?? 'project-snapshot',
+    },
+  };
+}
+
+export function buildIDEAgentAnalysisPacketFromProjectContext({
+  projectContext,
+  dimensions = [],
+  options = {},
+}: IDEAgentProjectContextPacketInput): IDEAgentAnalysisPacket {
+  const presenterInput = normalizeProjectContextPresenterInput(projectContext);
+  const projectRoot = options.projectRoot ?? presenterInput.project.projectRoot;
+  const profile = options.profile ?? 'cold-start';
+  const generatedAt = options.generatedAt ?? new Date().toISOString();
+  const maxUnits = Math.max(1, options.maxUnits ?? DEFAULT_MAX_UNITS);
+  const globalDegraded = inferProjectContextDegraded(presenterInput);
+  const globalWarnings = inferProjectContextWarnings(presenterInput, globalDegraded);
+  const candidates = collectProjectContextCandidates(presenterInput);
+  const packetDimensions = dimensions.length
+    ? [...dimensions]
+    : [{ id: 'project-overview', label: 'Project Overview' }];
+  const totalUnits = packetDimensions.length;
+  const selectedDimensions = packetDimensions.slice(0, maxUnits);
+  const units = selectedDimensions.map((dimension, index) =>
+    buildProjectContextAnalysisUnit({
+      presenterInput,
+      dimension,
+      index,
+      candidates,
+      globalDegraded,
+      globalWarnings,
+    })
+  );
+  const sourceRefs = dedupeSourceRefs(units.flatMap((unit) => unit.sourceRefs));
+  const requiredReadSet = sortUnique(units.flatMap((unit) => unit.requiredReadSet));
+  const structuralEvidenceRefs = dedupeEvidenceRefs(
+    units.flatMap((unit) => unit.structuralEvidenceRefs)
+  );
+  const packetIdentity = {
+    profile,
+    projectRoot,
+    dimensions: units.map((unit) => unit.dimensionId),
+    requiredReadSet,
+    structuralEvidenceRefs: structuralEvidenceRefs.map((ref) => ref.ref),
+    source: 'project-context',
+  };
+  const packetId = `ide_packet_${stableHash(packetIdentity)}`;
+  const progressSeed = createIDEAgentAnalysisProgressSeed({ packetId, units });
+
+  return {
+    packetId,
+    projectRootHash: stableHash(projectRoot),
+    generatedAt,
+    profile,
+    projectSummary: {
+      primaryLanguage: inferProjectContextPrimaryLanguage(presenterInput),
+      fileCount: presenterInput.files.length,
+      targetCount: presenterInput.repo?.targets.length ?? 0,
+      materialization: buildProjectContextMaterializationSummary(presenterInput),
+      degraded: globalDegraded,
+      warnings: globalWarnings,
+    },
+    units,
+    sourceRefs,
+    requiredReadSet,
+    structuralEvidenceRefs,
+    retrievalHints: {
+      structureTools: ['ProjectContext.execute', 'alembic_project_matrix'],
+      callContextAvailable: false,
+      graphAvailable: Boolean(
+        presenterInput.map ||
+          presenterInput.fileFlows.length ||
+          presenterInput.moduleLayers.length ||
+          presenterInput.modules.length
+      ),
+      stableKeyFormat: STABLE_KEY_FORMAT,
+      aliasPolicy: 'shortAlias is display/search only and must not be used as the primary key',
+    },
+    budget: {
+      includedUnits: units.length,
+      totalUnits,
+      ...(totalUnits > units.length
+        ? { omittedReason: `maxUnits=${maxUnits} limited packet projection` }
+        : {}),
+    },
+    progressSeed,
+    meta: {
+      compressionIndependent: true,
+      builder: 'IDEAgentAnalysisPacketBuilder',
+      source: 'project-context',
     },
   };
 }
@@ -530,6 +638,401 @@ function buildAnalysisUnit({
     degraded,
     warnings,
   };
+}
+
+function buildProjectContextAnalysisUnit({
+  presenterInput,
+  dimension,
+  index,
+  candidates,
+  globalDegraded,
+  globalWarnings,
+}: {
+  presenterInput: ProjectContextPresenterInput;
+  dimension: DimensionDef;
+  index: number;
+  candidates: readonly SourceRefCandidate[];
+  globalDegraded: readonly IDEAgentAnalysisDegradedReason[];
+  globalWarnings: readonly string[];
+}): IDEAgentAnalysisUnit {
+  const selected = selectProjectContextCandidatesForDimension(dimension.id, candidates).slice(0, 8);
+  const fallbackSelected = selected.length ? selected : candidates.slice(0, 8);
+  const sourceRefs = dedupeSourceRefs(fallbackSelected.map((candidate) => candidate.sourceRef));
+  const requiredReadSet = sortUnique(sourceRefs.map(readableSourcePath));
+  const structuralEvidenceRefs = dedupeEvidenceRefs(
+    fallbackSelected.map((candidate) => candidate.evidence)
+  );
+  const representative = sourceRefs[0] ?? createProjectContextFallbackSourceRef(presenterInput);
+  const key = createIDEAgentAnalysisUnitKey({
+    sourceRef: sourceRefKey(representative),
+    projectScopeId: representative.projectScopeId,
+    folderId: representative.folderId,
+    qualifiedPath: representative.qualifiedPath,
+    fqn: representative.fqn,
+    entityType: representative.entityType ?? 'project-context',
+    line: representative.line,
+    symbol: representative.symbol,
+  });
+  const degraded = dedupeDegraded([
+    ...globalDegraded,
+    ...(requiredReadSet.length === 0 ? ['empty-read-set' as const] : []),
+  ]);
+  const warnings = [
+    ...globalWarnings,
+    ...(requiredReadSet.length === 0
+      ? [`${dimension.id}: no ProjectContext source refs could be projected`]
+      : []),
+  ];
+  const priority = Math.max(1, 100 - index * 5 - degraded.length * 3);
+  const structuralHints = buildProjectContextStructuralHints(
+    presenterInput,
+    dimension.id,
+    fallbackSelected
+  );
+  const completionContract: IDEAgentCompletionContract = {
+    minDistinctFiles: Math.min(2, Math.max(1, requiredReadSet.length)),
+    mustReferenceAssignedSources: true,
+    expectedEvidence: expectedEvidenceForDimension(dimension.id, structuralEvidenceRefs),
+    allowNoRecipeWithReason: true,
+  };
+
+  return {
+    unitId: `ide_unit_${stableHash({
+      dimensionId: dimension.id,
+      key: key.key,
+      requiredReadSet,
+      evidenceRefs: structuralEvidenceRefs.map((ref) => ref.ref),
+      source: 'project-context',
+    })}`,
+    key,
+    dimensionId: dimension.id,
+    priority,
+    reason: buildUnitReason(dimension, fallbackSelected, degraded),
+    sourceRefs,
+    requiredReadSet,
+    structuralEvidenceRefs,
+    structuralHints,
+    completionContract,
+    degraded,
+    warnings,
+  };
+}
+
+function normalizeProjectContextPresenterInput(
+  input: ProjectContextPresenterInput | readonly ProjectContextEnvelope<ProjectContextResult>[]
+): ProjectContextPresenterInput {
+  return 'project' in input ? input : buildProjectContextPresenterInput(input);
+}
+
+function collectProjectContextCandidates(
+  presenterInput: ProjectContextPresenterInput
+): SourceRefCandidate[] {
+  const fileCandidates = presenterInput.files.flatMap((file) => {
+    const ref = sourceRefFromProjectContextFile(file);
+    return ref ? [makeProjectContextCandidate(ref, file.ref, `file:${file.filePath}`, 70)] : [];
+  });
+  const refCandidates = presenterInput.refs.flatMap((ref) => {
+    const sourceRef = sourceRefFromProjectContextRef(ref);
+    return sourceRef
+      ? [makeProjectContextCandidate(sourceRef, ref, `ref:${ref.id}`, scoreProjectContextRef(ref))]
+      : [];
+  });
+
+  return [...fileCandidates, ...refCandidates].sort(
+    (a, b) =>
+      b.score - a.score ||
+      readableSourcePath(a.sourceRef).localeCompare(readableSourcePath(b.sourceRef)) ||
+      (a.sourceRef.symbol ?? '').localeCompare(b.sourceRef.symbol ?? '')
+  );
+}
+
+function sourceRefFromProjectContextFile(file: {
+  filePath: string;
+  repoId?: string;
+  language?: string;
+  ref?: ProjectContextRef;
+}): IDEAgentSourceRef | null {
+  return makeProjectContextSourceRef({
+    path: file.filePath,
+    repoId: file.repoId,
+    ref: file.ref,
+    symbol: file.ref?.label,
+    entityType: 'file',
+    role: 'entry',
+    displayName: file.filePath,
+  });
+}
+
+function sourceRefFromProjectContextRef(ref: ProjectContextRef): IDEAgentSourceRef | null {
+  const pathValue =
+    ref.scope.filePath ??
+    metadataString(ref, 'filePath') ??
+    metadataString(ref, 'path') ??
+    ref.scope.sourceFolder;
+  return makeProjectContextSourceRef({
+    path: pathValue,
+    repoId: ref.scope.repoId,
+    ref,
+    line: ref.scope.range?.startLine,
+    symbol: ref.label ?? metadataString(ref, 'symbol') ?? metadataString(ref, 'name'),
+    fqn:
+      pathValue && ref.label
+        ? `${pathValue}::${ref.label}`
+        : (metadataString(ref, 'qualifiedName') ?? undefined),
+    entityType: ref.kind,
+    role: projectContextRefRole(ref.kind),
+    displayName: ref.label ?? ref.id,
+  });
+}
+
+function makeProjectContextSourceRef({
+  path,
+  repoId,
+  ref,
+  line,
+  symbol,
+  fqn,
+  entityType,
+  role,
+  displayName,
+}: {
+  path?: string;
+  repoId?: string;
+  ref?: ProjectContextRef;
+  line?: number;
+  symbol?: string;
+  fqn?: string;
+  entityType: string;
+  role: IDEAgentSourceRefRole;
+  displayName?: string;
+}): IDEAgentSourceRef | null {
+  if (!path?.trim()) {
+    return null;
+  }
+  const normalizedPath = normalizeComparablePath(path);
+  const qualifiedPath = repoId ? `${repoId}/${normalizedPath}` : undefined;
+  const alias = createShortAlias({ fqn, symbol, sourceRef: normalizedPath });
+  return {
+    path: normalizedPath,
+    ...(repoId ? { folderId: repoId, qualifiedPath } : {}),
+    ...(ref?.scope.sourceFolder ? { folderRelativeRoot: ref.scope.sourceFolder } : {}),
+    ...(typeof line === 'number' ? { line } : {}),
+    ...(symbol ? { symbol } : {}),
+    ...(fqn ? { fqn: normalizeComparablePath(fqn) } : {}),
+    entityType,
+    role,
+    ...(displayName ? { displayName } : {}),
+    ...(alias ? { alias } : {}),
+  };
+}
+
+function makeProjectContextCandidate(
+  sourceRef: IDEAgentSourceRef,
+  ref: ProjectContextRef | undefined,
+  identity: string,
+  score: number
+): SourceRefCandidate {
+  return {
+    sourceRef,
+    evidence: {
+      kind: 'project-context',
+      ref: `project-context:${ref?.id ?? stableHash(identity)}`,
+      summary: `${ref?.kind ?? 'file'}:${describeSourceRef(sourceRef)}`,
+      sourceRefs: [sourceRef],
+    },
+    score,
+  };
+}
+
+function scoreProjectContextRef(ref: ProjectContextRef): number {
+  switch (ref.kind) {
+    case 'source-slice':
+    case 'anchor-range':
+    case 'symbol':
+      return 96;
+    case 'file-symbol':
+    case 'file-flow':
+      return 92;
+    case 'file':
+      return 88;
+    case 'module':
+    case 'module-layer':
+      return 82;
+    case 'map':
+    case 'repo':
+      return 76;
+    default:
+      return 60;
+  }
+}
+
+function projectContextRefRole(kind: ProjectContextRef['kind']): IDEAgentSourceRefRole {
+  switch (kind) {
+    case 'file-flow':
+    case 'relation-site':
+      return 'dependency';
+    case 'symbol':
+    case 'file-symbol':
+      return 'symbol';
+    case 'module':
+    case 'module-layer':
+      return 'module';
+    case 'source-slice':
+    case 'anchor-range':
+      return 'project-context';
+    default:
+      return 'entry';
+  }
+}
+
+function selectProjectContextCandidatesForDimension(
+  dimensionId: string,
+  candidates: readonly SourceRefCandidate[]
+): SourceRefCandidate[] {
+  const id = dimensionId.toLowerCase();
+  const preferredKinds =
+    id.includes('flow') || id.includes('event') || id.includes('data')
+      ? new Set<ProjectContextRef['kind']>(['file-flow', 'relation-site', 'source-slice'])
+      : id.includes('architecture') || id.includes('module')
+        ? new Set<ProjectContextRef['kind']>(['map', 'module', 'module-layer', 'file'])
+        : id.includes('symbol') || id.includes('api') || id.includes('surface')
+          ? new Set<ProjectContextRef['kind']>(['file-symbol', 'symbol', 'source-slice'])
+          : new Set<ProjectContextRef['kind']>();
+  if (preferredKinds.size === 0) {
+    return candidates.slice(0, 12);
+  }
+  const preferred = candidates.filter((candidate) => {
+    const refKind = candidate.sourceRef.entityType as ProjectContextRef['kind'] | undefined;
+    return refKind ? preferredKinds.has(refKind) : false;
+  });
+  return (preferred.length ? preferred : candidates).slice(0, 12);
+}
+
+function buildProjectContextStructuralHints(
+  presenterInput: ProjectContextPresenterInput,
+  dimensionId: string,
+  candidates: readonly SourceRefCandidate[]
+): IDEAgentStructuralHints {
+  const dependencyHints = [
+    ...(presenterInput.map?.majorFlows ?? []).slice(0, 8).map((flow) => ({
+      from: flow.refs[0]?.label ?? flow.refs[0]?.id ?? 'project-context',
+      to: flow.refs[1]?.label ?? flow.refs[1]?.id ?? 'project-context',
+      relation: flow.summary,
+    })),
+    ...presenterInput.fileFlows.slice(0, 4).flatMap((flow) =>
+      [...flow.imports, ...flow.callees, ...flow.outflow].slice(0, 4).map((relation) => ({
+        from:
+          relation.from?.label ??
+          relation.fromRef?.label ??
+          relation.filePath ??
+          flow.file.filePath,
+        to: relation.to?.label ?? relation.toRef?.label ?? relation.label ?? flow.file.filePath,
+        relation: relation.kind,
+      }))
+    ),
+  ];
+  const projectContextHints = sortUnique([
+    ...(presenterInput.repo?.languages.map(
+      (language) =>
+        `${language.language}${language.fileCount ? ` files=${language.fileCount}` : ''}`
+    ) ?? []),
+    ...(presenterInput.repo?.entrypoints.map(
+      (entrypoint) => `${entrypoint.kind}:${entrypoint.name}`
+    ) ?? []),
+    ...(presenterInput.map?.modules.map((module) => `module:${module.name}`) ?? []),
+    ...(presenterInput.map?.layers.map((layer) => `layer:${layer.name}`) ?? []),
+    ...presenterInput.unavailable.map((item) => `${item.queryLevel} unavailable: ${item.reason}`),
+  ]).slice(0, 12);
+  const aliases = sortUnique(
+    candidates.flatMap((candidate) => candidate.sourceRef.alias ?? candidate.sourceRef.symbol ?? [])
+  ).slice(0, 8);
+  const dataFlowHints = dimensionId.toLowerCase().includes('flow')
+    ? presenterInput.fileFlows
+        .slice(0, 8)
+        .map(
+          (flow) =>
+            `${flow.file.filePath}: imports=${flow.imports.length} callers=${flow.callers.length} callees=${flow.callees.length}`
+        )
+    : [];
+
+  return {
+    ...(dependencyHints.length ? { dependencies: dependencyHints.slice(0, 8) } : {}),
+    ...(dataFlowHints.length ? { dataFlowHints } : {}),
+    ...(projectContextHints.length ? { projectContext: projectContextHints } : {}),
+    ...(aliases.length ? { aliases } : {}),
+  };
+}
+
+function createProjectContextFallbackSourceRef(
+  presenterInput: ProjectContextPresenterInput
+): IDEAgentSourceRef {
+  const firstFile = presenterInput.files[0];
+  return {
+    path: firstFile?.filePath ?? (presenterInput.project.projectRoot || 'project'),
+    entityType: 'project-context',
+    role: 'project-context',
+    displayName: presenterInput.project.displayName ?? 'ProjectContext',
+    alias: presenterInput.project.displayName ?? 'ProjectContext',
+  };
+}
+
+function inferProjectContextPrimaryLanguage(input: ProjectContextPresenterInput): string {
+  const repoLanguage = input.repo?.languages[0]?.language;
+  if (repoLanguage) {
+    return repoLanguage;
+  }
+  const counts = new Map<string, number>();
+  for (const file of input.files) {
+    if (file.language) {
+      counts.set(file.language, (counts.get(file.language) ?? 0) + 1);
+    }
+  }
+  return (
+    [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ??
+    'unknown'
+  );
+}
+
+function buildProjectContextMaterializationSummary(
+  input: ProjectContextPresenterInput
+): Record<string, boolean | number | string> {
+  return {
+    projectContext: true,
+    space: Boolean(input.space),
+    repo: Boolean(input.repo),
+    map: Boolean(input.map),
+    modules: input.modules.length,
+    moduleLayers: input.moduleLayers.length,
+    fileFlows: input.fileFlows.length,
+    fileSymbols: input.fileSymbols.length,
+    sourceSlices: input.sourceSlices.length,
+    anchorRanges: input.anchorRanges.length,
+    unavailable: input.unavailable.length,
+  };
+}
+
+function inferProjectContextDegraded(
+  input: ProjectContextPresenterInput
+): IDEAgentAnalysisDegradedReason[] {
+  return input.unavailable.length || input.warnings.some((warning) => warning.severity === 'error')
+    ? ['project-context-unavailable']
+    : [];
+}
+
+function inferProjectContextWarnings(
+  input: ProjectContextPresenterInput,
+  degraded: readonly IDEAgentAnalysisDegradedReason[]
+): string[] {
+  return sortUnique([
+    ...input.warnings.map((warning) => `${warning.queryLevel}:${warning.code}: ${warning.message}`),
+    ...input.unavailable.map((item) => `${item.queryLevel} unavailable: ${item.reason}`),
+    ...degraded.map((reason) => `IDE analysis packet degraded: ${reason}`),
+  ]);
+}
+
+function metadataString(ref: ProjectContextRef, key: string): string | undefined {
+  const value = ref.metadata?.[key];
+  return typeof value === 'string' ? value : undefined;
 }
 
 function collectSourceRefCandidates(snapshot: ProjectSnapshot): SourceRefCandidate[] {

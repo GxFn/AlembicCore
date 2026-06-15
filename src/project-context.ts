@@ -10,6 +10,9 @@ export type {
   ProjectContextAnchor,
   ProjectContextEnvelope,
   ProjectContextLevel,
+  ProjectContextPresenterInput,
+  ProjectContextPresenterUnavailable,
+  ProjectContextPresenterWarning,
   ProjectContextProject,
   ProjectContextQueryError,
   ProjectContextQueryErrorCode,
@@ -25,4 +28,5 @@ export type {
   SourceSliceContext,
   SpaceContext,
 } from './domain/project-context/index.js';
+export { buildProjectContextPresenterInput } from './domain/project-context/index.js';
 export { ProjectContext } from './service/project-context/ProjectContextService.js';

@@ -2,11 +2,13 @@ export * from './core/index.js';
 export * from './daemon/index.js';
 export * from './domain/index.js';
 export {
+  buildProjectContextMissionBriefing,
   createHostAgentWorkflowSession,
   type HostAgentMissionBriefingInput,
   type HostAgentMissionBriefingResult,
   type HostAgentMissionSessionContainer,
   type HostAgentMissionWorkflowSession,
+  type ProjectContextMissionBriefingInput,
 } from './host-agent-workflows.js';
 export * from './infrastructure/index.js';
 // 阶段 14：根入口只暴露外层收敛需要的稳定契约，避免把内部重复类型通过 export * 撞到一起。
@@ -32,6 +34,7 @@ export {
 } from './shared/OutputBudget.js';
 export {
   buildIDEAgentAnalysisPacket,
+  buildIDEAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromSnapshot,
   createIDEAgentAnalysisProgressSeed,
   createIDEAgentAnalysisUnitKey,
@@ -48,6 +51,7 @@ export {
   type IDEAgentAnalysisUnitStatus,
   type IDEAgentCompletionContract,
   type IDEAgentDependencyHint,
+  type IDEAgentProjectContextPacketInput,
   type IDEAgentSourceRef,
   type IDEAgentSourceRefRole,
   type IDEAgentStableUnitKey,

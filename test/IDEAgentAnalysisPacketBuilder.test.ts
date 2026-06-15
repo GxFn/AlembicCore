@@ -3,13 +3,24 @@ import { describe, expect, it } from 'vitest';
 import {
   BootstrapSession,
   buildIDEAgentAnalysisPacket,
+  buildIDEAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromSnapshot,
   buildMissionBriefing,
+  buildProjectContextMissionBriefing,
   createIDEAgentAnalysisProgressSeed,
   createIDEAgentAnalysisUnitKey,
   type DimensionDef,
 } from '../src/host-agent-workflows.js';
-import { buildIDEAgentAnalysisPacket as buildPacketFromRoot } from '../src/index.js';
+import {
+  buildIDEAgentAnalysisPacket as buildPacketFromRoot,
+  buildProjectContextMissionBriefing as buildProjectContextMissionBriefingFromRoot,
+  buildIDEAgentAnalysisPacketFromProjectContext as buildProjectContextPacketFromRoot,
+} from '../src/index.js';
+import {
+  buildProjectContextPresenterInput,
+  type ProjectContextEnvelope,
+  type ProjectContextResult,
+} from '../src/project-context.js';
 import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
 import { buildIDEAgentAnalysisPacketFromSnapshot as buildPacketFromProjectIntelligence } from '../src/workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
 import { ProjectIntelligenceCapability } from '../src/workflows/capabilities/project-intelligence/ProjectIntelligenceCapability.js';
@@ -113,11 +124,161 @@ function makeSnapshot(overrides: Partial<Parameters<typeof buildProjectSnapshot>
   });
 }
 
+function makeProjectContextEnvelopes(): ProjectContextEnvelope<ProjectContextResult>[] {
+  const project = {
+    projectRoot: '/fixture',
+    displayName: 'Fixture Project',
+  };
+  const fileRef = {
+    id: 'pc:file:src/UserService.ts',
+    kind: 'file' as const,
+    label: 'UserService.ts',
+    scope: { projectRoot: project.projectRoot, filePath: 'src/UserService.ts', repoId: 'core' },
+  };
+  const symbolRef = {
+    id: 'pc:symbol:UserService',
+    kind: 'symbol' as const,
+    label: 'UserService',
+    parentRef: fileRef.id,
+    scope: {
+      projectRoot: project.projectRoot,
+      filePath: 'src/UserService.ts',
+      range: { startLine: 1, endLine: 8 },
+      repoId: 'core',
+    },
+  };
+  const repoRef = {
+    id: 'pc:repo:core',
+    kind: 'repo' as const,
+    label: 'core',
+    scope: { projectRoot: project.projectRoot, repoId: 'core' },
+  };
+  const moduleRef = {
+    id: 'pc:module:service',
+    kind: 'module' as const,
+    label: 'service',
+    scope: { projectRoot: project.projectRoot, sourceFolder: 'src', repoId: 'core' },
+  };
+  const layerRef = {
+    id: 'pc:module-layer:domain',
+    kind: 'module-layer' as const,
+    label: 'Domain',
+    scope: { projectRoot: project.projectRoot, sourceFolder: 'src', repoId: 'core' },
+  };
+
+  return [
+    {
+      contractVersion: 1,
+      project,
+      queryLevel: 'repo',
+      refs: [repoRef, fileRef],
+      data: {
+        repo: { id: 'core', name: 'core', root: '/fixture', ref: repoRef },
+        languages: [{ language: 'typescript', fileCount: 2 }],
+        buildSystems: [{ kind: 'node', configRefs: [fileRef] }],
+        packageSystems: [{ kind: 'npm', manifestRefs: [fileRef] }],
+        targets: [{ name: 'core', kind: 'library', refs: [fileRef] }],
+        localPackages: [{ name: 'core', path: 'src', ref: moduleRef }],
+        sourceRoots: [{ path: 'src', role: 'source', ref: moduleRef }],
+        entrypoints: [{ name: 'src/UserService.ts', kind: 'file', refs: [fileRef] }],
+        commands: [],
+        topAreas: [{ path: 'src', role: 'source', ref: moduleRef }],
+        configFiles: [],
+        nextRefs: [moduleRef],
+      },
+    },
+    {
+      contractVersion: 1,
+      project,
+      queryLevel: 'map',
+      refs: [repoRef, moduleRef, layerRef, fileRef],
+      data: {
+        repo: { id: 'core', name: 'core', root: '/fixture', ref: repoRef },
+        modules: [
+          {
+            id: 'service',
+            name: 'service',
+            configLayer: 'domain',
+            ownedFileCount: 1,
+            role: 'domain service',
+            ref: moduleRef,
+          },
+        ],
+        layers: [{ id: 'domain', name: 'Domain', order: 1, ref: layerRef }],
+        dependencySummary: { edgeCount: 1, notes: ['ProjectContext relation summary'] },
+        cycles: [],
+        hotspots: [{ ref: moduleRef, score: 5, reason: 'public surface' }],
+        majorFlows: [{ refs: [moduleRef, fileRef], summary: 'service owns user loading' }],
+        externalDependencyHotspots: [],
+        nextRefs: [fileRef],
+      },
+    },
+    {
+      contractVersion: 1,
+      project,
+      queryLevel: 'file-symbols',
+      refs: [fileRef, symbolRef],
+      data: {
+        file: { filePath: 'src/UserService.ts', language: 'typescript', ref: fileRef },
+        symbols: [
+          {
+            name: 'UserService',
+            kind: 'class',
+            filePath: 'src/UserService.ts',
+            range: { startLine: 1, endLine: 8 },
+            ref: symbolRef,
+            exported: true,
+          },
+        ],
+        naming: { warnings: [] },
+        nextRefs: [symbolRef],
+      },
+    },
+    {
+      contractVersion: 1,
+      project,
+      queryLevel: 'file-flow',
+      refs: [fileRef, symbolRef],
+      data: {
+        file: { filePath: 'src/UserService.ts', language: 'typescript', ref: fileRef },
+        imports: [],
+        exports: [
+          {
+            name: 'UserService',
+            kind: 'class',
+            filePath: 'src/UserService.ts',
+            ref: symbolRef,
+          },
+        ],
+        callers: [],
+        callees: [],
+        inflow: [],
+        outflow: [],
+        nextRefs: [symbolRef],
+      },
+    },
+    {
+      contractVersion: 1,
+      project,
+      queryLevel: 'source-slice',
+      refs: [fileRef],
+      data: {
+        file: { filePath: 'src/UserService.ts', language: 'typescript', ref: fileRef },
+        range: { startLine: 1, endLine: 8 },
+        text: 'PROJECT_CONTEXT_SOURCE_BODY_SHOULD_NOT_LEAK',
+        nextRefs: [symbolRef],
+      },
+    },
+  ];
+}
+
 describe('IDEAgentAnalysisPacketBuilder', () => {
   it('is exported by stable public Core entrypoints', () => {
     expect(ProjectIntelligenceCapability.run).toBeInstanceOf(Function);
     expect(buildIDEAgentAnalysisPacket).toBeInstanceOf(Function);
     expect(buildPacketFromRoot).toBeInstanceOf(Function);
+    expect(buildProjectContextPacketFromRoot).toBeInstanceOf(Function);
+    expect(buildProjectContextMissionBriefingFromRoot).toBeInstanceOf(Function);
     expect(buildPacketFromProjectIntelligence).toBeInstanceOf(Function);
   });
 
@@ -193,6 +354,59 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
 
     expect(packet.meta.source).toBe('project-intelligence-result');
     expect(packet.requiredReadSet).toContain('src/UserService.ts');
+  });
+
+  it('builds ProjectContext-backed packet units without ProjectSnapshot or source body leakage', () => {
+    const presenterInput = buildProjectContextPresenterInput(makeProjectContextEnvelopes());
+    const packet = buildIDEAgentAnalysisPacketFromProjectContext({
+      projectContext: presenterInput,
+      dimensions,
+      options: { generatedAt: '2026-06-15T00:00:00.000Z', maxUnits: 2 },
+    });
+
+    expect(packet.meta.source).toBe('project-context');
+    expect(packet.requiredReadSet).toContain('core/src/UserService.ts');
+    expect(packet.retrievalHints.structureTools).toContain('ProjectContext.execute');
+    expect(packet.retrievalHints.structureTools).not.toContain('alembic_call_context');
+    expect(packet.projectSummary.materialization).toMatchObject({
+      projectContext: true,
+      repo: true,
+      map: true,
+      fileSymbols: 1,
+      sourceSlices: 1,
+    });
+    expect(packet.structuralEvidenceRefs.map((ref) => ref.kind)).toContain('project-context');
+    expect(packet.units[0]?.structuralHints.projectContext).toEqual(
+      expect.arrayContaining(['typescript files=2', 'module:service'])
+    );
+    expect(JSON.stringify(packet)).not.toContain('PROJECT_CONTEXT_SOURCE_BODY_SHOULD_NOT_LEAK');
+  });
+
+  it('builds Mission Briefing from ProjectContext presenter input without snapshot data', () => {
+    const session = new BootstrapSession({
+      projectRoot: '/fixture',
+      dimensions,
+    });
+    const briefing = buildProjectContextMissionBriefing({
+      projectContext: makeProjectContextEnvelopes(),
+      activeDimensions: dimensions,
+      session,
+    }) as Record<string, unknown>;
+
+    expect(briefing.meta).toMatchObject({
+      projectInformationSource: 'project-context',
+      projectContextEnvelopeCount: 5,
+    });
+    expect(briefing.projectMeta).toMatchObject({
+      name: 'Fixture Project',
+      primaryLanguage: 'typescript',
+      projectInformationSource: 'project-context',
+    });
+    expect(briefing.projectContext).toMatchObject({
+      source: 'project-context',
+      sourceFiles: [{ filePath: 'src/UserService.ts', language: 'typescript' }],
+    });
+    expect(JSON.stringify(briefing)).not.toContain('PROJECT_CONTEXT_SOURCE_BODY_SHOULD_NOT_LEAK');
   });
 
   it('keeps packet evidence independent from Mission Briefing compression', () => {

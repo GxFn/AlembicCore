@@ -17,6 +17,12 @@
 import { getDimensionSOP, PRE_SUBMIT_CHECKLIST } from '../../../domain/dimension/DimensionSop.js';
 import { getCursorDeliverySpec } from '../../../domain/knowledge/FieldSpec.js';
 import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../../../domain/knowledge/StyleGuide.js';
+import {
+  buildProjectContextPresenterInput,
+  type ProjectContextEnvelope,
+  type ProjectContextPresenterInput,
+  type ProjectContextResult,
+} from '../../../domain/project-context/index.js';
 import type {
   AstCategoryInfo,
   AstProtocolInfo,
@@ -197,6 +203,19 @@ interface MissionBriefingParams {
   languageStats?: Record<string, number> | null;
   panoramaResult?: Record<string, unknown> | null;
   localPackageModules?: LocalPackageModule[];
+  profile?: BriefingProfile;
+  rescan?: RescanBriefingInput;
+  responseBudget?: Partial<ResponseBudget>;
+}
+
+export interface ProjectContextMissionBriefingInput {
+  projectContext:
+    | ProjectContextPresenterInput
+    | readonly ProjectContextEnvelope<ProjectContextResult>[];
+  activeDimensions: DimensionDef[];
+  session: { toJSON(): Record<string, unknown> };
+  projectMeta?: Record<string, unknown>;
+  languageExtension?: unknown;
   profile?: BriefingProfile;
   rescan?: RescanBriefingInput;
   responseBudget?: Partial<ResponseBudget>;
@@ -1237,4 +1256,233 @@ export function buildMissionBriefing({
   briefing.meta = { ...briefing.meta, profile: briefingPlan.profile };
 
   return briefing;
+}
+
+export function buildProjectContextMissionBriefing({
+  projectContext,
+  activeDimensions,
+  session,
+  projectMeta,
+  languageExtension,
+  profile,
+  rescan,
+  responseBudget,
+}: ProjectContextMissionBriefingInput): MissionBriefing {
+  const presenterInput = normalizeProjectContextPresenterInput(projectContext);
+  const briefing = buildMissionBriefing({
+    projectMeta: {
+      ...buildProjectContextProjectMeta(presenterInput),
+      ...projectMeta,
+      projectInformationSource: 'project-context',
+    },
+    targets: buildProjectContextTargets(presenterInput),
+    activeDimensions,
+    session,
+    languageExtension: languageExtension ?? null,
+    languageStats: buildProjectContextLanguageStats(presenterInput),
+    depGraphData: buildProjectContextDependencyGraph(presenterInput),
+    localPackageModules: buildProjectContextLocalPackageModules(presenterInput),
+    panoramaResult: buildProjectContextPanoramaReplacement(presenterInput),
+    profile,
+    rescan,
+    responseBudget,
+  }) as MissionBriefing;
+
+  briefing.projectContext = {
+    source: 'project-context',
+    project: presenterInput.project,
+    refs: presenterInput.refs.map((ref) => ({
+      id: ref.id,
+      kind: ref.kind,
+      label: ref.label,
+      filePath: ref.scope.filePath,
+      range: ref.scope.range,
+      repoId: ref.scope.repoId,
+    })),
+    sourceFiles: presenterInput.files.map((file) => ({
+      filePath: file.filePath,
+      repoId: file.repoId,
+      language: file.language,
+      lineCount: file.lineCount,
+    })),
+    unavailable: presenterInput.unavailable,
+    warnings: presenterInput.warnings,
+  };
+  briefing.meta = {
+    ...briefing.meta,
+    projectInformationSource: 'project-context',
+    projectContextEnvelopeCount: presenterInput.envelopes.length,
+  };
+
+  return briefing;
+}
+
+function normalizeProjectContextPresenterInput(
+  input: ProjectContextPresenterInput | readonly ProjectContextEnvelope<ProjectContextResult>[]
+): ProjectContextPresenterInput {
+  return 'project' in input ? input : buildProjectContextPresenterInput(input);
+}
+
+function buildProjectContextProjectMeta(
+  input: ProjectContextPresenterInput
+): Record<string, unknown> {
+  const repoName = input.repo?.repo.name;
+  const projectRoot = input.project.projectRoot;
+  return {
+    name: input.project.displayName ?? repoName ?? basename(projectRoot) ?? 'project-context',
+    primaryLanguage: inferProjectContextPrimaryLanguage(input),
+    fileCount: input.files.length,
+    projectType:
+      input.repo?.packageSystems[0]?.kind ?? input.repo?.buildSystems[0]?.kind ?? 'project-context',
+    projectRoot,
+  };
+}
+
+function buildProjectContextTargets(input: ProjectContextPresenterInput): TargetInfo[] {
+  const repoTargets = input.repo?.targets.map((target) => ({
+    name: target.name,
+    type: target.kind ?? 'target',
+    fileCount: target.refs.length || undefined,
+  }));
+  if (repoTargets?.length) {
+    return repoTargets;
+  }
+  return input.modules.map((moduleContext) => ({
+    name: moduleContext.module.name,
+    type: moduleContext.module.kind ?? 'module',
+    inferredRole: moduleContext.module.role,
+    fileCount: moduleContext.ownedFiles.length,
+  }));
+}
+
+function buildProjectContextLanguageStats(
+  input: ProjectContextPresenterInput
+): Record<string, number> {
+  const stats = new Map<string, number>();
+  for (const language of input.repo?.languages ?? []) {
+    stats.set(language.language, language.fileCount ?? 0);
+  }
+  for (const file of input.files) {
+    if (file.language && !stats.has(file.language)) {
+      stats.set(file.language, 0);
+    }
+    if (file.language) {
+      stats.set(file.language, (stats.get(file.language) ?? 0) + 1);
+    }
+  }
+  return Object.fromEntries(
+    [...stats.entries()].sort(([left], [right]) => left.localeCompare(right))
+  );
+}
+
+function buildProjectContextDependencyGraph(
+  input: ProjectContextPresenterInput
+): DependencyGraph | null {
+  const nodes = [
+    ...(input.map?.modules.map((module) => ({
+      id: module.id,
+      label: module.name,
+      fileCount: module.ownedFileCount,
+    })) ?? []),
+    ...input.moduleLayers.flatMap((layerContext) =>
+      layerContext.layers.map((layer) => ({
+        id: layer.id,
+        label: layer.name,
+        fileCount: layer.fileGroups?.length,
+      }))
+    ),
+  ];
+  const edges = [
+    ...(input.map?.majorFlows.flatMap((flow) => {
+      const from = flow.refs[0]?.id ?? flow.refs[0]?.label;
+      const to = flow.refs[1]?.id ?? flow.refs[1]?.label;
+      return from && to ? [{ from, to, type: flow.summary }] : [];
+    }) ?? []),
+    ...input.fileFlows.flatMap((flow) =>
+      [...flow.imports, ...flow.callees, ...flow.outflow].flatMap((relation) => {
+        const from = relation.fromRef?.id ?? relation.from?.label ?? flow.file.filePath;
+        const to = relation.toRef?.id ?? relation.to?.label ?? relation.label;
+        return from && to ? [{ from, to, type: relation.kind }] : [];
+      })
+    ),
+  ];
+
+  if (!nodes.length && !edges.length) {
+    return null;
+  }
+  return { nodes, edges };
+}
+
+function buildProjectContextLocalPackageModules(
+  input: ProjectContextPresenterInput
+): LocalPackageModule[] {
+  const moduleContexts = input.modules.map((moduleContext) => ({
+    name: moduleContext.module.name,
+    packageName: moduleContext.module.name,
+    fileCount: moduleContext.ownedFiles.length,
+    inferredRole: moduleContext.module.role,
+    keyFiles: moduleContext.ownedFiles.slice(0, 6).map((file) => file.filePath),
+  }));
+  if (moduleContexts.length) {
+    return moduleContexts;
+  }
+  return (
+    input.map?.modules.map((module) => ({
+      name: module.name,
+      packageName: module.name,
+      fileCount: module.ownedFileCount ?? 0,
+      inferredRole: module.role,
+      keyFiles: [],
+    })) ?? []
+  );
+}
+
+function buildProjectContextPanoramaReplacement(
+  input: ProjectContextPresenterInput
+): Record<string, unknown> | null {
+  if (!input.map && !input.moduleLayers.length && !input.unavailable.length) {
+    return null;
+  }
+  return {
+    source: 'project-context',
+    layers:
+      input.map?.layers.map((layer) => ({
+        level: layer.order ?? 0,
+        name: layer.name,
+        modules:
+          input.map?.modules
+            .filter(
+              (module) => module.configLayer === layer.id || module.configLayer === layer.name
+            )
+            .map((module) => module.name) ?? [],
+      })) ?? [],
+    couplingHotspots:
+      input.map?.hotspots.map((hotspot) => ({
+        module: hotspot.ref.label ?? hotspot.ref.id,
+        fanIn: Math.round(hotspot.score),
+        fanOut: 0,
+      })) ?? [],
+    cyclicDependencies:
+      input.map?.cycles.map((cycle) => ({
+        cycle: cycle.refs.map((ref) => ref.label ?? ref.id),
+        severity: cycle.summary,
+      })) ?? [],
+    projectContextUnavailable: input.unavailable.map((item) => ({
+      queryLevel: item.queryLevel,
+      reason: item.reason,
+    })),
+  };
+}
+
+function inferProjectContextPrimaryLanguage(input: ProjectContextPresenterInput): string {
+  const repoLanguage = input.repo?.languages[0]?.language;
+  if (repoLanguage) {
+    return repoLanguage;
+  }
+  const stats = buildProjectContextLanguageStats(input);
+  return Object.entries(stats).sort((left, right) => right[1] - left[1])[0]?.[0] ?? 'unknown';
+}
+
+function basename(pathValue: string): string | undefined {
+  return pathValue.split('/').filter(Boolean).pop();
 }
