@@ -55,5 +55,4 @@ export {
   type IDEAgentStructuralEvidenceKind,
   type IDEAgentStructuralEvidenceRef,
   type IDEAgentStructuralHints,
-  ProjectIntelligenceCapability,
 } from './workflows/capabilities/project-intelligence/index.js';

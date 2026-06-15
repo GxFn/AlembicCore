@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -16,23 +17,34 @@ import {
   SOURCE_GRAPH_EDGE_KINDS,
   SOURCE_GRAPH_FRESHNESS_STATES,
   SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS,
-  SourceGraphFreshnessService,
-  SourceGraphIndexer,
-  SourceGraphLifecycleService,
-  SourceGraphQueryService,
-  SourceGraphRepositoryImpl,
-  SourceGraphService,
   validateSourceGraphDiagnostic,
   validateSourceGraphEdge,
   validateSourceGraphSearchResult,
   validateSourceGraphValidationPlanResult,
   validateSourceSymbolNode,
-} from '../src/source-graph.js';
+} from '../src/domain/source-graph/index.js';
+import { SourceGraphRepositoryImpl } from '../src/repository/source-graph/index.js';
+import {
+  SourceGraphFreshnessService,
+  SourceGraphIndexer,
+  SourceGraphLifecycleService,
+  SourceGraphQueryService,
+  SourceGraphService,
+} from '../src/service/source-graph/index.js';
 
-describe('public source graph entrypoints', () => {
-  it('publishes deterministic source graph DTO creators and validators', () => {
+describe('internal source graph boundary', () => {
+  it('withdraws the public source graph facade from package exports', () => {
+    const packageJson = JSON.parse(
+      fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
+    ) as { exports: Record<string, unknown> };
+
+    expect(packageJson.exports['./source-graph']).toBeUndefined();
+    expect(fs.existsSync(new URL('../src/source-graph.ts', import.meta.url))).toBe(false);
+  });
+
+  it('keeps deterministic source graph DTO creators and validators internal', () => {
     const snapshot = createSourceGraphSnapshot({
-      generationId: 'public-source-graph',
+      generationId: 'internal-source-graph',
       projectRoot: '/tmp/alembic-core',
       repoId: 'AlembicCore',
       graphRoot: '/tmp/alembic-core',
@@ -49,39 +61,39 @@ describe('public source graph entrypoints', () => {
     const file = createSourceFileNode({
       generationId: snapshot.generationId,
       projectRoot: snapshot.projectRoot,
-      repoRelativePath: 'src/source-graph.ts',
+      repoRelativePath: 'src/service/source-graph/SourceGraphService.ts',
       language: 'typescript',
-      contentHash: 'sha256-public',
+      contentHash: 'sha256-internal',
     });
     const symbol = createSourceSymbolNode({
       generationId: snapshot.generationId,
-      symbolId: 'sourceGraphFacade',
-      displayName: 'sourceGraphFacade',
-      kind: 'module',
+      symbolId: 'sourceGraphInternalService',
+      displayName: 'SourceGraphService',
+      kind: 'class',
       filePath: file.repoRelativePath,
       range: { startLine: 1, startColumn: 0, endLine: 3, endColumn: 1 },
       exported: true,
     });
     const edge = createSourceGraphEdge({
       generationId: snapshot.generationId,
-      edgeId: 'facade->repository',
+      edgeId: 'service->repository',
       kind: 'imports',
-      fromFilePath: 'src/source-graph.ts',
-      toFilePath: 'src/repository/source-graph/index.ts',
+      fromFilePath: 'src/service/source-graph/SourceGraphService.ts',
+      toFilePath: 'src/repository/source-graph/SourceGraphRepository.ts',
       provenance: 'deterministic',
     });
     const section = createSourceSection({
       filePath: symbol.filePath,
       startLine: symbol.range.startLine,
       endLine: symbol.range.endLine,
-      reason: 'public-facade-test',
+      reason: 'internal-boundary-test',
       freshness: snapshot.freshness,
       symbolIds: [symbol.symbolId],
     });
     const result = createSourceGraphQueryResult({
       generationId: snapshot.generationId,
       projectRoot: snapshot.projectRoot,
-      query: 'sourceGraphFacade',
+      query: 'SourceGraphService',
       freshness: snapshot.freshness,
       sourceSections: [section],
       symbols: [symbol],
@@ -108,7 +120,7 @@ describe('public source graph entrypoints', () => {
     ).toHaveLength(1);
   });
 
-  it('publishes the Core source graph repository and service facade', () => {
+  it('keeps the internal source graph repository and service available', () => {
     expect(SourceGraphIndexer).toBeDefined();
     expect(SourceGraphFreshnessService).toBeDefined();
     expect(SourceGraphLifecycleService).toBeDefined();
@@ -124,7 +136,7 @@ describe('public source graph entrypoints', () => {
     expect(SourceGraphService.prototype.getSourceGraphValidationPlan).toBeDefined();
   });
 
-  it('publishes CGK-15 source graph boundary states and diagnostic ownership', () => {
+  it('keeps source graph boundary states and diagnostic ownership internal', () => {
     expect(SOURCE_GRAPH_FRESHNESS_STATES).toEqual(
       expect.arrayContaining([
         'uninitialized',
@@ -159,7 +171,7 @@ describe('public source graph entrypoints', () => {
     ).toHaveLength(1);
   });
 
-  it('publishes CGK-17 operation-specific outputs without generic or unrelated fields', () => {
+  it('keeps operation-specific outputs without generic or unrelated fields', () => {
     const freshness = {
       status: 'fresh',
       checkedAt: 1000,
@@ -232,7 +244,7 @@ describe('public source graph entrypoints', () => {
     const affectedTestsResult = createSourceGraphAffectedTestsResult({
       projectRoot: '/tmp/alembic-core',
       freshness,
-      changedFiles: ['src/source-graph.ts'],
+      changedFiles: ['src/service/source-graph/SourceGraphService.ts'],
       diagnostics: [
         {
           code: 'affected-tests-unknown',
@@ -248,9 +260,12 @@ describe('public source graph entrypoints', () => {
     const validationPlan = createSourceGraphValidationPlanResult({
       projectRoot: '/tmp/alembic-core',
       freshness,
-      changedFiles: ['src/source-graph.ts'],
-      seedSymbols: ['src/source-graph.ts#SourceGraphService'],
-      impactedFiles: ['src/source-graph.ts', 'test/source-graph.test.ts'],
+      changedFiles: ['src/service/source-graph/SourceGraphService.ts'],
+      seedSymbols: ['src/service/source-graph/SourceGraphService.ts#SourceGraphService'],
+      impactedFiles: [
+        'src/service/source-graph/SourceGraphService.ts',
+        'test/source-graph.test.ts',
+      ],
       mustRun: [
         {
           kind: 'test-file',
@@ -261,8 +276,8 @@ describe('public source graph entrypoints', () => {
           evidence: [
             {
               kind: 'changed-file',
-              ref: 'src/source-graph.ts',
-              filePath: 'src/source-graph.ts',
+              ref: 'src/service/source-graph/SourceGraphService.ts',
+              filePath: 'src/service/source-graph/SourceGraphService.ts',
               reason: 'Changed file seed.',
             },
           ],

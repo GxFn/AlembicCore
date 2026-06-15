@@ -10,7 +10,7 @@ import {
   SourceGraphFreshnessService,
   SourceGraphIndexer,
   SourceGraphService,
-} from '../src/source-graph.js';
+} from '../src/service/source-graph/index.js';
 
 describe('SourceGraphIndexer', () => {
   let tmpDir: string;

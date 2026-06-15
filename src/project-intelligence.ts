@@ -1,13 +1,10 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProjectAnalysisResult as AstProjectAnalysisResult } from './core/AstAnalyzer.js';
 import {
   analyzeFile,
-  analyzeProject,
   checkProtocolConformance,
   findCallExpressions,
   findPatternInContext,
-  generateContextForAgent,
   isAvailable,
   parseToTree,
   registerLanguage,
@@ -18,31 +15,22 @@ import {
   inferLanguagesFromStats,
   reloadPlugins,
 } from './core/ast/ensureGrammars.js';
-import { loadPlugins } from './core/ast/index.js';
-import ProjectGraph from './core/ast/ProjectGraph.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from './core/discovery/index.js';
 import type { LanguageService as LanguageServiceType } from './shared/LanguageService.js';
 import LanguageService from './shared/LanguageService.js';
-import type { ProjectDescriptor } from './shared/ProjectScope.js';
 import { RESOURCES_DIR } from './shared/packageRoot.js';
 
-export * from './core/analysis/index.js';
 export {
   analyzeFile,
-  analyzeProject,
   checkProtocolConformance,
   findCallExpressions,
   findPatternInContext,
-  generateContextForAgent,
   isAvailable as isProjectAstAvailable,
-  loadPlugins as loadProjectAstPlugins,
   parseToTree,
   registerLanguage,
   supportedLanguages,
 };
-export type { AstProjectAnalysisResult };
 export { ensureGrammars, inferLanguagesFromStats, reloadPlugins as reloadProjectAstPlugins };
-export { ProjectGraph };
 export {
   ConfigWatcher,
   type ConfigWatcherOptions,
@@ -130,43 +118,6 @@ export {
 } from './core/discovery/parsers/YamlConfigParser.js';
 export type { LanguageServiceType };
 export { LanguageService };
-export * from './service/panorama/index.js';
-export type {
-  AstCategoryInfo,
-  AstClassInfo,
-  AstContext,
-  AstFileSummary,
-  AstMethodInfo,
-  AstProtocolInfo,
-  AstSummary,
-  BootstrapSessionShape,
-  CallGraphResult as SnapshotCallGraphResult,
-  CodeEntityGraphResult,
-  DependencyEdge as SnapshotDependencyEdge,
-  DependencyGraph as SnapshotDependencyGraph,
-  DependencyNode as SnapshotDependencyNode,
-  DimensionDef,
-  DiscovererInfo,
-  EnhancementPackInfo,
-  ExistingRecipeInfo,
-  GuardAudit,
-  GuardAuditFileEntry,
-  GuardAuditSummary,
-  GuardViolation as SnapshotGuardViolation,
-  IncrementalPlan,
-  LanguageProfile,
-  LocalPackageModule,
-  MissionBriefingResult,
-  PanoramaResult as SnapshotPanoramaResult,
-  PhaseReport as SnapshotPhaseReport,
-  ProjectMetrics,
-  ProjectSnapshot,
-  ProjectSnapshotInput,
-  SnapshotFile,
-  SnapshotTarget,
-} from './types/ProjectSnapshot.js';
-export { buildProjectSnapshot } from './types/projectSnapshotBuilder.js';
-export * from './workflows/capabilities/project-intelligence/index.js';
 
 export const CORE_GRAMMAR_RESOURCE_FILES = Object.freeze([
   'tree-sitter-dart.wasm',
@@ -208,21 +159,6 @@ export interface EnsureProjectGrammarResourcesResult {
   alreadyAvailable: string[];
   reloaded: boolean;
 }
-
-export interface TryBuildProjectGraphOptions {
-  extensions?: string[];
-  onProgress?: (parsed: number, total: number) => void;
-  timeoutMs?: number;
-  maxFiles?: number;
-  maxFileSizeBytes?: number;
-  projectScope?: ProjectDescriptor | string | null;
-  workspaceConfigProjectScope?: boolean;
-  reloadAstPlugins?: boolean;
-}
-
-export type TryBuildProjectGraphResult =
-  | { available: true; graph: ProjectGraph }
-  | { available: false; graph: null; reason: 'ast-unavailable' | 'build-failed'; error?: Error };
 
 export function resolveCoreGrammarResourcesDir(): string {
   return join(RESOURCES_DIR, 'grammars');
@@ -278,30 +214,4 @@ export function analyzeSourceFile(
   options?: Parameters<typeof analyzeFile>[2]
 ): Record<string, unknown> | null {
   return analyzeFile(content, language, options) as Record<string, unknown> | null;
-}
-
-export async function tryBuildProjectGraph(
-  projectRoot: string,
-  options: TryBuildProjectGraphOptions = {}
-): Promise<TryBuildProjectGraphResult> {
-  if (options.reloadAstPlugins) {
-    await loadPlugins();
-  }
-
-  if (!isAvailable()) {
-    return { available: false, graph: null, reason: 'ast-unavailable' };
-  }
-
-  try {
-    const { reloadAstPlugins: _reloadAstPlugins, ...buildOptions } = options;
-    const graph = await ProjectGraph.build(projectRoot, buildOptions);
-    return { available: true, graph };
-  } catch (error) {
-    return {
-      available: false,
-      graph: null,
-      reason: 'build-failed',
-      error: error instanceof Error ? error : new Error(String(error)),
-    };
-  }
 }

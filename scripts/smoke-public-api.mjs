@@ -12,9 +12,16 @@ const exactExportPaths = Object.keys(pkg.exports).filter((exportPath) => !export
 const requiredRootExports = [
   'DEFAULT_FOLDER_NAMES',
   'KnowledgeRepositoryImpl',
-  'ProjectIntelligenceCapability',
   'createHostAgentWorkflowSession',
 ];
+const forbiddenRootExports = [
+  'ProjectIntelligenceCapability',
+  'SourceGraphQueryService',
+  'SourceGraphService',
+  'createSourceGraphSnapshot',
+  'createSourceGraphValidationPlanResult',
+];
+const forbiddenExportPaths = ['./source-graph'];
 const requiredSubpathExports = {
   '@alembic/core/config': [
     'CANDIDATES_DIR',
@@ -113,6 +120,7 @@ const requiredSubpathExports = {
     'SUBMIT_REQUIREMENTS',
   ],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
+  '@alembic/core/project-context': ['ProjectContext'],
   '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],
   '@alembic/core/service/candidate': ['aggregateCandidates', 'findSimilarRecipes'],
   '@alembic/core/search': [
@@ -252,6 +260,12 @@ const requiredTypeDeclarations = {
     'ProjectSkillRuntimeExportStatus',
     'ProjectSkillRuntimeExportStrategy',
   ],
+  '@alembic/core/project-context': [
+    'ProjectContext',
+    'ProjectContextEnvelope',
+    'ProjectContextRequest',
+    'ProjectContextResult',
+  ],
   '@alembic/core/types': [
     'IncrementalPlan',
     'McpContext',
@@ -269,9 +283,19 @@ for (const exportPath of exactExportPaths) {
 }
 
 const root = await import(pkg.name);
+for (const exportPath of forbiddenExportPaths) {
+  if (exportPath in pkg.exports) {
+    throw new Error(`Forbidden package export resurrected: ${exportPath}`);
+  }
+}
 for (const exportName of requiredRootExports) {
   if (!(exportName in root)) {
     throw new Error(`Missing root export: ${exportName}`);
+  }
+}
+for (const exportName of forbiddenRootExports) {
+  if (exportName in root) {
+    throw new Error(`Forbidden root export resurrected: ${exportName}`);
   }
 }
 

@@ -144,13 +144,11 @@
           "targetFacade": "./project-intelligence",
           "symbols": [
             "analyzeFile",
-            "analyzeProject",
             "analyzeSourceFile",
             "isProjectAstAvailable",
-            "loadProjectAstPlugins",
             "parseToTree"
           ],
-          "reason": "Alembic benchmarking scripts only need project AST analysis entrypoints; the stable project-intelligence facade already exposes those symbols without requiring the transitional core/AstAnalyzer path."
+          "reason": "Alembic benchmarking scripts that need file-level AST analysis use the stable project-intelligence facade; project-level context queries route through ./project-context."
         },
         "@alembic/core/core/ast": {
           "decision": "consumer-ready-stable",
@@ -158,11 +156,9 @@
           "symbols": [
             "CORE_GRAMMAR_RESOURCE_FILES",
             "ensureProjectGrammarResources",
-            "loadProjectAstPlugins",
-            "ProjectGraph",
             "reloadProjectAstPlugins"
           ],
-          "reason": "AST plugin loading, grammar resources and project graph construction are available from the stable project-intelligence facade; consumers do not need the transitional core/ast index for those symbols."
+          "reason": "Grammar resource and AST plugin reload contracts are available from the stable project-intelligence facade; project graph construction routes through ./project-context instead of the project-intelligence facade."
         },
         "@alembic/core/core/discovery": {
           "decision": "consumer-ready-stable",
@@ -443,21 +439,27 @@
       },
       "./domain/source-graph": {
         "removedAt": "2026-06-12",
-        "replacementFacade": "./source-graph",
-        "note": "Variant facade removed; ./source-graph is the single canonical source-graph facade (shape frozen for CKG2/CKG4).",
+        "replacementFacade": "./project-context",
+        "note": "Variant facade removed; public project-information queries route through ./project-context while source graph implementation remains internal to domain/repository/service paths.",
         "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
       },
       "./repository/source-graph": {
         "removedAt": "2026-06-12",
-        "replacementFacade": "./source-graph",
-        "note": "Variant facade removed; ./source-graph is the single canonical source-graph facade (shape frozen for CKG2/CKG4).",
+        "replacementFacade": "./project-context",
+        "note": "Variant facade removed; public project-information queries route through ./project-context while source graph implementation remains internal to domain/repository/service paths.",
         "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
       },
       "./service/source-graph": {
         "removedAt": "2026-06-12",
-        "replacementFacade": "./source-graph",
-        "note": "Variant facade removed; ./source-graph is the single canonical source-graph facade (shape frozen for CKG2/CKG4).",
+        "replacementFacade": "./project-context",
+        "note": "Variant facade removed; public project-information queries route through ./project-context while source graph implementation remains internal to domain/repository/service paths.",
         "scanEvidence": "CO1 fresh 5-repo exact-specifier scan, 0 consumers (Alembic, AlembicAgent, AlembicPlugin, AlembicDashboard, AlembicCore); state-root evidence/raw/co1-removal-scans.txt"
+      },
+      "./source-graph": {
+        "removedAt": "2026-06-15",
+        "replacementFacade": "./project-context",
+        "note": "Public project-information answers now route through ./project-context; source graph DTOs, repositories and services stay available only through Core internal implementation paths.",
+        "scanEvidence": "PCU-4 AlembicCore pre/post import scan and public boundary tests; state-root evidence/target-pcu4-core-consumer-replacement-public-deletion-evidence-2026-06-15.md"
       },
       "./service/evolution": {
         "removedAt": "2026-06-12",
@@ -874,18 +876,6 @@
         "scanEvidence": "RW0 fresh re-scan 2026-06-13 (4 repos, mocks included, most-specific export-key resolution): 0 consumers. Evidence: alembic-0.3.0-release-wave/evidence/raw/rw0-rescan-2026-06-13.json"
       }
     },
-    "sourceGraphCanonical": {
-      "canonicalFacade": "./source-graph",
-      "shape": "frozen",
-      "appliesTo": "CKG2/CKG4 consume source-graph exclusively through ./source-graph; its export shape is frozen while CKG work is live in AlembicPlugin.",
-      "liveConsumers": "AlembicPlugin: 5 references (2 lib, 2 test, 1 dynamic script) per CO0/CO1 freeze scans.",
-      "variantFacadesRemoved": [
-        "./domain/source-graph",
-        "./repository/source-graph",
-        "./service/source-graph"
-      ],
-      "decidedAt": "2026-06-12"
-    },
     "transitionalOwnership": {
       "./*": {
         "owner": "AlembicCore window",
@@ -961,7 +951,7 @@
       },
       "plugin-keep-alive": {
         "owner": "AlembicPlugin window",
-        "consumer": "AlembicPlugin via file:../AlembicCore live link — 37 frozen specifiers (CO1 re-freeze 2026-06-12, identical to CO0 list), incl. core/ast/lang-*, infrastructure/database/drizzle{,/schema}, infrastructure/database/migrations/*, ./source-graph",
+        "consumer": "AlembicPlugin via file:../AlembicCore live link — remaining frozen specifiers include core/ast/lang-*, infrastructure/database/drizzle{,/schema}, and infrastructure/database/migrations/*; public source-graph replacement is completed by PCU-4.",
         "cleanupTrigger": "post-CKG AlembicPlugin migration to stable facades + vendor refresh (SD-5 phase 2); the keep-alive list may only shrink via Plugin-side commits",
         "note": "Hard constraint: every listed specifier stays importable and behavior-identical; zero AlembicPlugin edits from Core-side waves."
       }
@@ -1110,10 +1100,10 @@
     "./knowledge",
     "./logging",
     "./memory",
+    "./project-context",
     "./project-intelligence",
     "./repositories",
     "./search",
-    "./source-graph",
     "./vector",
     "./workspace"
   ],

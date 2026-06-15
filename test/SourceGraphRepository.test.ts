@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
 import { pathGuard } from '../src/io.js';
 import { createAlembicRepositories } from '../src/repositories.js';
-import { SourceGraphService } from '../src/source-graph.js';
+import { SourceGraphService } from '../src/service/source-graph/index.js';
 
 describe('SourceGraphRepository', () => {
   let tmpDir: string;

@@ -9,14 +9,10 @@ import {
   createIDEAgentAnalysisUnitKey,
   type DimensionDef,
 } from '../src/host-agent-workflows.js';
-import {
-  buildIDEAgentAnalysisPacket as buildPacketFromRoot,
-  ProjectIntelligenceCapability,
-} from '../src/index.js';
-import {
-  buildIDEAgentAnalysisPacketFromSnapshot as buildPacketFromProjectIntelligence,
-  buildProjectSnapshot,
-} from '../src/project-intelligence.js';
+import { buildIDEAgentAnalysisPacket as buildPacketFromRoot } from '../src/index.js';
+import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
+import { buildIDEAgentAnalysisPacketFromSnapshot as buildPacketFromProjectIntelligence } from '../src/workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
+import { ProjectIntelligenceCapability } from '../src/workflows/capabilities/project-intelligence/ProjectIntelligenceCapability.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Find architectural boundaries' },

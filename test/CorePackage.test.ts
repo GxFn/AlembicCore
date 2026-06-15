@@ -8,18 +8,14 @@ import {
 } from '../src/domain/knowledge/FieldSpec.js';
 import {
   createHostAgentWorkflowSession,
-  createSourceGraphSnapshot,
-  createSourceGraphValidationPlanResult,
   DEFAULT_FOLDER_NAMES,
   KnowledgeRepositoryImpl,
-  ProjectIntelligenceCapability,
   resolveFolderNames,
-  SourceGraphQueryService,
-  SourceGraphService,
   validateFolderNameSegment,
 } from '../src/index.js';
 import { ConfigLoader } from '../src/infrastructure/config/index.js';
 import { WriteZone } from '../src/infrastructure/io/index.js';
+import { ProjectContext } from '../src/project-context.js';
 
 describe('Core package baseline', () => {
   it('rejects folder name segments that would become paths', () => {
@@ -56,25 +52,21 @@ describe('Core package baseline', () => {
     expect(getCursorDeliverySpec()).toStrictEqual(getAgentAdapterFieldSpec());
   });
 
-  it('exposes stage 14 root package entrypoints for outer repository convergence', () => {
+  it('exposes stage 14 root package entrypoints for outer repository convergence', async () => {
+    const rootModule = await import('../src/index.js');
+
     expect(KnowledgeRepositoryImpl).toBeDefined();
-    expect(ProjectIntelligenceCapability).toBeDefined();
     expect(createHostAgentWorkflowSession).toBeDefined();
+    expect(Object.hasOwn(rootModule, 'ProjectIntelligenceCapability')).toBe(false);
   });
 
-  it('exposes source graph contracts and service through stable root aggregation', () => {
-    expect(
-      createSourceGraphSnapshot({
-        generationId: 'root-source-graph',
-        projectRoot: '/tmp/alembic-core',
-      }).freshness.status
-    ).toBe('fresh');
-    expect(SourceGraphService).toBeDefined();
-    expect(SourceGraphQueryService).toBeDefined();
-    expect(
-      createSourceGraphValidationPlanResult({
-        projectRoot: '/tmp/alembic-core',
-      }).operation
-    ).toBe('validation-plan');
+  it('routes public project information through ProjectContext instead of root source graph aggregation', async () => {
+    const rootModule = await import('../src/index.js');
+
+    expect(ProjectContext.execute).toBeInstanceOf(Function);
+    expect(Object.hasOwn(rootModule, 'createSourceGraphSnapshot')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'createSourceGraphValidationPlanResult')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'SourceGraphService')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'SourceGraphQueryService')).toBe(false);
   });
 });

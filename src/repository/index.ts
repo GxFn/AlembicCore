@@ -7,7 +7,6 @@ export * from './knowledge/index.js';
 export * from './memory/index.js';
 export * from './search/index.js';
 export * from './session/index.js';
-export * from './source-graph/index.js';
 export * from './sourceref/index.js';
 export * from './sync/index.js';
 export * from './token/index.js';

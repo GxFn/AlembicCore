@@ -289,32 +289,6 @@ function buildTrendIssues(policy, summary, wildcardExportCount) {
   return issues;
 }
 
-function buildSourceGraphIssues(policy, exportPathSet) {
-  const canonical = policy.closeout?.sourceGraphCanonical;
-  if (!canonical) {
-    return [];
-  }
-
-  const issues = [];
-  if (!exportPathSet.has(canonical.canonicalFacade) || !policy.stablePublicExports.includes(canonical.canonicalFacade)) {
-    issues.push({
-      kind: 'source-graph-canonical-missing',
-      message: `Canonical source-graph facade ${canonical.canonicalFacade} must stay a stable package export (shape frozen for CKG2/CKG4).`,
-    });
-  }
-  for (const variant of canonical.variantFacadesRemoved ?? []) {
-    if (exportPathSet.has(variant)) {
-      issues.push({
-        exportPath: variant,
-        kind: 'source-graph-variant-resurrected',
-        message: `Removed source-graph variant facade ${variant} may not return; ${canonical.canonicalFacade} is canonical.`,
-      });
-    }
-  }
-
-  return issues;
-}
-
 function recordTrendEntry(policy, summary, exportPaths, wildcardExportCount) {
   const trend = getPublicApiTrend(policy);
   const last = trend?.history.at(-1);
@@ -391,7 +365,6 @@ async function buildReport(options = {}) {
     ...buildReviewByIssues(policy),
     ...(await buildNarrownessIssues(policy)),
     ...buildTrendIssues(policy, summary, wildcardExportPaths.length),
-    ...buildSourceGraphIssues(policy, exportPathSet),
   ];
 
   if (missingPolicyExportCount > 0) {
@@ -422,7 +395,7 @@ function formatTextReport(report) {
       `Exact exports: ${report.exactExportCount}; wildcard exports: ${report.wildcardExportCount}.`,
       `Status summary: stable=${report.summary['stable-public']}, provisional=${report.summary['provisional-public']}, transitional=${report.summary['transitional-internal']}.`,
       `Closeout no-growth: transitional<=${report.closeoutSummary.maxCounts?.['transitional-internal'] ?? 'unset'} (${report.closeoutSummary.transitionalExportCount}); wildcard<=${report.closeoutSummary.maxCounts?.wildcardExports ?? 'unset'} (${report.closeoutSummary.wildcardExportCount}).`,
-      'Prescriptive checks passed: removed-export resurrection, transitional ownership, deprecation marks, review-by dates, provisional narrowness budgets, shrink-only trend/maxCounts, source-graph canonical.',
+      'Prescriptive checks passed: removed-export resurrection, transitional ownership, deprecation marks, review-by dates, provisional narrowness budgets, shrink-only trend/maxCounts, ProjectContext project-information boundary.',
       ...(report.trendRecording
         ? [
             report.trendRecording.appended

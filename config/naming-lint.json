@@ -53,9 +53,9 @@
       "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./project-intelligence (export target). Barrel re-export, not a class-position straggler; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels (SN4 census)."
     },
     {
-      "file": "src/source-graph.ts",
+      "file": "src/project-context.ts",
       "owner": "AlembicCore window",
-      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./source-graph (export target; empty primary export = pure re-export). Exempt like index.ts barrels (SN4 census)."
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./project-context (export target). Barrel re-export, not a class-position straggler; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels (SN4 census)."
     },
     {
       "file": "src/host-agent-workflows.ts",

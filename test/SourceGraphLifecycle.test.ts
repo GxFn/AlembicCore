@@ -5,9 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
 import { pathGuard } from '../src/io.js';
-import { runAllPhases } from '../src/project-intelligence.js';
 import { createAlembicRepositories } from '../src/repositories.js';
-import { SourceGraphLifecycleService, SourceGraphService } from '../src/source-graph.js';
+import {
+  SourceGraphLifecycleService,
+  SourceGraphService,
+} from '../src/service/source-graph/index.js';
+import { runAllPhases } from '../src/workflows/capabilities/project-intelligence/ProjectIntelligenceRunner.js';
 import { getGhostWorkspaceDir, ProjectRegistry, WorkspaceResolver } from '../src/workspace.js';
 
 describe('SourceGraphLifecycleService', () => {
