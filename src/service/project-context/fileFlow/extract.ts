@@ -95,10 +95,11 @@ function collectImports(
   astImports: readonly unknown[] | undefined
 ): ExtractedFileFlowImport[] {
   const astQueue = (astImports ?? []).map(readAstImportRecord).filter(isExtractedImportMetadata);
+  const codeLines = maskCommentText(lines);
   const imports: ExtractedFileFlowImport[] = [];
   const seenDynamicLines = new Set<number>();
 
-  for (const statement of collectLogicalStatements(lines, 'import')) {
+  for (const statement of collectLogicalStatements(codeLines, 'import')) {
     const staticImport = parseStaticImportStatement(statement.text);
     if (staticImport) {
       const astRecord = shiftMatchingImport(astQueue, staticImport.specifier);
@@ -127,9 +128,12 @@ function collectImports(
     }
   }
 
-  for (const [index, line] of lines.entries()) {
+  for (const [index, line] of codeLines.entries()) {
     const lineNumber = index + 1;
     if (seenDynamicLines.has(lineNumber)) {
+      continue;
+    }
+    if (isCommentOnlyLine(lines[index] ?? '')) {
       continue;
     }
     const cjs = parseCommonJsRequire(line);
@@ -156,11 +160,73 @@ function collectImports(
   return dedupeImports(imports);
 }
 
+function isCommentOnlyLine(line: string): boolean {
+  return /^\s*(?:\/\/|\/\*|\*)/.test(line);
+}
+
+function maskCommentText(lines: readonly string[]): string[] {
+  let inBlockComment = false;
+  let inString: '"' | "'" | '`' | undefined;
+  let escaped = false;
+
+  return lines.map((line) => {
+    let masked = '';
+    for (let index = 0; index < line.length; index++) {
+      const char = line[index];
+      const next = line[index + 1];
+
+      if (inBlockComment) {
+        if (char === '*' && next === '/') {
+          masked += '  ';
+          index++;
+          inBlockComment = false;
+        } else {
+          masked += ' ';
+        }
+        continue;
+      }
+
+      if (inString) {
+        masked += char;
+        if (escaped) {
+          escaped = false;
+        } else if (char === '\\') {
+          escaped = true;
+        } else if (char === inString) {
+          inString = undefined;
+        }
+        continue;
+      }
+
+      if (char === '"' || char === "'" || char === '`') {
+        inString = char;
+        masked += char;
+        continue;
+      }
+
+      if (char === '/' && next === '/') {
+        masked += ' '.repeat(line.length - index);
+        break;
+      }
+
+      if (char === '/' && next === '*') {
+        masked += '  ';
+        index++;
+        inBlockComment = true;
+        continue;
+      }
+
+      masked += char;
+    }
+    return masked;
+  });
+}
+
 function collectExports(lines: readonly string[]): ExtractedFileFlowExport[] {
   const exports: ExtractedFileFlowExport[] = [];
   for (const statement of collectLogicalStatements(lines, 'export')) {
     const declaration = statement.text.match(
-      /\bexport\s+(?:default\s+)?(?:abstract\s+)?(class|interface|type|enum|function|const|let|var)\s+([A-Za-z_$][\w$]*)/
+      /\bexport\s+(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var)\s+([A-Za-z_$][\w$]*)/
     );
     if (declaration?.[1] && declaration[2]) {
       exports.push({
@@ -379,9 +445,98 @@ function parseCommonJsRequire(line: string):
 }
 
 function parseDynamicImports(text: string): string[] {
-  return [...text.matchAll(/\bimport\(\s*['"]([^'"]+)['"]\s*\)/g)]
-    .map((match) => match[1])
-    .filter((value): value is string => Boolean(value));
+  const specifiers: string[] = [];
+
+  for (let index = 0; index < text.length; index++) {
+    const dynamicImport = readDynamicImportAt(text, index);
+    if (dynamicImport) {
+      specifiers.push(dynamicImport.specifier);
+      index = dynamicImport.endIndex;
+      continue;
+    }
+
+    const quoted = readQuotedLiteralAt(text, index);
+    if (quoted) {
+      index = quoted.endIndex;
+    }
+  }
+
+  return specifiers;
+}
+
+function readDynamicImportAt(
+  text: string,
+  index: number
+): { specifier: string; endIndex: number } | undefined {
+  if (!isDynamicImportTokenAt(text, index)) {
+    return undefined;
+  }
+
+  let cursor = skipWhitespace(text, index + 'import'.length);
+  if (text[cursor] !== '(') {
+    return undefined;
+  }
+
+  cursor = skipWhitespace(text, cursor + 1);
+  const literal = readQuotedLiteralAt(text, cursor);
+  const specifier = literal?.value.trim();
+  if (!literal || !specifier || specifier.includes('${')) {
+    return undefined;
+  }
+
+  return {
+    endIndex: literal.endIndex,
+    specifier,
+  };
+}
+
+function readQuotedLiteralAt(
+  text: string,
+  index: number
+): { value: string; endIndex: number } | undefined {
+  const quote = text[index];
+  if (quote !== '"' && quote !== "'" && quote !== '`') {
+    return undefined;
+  }
+
+  let value = '';
+  for (let cursor = index + 1; cursor < text.length; cursor++) {
+    const char = text[cursor];
+    if (char === '\\') {
+      cursor++;
+      if (cursor < text.length) {
+        value += text[cursor];
+      }
+      continue;
+    }
+    if (char === quote) {
+      return { endIndex: cursor, value };
+    }
+    value += char;
+  }
+
+  return undefined;
+}
+
+function isDynamicImportTokenAt(text: string, index: number): boolean {
+  if (!text.startsWith('import', index)) {
+    return false;
+  }
+  const previous = text[index - 1];
+  const next = text[index + 'import'.length];
+  return !isIdentifierChar(previous) && !isIdentifierChar(next);
+}
+
+function skipWhitespace(text: string, index: number): number {
+  let cursor = index;
+  while (cursor < text.length && /\s/.test(text[cursor])) {
+    cursor++;
+  }
+  return cursor;
+}
+
+function isIdentifierChar(value: string | undefined): boolean {
+  return value !== undefined && /[A-Za-z0-9_$]/.test(value);
 }
 
 function readAstImportRecord(value: unknown):

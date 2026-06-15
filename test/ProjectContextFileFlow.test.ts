@@ -176,6 +176,42 @@ describe('ProjectContext PCQ-3 file-flow', () => {
     );
   });
 
+  it('ignores comment examples while preserving real dynamic imports', async () => {
+    const source = [
+      "// Example only: const fake = await import('./commented');",
+      "/* Example only: const ignored = require('./blocked'); */",
+      'const literal = "import(\'./string-only\')";',
+      'export async function loadLazy(): Promise<string> {',
+      "  const mod = await import('./lazy');",
+      "  return literal + ':' + mod.lazy;",
+      '}',
+    ].join('\n');
+
+    await withFixture(
+      {
+        'src/dynamic.ts': source,
+        'src/lazy.ts': 'export const lazy = "loaded";',
+      },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/dynamic.ts' },
+          scope: { projectRoot, repoId: 'core' },
+        });
+        const data = envelope.data as FileFlowContext;
+
+        expect(data.imports.map((relation) => relation.to?.label)).toEqual(['src/lazy.ts']);
+        expect(data.exports.map((symbol) => symbol.qualifiedName ?? symbol.name)).toEqual([
+          'loadLazy',
+        ]);
+        expect(data.outflow.map((relation) => relation.kind)).toEqual(
+          expect.arrayContaining(['imports', 'exports'])
+        );
+        expect(envelope.errors).toBeUndefined();
+      }
+    );
+  });
+
   it('returns ordinary query errors without inventing flow facts for unsupported or missing files', async () => {
     await withFixture({ 'README.md': '# Notes\n\nNo parser here.' }, async (projectRoot) => {
       const unsupported = await ProjectContext.execute({
