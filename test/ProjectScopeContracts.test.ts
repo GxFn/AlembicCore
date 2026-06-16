@@ -15,6 +15,7 @@ import {
   PROJECT_SCOPE_CONTRACT_VERSION,
   PROJECT_SCOPE_OPERATIONS,
   PROJECT_SCOPE_STORAGE_KINDS,
+  readProjectScopeFromWorkspaceConfig,
   resolveProjectScopeForFolder,
   resolveProjectScopeRegistryFolder,
   resolveProjectScopeSourceRef,
@@ -152,6 +153,7 @@ describe('ProjectScope multi-root contracts', () => {
       path.join(controlRoot, 'AlembicPlugin'),
     ]);
     expect(scope?.controlRoot.includedInFolders).toBe(false);
+    expect(readProjectScopeFromWorkspaceConfig).toBeInstanceOf(Function);
   });
 
   it('rejects controlRoot as a source folder and bans standard/project-root storage for new entries', () => {

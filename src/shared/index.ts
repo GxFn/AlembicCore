@@ -56,6 +56,7 @@ export {
   PROJECT_SCOPE_OPERATIONS,
   PROJECT_SCOPE_RESOLUTION_REASONS,
   PROJECT_SCOPE_STORAGE_KINDS,
+  readProjectScopeFromWorkspaceConfig,
   resolveProjectScopeForFolder,
   resolveProjectScopeRegistryFolder,
   resolveProjectScopeSourceRef,
