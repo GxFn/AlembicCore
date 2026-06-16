@@ -9,7 +9,7 @@
 
 import Database from 'better-sqlite3';
 import { vi } from 'vitest';
-import { BM25Scorer, SearchEngine, tokenize } from '../src/service/search/SearchEngine.js';
+import { FieldWeightedScorer, SearchEngine, tokenize } from '../src/service/search/SearchEngine.js';
 
 /** 在内存 DB 中创建 knowledge_entries 表 */
 function createInMemoryDb() {
@@ -115,19 +115,28 @@ describe('Integration: Search Pipeline', () => {
     });
   });
 
-  // ── BM25Scorer 独立测试 ───────────────────────────────
+  // ── FieldWeightedScorer 独立测试 ───────────────────────────────
 
-  describe('BM25Scorer 评分排序', () => {
+  describe('FieldWeightedScorer 评分排序', () => {
     let scorer;
 
     beforeEach(() => {
-      scorer = new BM25Scorer();
+      scorer = new FieldWeightedScorer();
     });
 
     it('应按相关性排序', () => {
-      scorer.addDocument('r1', 'Swift URLSession networking request');
-      scorer.addDocument('r2', 'Swift TableView delegate datasource');
-      scorer.addDocument('r3', 'URLSession download upload networking');
+      scorer.addDocument('r1', 'Swift URLSession networking request', {
+        title: 'Swift URLSession networking',
+        trigger: 'urlsession',
+        tags: ['networking'],
+      });
+      scorer.addDocument('r2', 'Swift TableView delegate datasource', {
+        title: 'Swift TableView',
+      });
+      scorer.addDocument('r3', 'URLSession download upload networking', {
+        title: 'URLSession download',
+        tags: ['networking'],
+      });
 
       const results = scorer.search('URLSession networking');
       expect(results.length).toBeGreaterThanOrEqual(2);

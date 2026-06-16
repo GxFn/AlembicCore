@@ -19,7 +19,7 @@ import pLimit, { type LimitFunction } from 'p-limit';
 /** IO 密集型（文件读写、DB 查询、本地向量操作） */
 export const ioLimit: LimitFunction = pLimit(20);
 
-/** CPU 密集型（AST 解析、BM25 搜索） */
+/** CPU 密集型（AST 解析、lexical 搜索） */
 export const cpuLimit: LimitFunction = pLimit(4);
 
 /**

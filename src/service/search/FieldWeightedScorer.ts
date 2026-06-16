@@ -1,11 +1,11 @@
 /**
  * FieldWeightedScorer — 加权字段匹配评分器
  *
- * 替代 BM25Scorer 作为结构化知识库的默认搜索评分引擎。
+ * 结构化知识库的默认搜索评分引擎。
  *
  * 设计动机:
- * - BM25 将所有字段拼接为文本做统计评分，tokenize 去重导致 TF 恒为 1，BM25F boost 失效
- * - 对于 ~50–500 条结构化知识条目，BM25 的大规模语料假设不成立
+ * - 旧全文统计评分把所有字段拼接为文本，tokenize 去重后会削弱结构化字段权重
+ * - 对于 ~50–500 条结构化知识条目，大规模语料假设不成立
  * - FieldWeightedScorer 对每个字段独立打分并加权合并，精确匹配 > token 重叠 > IDF 加权
  *
  * 字段权重:
@@ -50,7 +50,7 @@ interface FieldWeightedDocument {
 /**
  * FieldWeightedScorer — 加权字段匹配评分器
  *
- * 接口与 BM25Scorer 完全兼容（实现 Scorer 接口），可作为 drop-in 替换。
+ * 实现 Scorer 接口，可作为 SearchEngine 默认 scorer。
  */
 export class FieldWeightedScorer implements Scorer {
   avgLength: number;

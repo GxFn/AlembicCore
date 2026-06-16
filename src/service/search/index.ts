@@ -1,4 +1,3 @@
-export * from './BM25Scorer.js';
 export * from './CoarseRanker.js';
 export * from './contextBoost.js';
 export * from './FieldWeightedScorer.js';

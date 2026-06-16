@@ -2,7 +2,7 @@
  * SearchTypes — SearchEngine 共享类型定义
  *
  * 从 SearchEngine.ts 提取的所有接口和类型，
- * 供 SearchEngine、FieldWeightedScorer、BM25Scorer 及测试文件独立消费。
+ * 供 SearchEngine、FieldWeightedScorer 及测试文件独立消费。
  *
  * @module SearchTypes
  */
@@ -29,7 +29,7 @@ export interface ScorerResult {
 }
 
 /**
- * Scorer 通用接口 — FieldWeightedScorer（默认）与 BM25Scorer 共同实现
+ * Scorer 通用接口 — FieldWeightedScorer（默认）实现
  *
  * SearchEngine 通过此接口与具体评分器解耦，可在运行时切换。
  */
@@ -57,6 +57,7 @@ export interface DocMeta {
   language: string;
   dimensionId?: string;
   category: string;
+  scope?: string;
   updatedAt: string | null;
   createdAt: string | null;
   difficulty: string;
@@ -79,7 +80,15 @@ export interface SearchResultItem {
   language?: string;
   dimensionId?: string;
   category?: string;
+  scope?: string;
   score?: number;
+  semanticScore?: number;
+  vectorScore?: number;
+  semanticUsed?: boolean;
+  vectorUsed?: boolean;
+  fallbackReason?: string;
+  matchedFilters?: Record<string, string[]>;
+  scoreBreakdown?: Record<string, unknown>;
   content?: string;
   code?: string;
   headers?: string;
@@ -111,6 +120,7 @@ export interface DbRow {
   category?: string;
   knowledgeType?: string;
   kind?: string;
+  scope?: string;
   content?: string;
   lifecycle?: string;
   tags?: string;
@@ -128,6 +138,26 @@ export interface DbRow {
   [key: string]: unknown;
 }
 
+export type SearchMetadataFilterKey =
+  | 'category'
+  | 'dimensionId'
+  | 'kind'
+  | 'knowledgeType'
+  | 'language'
+  | 'scope'
+  | 'tags'
+  | 'type';
+
+export type SearchMetadataFilterValue = string | string[] | undefined;
+
+export type SearchMetadataFilters = Partial<
+  Record<SearchMetadataFilterKey, SearchMetadataFilterValue>
+> & {
+  tag?: SearchMetadataFilterValue;
+};
+
+export type NormalizedSearchMetadataFilters = Partial<Record<SearchMetadataFilterKey, string[]>>;
+
 /** Search method options */
 export interface SearchOptions {
   type?: string;
@@ -137,6 +167,15 @@ export interface SearchOptions {
   rank?: boolean;
   groupByKind?: boolean;
   useAI?: boolean;
+  category?: SearchMetadataFilterValue;
+  dimensionId?: SearchMetadataFilterValue;
+  filters?: SearchMetadataFilters;
+  kind?: SearchMetadataFilterValue;
+  knowledgeType?: SearchMetadataFilterValue;
+  language?: SearchMetadataFilterValue;
+  scope?: SearchMetadataFilterValue;
+  tag?: SearchMetadataFilterValue;
+  tags?: SearchMetadataFilterValue;
   [key: string]: unknown;
 }
 
@@ -207,6 +246,8 @@ export interface SearchResponseMeta {
   workspace?: SearchWorkspaceIdentity;
   timings?: SearchTimingMeta;
   residentVector?: ResidentVectorMeta;
+  appliedFilters?: NormalizedSearchMetadataFilters;
+  unsupportedMode?: string;
   [key: string]: unknown;
 }
 
@@ -224,6 +265,8 @@ export interface BuildSearchResponseMetaInput {
   workspace?: SearchWorkspaceIdentity;
   timings?: SearchTimingMeta;
   residentVector?: ResidentVectorMeta;
+  appliedFilters?: NormalizedSearchMetadataFilters;
+  unsupportedMode?: string;
   [key: string]: unknown;
 }
 
@@ -278,6 +321,12 @@ export function buildSearchResponseMeta(
   }
   if (input.residentVector) {
     meta.residentVector = input.residentVector;
+  }
+  if (input.appliedFilters && Object.keys(input.appliedFilters).length > 0) {
+    meta.appliedFilters = input.appliedFilters;
+  }
+  if (input.unsupportedMode) {
+    meta.unsupportedMode = input.unsupportedMode;
   }
 
   return meta;
@@ -419,6 +468,14 @@ export interface SlimSearchResult {
   actionHint?: string;
   /** 知识类型 (code-standard/code-pattern/...) — Bridge 场景需要 */
   knowledgeType?: string;
+  /** Recipe / knowledge scope for faceted search. */
+  scope?: string;
+  /** Domain dimension id for faceted search. */
+  dimensionId?: string;
+  /** Category for faceted search. */
+  category?: string;
+  /** Tags preserved for filter evidence. */
+  tags?: string[];
   /** 已验证的项目来源文件路径（可信度证据链） */
   sourceRefs?: string[];
 }
@@ -446,6 +503,9 @@ export function slimSearchResult(item: SearchResultItem): SlimSearchResult {
     Array.isArray(rawRefs) && rawRefs.length > 0
       ? rawRefs.filter((s: unknown) => typeof s === 'string' && (s as string).length > 0)
       : undefined;
+  const tags = Array.isArray(item.tags)
+    ? item.tags.filter((tag): tag is string => typeof tag === 'string')
+    : undefined;
   return {
     id: item.id,
     title: (item.title as string) || '',
@@ -456,6 +516,10 @@ export function slimSearchResult(item: SearchResultItem): SlimSearchResult {
     description: ((item.description as string) || '').slice(0, 120),
     actionHint,
     knowledgeType: (item.knowledgeType as string) || undefined,
+    scope: (item.scope as string) || undefined,
+    dimensionId: (item.dimensionId as string) || undefined,
+    category: (item.category as string) || undefined,
+    tags,
     sourceRefs,
   };
 }
@@ -484,6 +548,7 @@ export interface SearchVectorService {
     opts?: {
       topK?: number;
       alpha?: number;
+      filter?: Record<string, unknown> | null;
       sparseSearchFn?:
         | ((
             q: string,

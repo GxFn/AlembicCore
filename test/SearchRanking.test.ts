@@ -6,7 +6,7 @@
  *  - MultiSignalRanker      (6信号、场景权重、向后兼容)
  *  - Individual Signals      (RelevanceSignal, PopularitySignal, ContextMatchSignal, etc.)
  *  - contextBoost           (共享上下文加成)
- *  - BM25Scorer             (增量 remove/update/compact, legacy 评分器)
+ *  - FieldWeightedScorer    (增量 remove/update/compact, lexical 评分器)
  */
 
 import { CoarseRanker } from '../src/service/search/CoarseRanker.js';
@@ -20,7 +20,7 @@ import {
   RecencySignal,
   RelevanceSignal,
 } from '../src/service/search/MultiSignalRanker.js';
-import { BM25Scorer } from '../src/service/search/SearchEngine.js';
+import { FieldWeightedScorer } from '../src/service/search/SearchEngine.js';
 
 /* ════════════════════════════════════════════════════════════════════
  *  CoarseRanker
@@ -418,14 +418,14 @@ describe('contextBoost', () => {
 });
 
 /* ════════════════════════════════════════════════════════════════════
- *  BM25Scorer — incremental operations (legacy scorer)
+ *  FieldWeightedScorer — incremental operations
  * ════════════════════════════════════════════════════════════════════ */
 
-describe('BM25Scorer incremental', () => {
+describe('FieldWeightedScorer incremental', () => {
   let scorer;
 
   beforeEach(() => {
-    scorer = new BM25Scorer();
+    scorer = new FieldWeightedScorer();
     scorer.addDocument('d1', 'react hooks useState');
     scorer.addDocument('d2', 'vue composition ref');
     scorer.addDocument('d3', 'angular signals effect');

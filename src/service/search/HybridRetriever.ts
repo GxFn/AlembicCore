@@ -50,7 +50,7 @@ export class HybridRetriever {
    * RRF 融合搜索
    *
    * Dense: vectorStore 向量搜索 (HNSW or brute-force)
-   * Sparse: BM25 关键词搜索 (由外部传入结果)
+   * Sparse: keyword / lexical 搜索 (由外部传入结果)
    *
    * @param params.denseResults - 向量搜索结果
    * @param params.sparseResults - 关键词搜索结果

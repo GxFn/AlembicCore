@@ -640,13 +640,13 @@ export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
   },
   {
     cleanupBlocker:
-      'No active product consumer remains after D9 alias import scan; keep BM25Scorer class but do not reintroduce BM25* type aliases.',
+      'No active product consumer remains after D9 legacy scorer import scan; keep neutral Scorer contracts and do not reintroduce retired scorer aliases.',
     currentCompatibilityOwner: [],
     currentConsumers: [],
     decisionRationale:
-      'Active product source scan has zero BM25Document/BM25SearchResult/BM25DocMeta imports, and Core internals now use ScorerDocument/ScorerResult/DocMeta.',
+      'Active product source scan has zero retired scorer type-alias imports, and Core internals now use ScorerDocument/ScorerResult/DocMeta.',
     id: 'D9-C04',
-    legacySurface: 'Deprecated BM25Document, BM25SearchResult, and BM25DocMeta type aliases.',
+    legacySurface: 'Deprecated legacy scorer document/search/doc-meta type aliases.',
     publicExposurePolicy:
       'Deleted type aliases; current public scorer type names remain ScorerDocument, ScorerResult, and DocMeta.',
     registryRows: ['I01'],
@@ -656,12 +656,11 @@ export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
     sourceFiles: [
       'src/search.ts',
       'src/service/search/SearchTypes.ts',
-      'src/service/search/BM25Scorer.ts',
       'src/service/search/FieldWeightedScorer.ts',
     ],
     status: 'deleted',
     validationCommands: [
-      'rg -n "BM25Document|BM25SearchResult|BM25DocMeta" Alembic AlembicPlugin AlembicAgent AlembicDashboard -g "!**/vendor/**" -g "!**/dist/**"',
+      'rg -n "LegacyScorerDocument|LegacyScorerSearchResult|LegacyScorerDocMeta" Alembic AlembicPlugin AlembicAgent AlembicDashboard -g "!**/vendor/**" -g "!**/dist/**"',
       'npm run build:check',
       'npm run test',
     ],

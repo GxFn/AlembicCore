@@ -84,7 +84,7 @@ const SCENARIO_WEIGHTS = {
   },
 };
 
-/** 相关性信号 — BM25 + 标题匹配 + 内容匹配 */
+/** 相关性信号 — 召回分 + 标题匹配 + 内容匹配 */
 export class RelevanceSignal {
   compute(candidate: SignalCandidate, context: SignalContext) {
     let score = candidate.recallScore || candidate.score || 0;

@@ -25,6 +25,7 @@ import { MultiSignalRanker } from './MultiSignalRanker.js';
 import type {
   DbRow,
   DocMeta,
+  NormalizedSearchMetadataFilters,
   RankingContext,
   Scorer,
   ScorerResult,
@@ -33,6 +34,7 @@ import type {
   SearchDb,
   SearchEngineOptions,
   SearchHybridRetriever,
+  SearchMetadataFilterKey,
   SearchOptions,
   SearchResponse,
   SearchResultItem,
@@ -42,12 +44,11 @@ import type {
 } from './SearchTypes.js';
 import { buildSearchResponseMeta } from './SearchTypes.js';
 
-// ── Re-exports for backward compatibility ──
-export { BM25Scorer } from './BM25Scorer.js';
 export { FieldWeightedScorer } from './FieldWeightedScorer.js';
 export type {
   DbRow,
   DocMeta,
+  NormalizedSearchMetadataFilters,
   RankingContext,
   ResolveSearchWorkspaceIdentityInput,
   RrfHit,
@@ -58,6 +59,8 @@ export type {
   SearchDb,
   SearchEngineOptions,
   SearchHybridRetriever,
+  SearchMetadataFilterKey,
+  SearchMetadataFilters,
   SearchOptions,
   SearchResponse,
   SearchResponseMeta,
@@ -206,11 +209,36 @@ export class SearchEngine {
    * @param options {type, limit, mode, useAI}
    */
   async search(query: string, options: SearchOptions = {}) {
-    const { type = 'all', limit = 20, mode = 'keyword', context } = options;
+    const { type = 'all', limit = 20, context } = options;
+    const mode = typeof options.mode === 'string' ? options.mode.toLowerCase() : 'keyword';
     const shouldRank = options.rank ?? mode !== 'keyword';
+    const metadataFilters = this.#normalizeMetadataFilters(options);
+    const hasMetadataFilters = this.#hasMetadataFilters(metadataFilters);
     const tSearchStart = performance.now();
 
-    if (!query || !query.trim()) {
+    if (mode === 'bm25') {
+      const durationMs = performance.now() - tSearchStart;
+      return {
+        items: [],
+        total: 0,
+        query,
+        mode: 'unsupported',
+        type,
+        ranked: false,
+        searchMeta: buildSearchResponseMeta({
+          route: 'core-search-engine',
+          requestedMode: mode,
+          actualMode: 'unsupported',
+          resultCount: 0,
+          durationMs,
+          fallbackReason: 'unsupported_mode:bm25',
+          unsupportedMode: mode,
+          appliedFilters: metadataFilters,
+        }),
+      };
+    }
+
+    if ((!query || !query.trim()) && !hasMetadataFilters) {
       return {
         items: [],
         total: 0,
@@ -230,9 +258,10 @@ export class SearchEngine {
 
     // 带 sessionHistory 的上下文搜索不缓存（个性化结果）
     const hasSessionContext = (context?.sessionHistory?.length ?? 0) > 0;
+    const filterCacheKey = this.#metadataFilterCacheKey(metadataFilters);
     const cacheKey = hasSessionContext
       ? null
-      : `${query}:${type}:${limit}:${mode}:${shouldRank ? 'r' : ''}:${options.groupByKind ? 'g' : ''}`;
+      : `${query}:${type}:${limit}:${mode}:${shouldRank ? 'r' : ''}:${options.groupByKind ? 'g' : ''}:${filterCacheKey}`;
     if (cacheKey) {
       const cached = this._getCache(cacheKey);
       if (cached) {
@@ -251,119 +280,106 @@ export class SearchEngine {
     let semanticUsed: boolean | undefined;
     let vectorUsed: boolean | undefined;
 
-    switch (mode) {
-      case 'auto': {
-        // ── Weighted-First + Confidence Gate ──
-        // 先跑 weighted（~40ms），评估是否需要 embed（2-22s）
-        const weightedItems = this._scorerSearch(query, type, recallLimit);
-        const confidence = this.#computeWeightedConfidence(query, weightedItems, limit);
+    if ((!query || !query.trim()) && hasMetadataFilters) {
+      results = this.#metadataFilterOnlySearch(type, limit, metadataFilters);
+      actualMode = 'metadata-filter';
+    } else {
+      switch (mode) {
+        case 'auto': {
+          // ── Weighted-First + Confidence Gate ──
+          // 先跑 weighted（~40ms），评估是否需要 embed（2-22s）
+          const weightedItems = this._scorerSearch(query, type, recallLimit, metadataFilters);
+          const confidence = this.#computeWeightedConfidence(query, weightedItems, limit);
 
-        if (confidence >= 60) {
-          // 高 confidence: weighted 已足够，跳过 embed
-          results = weightedItems;
-          actualMode = `auto(weighted-only,conf=${confidence})`;
-          this.logger.info(
-            `[QueryRouter] skip-semantic: conf=${confidence} topScore=${weightedItems[0]?.score ?? 0} query="${query}"`
-          );
-          break;
-        }
-        if (!this.vectorService) {
-          // 没有 VectorService 时不是“向量失败”，而是明确走 Core baseline 搜索。
-          results = weightedItems;
-          actualMode = `auto(weighted-only,conf=${confidence})`;
-          fallbackReason = 'vector_service_unavailable';
-          this.logger.info(
-            `[QueryRouter] skip-semantic: vector_service_unavailable conf=${confidence} topScore=${weightedItems[0]?.score ?? 0} query="${query}"`
-          );
-          break;
-        }
-
-        // 低 confidence: 投入 embed，RRF 融合
-        // 自适应 alpha：confidence 越低 → semantic 权重越高
-        // conf=0 → alpha=0.75, conf=30 → alpha=0.575, conf=55 → alpha=0.42
-        const adaptiveAlpha =
-          this._fusionSemanticWeight + (0.75 - this._fusionSemanticWeight) * (1 - confidence / 60);
-        this.logger.info(
-          `[QueryRouter] invoke-semantic: conf=${confidence} alpha=${adaptiveAlpha.toFixed(2)} topScore=${weightedItems[0]?.score ?? 0} query="${query}"`
-        );
-        try {
-          const rrfResults = await this.vectorService.hybridSearch(query, {
-            topK: recallLimit,
-            alpha: adaptiveAlpha,
-            sparseSearchFn: () => weightedItems,
-          });
-          if (rrfResults.length > 0) {
-            const rrfVectorUsed = rrfResults.some((r) => r.vectorUsed === true);
-            semanticUsed = rrfVectorUsed;
-            vectorUsed = rrfVectorUsed;
-            if (!rrfVectorUsed) {
-              fallbackReason =
-                rrfResults.find((r) => typeof r.fallbackReason === 'string')?.fallbackReason ??
-                'vector_service_sparse_only';
-            }
-            results = rrfResults.map((r) => {
-              const base =
-                ((r as Record<string, unknown>).data as Record<string, unknown>)?.item ||
-                (r as Record<string, unknown>).data ||
-                {};
-              const baseMeta = ((base as Record<string, unknown>).metadata || {}) as Record<
-                string,
-                unknown
-              >;
-              return {
-                id: r.id,
-                title: ((base as Record<string, unknown>).title ||
-                  baseMeta.title ||
-                  r.id) as string,
-                type: ((base as Record<string, unknown>).type || 'recipe') as string,
-                kind: ((base as Record<string, unknown>).kind ||
-                  baseMeta.kind ||
-                  'pattern') as string,
-                status: ((base as Record<string, unknown>).status ||
-                  baseMeta.status ||
-                  'active') as string,
-                score: Math.round(r.score * 1000) / 1000,
-                content: (base as Record<string, unknown>).content as string | undefined,
-                description: (base as Record<string, unknown>).description as string | undefined,
-              } as SearchResultItem;
-            });
-            this._supplementDetails(results as SearchResultItem[]);
-            actualMode = rrfVectorUsed
-              ? `auto(rrf,conf=${confidence},α=${adaptiveAlpha.toFixed(2)})`
-              : `auto(sparse-rrf,conf=${confidence})`;
+          if (confidence >= 60) {
+            // 高 confidence: weighted 已足够，跳过 embed
+            results = weightedItems;
+            actualMode = `auto(weighted-only,conf=${confidence})`;
+            this.logger.info(
+              `[QueryRouter] skip-semantic: conf=${confidence} topScore=${weightedItems[0]?.score ?? 0} query="${query}"`
+            );
             break;
           }
-        } catch (err: unknown) {
-          // VectorService RRF 失败, 降级
-          const errorMessage = err instanceof Error ? err.message : String(err);
-          fallbackReason = `vector_service_hybrid_failed:${errorMessage}`;
-          this.logger.warn('[QueryRouter] vector service hybrid failed, falling back to weighted', {
-            error: errorMessage,
-            query,
-            confidence,
-          });
-        }
+          if (!this.vectorService) {
+            // 没有 VectorService 时不是“向量失败”，而是明确走 Core baseline 搜索。
+            results = weightedItems;
+            actualMode = `auto(weighted-only,conf=${confidence})`;
+            fallbackReason = 'vector_service_unavailable';
+            this.logger.info(
+              `[QueryRouter] skip-semantic: vector_service_unavailable conf=${confidence} topScore=${weightedItems[0]?.score ?? 0} query="${query}"`
+            );
+            break;
+          }
 
-        // 降级: embed 失败 → 返回已有的 weighted 结果
-        results = weightedItems;
-        actualMode = `auto(weighted-fallback,conf=${confidence})`;
-        fallbackReason ??= 'vector_service_hybrid_unavailable';
-        break;
+          // 低 confidence: 投入 embed，RRF 融合
+          // 自适应 alpha：confidence 越低 → semantic 权重越高
+          // conf=0 → alpha=0.75, conf=30 → alpha=0.575, conf=55 → alpha=0.42
+          const adaptiveAlpha =
+            this._fusionSemanticWeight +
+            (0.75 - this._fusionSemanticWeight) * (1 - confidence / 60);
+          this.logger.info(
+            `[QueryRouter] invoke-semantic: conf=${confidence} alpha=${adaptiveAlpha.toFixed(2)} topScore=${weightedItems[0]?.score ?? 0} query="${query}"`
+          );
+          try {
+            const rrfResults = await this.vectorService.hybridSearch(query, {
+              topK: recallLimit,
+              alpha: adaptiveAlpha,
+              filter: this.#hasMetadataFilters(metadataFilters) ? metadataFilters : null,
+              sparseSearchFn: () => weightedItems,
+            });
+            if (rrfResults.length > 0) {
+              const rrfVectorUsed = rrfResults.some((r) => r.vectorUsed === true);
+              semanticUsed = rrfVectorUsed;
+              vectorUsed = rrfVectorUsed;
+              if (!rrfVectorUsed) {
+                fallbackReason =
+                  rrfResults.find((r) => typeof r.fallbackReason === 'string')?.fallbackReason ??
+                  'vector_service_sparse_only';
+              }
+              results = rrfResults.map((r) => this.#mapVectorLikeResult(r.id, r.score, r));
+              this._supplementDetails(results as SearchResultItem[]);
+              results = this.#applyMetadataFilters(results, metadataFilters);
+              actualMode = rrfVectorUsed
+                ? `auto(rrf,conf=${confidence},α=${adaptiveAlpha.toFixed(2)})`
+                : `auto(sparse-rrf,conf=${confidence})`;
+              break;
+            }
+          } catch (err: unknown) {
+            // VectorService RRF 失败, 降级
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            fallbackReason = `vector_service_hybrid_failed:${errorMessage}`;
+            this.logger.warn(
+              '[QueryRouter] vector service hybrid failed, falling back to weighted',
+              {
+                error: errorMessage,
+                query,
+                confidence,
+              }
+            );
+          }
+
+          // 降级: embed 失败 → 返回已有的 weighted 结果
+          results = weightedItems;
+          actualMode = `auto(weighted-fallback,conf=${confidence})`;
+          fallbackReason ??= 'vector_service_hybrid_unavailable';
+          break;
+        }
+        case 'weighted':
+          results = this._scorerSearch(query, type, recallLimit, metadataFilters);
+          break;
+        case 'semantic': {
+          const semResult = await this._semanticSearch(query, type, recallLimit, metadataFilters);
+          results = semResult.items;
+          actualMode = semResult.actualMode || 'semantic';
+          fallbackReason = semResult.fallbackReason;
+          semanticUsed = semResult.semanticUsed;
+          vectorUsed = semResult.vectorUsed;
+          break;
+        }
+        default:
+          results = this._keywordSearch(query, type, limit, metadataFilters);
+          break;
       }
-      case 'weighted':
-      case 'bm25':
-        results = this._scorerSearch(query, type, recallLimit);
-        break;
-      case 'semantic': {
-        const semResult = await this._semanticSearch(query, type, recallLimit);
-        results = semResult.items;
-        actualMode = semResult.actualMode || 'semantic';
-        fallbackReason = semResult.fallbackReason;
-        break;
-      }
-      default:
-        results = this._keywordSearch(query, type, limit);
-        break;
     }
 
     // ── Ranking Pipeline ([CrossEncoder] → CoarseRanker → MultiSignalRanker → ContextBoost) ──
@@ -394,6 +410,7 @@ export class SearchEngine {
       fallbackReason,
       degraded: this._indexDegradedReason !== null,
       degradedReason: this._indexDegradedReason ?? undefined,
+      appliedFilters: metadataFilters,
     });
     this.logger.info(
       `Search completed: mode=${actualMode} total=${results.length} time=${Math.round(tSearchEnd - tSearchStart)}ms ranked=${response.ranked} query="${query}"`
@@ -502,11 +519,17 @@ export class SearchEngine {
    * 返回包含 kind 字段的完整结果，使用 ESCAPE 防止通配符注入
    * 当 SQL LIKE 无结果时，降级到 FieldWeighted 搜索以提升自然语言查询的召回率
    */
-  _keywordSearch(query: string, type: string, limit: number) {
+  _keywordSearch(
+    query: string,
+    type: string,
+    limit: number,
+    filters: NormalizedSearchMetadataFilters = {}
+  ) {
     const results: SearchResultItem[] = [];
     // 转义 LIKE 通配符 (% → \%, _ → \_)
     const escaped = query.replace(/[%_\\]/g, (ch: string) => `\\${ch}`);
     const pattern = `%${escaped}%`;
+    const rowLimit = this.#hasMetadataFilters(filters) ? Math.max(limit * 5, 100) : limit;
 
     if (
       type === 'all' ||
@@ -518,7 +541,7 @@ export class SearchEngine {
       try {
         let rows: DbRow[] = [];
         try {
-          const rawRows = this.#knowledgeRepo.keywordSearchSync(pattern, limit);
+          const rawRows = this.#knowledgeRepo.keywordSearchSync(pattern, rowLimit);
           rows = rawRows.map((r) => ({
             ...r,
             status:
@@ -545,9 +568,13 @@ export class SearchEngine {
               trigger: r.trigger || '',
               kind: r.kind || 'pattern',
               score: Math.round(score * 1000) / 1000,
+              matchedFilters: this.#matchedFilterEvidence(r, filters),
             };
           })
         );
+        const filtered = this.#applyMetadataFilters(results, filters);
+        results.length = 0;
+        results.push(...filtered);
         results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
       } catch {
         /* table may not exist */
@@ -561,7 +588,7 @@ export class SearchEngine {
     // 这让自然语言查询（如 "如何处理网络错误"）在 keyword 模式下也能返回结果
     if (results.length === 0) {
       this.ensureIndex();
-      const scorerResults = this._scorerSearch(query, type, limit);
+      const scorerResults = this._scorerSearch(query, type, limit, filters);
       return scorerResults;
     }
 
@@ -573,7 +600,12 @@ export class SearchEngine {
    * 增加 Title/Trigger 精确匹配 bonus — 当 query 出现在标题/触发词中时
    * 给予额外分数加成，确保精确匹配的条目排名靠前
    */
-  _scorerSearch(query: string, type: string, limit: number) {
+  _scorerSearch(
+    query: string,
+    type: string,
+    limit: number,
+    filters: NormalizedSearchMetadataFilters = {}
+  ) {
     let results = this.scorer.search(query, limit * 2);
 
     if (type !== 'all') {
@@ -585,6 +617,9 @@ export class SearchEngine {
         return (r.meta as Record<string, unknown>).type === 'recipe';
       });
     }
+    results = results.filter((r) =>
+      this.#matchesMetadataRecord(r.meta as Record<string, unknown>, filters)
+    );
 
     // ── Title/Trigger exact-match bonus ──
     // 当 query 精确出现在标题或触发词中时，增加分数
@@ -623,7 +658,11 @@ export class SearchEngine {
         status: meta.status,
         language: meta.language || '',
         category: meta.category || '',
+        dimensionId: meta.dimensionId || '',
+        knowledgeType: meta.knowledgeType || '',
+        scope: meta.scope || '',
         score: Math.round(r.score * 1000) / 1000,
+        matchedFilters: this.#matchedFilterEvidence(meta as Record<string, unknown>, filters),
         // 排序信号字段（供 CoarseRanker / MultiSignalRanker 使用）
         updatedAt: meta.updatedAt || null,
         createdAt: meta.createdAt || null,
@@ -649,12 +688,22 @@ export class SearchEngine {
   async _semanticSearch(
     query: string,
     type: string,
-    limit: number
-  ): Promise<{ items: SearchResultItem[]; actualMode: string; fallbackReason?: string }> {
+    limit: number,
+    filters: NormalizedSearchMetadataFilters = {}
+  ): Promise<{
+    items: SearchResultItem[];
+    actualMode: string;
+    fallbackReason?: string;
+    semanticUsed?: boolean;
+    vectorUsed?: boolean;
+  }> {
     // 优先使用 VectorService (统一向量服务层)
     if (this.vectorService) {
       try {
-        const vectorResults = await this.vectorService.search(query, { topK: limit * 2 });
+        const vectorResults = await this.vectorService.search(query, {
+          topK: limit * 2,
+          filter: this.#hasMetadataFilters(filters) ? filters : null,
+        });
         if (vectorResults.length > 0) {
           let results: SearchResultItem[] = vectorResults.map((vr) => {
             const item = vr.item as Record<string, unknown>;
@@ -669,6 +718,19 @@ export class SearchEngine {
               kind: (metadata.kind as string) || 'pattern',
               status: (metadata.status as string) || 'active',
               score: Math.round(vr.score * 1000) / 1000,
+              semanticScore: Math.round(vr.score * 1000) / 1000,
+              vectorScore: Math.round(vr.score * 1000) / 1000,
+              semanticUsed: true,
+              vectorUsed: true,
+              description: (metadata.description as string) || undefined,
+              content: (item.content as string) || undefined,
+              language: (metadata.language as string) || '',
+              dimensionId: (metadata.dimensionId as string) || '',
+              category: (metadata.category as string) || '',
+              knowledgeType: (metadata.knowledgeType as string) || '',
+              scope: (metadata.scope as string) || '',
+              tags: this.#readStringArray(metadata.tags),
+              scoreBreakdown: { semantic: vr.score, vector: vr.score },
             } as SearchResultItem;
           });
           // 按 entryId 去重 — 同一 Recipe 的多个 chunk 只保留最高分
@@ -683,7 +745,8 @@ export class SearchEngine {
           }
           results = results.slice(0, limit);
           this._supplementDetails(results);
-          return { items: results, actualMode: 'semantic' };
+          results = this.#applyMetadataFilters(results, filters);
+          return { items: results, actualMode: 'semantic', semanticUsed: true, vectorUsed: true };
         }
       } catch (err: unknown) {
         this.logger.warn('VectorService search failed, falling back to legacy path', {
@@ -696,9 +759,11 @@ export class SearchEngine {
     if (!this.aiProvider) {
       this.logger.debug('AI provider not available, falling back to FieldWeighted search');
       return {
-        items: this._scorerSearch(query, type, limit),
+        items: this._scorerSearch(query, type, limit, filters),
         actualMode: 'weighted',
         fallbackReason: 'embed_provider_unavailable',
+        semanticUsed: false,
+        vectorUsed: false,
       };
     }
 
@@ -706,9 +771,11 @@ export class SearchEngine {
       const queryEmbedding = await this.aiProvider.embed(query);
       if (!queryEmbedding || queryEmbedding.length === 0) {
         return {
-          items: this._scorerSearch(query, type, limit),
+          items: this._scorerSearch(query, type, limit, filters),
           actualMode: 'weighted',
           fallbackReason: 'empty_query_embedding',
+          semanticUsed: false,
+          vectorUsed: false,
         };
       }
 
@@ -740,6 +807,19 @@ export class SearchEngine {
                 kind: (vr.metadata?.kind as string) || 'pattern',
                 status: (vr.metadata?.status as string) || 'active',
                 score: Math.round((vr.similarity || vr.score || 0) * 1000) / 1000,
+                semanticScore: Math.round((vr.similarity || vr.score || 0) * 1000) / 1000,
+                vectorScore: Math.round((vr.similarity || vr.score || 0) * 1000) / 1000,
+                semanticUsed: true,
+                vectorUsed: true,
+                description: (vr.metadata?.description as string) || undefined,
+                content: vr.content,
+                language: (vr.metadata?.language as string) || '',
+                dimensionId: (vr.metadata?.dimensionId as string) || '',
+                category: (vr.metadata?.category as string) || '',
+                knowledgeType: (vr.metadata?.knowledgeType as string) || '',
+                scope: (vr.metadata?.scope as string) || '',
+                tags: this.#readStringArray(vr.metadata?.tags),
+                scoreBreakdown: { semantic: vr.similarity || vr.score || 0, vector: vr.score ?? 0 },
               } as SearchResultItem;
             });
             // 按 entryId 去重
@@ -754,7 +834,8 @@ export class SearchEngine {
             }
             results = results.slice(0, limit);
             this._supplementDetails(results);
-            return { items: results, actualMode: 'semantic' };
+            results = this.#applyMetadataFilters(results, filters);
+            return { items: results, actualMode: 'semantic', semanticUsed: true, vectorUsed: true };
           }
         } catch (vecErr: unknown) {
           const errorMessage = vecErr instanceof Error ? vecErr.message : String(vecErr);
@@ -762,18 +843,22 @@ export class SearchEngine {
             error: errorMessage,
           });
           return {
-            items: this._scorerSearch(query, type, limit),
+            items: this._scorerSearch(query, type, limit, filters),
             actualMode: 'weighted',
             fallbackReason: `vector_store_query_failed:${errorMessage}`,
+            semanticUsed: false,
+            vectorUsed: false,
           };
         }
       }
 
       this.logger.debug('Vector search fallback to FieldWeighted');
       return {
-        items: this._scorerSearch(query, type, limit),
+        items: this._scorerSearch(query, type, limit, filters),
         actualMode: 'weighted',
         fallbackReason: 'vector_store_unavailable_or_empty',
+        semanticUsed: false,
+        vectorUsed: false,
       };
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -781,9 +866,11 @@ export class SearchEngine {
         error: errorMessage,
       });
       return {
-        items: this._scorerSearch(query, type, limit),
+        items: this._scorerSearch(query, type, limit, filters),
         actualMode: 'weighted',
         fallbackReason: `semantic_search_failed:${errorMessage}`,
+        semanticUsed: false,
+        vectorUsed: false,
       };
     }
   }
@@ -926,8 +1013,20 @@ export class SearchEngine {
           if (!item.language && row.language) {
             item.language = row.language;
           }
+          if (!item.dimensionId && row.dimensionId) {
+            item.dimensionId = row.dimensionId;
+          }
           if (!item.category && row.category) {
             item.category = row.category;
+          }
+          if (!item.knowledgeType && row.knowledgeType) {
+            item.knowledgeType = row.knowledgeType;
+          }
+          if (!item.kind && row.kind) {
+            item.kind = row.kind;
+          }
+          if (!item.scope && row.scope) {
+            item.scope = row.scope;
           }
           if (!item.updatedAt && row.updatedAt) {
             item.updatedAt = row.updatedAt;
@@ -1088,7 +1187,7 @@ export class SearchEngine {
    * 高价值字段（title, trigger）通过重复出现提升 TF 权重
    * — title ×3, trigger ×2, description ×1.5（通过重复 token 实现）
    * 这确保标题匹配的文档获得显著更高的分数
-   * 注：此逻辑主要服务于 BM25Scorer，FieldWeightedScorer 内部已有字段权重机制
+   * 注：FieldWeightedScorer 内部已有字段权重机制，此文本用于兼容通用 scorer 输入。
    */
   _buildDocText(r: DbRow) {
     let contentText = '';
@@ -1122,6 +1221,8 @@ export class SearchEngine {
       r.dimensionId,
       r.category,
       r.knowledgeType,
+      r.kind,
+      r.scope,
       tagText,
       contentText,
     ];
@@ -1175,6 +1276,7 @@ export class SearchEngine {
       language: r.language || '',
       dimensionId: r.dimensionId || '',
       category: r.category || '',
+      scope: r.scope || '',
       updatedAt: r.updatedAt || null,
       createdAt: r.createdAt || null,
       difficulty: r.difficulty || 'intermediate',
@@ -1182,6 +1284,311 @@ export class SearchEngine {
       usageCount,
       authorityScore,
       qualityScore: qualityOverall,
+    };
+  }
+
+  #metadataFilterOnlySearch(
+    type: string,
+    limit: number,
+    filters: NormalizedSearchMetadataFilters
+  ): SearchResultItem[] {
+    const docs = this.scorer.documents as Array<{
+      id?: string;
+      meta?: Record<string, unknown>;
+    } | null>;
+    const items: SearchResultItem[] = [];
+
+    for (const doc of docs) {
+      if (!doc?.id || !doc.meta) {
+        continue;
+      }
+      if (!this.#matchesTypeFilter(doc.meta, type)) {
+        continue;
+      }
+      if (!this.#matchesMetadataRecord(doc.meta, filters)) {
+        continue;
+      }
+      items.push(this.#mapMetaToSearchItem(doc.id, doc.meta, 1, filters));
+    }
+
+    this._supplementDetails(items);
+    return items.slice(0, limit);
+  }
+
+  #normalizeMetadataFilters(options: SearchOptions): NormalizedSearchMetadataFilters {
+    const rawFilters =
+      options.filters && typeof options.filters === 'object'
+        ? (options.filters as Record<string, unknown>)
+        : {};
+    const filters: NormalizedSearchMetadataFilters = {};
+    const keys: SearchMetadataFilterKey[] = [
+      'category',
+      'dimensionId',
+      'kind',
+      'knowledgeType',
+      'language',
+      'scope',
+      'tags',
+      'type',
+    ];
+
+    for (const key of keys) {
+      const values = this.#normalizeFilterValues(
+        rawFilters[key] ?? (options as Record<string, unknown>)[key]
+      );
+      if (values.length > 0) {
+        filters[key] = values;
+      }
+    }
+
+    const tagValues = [
+      ...this.#normalizeFilterValues(rawFilters.tag),
+      ...this.#normalizeFilterValues((options as Record<string, unknown>).tag),
+    ];
+    if (tagValues.length > 0) {
+      filters.tags = [...new Set([...(filters.tags ?? []), ...tagValues])].sort();
+    }
+
+    return filters;
+  }
+
+  #normalizeFilterValues(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return [
+        ...new Set(
+          value
+            .flatMap((item) => this.#normalizeFilterValues(item))
+            .filter((item) => item.length > 0)
+        ),
+      ].sort();
+    }
+    if (typeof value !== 'string') {
+      return [];
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return this.#normalizeFilterValues(parsed);
+        }
+      } catch {
+        /* keep comma splitting fallback */
+      }
+    }
+    return [
+      ...new Set(
+        trimmed
+          .split(',')
+          .map((item) => this.#normalizeComparableValue(item))
+          .filter((item) => item.length > 0)
+      ),
+    ].sort();
+  }
+
+  #hasMetadataFilters(filters: NormalizedSearchMetadataFilters): boolean {
+    return Object.values(filters).some((values) => Array.isArray(values) && values.length > 0);
+  }
+
+  #metadataFilterCacheKey(filters: NormalizedSearchMetadataFilters): string {
+    if (!this.#hasMetadataFilters(filters)) {
+      return 'nofilters';
+    }
+    return JSON.stringify(
+      Object.entries(filters)
+        .filter(([, values]) => Array.isArray(values) && values.length > 0)
+        .sort(([a], [b]) => a.localeCompare(b))
+    );
+  }
+
+  #applyMetadataFilters<T extends SearchResultItem>(
+    items: T[],
+    filters: NormalizedSearchMetadataFilters
+  ): T[] {
+    if (!this.#hasMetadataFilters(filters)) {
+      return items;
+    }
+    return items
+      .filter((item) => this.#matchesMetadataRecord(item as Record<string, unknown>, filters))
+      .map(
+        (item) =>
+          ({
+            ...item,
+            matchedFilters: this.#matchedFilterEvidence(item as Record<string, unknown>, filters),
+          }) as T
+      );
+  }
+
+  #matchesMetadataRecord(
+    record: Record<string, unknown>,
+    filters: NormalizedSearchMetadataFilters
+  ): boolean {
+    if (!this.#hasMetadataFilters(filters)) {
+      return true;
+    }
+    for (const [key, expected] of Object.entries(filters) as Array<
+      [SearchMetadataFilterKey, string[]]
+    >) {
+      if (expected.length === 0) {
+        continue;
+      }
+      const actual = this.#metadataValues(record, key);
+      if (actual.length === 0) {
+        return false;
+      }
+      const matched = actual.some((value) => expected.includes(value));
+      if (!matched) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  #matchedFilterEvidence(
+    record: Record<string, unknown>,
+    filters: NormalizedSearchMetadataFilters
+  ): Record<string, string[]> | undefined {
+    if (!this.#hasMetadataFilters(filters)) {
+      return undefined;
+    }
+    const evidence: Record<string, string[]> = {};
+    for (const [key, expected] of Object.entries(filters) as Array<
+      [SearchMetadataFilterKey, string[]]
+    >) {
+      const actual = this.#metadataValues(record, key);
+      const matched = actual.filter((value) => expected.includes(value));
+      if (matched.length > 0) {
+        evidence[key] = matched;
+      }
+    }
+    return evidence;
+  }
+
+  #metadataValues(record: Record<string, unknown>, key: SearchMetadataFilterKey): string[] {
+    if (key === 'tags') {
+      return this.#readStringArray(record.tags).map((value) =>
+        this.#normalizeComparableValue(value)
+      );
+    }
+    if (key === 'type') {
+      return [
+        ...this.#readStringArray(record.type),
+        ...this.#readStringArray(record.kind),
+        ...this.#readStringArray(record.knowledgeType),
+      ].map((value) => this.#normalizeComparableValue(value));
+    }
+    return this.#readStringArray(record[key]).map((value) => this.#normalizeComparableValue(value));
+  }
+
+  #readStringArray(value: unknown): string[] {
+    if (Array.isArray(value)) {
+      return value.filter((item): item is string => typeof item === 'string' && item.length > 0);
+    }
+    if (typeof value !== 'string') {
+      return [];
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return [];
+    }
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.filter(
+            (item): item is string => typeof item === 'string' && item.length > 0
+          );
+        }
+      } catch {
+        /* keep scalar fallback */
+      }
+    }
+    return [trimmed];
+  }
+
+  #normalizeComparableValue(value: string): string {
+    return value.trim().toLowerCase();
+  }
+
+  #matchesTypeFilter(record: Record<string, unknown>, type: string): boolean {
+    if (type === 'all') {
+      return true;
+    }
+    if (type === 'rule') {
+      return record.knowledgeType === 'boundary-constraint' || record.kind === 'rule';
+    }
+    return record.type === 'recipe' || record.type === 'knowledge';
+  }
+
+  #mapMetaToSearchItem(
+    id: string,
+    meta: Record<string, unknown>,
+    score: number,
+    filters: NormalizedSearchMetadataFilters
+  ): SearchResultItem {
+    return {
+      id,
+      title: (meta.title as string) || id,
+      trigger: (meta.trigger as string) || '',
+      type: (meta.type as string) || 'knowledge',
+      kind: (meta.kind as string) || 'pattern',
+      status: meta.status as string | undefined,
+      language: (meta.language as string) || '',
+      dimensionId: (meta.dimensionId as string) || '',
+      category: (meta.category as string) || '',
+      knowledgeType: (meta.knowledgeType as string) || '',
+      scope: (meta.scope as string) || '',
+      score,
+      tags: this.#readStringArray(meta.tags),
+      matchedFilters: this.#matchedFilterEvidence(meta, filters),
+      scoreBreakdown: { metadataFilter: score },
+    };
+  }
+
+  #mapVectorLikeResult(
+    id: string,
+    score: number,
+    source: Record<string, unknown>
+  ): SearchResultItem {
+    const data = (source.data as Record<string, unknown>) || {};
+    const base = (data.item as Record<string, unknown>) || data || {};
+    const metadata = (base.metadata as Record<string, unknown>) || {};
+    const rawId = (metadata.entryId as string) || (base.id as string) || id;
+    const entryId = rawId.replace(/^entry_/, '');
+    const roundedScore = Math.round(score * 1000) / 1000;
+    return {
+      id: entryId,
+      title: ((base.title as string) || (metadata.title as string) || entryId) as string,
+      type: ((base.type as string) || (metadata.type as string) || 'recipe') as string,
+      kind: ((base.kind as string) || (metadata.kind as string) || 'pattern') as string,
+      status: ((base.status as string) || (metadata.status as string) || 'active') as string,
+      score: roundedScore,
+      semanticScore: source.semanticUsed === false ? 0 : roundedScore,
+      vectorScore: source.vectorUsed === false ? 0 : roundedScore,
+      semanticUsed: source.semanticUsed !== false && source.vectorUsed === true,
+      vectorUsed: source.vectorUsed === true,
+      fallbackReason: source.fallbackReason as string | undefined,
+      content: base.content as string | undefined,
+      description: ((base.description as string) || (metadata.description as string)) as
+        | string
+        | undefined,
+      language: ((base.language as string) || (metadata.language as string) || '') as string,
+      dimensionId: ((base.dimensionId as string) ||
+        (metadata.dimensionId as string) ||
+        '') as string,
+      category: ((base.category as string) || (metadata.category as string) || '') as string,
+      knowledgeType: ((base.knowledgeType as string) ||
+        (metadata.knowledgeType as string) ||
+        '') as string,
+      scope: ((base.scope as string) || (metadata.scope as string) || '') as string,
+      tags: this.#readStringArray(base.tags ?? metadata.tags),
+      scoreBreakdown: {
+        semantic: source.semanticUsed === false ? 0 : roundedScore,
+        vector: source.vectorUsed === true ? roundedScore : 0,
+      },
     };
   }
 

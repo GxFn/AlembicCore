@@ -3,8 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { vi } from 'vitest';
 import {
-  BM25Scorer,
   buildSearchResponseMeta,
+  FieldWeightedScorer,
   resolveSearchWorkspaceIdentity,
   SearchEngine,
   tokenize,
@@ -72,13 +72,13 @@ describe('tokenize', () => {
 });
 
 /* ────────────────────────────────────────────
- *  BM25Scorer
+ *  FieldWeightedScorer
  * ──────────────────────────────────────────── */
-describe('BM25Scorer', () => {
+describe('FieldWeightedScorer', () => {
   let scorer;
 
   beforeEach(() => {
-    scorer = new BM25Scorer();
+    scorer = new FieldWeightedScorer();
   });
 
   test('should start with 0 documents', () => {
@@ -116,12 +116,16 @@ describe('BM25Scorer', () => {
     expect(results.map((r) => r.id)).toContain('doc3');
   });
 
-  test('search should rank more relevant documents higher', () => {
-    scorer.addDocument('doc1', 'swift swift swift networking');
-    scorer.addDocument('doc2', 'swift python java');
+  test('search should rank structured field matches higher', () => {
+    scorer.addDocument('doc1', 'swift networking', {
+      title: 'Swift Networking',
+      trigger: 'swift-networking',
+      tags: ['networking'],
+    });
+    scorer.addDocument('doc2', 'swift python java', { title: 'General Swift' });
 
-    const results = scorer.search('swift');
-    expect(results[0].id).toBe('doc1'); // more occurrences → higher BM25
+    const results = scorer.search('swift networking');
+    expect(results[0].id).toBe('doc1');
   });
 
   test('search should respect limit', () => {
@@ -264,7 +268,172 @@ describe('SearchEngine', () => {
     expect(engine.getStats().cacheSize).toBe(1);
   });
 
-  test('search in bm25 mode should build index on first call', async () => {
+  test('metadata filters narrow results with AND across fields', async () => {
+    const rows = [
+      {
+        id: 'r1',
+        title: 'Architecture rule',
+        description: 'project architecture standard',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'architecture',
+        category: 'standards',
+        knowledgeType: 'architecture',
+        kind: 'rule',
+        scope: 'project',
+        tags: '["semantic-quality","ranking"]',
+        content: '{"pattern":"architecture"}',
+        trigger: 'architecture',
+      },
+      {
+        id: 'r2',
+        title: 'Architecture example',
+        description: 'workspace architecture example',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'architecture',
+        category: 'examples',
+        knowledgeType: 'architecture',
+        kind: 'pattern',
+        scope: 'workspace',
+        tags: '["semantic-quality"]',
+        content: '{"pattern":"architecture"}',
+        trigger: 'architecture',
+      },
+    ];
+    const engine = new SearchEngine(makeMockDb(rows));
+
+    const result = await engine.search('architecture', {
+      mode: 'weighted',
+      dimensionId: 'architecture',
+      knowledgeType: 'architecture',
+      scope: 'project',
+      category: 'standards',
+      kind: 'rule',
+    });
+
+    expect(result.items.map((item) => item.id)).toEqual(['r1']);
+    expect(result.searchMeta?.appliedFilters).toMatchObject({
+      category: ['standards'],
+      dimensionId: ['architecture'],
+      kind: ['rule'],
+      knowledgeType: ['architecture'],
+      scope: ['project'],
+    });
+    expect(result.items[0].matchedFilters).toMatchObject({
+      category: ['standards'],
+      dimensionId: ['architecture'],
+      kind: ['rule'],
+      knowledgeType: ['architecture'],
+      scope: ['project'],
+    });
+  });
+
+  test('tag filters use OR within tags and AND with other fields', async () => {
+    const rows = [
+      {
+        id: 'r1',
+        title: 'Semantic quality',
+        description: 'semantic filter quality',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'search',
+        category: 'standards',
+        knowledgeType: 'architecture',
+        kind: 'rule',
+        scope: 'project',
+        tags: '["semantic-quality"]',
+        content: '{"pattern":"semantic"}',
+        trigger: 'semantic',
+      },
+      {
+        id: 'r2',
+        title: 'Ranking quality',
+        description: 'ranking filter quality',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'search',
+        category: 'standards',
+        knowledgeType: 'architecture',
+        kind: 'rule',
+        scope: 'project',
+        tags: '["ranking"]',
+        content: '{"pattern":"ranking"}',
+        trigger: 'ranking',
+      },
+      {
+        id: 'r3',
+        title: 'Workspace semantic quality',
+        description: 'workspace scope should be excluded',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'search',
+        category: 'standards',
+        knowledgeType: 'architecture',
+        kind: 'rule',
+        scope: 'workspace',
+        tags: '["semantic-quality"]',
+        content: '{"pattern":"semantic"}',
+        trigger: 'semantic',
+      },
+    ];
+    const engine = new SearchEngine(makeMockDb(rows));
+
+    const result = await engine.search('', {
+      mode: 'weighted',
+      scope: 'project',
+      tags: ['semantic-quality', 'ranking'],
+    });
+
+    expect(result.mode).toBe('metadata-filter');
+    expect(result.items.map((item) => item.id).sort()).toEqual(['r1', 'r2']);
+    expect(result.items.every((item) => item.matchedFilters?.scope?.[0] === 'project')).toBe(true);
+  });
+
+  test('cache keys distinguish metadata filter sets', async () => {
+    const rows = [
+      {
+        id: 'r1',
+        title: 'Search architecture',
+        description: 'search architecture',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'search',
+        category: 'standards',
+        knowledgeType: 'architecture',
+        kind: 'rule',
+        scope: 'project',
+        tags: '[]',
+        content: '{"pattern":"search"}',
+        trigger: 'search',
+      },
+      {
+        id: 'r2',
+        title: 'Search example',
+        description: 'search example',
+        lifecycle: 'active',
+        language: 'typescript',
+        dimensionId: 'search',
+        category: 'examples',
+        knowledgeType: 'architecture',
+        kind: 'pattern',
+        scope: 'project',
+        tags: '[]',
+        content: '{"pattern":"search"}',
+        trigger: 'search',
+      },
+    ];
+    const engine = new SearchEngine(makeMockDb(rows));
+
+    const standards = await engine.search('search', { mode: 'weighted', category: 'standards' });
+    const examples = await engine.search('search', { mode: 'weighted', category: 'examples' });
+
+    expect(standards.items.map((item) => item.id)).toEqual(['r1']);
+    expect(examples.items.map((item) => item.id)).toEqual(['r2']);
+    expect(engine.getStats().cacheSize).toBe(2);
+  });
+
+  test('search rejects retired bm25 mode without mapping it to keyword', async () => {
     const rows = [
       {
         id: 'r1',
@@ -284,11 +453,20 @@ describe('SearchEngine', () => {
     const engine = new SearchEngine(db);
 
     const result = await engine.search('swift', { mode: 'bm25' });
-    expect(result.mode).toBe('bm25');
-    expect(engine.getStats().indexed).toBe(true);
+    expect(result.items).toEqual([]);
+    expect(result.mode).toBe('unsupported');
+    expect(result.searchMeta).toEqual(
+      expect.objectContaining({
+        requestedMode: 'bm25',
+        actualMode: 'unsupported',
+        fallbackReason: 'unsupported_mode:bm25',
+        unsupportedMode: 'bm25',
+      })
+    );
+    expect(engine.getStats().indexed).toBe(false);
   });
 
-  test('search in semantic mode should fall back to bm25 without aiProvider', async () => {
+  test('search in semantic mode should fall back to weighted without aiProvider', async () => {
     const rows = [
       {
         id: 'r1',
@@ -343,7 +521,17 @@ describe('SearchEngine', () => {
           score: 0.91,
           item: {
             id: 'entry_r1',
-            metadata: { entryId: 'r1', title: 'VideoURLPreloader', kind: 'pattern' },
+            metadata: {
+              entryId: 'r1',
+              title: 'VideoURLPreloader',
+              kind: 'pattern',
+              language: 'swift',
+              dimensionId: 'playback',
+              category: 'Player',
+              knowledgeType: 'code-pattern',
+              scope: 'project',
+              tags: ['preload', 'media'],
+            },
           },
         },
       ]),
@@ -356,8 +544,22 @@ describe('SearchEngine', () => {
       rank: false,
     });
 
-    expect(vectorService.search).toHaveBeenCalledWith('视频地址预加载', { topK: 10 });
+    expect(vectorService.search).toHaveBeenCalledWith('视频地址预加载', {
+      topK: 10,
+      filter: null,
+    });
     expect(result.mode).toBe('semantic');
+    expect(result.items[0]).toMatchObject({
+      id: 'r1',
+      semanticScore: 0.91,
+      vectorScore: 0.91,
+      semanticUsed: true,
+      vectorUsed: true,
+      dimensionId: 'playback',
+      knowledgeType: 'code-pattern',
+      scope: 'project',
+      tags: ['preload', 'media'],
+    });
     expect(result.searchMeta).toEqual(
       expect.objectContaining({
         route: 'core-search-engine',
@@ -368,6 +570,67 @@ describe('SearchEngine', () => {
         resultCount: 1,
       })
     );
+  });
+
+  test('semantic mode forwards filters and still hard-filters returned vectors', async () => {
+    const db = makeMockDb([]);
+    const vectorService = {
+      search: vi.fn().mockResolvedValue([
+        {
+          score: 0.88,
+          item: {
+            id: 'entry_keep',
+            metadata: {
+              entryId: 'keep',
+              title: 'Project semantic quality',
+              kind: 'rule',
+              language: 'typescript',
+              dimensionId: 'search',
+              category: 'standards',
+              knowledgeType: 'architecture',
+              scope: 'project',
+              tags: ['semantic-quality'],
+            },
+          },
+        },
+        {
+          score: 0.93,
+          item: {
+            id: 'entry_drop',
+            metadata: {
+              entryId: 'drop',
+              title: 'Workspace semantic quality',
+              kind: 'rule',
+              language: 'typescript',
+              dimensionId: 'search',
+              category: 'standards',
+              knowledgeType: 'architecture',
+              scope: 'workspace',
+              tags: ['semantic-quality'],
+            },
+          },
+        },
+      ]),
+    };
+    const engine = new SearchEngine(db, { vectorService: vectorService as never });
+
+    const result = await engine.search('semantic quality', {
+      mode: 'semantic',
+      scope: 'project',
+      tags: ['semantic-quality', 'ranking'],
+      rank: false,
+    });
+
+    expect(vectorService.search).toHaveBeenCalledWith('semantic quality', {
+      topK: 40,
+      filter: { scope: ['project'], tags: ['ranking', 'semantic-quality'] },
+    });
+    expect(result.items.map((item) => item.id)).toEqual(['keep']);
+    expect(result.searchMeta).toMatchObject({
+      appliedFilters: { scope: ['project'], tags: ['ranking', 'semantic-quality'] },
+      semanticUsed: true,
+      vectorUsed: true,
+    });
   });
 
   test('auto searchMeta should not report vector usage for sparse-only RRF fallback', async () => {
@@ -480,7 +743,7 @@ describe('SearchEngine', () => {
     // Wait for cache to expire
     await new Promise((r) => setTimeout(r, 10));
     // Access _getCache directly to verify expiration
-    const cached = engine._getCache('test:all:20:keyword:');
+    const cached = engine._getCache('test:all:20:keyword:::nofilters');
     expect(cached).toBeNull();
   });
 });

@@ -338,7 +338,7 @@ export class VectorService {
 
   /**
    * 混合搜索 (Dense + Sparse RRF 融合)
-   * 通过 HybridRetriever 执行向量 + BM25 关键词并行检索
+   * 通过 HybridRetriever 执行向量 + keyword / lexical 并行检索
    *
    * Embed 失败时优雅降级: 跳过 Dense 路, 仅用 Sparse 结果进行 RRF 融合,
    * 避免因网络问题导致整个搜索返回空结果。

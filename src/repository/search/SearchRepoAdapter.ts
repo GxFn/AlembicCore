@@ -66,17 +66,19 @@ export interface SearchSourceRefRepo {
 export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   #db: SearchDb;
   #dimensionIdSelect: string;
+  #scopeSelect: string;
   constructor(db: SearchDb) {
     this.#db = db;
     this.#dimensionIdSelect = hasKnowledgeColumn(db, 'dimensionId')
       ? 'dimensionId'
       : "'' AS dimensionId";
+    this.#scopeSelect = hasKnowledgeColumn(db, 'scope') ? 'scope' : "'' AS scope";
   }
 
   findNonDeprecatedSync() {
     return prepareCached<SearchStatement>(
       this.#db,
-      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind,
+      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
                 updatedAt, createdAt
          FROM knowledge_entries WHERE lifecycle != 'deprecated'`
@@ -86,7 +88,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   keywordSearchSync(pattern: string, limit: number) {
     return prepareCached<SearchStatement>(
       this.#db,
-      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, lifecycle as status, content, trigger, headers, moduleName, 'knowledge' as type
+      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect}, lifecycle as status, content, tags, trigger, headers, moduleName, 'knowledge' as type
          FROM knowledge_entries
          WHERE lifecycle != 'deprecated' AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\' OR trigger LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')
          LIMIT ?`
@@ -101,7 +103,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
     return prepareCached<SearchStatement>(
       this.#db,
       `SELECT id, content, description, trigger, headers, moduleName,
-                tags, language, ${this.#dimensionIdSelect}, category, updatedAt, createdAt, quality, stats, difficulty,
+                tags, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect}, updatedAt, createdAt, quality, stats, difficulty,
                 whenClause, doClause
          FROM knowledge_entries WHERE id IN (${placeholders})`
     ).all(...ids);
@@ -110,7 +112,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   findUpdatedSinceSync(sinceIso: string) {
     return prepareCached<SearchStatement>(
       this.#db,
-      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind,
+      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
                 updatedAt, createdAt
          FROM knowledge_entries WHERE updatedAt > ?`

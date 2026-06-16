@@ -4,7 +4,6 @@ import type {
   SearchEngineOptions,
 } from './service/search/SearchTypes.js';
 
-export { BM25Scorer } from './service/search/BM25Scorer.js';
 export { CoarseRanker } from './service/search/CoarseRanker.js';
 export type { SearchContext, SearchItem } from './service/search/contextBoost.js';
 export { contextBoost } from './service/search/contextBoost.js';
