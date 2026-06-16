@@ -8,5 +8,6 @@ export * from './HnswVectorAdapter.js';
 export * from './IndexingPipeline.js';
 export * from './JsonVectorAdapter.js';
 export * from './ScalarQuantizer.js';
+export * from './VectorMetadataFilter.js';
 export * from './VectorMigration.js';
 export * from './VectorStore.js';

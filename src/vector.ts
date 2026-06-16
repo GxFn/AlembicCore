@@ -40,6 +40,33 @@ export type {
   VectorChunkEnricher,
   VectorDocumentInfo,
 } from './service/vector/EnrichmentTypes.js';
+export type {
+  RecipeRegionBuildOptions,
+  RecipeRegionGenerationTestOptions,
+  RecipeRegionGenerationTestReport,
+  RecipeRegionGenerationTestRetrievalSample,
+  RecipeRegionGenerationTestSampleQuery,
+  RecipeRegionRemovalResult,
+  RecipeRegionSourceEntry,
+  RecipeRegionSyncOptions,
+  RecipeRegionSyncResult,
+  RecipeRegionSyncStatus,
+  RecipeRegionVectorMetadata,
+  RecipeSemanticRegionChunk,
+  RecipeSemanticRegionClass,
+  RecipeSourceRefsBridge,
+  SourceRefsBridgeStatus,
+} from './service/vector/RecipeRegionVectorIndex.js';
+export {
+  buildRecipeSemanticRegionChunks,
+  parseRecipeIdFromRegionVectorId,
+  RECIPE_REGION_VECTOR_ID_PREFIX,
+  RECIPE_REGION_VECTOR_SCHEMA_VERSION,
+  RECIPE_SEMANTIC_REGION_CLASSES,
+  RECIPE_SEMANTIC_REGION_METADATA_TYPE,
+  syncRecipeSemanticRegionVectors,
+  testRecipeSemanticRegionGeneration,
+} from './service/vector/RecipeRegionVectorIndex.js';
 export type { SyncCoordinatorConfig } from './service/vector/SyncCoordinator.js';
 export { SyncCoordinator } from './service/vector/SyncCoordinator.js';
 export { VectorService };

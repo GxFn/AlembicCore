@@ -20,6 +20,18 @@ import type { IndexingPipeline } from '../../infrastructure/vector/IndexingPipel
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import type { HybridRetriever } from '../search/HybridRetriever.js';
 import type { VectorChunkEnricher } from './EnrichmentTypes.js';
+import {
+  parseRecipeIdFromRegionVectorId,
+  RECIPE_REGION_VECTOR_ID_PREFIX,
+  type RecipeRegionGenerationTestOptions,
+  type RecipeRegionGenerationTestReport,
+  type RecipeRegionRemovalResult,
+  type RecipeRegionSourceEntry,
+  type RecipeRegionSyncOptions,
+  type RecipeRegionSyncResult,
+  syncRecipeSemanticRegionVectors,
+  testRecipeSemanticRegionGeneration,
+} from './RecipeRegionVectorIndex.js';
 import type { SyncCoordinator } from './SyncCoordinator.js';
 
 // ── Types ──
@@ -519,6 +531,101 @@ export class VectorService {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    const regionRemoval = await this.removeRecipeSemanticRegions(entryId);
+    if (regionRemoval.errors.length > 0) {
+      this.#logger.warn('[VectorService] removeEntry recipe region cleanup had errors', {
+        entryId,
+        errors: regionRemoval.errors,
+      });
+    }
+  }
+
+  /**
+   * APQ3 Recipe semantic-region index generation.
+   *
+   * Callers must invoke this only from rebuild / refresh / knowledge-sync
+   * flows. Query methods intentionally never call it, so prime lookups cannot
+   * mutate the index or fabricate region evidence during retrieval.
+   */
+  async syncRecipeSemanticRegions(
+    entries: RecipeRegionSourceEntry[],
+    opts: RecipeRegionSyncOptions = {}
+  ): Promise<RecipeRegionSyncResult> {
+    const result = await syncRecipeSemanticRegionVectors(
+      this.#vectorStore,
+      this.#embedProvider,
+      entries,
+      opts
+    );
+
+    this.#logger.info('[VectorService] recipe semantic-region sync complete', {
+      status: result.status,
+      scanned: result.scanned,
+      generated: result.generated,
+      upserted: result.upserted,
+      removed: result.removed,
+      degradedReason: result.degradedReason,
+    });
+
+    return result;
+  }
+
+  /**
+   * APQ3 bounded generation-test report.
+   *
+   * Use this on a representative subset or isolated data-root copy before
+   * calling full active-Recipe generation for validation fixtures.
+   */
+  async testRecipeSemanticRegionGeneration(
+    entries: RecipeRegionSourceEntry[],
+    opts: RecipeRegionGenerationTestOptions = {}
+  ): Promise<RecipeRegionGenerationTestReport> {
+    const report = await testRecipeSemanticRegionGeneration(
+      this.#vectorStore,
+      this.#embedProvider,
+      entries,
+      opts
+    );
+
+    this.#logger.info('[VectorService] recipe semantic-region generation test complete', {
+      status: report.status,
+      activeRecipeCount: report.activeRecipeCount,
+      generatedRecipeRegionItemCount: report.generatedRecipeRegionItemCount,
+      distinctRecipeIdsCovered: report.distinctRecipeIdsCovered,
+      safeForFullFixtureGeneration: report.safeForFullFixtureGeneration,
+    });
+
+    return report;
+  }
+
+  /** Remove generated region chunks for a parent Recipe without touching entry_* vectors. */
+  async removeRecipeSemanticRegions(recipeId: string): Promise<RecipeRegionRemovalResult> {
+    const result: RecipeRegionRemovalResult = { removed: 0, errors: [] };
+    try {
+      const vectorIds = await this.#vectorStore.listIds();
+      for (const id of vectorIds) {
+        if (!id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
+          continue;
+        }
+        if (parseRecipeIdFromRegionVectorId(id) !== recipeId) {
+          continue;
+        }
+        try {
+          await this.#vectorStore.remove(id);
+          result.removed++;
+        } catch (err: unknown) {
+          result.errors.push(
+            `recipe-region-remove-failed:${id}:${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    } catch (err: unknown) {
+      result.errors.push(
+        `recipe-region-list-failed:${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    return result;
   }
 
   /** 批量同步知识条目 */

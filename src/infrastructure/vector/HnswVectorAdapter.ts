@@ -23,6 +23,7 @@ import { AsyncPersistence, WAL_OP } from './AsyncPersistence.js';
 import { BinaryPersistence } from './BinaryPersistence.js';
 import { HnswIndex } from './HnswIndex.js';
 import { ScalarQuantizer } from './ScalarQuantizer.js';
+import { matchesVectorMetadataFilter } from './VectorMetadataFilter.js';
 import { VectorStore } from './VectorStore.js';
 
 export class HnswVectorAdapter extends VectorStore {
@@ -849,35 +850,7 @@ export class HnswVectorAdapter extends VectorStore {
   // ── 过滤 ──
 
   #matchFilter(item: { metadata?: Record<string, unknown> }, filter: Record<string, unknown>) {
-    const meta = item.metadata || {};
-    if (filter.type && meta.type !== filter.type) {
-      return false;
-    }
-    if (filter.category && meta.category !== filter.category) {
-      return false;
-    }
-    if (filter.language && meta.language !== filter.language) {
-      return false;
-    }
-    if (
-      filter.sourcePath &&
-      !(meta.sourcePath as string | undefined)?.includes(filter.sourcePath as string)
-    ) {
-      return false;
-    }
-    if (filter.module && meta.module !== filter.module) {
-      return false;
-    }
-    if (filter.tags && Array.isArray(filter.tags)) {
-      const itemTags = meta.tags || [];
-      if (!filter.tags.some((t: string) => (itemTags as string[]).includes(t))) {
-        return false;
-      }
-    }
-    if (filter.deprecated === false && meta.deprecated) {
-      return false;
-    }
-    return true;
+    return matchesVectorMetadataFilter(item.metadata, filter);
   }
 
   /** 销毁: 清理定时器 */

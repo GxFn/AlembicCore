@@ -31,7 +31,37 @@ export * from './markdownUtils.js';
 export { default as pathGuard, PathGuardError } from './PathGuard.js';
 export * from './ProjectMarkers.js';
 export * from './ProjectRegistry.js';
-export * from './ProjectScope.js';
+export type * from './ProjectScope.js';
+export {
+  ALEMBIC_PROJECT_SCOPE_ENDPOINTS,
+  addProjectScopeFolder,
+  addProjectScopeFolderToRegistry,
+  buildProjectScopeSourceRefIndex,
+  createCanonicalSourceIdentity,
+  createProjectControlRoot,
+  createProjectDescriptor,
+  createProjectFolderDescriptor,
+  createProjectScopeEndpointCapability,
+  createProjectScopeEvidenceRef,
+  createProjectScopeRegistryDocument,
+  createProjectScopeSourceRef,
+  listProjectScopeFolders,
+  normalizeProjectScopePath,
+  normalizeProjectScopeSourceRef,
+  normalizeProjectScopeSourceRefs,
+  normalizeProjectScopeSummary,
+  PROJECT_SCOPE_CONTRACT_VERSION,
+  PROJECT_SCOPE_FOLDER_ROLES,
+  PROJECT_SCOPE_FOLDER_STATES,
+  PROJECT_SCOPE_OPERATIONS,
+  PROJECT_SCOPE_RESOLUTION_REASONS,
+  PROJECT_SCOPE_STORAGE_KINDS,
+  resolveProjectScopeForFolder,
+  resolveProjectScopeRegistryFolder,
+  resolveProjectScopeSourceRef,
+  summarizeProjectScopeDescriptor,
+  upsertProjectScopeInRegistry,
+} from './ProjectScope.js';
 export * from './packageRoot.js';
 export * from './recipeTokens.js';
 export * from './resolveProjectRoot.js';

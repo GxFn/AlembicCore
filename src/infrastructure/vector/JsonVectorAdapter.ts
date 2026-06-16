@@ -9,6 +9,7 @@ import { dirname, join, relative } from 'node:path';
 import pathGuard from '../../shared/PathGuard.js';
 import { cosineSimilarity } from '../../shared/similarity.js';
 import type { WriteZone } from '../io/WriteZone.js';
+import { matchesVectorMetadataFilter } from './VectorMetadataFilter.js';
 import { VectorStore } from './VectorStore.js';
 
 export class JsonVectorAdapter extends VectorStore {
@@ -226,35 +227,7 @@ export class JsonVectorAdapter extends VectorStore {
     filter: Record<string, unknown>
   ) {
     return items.filter((item) => {
-      const meta = item.metadata || {};
-      if (filter.type && meta.type !== filter.type) {
-        return false;
-      }
-      if (filter.category && meta.category !== filter.category) {
-        return false;
-      }
-      if (filter.language && meta.language !== filter.language) {
-        return false;
-      }
-      if (
-        filter.sourcePath &&
-        !(meta.sourcePath as string | undefined)?.includes(filter.sourcePath as string)
-      ) {
-        return false;
-      }
-      if (filter.module && meta.module !== filter.module) {
-        return false;
-      }
-      if (filter.tags && Array.isArray(filter.tags)) {
-        const itemTags = meta.tags || [];
-        if (!(filter.tags as string[]).some((t) => (itemTags as string[]).includes(t))) {
-          return false;
-        }
-      }
-      if (filter.deprecated === false && meta.deprecated) {
-        return false;
-      }
-      return true;
+      return matchesVectorMetadataFilter(item.metadata, filter);
     });
   }
 

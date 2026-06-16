@@ -7,7 +7,6 @@ import {
   createCanonicalSourceIdentity,
   createProjectDescriptor,
   createProjectScopeEndpointCapability,
-  createProjectScopeFromWorkspaceConfig,
   createProjectScopeRegistryDocument,
   createProjectScopeSourceRef,
   listProjectScopeFolders,
@@ -19,9 +18,12 @@ import {
   resolveProjectScopeForFolder,
   resolveProjectScopeRegistryFolder,
   resolveProjectScopeSourceRef,
-  resolveWorkspaceConfigProjectFolders,
   summarizeProjectScopeDescriptor,
 } from '../src/shared/index.js';
+import {
+  createProjectScopeFromWorkspaceConfig,
+  resolveWorkspaceConfigProjectFolders,
+} from '../src/shared/ProjectScope.js';
 import { auditRecipesForRescan } from '../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
 
 describe('ProjectScope multi-root contracts', () => {
