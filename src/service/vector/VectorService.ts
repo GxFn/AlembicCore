@@ -302,7 +302,7 @@ export class VectorService {
    */
   async search(
     query: string,
-    opts: { topK?: number; filter?: Record<string, unknown>; minScore?: number } = {}
+    opts: { topK?: number; filter?: Record<string, unknown> | null; minScore?: number } = {}
   ): Promise<Array<{ item: Record<string, unknown>; score: number }>> {
     if (!this.#embedProvider) {
       return [];
@@ -348,6 +348,7 @@ export class VectorService {
     opts: {
       topK?: number;
       alpha?: number;
+      filter?: Record<string, unknown> | null;
       sparseSearchFn?:
         | ((
             q: string,
@@ -361,7 +362,7 @@ export class VectorService {
     }
     if (!this.#hybridRetriever) {
       // 无 hybridRetriever 时降级为纯向量搜索
-      const results = await this.search(query, { topK: opts.topK });
+      const results = await this.search(query, { topK: opts.topK, filter: opts.filter ?? null });
       return results.map((r) => ({
         id: ((r.item as Record<string, unknown>).id as string) || '',
         score: r.score,
@@ -371,7 +372,7 @@ export class VectorService {
       }));
     }
 
-    const { topK = 10, alpha = 0.5, sparseSearchFn = null } = opts;
+    const { topK = 10, alpha = 0.5, filter = null, sparseSearchFn = null } = opts;
 
     // Embed query — circuit breaker skips embed after repeated failures
     let queryVector: number[] | null = null;
@@ -411,6 +412,7 @@ export class VectorService {
       const fused = await this.#hybridRetriever.search(query, queryVector, {
         topK,
         alpha,
+        filter,
         sparseSearchFn: sparseSearchFn ?? undefined,
       });
       const tFuseEnd = performance.now();

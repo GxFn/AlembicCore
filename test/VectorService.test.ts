@@ -81,10 +81,13 @@ function createMockHybridRetriever() {
 // ── 动态导入 ──
 
 let VectorService: typeof import('../src/service/vector/VectorService.js').VectorService;
+let HybridRetriever: typeof import('../src/service/search/HybridRetriever.js').HybridRetriever;
 
 beforeAll(async () => {
-  const mod = await import('../src/service/vector/VectorService.js');
-  VectorService = mod.VectorService;
+  const vectorMod = await import('../src/service/vector/VectorService.js');
+  const searchMod = await import('../src/service/search/HybridRetriever.js');
+  VectorService = vectorMod.VectorService;
+  HybridRetriever = searchMod.HybridRetriever;
 });
 
 // ── Tests ──
@@ -297,6 +300,23 @@ describe('VectorService', () => {
       expect(results[0].semanticUsed).toBe(true);
     });
 
+    it('should pass metadata filters into the hybrid dense vector lane', async () => {
+      const filter = { scope: ['project'], tags: ['semantic-quality'] };
+      vectorStore.searchVector.mockResolvedValue([{ item: { id: 'dense1' }, score: 0.92 }]);
+      const retriever = new HybridRetriever({ vectorStore: vectorStore as never });
+      const svc = createService({ hybridRetriever: retriever });
+
+      const results = await svc.hybridSearch('filtered semantic query', { topK: 5, filter });
+
+      expect(vectorStore.searchVector).toHaveBeenCalledWith(
+        [0.1, 0.2, 0.3],
+        expect.objectContaining({ topK: 15, filter })
+      );
+      expect(results[0].id).toBe('dense1');
+      expect(results[0].vectorUsed).toBe(true);
+      expect(results[0].semanticUsed).toBe(true);
+    });
+
     it('should fall back to search() when no hybridRetriever', async () => {
       vectorStore.searchVector.mockResolvedValue([{ item: { id: 'fallback1' }, score: 0.8 }]);
       const svc = createService({ hybridRetriever: null });
@@ -304,6 +324,25 @@ describe('VectorService', () => {
 
       expect(results).toHaveLength(1);
       expect(results[0].vectorUsed).toBe(true);
+    });
+
+    it('should preserve metadata filters when falling back to pure vector search', async () => {
+      const filter = { dimensionId: ['architecture'], knowledgeType: ['standard'] };
+      vectorStore.searchVector.mockResolvedValue([
+        { item: { id: 'fallback-filtered' }, score: 0.8 },
+      ]);
+      const svc = createService({ hybridRetriever: null });
+
+      const results = await svc.hybridSearch('query', { topK: 4, filter });
+
+      expect(vectorStore.searchVector).toHaveBeenCalledWith(
+        [0.1, 0.2, 0.3],
+        expect.objectContaining({ topK: 4, filter })
+      );
+      expect(results).toHaveLength(1);
+      expect(results[0].id).toBe('fallback-filtered');
+      expect(results[0].vectorUsed).toBe(true);
+      expect(results[0].semanticUsed).toBe(true);
     });
 
     it('should return empty when no embedProvider', async () => {
