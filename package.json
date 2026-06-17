@@ -50,6 +50,10 @@
       "types": "./dist/recipe-context.d.ts",
       "import": "./dist/recipe-context.js"
     },
+    "./report": {
+      "types": "./dist/report.d.ts",
+      "import": "./dist/report.js"
+    },
     "./host-agent-workflows": {
       "types": "./dist/host-agent-workflows.d.ts",
       "import": "./dist/host-agent-workflows.js"

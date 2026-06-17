@@ -1,5 +1,6 @@
 export * from './ComplianceReporter.js';
 export * from './CoverageAnalyzer.js';
+export * from './EnhancementGuardRules.js';
 export * from './ExclusionManager.js';
 export * from './GuardCheckEngine.js';
 export * from './GuardCodeChecks.js';

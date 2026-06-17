@@ -102,6 +102,7 @@ const requiredSubpathExports = {
     'validateJobDisplaySnapshot',
   ],
   '@alembic/core/evolution': ['toRescanImpactDecision'],
+  '@alembic/core/guard': ['resolveEnhancementGuardRules'],
   '@alembic/core/host-agent-workflows': [
     'PROJECT_SKILL_ASSET_KINDS',
     'PROJECT_SKILL_AUTHORIZATION_STATUSES',
@@ -292,6 +293,7 @@ const requiredTypeDeclarations = {
     'RecipeContextRequest',
     'RecipeContextResult',
   ],
+  '@alembic/core/report': ['ReportEntry', 'ReportQueryOptions', 'ReportReader', 'ReportStore'],
   '@alembic/core/types': [
     'IncrementalPlan',
     'McpContext',
