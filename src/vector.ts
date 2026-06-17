@@ -71,6 +71,31 @@ export type { SyncCoordinatorConfig } from './service/vector/SyncCoordinator.js'
 export { SyncCoordinator } from './service/vector/SyncCoordinator.js';
 export { VectorService };
 export type {
+  FetchLike,
+  FetchRequestInit,
+  FetchResponseLike,
+  OllamaEmbedProviderConfig,
+  OllamaProbeResult,
+} from './infrastructure/vector/OllamaEmbedProvider.js';
+// GMAP-L1: local Ollama embedding lane (Core).
+export { OllamaEmbedProvider } from './infrastructure/vector/OllamaEmbedProvider.js';
+export type {
+  ApplyEmbedLaneResult,
+  EmbedLane,
+  EmbedLaneDiagnostic,
+  EmbedLaneName,
+  EmbedLaneSelection,
+} from './service/vector/EmbedProviderSelector.js';
+export {
+  applyEmbedLane,
+  buildLocalFirstEmbedLanes,
+  createOllamaEmbedLane,
+  embedLaneFromProvider,
+  keywordEmbedLane,
+  selectAndApplyEmbedLane,
+  selectEmbedLane,
+} from './service/vector/EmbedProviderSelector.js';
+export type {
   BuildResult,
   EmbedProvider,
   ProgressFn,

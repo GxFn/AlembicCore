@@ -205,6 +205,14 @@ const requiredSubpathExports = {
     'validateCoreLegacyContractConvergence',
   ],
   '@alembic/core/types': ['normalizeFileChangeEventSource'],
+  '@alembic/core/vector': [
+    'OllamaEmbedProvider',
+    'applyEmbedLane',
+    'buildLocalFirstEmbedLanes',
+    'createOllamaEmbedLane',
+    'keywordEmbedLane',
+    'selectEmbedLane',
+  ],
 };
 const requiredTypeDeclarations = {
   '@alembic/core/daemon': [
