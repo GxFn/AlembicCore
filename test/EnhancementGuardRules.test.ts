@@ -11,6 +11,7 @@ describe('resolveEnhancementGuardRules (RIC-2a/R1, @alembic/core/guard)', () => 
   it('returns [] before the enhancement registry is initialized', () => {
     // Fresh module singleton in this test file: registry is empty until init.
     expect(resolveEnhancementGuardRules()).toEqual([]);
+    expect(resolveEnhancementGuardRules({ frameworkAgnostic: true })).toEqual([]);
   });
 
   it('equals registry.all().flatMap(getGuardRules) after init, with valid shape', async () => {
@@ -42,5 +43,44 @@ describe('resolveEnhancementGuardRules (RIC-2a/R1, @alembic/core/guard)', () => 
 
     // An unknown language matches no pack -> no rules.
     expect(resolveEnhancementGuardRules({ language: '__no_such_language__' })).toEqual([]);
+  });
+
+  it('frameworkAgnostic returns generic-only (no-framework-condition) pack rules (RIC-2a-2)', async () => {
+    await initEnhancementRegistry();
+    const registry = getEnhancementRegistry();
+
+    // Semantic equivalence to the Plugin guard handler's generic-only filter
+    // (all().filter((p) => !p.conditions?.frameworks?.length)).
+    const agnosticPacks = registry.all().filter((pack) => !pack.conditions?.frameworks?.length);
+    const expected = agnosticPacks.flatMap((pack) => pack.getGuardRules());
+    expect(resolveEnhancementGuardRules({ frameworkAgnostic: true })).toEqual(expected);
+
+    // Every contributing pack is genuinely framework-agnostic (vacuously true when
+    // none qualify — the current pack set is entirely framework-conditioned, so
+    // generic-only currently yields [], identical to the Plugin handler today).
+    for (const pack of agnosticPacks) {
+      expect(pack.conditions?.frameworks?.length ?? 0).toBe(0);
+    }
+
+    // The filter is meaningful: there ARE framework-conditioned packs, so
+    // generic-only genuinely excludes packs rather than mirroring all().
+    const conditioned = registry
+      .all()
+      .filter((pack) => (pack.conditions?.frameworks?.length ?? 0) > 0);
+    expect(conditioned.length).toBeGreaterThan(0);
+
+    // frameworkAgnostic takes precedence over the resolver (ignores language/frameworks).
+    expect(
+      resolveEnhancementGuardRules({
+        frameworkAgnostic: true,
+        frameworks: ['react'],
+        language: 'typescript',
+      })
+    ).toEqual(expected);
+
+    // Generic-only rules are a subset of the all-packs rules.
+    expect(resolveEnhancementGuardRules({ frameworkAgnostic: true }).length).toBeLessThanOrEqual(
+      resolveEnhancementGuardRules().length
+    );
   });
 });

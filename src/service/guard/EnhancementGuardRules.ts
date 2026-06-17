@@ -21,12 +21,22 @@ export interface ResolveEnhancementGuardRulesOptions {
   language?: string;
   /** Detected frameworks used alongside `language` to narrow matching packs. */
   frameworks?: string[];
+  /**
+   * Generic-only mode (RIC-2a-2): when true, return Guard rules ONLY from packs
+   * with no framework conditions, ignoring `language`/`frameworks` (the resolver
+   * is not used). Mirrors the Plugin guard handler, which defers
+   * framework-conditioned packs (e.g. go-grpc) to a later precise resolve so
+   * non-matching projects do not get false-positive findings.
+   */
+  frameworkAgnostic?: boolean;
 }
 
 /**
  * Collect the Guard rules contributed by enhancement packs.
  *
  * - No options → all registered packs' Guard rules.
+ * - `frameworkAgnostic: true` → only packs with no framework conditions
+ *   (generic-only; takes precedence over the resolver path).
  * - `language` (+ optional `frameworks`) → only packs matched by the registry
  *   resolver (framework/language aware).
  *
@@ -36,8 +46,15 @@ export function resolveEnhancementGuardRules(
   options: ResolveEnhancementGuardRulesOptions = {}
 ): EnhancementGuardRule[] {
   const registry = getEnhancementRegistry();
-  const packs: EnhancementPack[] = options.language
-    ? registry.resolve(options.language, options.frameworks ?? [])
-    : registry.all();
+  let packs: EnhancementPack[];
+  if (options.frameworkAgnostic) {
+    // Generic-only: packs without framework conditions — semantics identical to
+    // the Plugin guard handler's all().filter((p) => !p.conditions?.frameworks?.length).
+    packs = registry.all().filter((pack) => !pack.conditions?.frameworks?.length);
+  } else if (options.language) {
+    packs = registry.resolve(options.language, options.frameworks ?? []);
+  } else {
+    packs = registry.all();
+  }
   return packs.flatMap((pack) => pack.getGuardRules());
 }
