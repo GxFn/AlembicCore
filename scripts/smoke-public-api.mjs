@@ -128,6 +128,11 @@ const requiredSubpathExports = {
   ],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
   '@alembic/core/project-context': ['ProjectContext'],
+  '@alembic/core/recipe-context': [
+    'RecipeContextService',
+    'createRecipeContextService',
+    'createRecipeContextServiceFromCore',
+  ],
   '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],
   '@alembic/core/service/candidate': ['aggregateCandidates', 'findSimilarRecipes'],
   '@alembic/core/search': [
@@ -272,6 +277,12 @@ const requiredTypeDeclarations = {
     'ProjectContextEnvelope',
     'ProjectContextRequest',
     'ProjectContextResult',
+  ],
+  '@alembic/core/recipe-context': [
+    'RecipeContextContract',
+    'RecipeContextEnvelope',
+    'RecipeContextRequest',
+    'RecipeContextResult',
   ],
   '@alembic/core/types': [
     'IncrementalPlan',

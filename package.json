@@ -46,6 +46,10 @@
       "types": "./dist/project-context.d.ts",
       "import": "./dist/project-context.js"
     },
+    "./recipe-context": {
+      "types": "./dist/recipe-context.d.ts",
+      "import": "./dist/recipe-context.js"
+    },
     "./host-agent-workflows": {
       "types": "./dist/host-agent-workflows.d.ts",
       "import": "./dist/host-agent-workflows.js"

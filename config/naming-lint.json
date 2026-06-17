@@ -58,6 +58,11 @@
       "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./host-agent-workflows (export target). Exempt like index.ts barrels (SN4 census)."
     },
     {
+      "file": "src/recipe-context.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./recipe-context (export target, GMAP-2). Barrel re-export peer to ./project-context; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels."
+    },
+    {
       "file": "src/core/ast/lang-dart.ts",
       "owner": "AlembicCore window",
       "reason": "Deliberate tree-sitter grammar-plugin family: the kebab lang-<id> name mirrors the grammar registry langId in core/ast/index.ts, which loads each via await import(entry.module) where entry.module is the registry string './lang-<id>.js'. Renaming would desync the langId↔file correspondence; exempt like the migrations family (SN4 census)."
