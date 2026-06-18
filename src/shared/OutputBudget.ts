@@ -54,7 +54,10 @@ export interface ToolOutputBudget {
  * headroom and is watched.
  */
 export const CORE_TOOL_OUTPUT_BUDGETS: Record<string, ToolOutputBudget> = {
-  alembic_codex_job: {
+  // MTC-7 merged alembic_mcp_bootstrap_job + alembic_mcp_rescan_job +
+  // alembic_codex_job into alembic_job; rawRef keeps the codex_job MT1 sweep
+  // (the measured predecessor) so the budget stays measurement-backed.
+  alembic_job: {
     budgetBytes: 16_384,
     measuredMaxBytes: 767_413,
     class: 'diagnostics-composite',
@@ -78,7 +81,9 @@ export const CORE_TOOL_OUTPUT_BUDGETS: Record<string, ToolOutputBudget> = {
     class: 'diagnostics-composite',
     rawRef: 'bilidili-agent-initphase/raw/alembic_codex_status__rep__minimal.json',
   },
-  alembic_codex_init: {
+  // de-codex rename: alembic_codex_init → alembic_init (same tool surface);
+  // rawRef keeps the codex_init MT1 sweep.
+  alembic_init: {
     budgetBytes: 24_576,
     measuredMaxBytes: 74_110,
     class: 'diagnostics-composite',

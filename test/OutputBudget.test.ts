@@ -52,7 +52,7 @@ describe('OutputBudget mechanism', () => {
   });
 
   test('budgets carry the MT1 measured values, not estimates', () => {
-    expect(CORE_TOOL_OUTPUT_BUDGETS.alembic_codex_job).toMatchObject({
+    expect(CORE_TOOL_OUTPUT_BUDGETS.alembic_job).toMatchObject({
       budgetBytes: 16_384,
       measuredMaxBytes: 767_413,
       class: 'diagnostics-composite',
