@@ -8,6 +8,11 @@ import {
 
 export const CORE_FAILURE_TAXONOMY_VERSION = 1;
 
+// The D25 floor every provider must demonstrate. 'needs-confirmation' is
+// deliberately NOT required: its only HTTP/412 producer (the decision-register
+// route) was retired, so no provider is obliged to emit it. Its taxonomy entry
+// is retained (see CORE_FAILURE_TAXONOMY) for providers that still classify
+// confirmation flows (e.g. the Plugin MCP consent/rebuild codes).
 export const CORE_D25_REQUIRED_FAILURE_KINDS = [
   'invalid-input',
   'not-found',
@@ -19,7 +24,6 @@ export const CORE_D25_REQUIRED_FAILURE_KINDS = [
   'degraded',
   'partial',
   'capability-mismatch',
-  'needs-confirmation',
   'provider-error',
   'host-failure',
   'internal-error',

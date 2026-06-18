@@ -23,7 +23,6 @@ describe('Core failure/problem taxonomy', () => {
       'degraded',
       'partial',
       'capability-mismatch',
-      'needs-confirmation',
       'provider-error',
       'host-failure',
       'internal-error',
