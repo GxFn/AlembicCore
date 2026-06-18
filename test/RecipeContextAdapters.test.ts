@@ -215,3 +215,78 @@ describe('vectorPortFromService over a real VectorService without an EmbedProvid
     expect(envelope.errors?.[0]?.code).toBe('vector-unavailable');
   });
 });
+
+describe('vectorPortFromService restores region identity across hybridSearch hit shapes', () => {
+  // Populated-hit coverage for the readHitString fix. The prior tests only
+  // exercised the embedProvider:null degraded path (hybridSearch -> []), so the
+  // nested item/metadata shapes that actually carry recipeId/regionClass were
+  // never asserted — exactly how the empty-identity defect slipped through.
+  function portOver(hits: Array<Record<string, unknown>>) {
+    const facade = { hybridSearch: async () => hits } as unknown as Parameters<
+      typeof vectorPortFromService
+    >[0];
+    return vectorPortFromService(facade);
+  }
+
+  it('reads recipeId/regionClass/content from the HybridRetriever fuse shape (hit.data.item.metadata)', async () => {
+    const port = portOver([
+      {
+        data: {
+          item: {
+            content: 'persist via repository.sync()',
+            id: 'chunk-1',
+            metadata: {
+              recipeId: 'recipe-42',
+              regionClass: 'persistence',
+              type: 'recipe-semantic-region',
+            },
+          },
+          score: 0.91,
+        },
+        denseRank: 1,
+        id: 'chunk-1',
+        rrfScore: 0.91,
+        score: 0.91,
+        semanticUsed: true,
+        sparseRank: 2,
+        vectorUsed: true,
+      },
+    ]);
+
+    const result = await port.searchRegions('persist', { limit: 5 });
+
+    expect(result.vectorUsed).toBe(true);
+    expect(result.hits).toHaveLength(1);
+    expect(result.hits[0]).toMatchObject({
+      content: 'persist via repository.sync()',
+      id: 'chunk-1',
+      recipeId: 'recipe-42',
+      regionClass: 'persistence',
+      score: 0.91,
+    });
+  });
+
+  it('reads region identity from the no-hybridRetriever degraded shape (hit.item.metadata)', async () => {
+    const port = portOver([
+      {
+        id: 'chunk-2',
+        item: {
+          content: 'guard rule body',
+          id: 'chunk-2',
+          metadata: { recipeId: 'recipe-7', regionClass: 'guard' },
+        },
+        score: 0.77,
+        semanticUsed: true,
+        vectorUsed: true,
+      },
+    ]);
+
+    const result = await port.searchRegions('guard', {});
+
+    expect(result.hits[0]).toMatchObject({
+      content: 'guard rule body',
+      recipeId: 'recipe-7',
+      regionClass: 'guard',
+    });
+  });
+});

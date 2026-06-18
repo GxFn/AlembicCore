@@ -97,17 +97,32 @@ function buildRegionFilter(
 }
 
 function readHitString(hit: VectorHit, key: string): string | undefined {
-  const direct = hit[key];
-  if (typeof direct === 'string' && direct.length > 0) {
-    return direct;
-  }
-  const fromMetadata = hit.metadata?.[key];
-  if (typeof fromMetadata === 'string' && fromMetadata.length > 0) {
-    return fromMetadata;
-  }
-  const fromItem = hit.item?.[key];
-  if (typeof fromItem === 'string' && fromItem.length > 0) {
-    return fromItem;
+  // VectorService.hybridSearch nests the region payload differently per path:
+  //   - no hybridRetriever   -> hit.item.{content | metadata.recipeId/regionClass}
+  //   - HybridRetriever.fuse -> hit.data.item.{content | metadata.recipeId/regionClass}
+  //     (fuse stores the SearchVector result under .data; the Plugin always
+  //      injects hybridRetriever, so this is the live region-query shape).
+  // Earlier probing stopped at hit / hit.metadata / hit.item, so identity sank
+  // under the item/metadata nesting and came back empty. Probe each known
+  // container in order; the first non-empty string wins (data structure and
+  // probe order otherwise unchanged).
+  const asRecord = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : undefined;
+  const item = asRecord(hit.item);
+  const dataItem = asRecord(asRecord(hit.data)?.item);
+  const containers: Array<Record<string, unknown> | undefined> = [
+    hit,
+    asRecord(hit.metadata),
+    item,
+    asRecord(item?.metadata),
+    dataItem,
+    asRecord(dataItem?.metadata),
+  ];
+  for (const container of containers) {
+    const value = container?.[key];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
   }
   return undefined;
 }
