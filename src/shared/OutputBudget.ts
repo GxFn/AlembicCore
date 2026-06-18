@@ -75,8 +75,13 @@ export const CORE_TOOL_OUTPUT_BUDGETS: Record<string, ToolOutputBudget> = {
     class: 'within-budget',
     rawRef: 'bilidili-agent/raw/alembic_rescan__rep__minimal.json',
   },
-  alembic_codex_status: {
-    budgetBytes: 16_384,
+  // MTC-4 merged alembic_health + alembic_mcp_status + alembic_codex_diagnostics
+  // into alembic_status. Budget = max(codex_status 16_384, codex_diagnostics
+  // 32_768) = 32_768 (W4 controller ruling): the aspect-branch tool returns one
+  // aspect per call, so the larger old bound covers either aspect. Measured keeps
+  // the codex_status sweep (112_785) — over budget, so still honestly composite.
+  alembic_status: {
+    budgetBytes: 32_768,
     measuredMaxBytes: 112_785,
     class: 'diagnostics-composite',
     rawRef: 'bilidili-agent-initphase/raw/alembic_codex_status__rep__minimal.json',
@@ -88,12 +93,6 @@ export const CORE_TOOL_OUTPUT_BUDGETS: Record<string, ToolOutputBudget> = {
     measuredMaxBytes: 74_110,
     class: 'diagnostics-composite',
     rawRef: 'bilidili-agent-initphase/raw/alembic_codex_init__rep__minimal.json',
-  },
-  alembic_codex_diagnostics: {
-    budgetBytes: 32_768,
-    measuredMaxBytes: 31_670,
-    class: 'no-headroom',
-    rawRef: 'bilidili-agent-usable/raw/alembic_codex_diagnostics__rep__minimal.json',
   },
   alembic_knowledge: {
     budgetBytes: 32_768,
