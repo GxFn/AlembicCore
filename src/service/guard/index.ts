@@ -1,5 +1,3 @@
-export * from './ComplianceReporter.js';
-export * from './CoverageAnalyzer.js';
 export * from './EnhancementGuardRules.js';
 export * from './ExclusionManager.js';
 export * from './GuardCheckEngine.js';
@@ -9,6 +7,5 @@ export * from './GuardFeedbackLoop.js';
 export * from './GuardPatternUtils.js';
 export * from './GuardService.js';
 export * from './RuleLearner.js';
-export * from './SourceFileCollector.js';
 export * from './UncertaintyCollector.js';
 export * from './ViolationsStore.js';

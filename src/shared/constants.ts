@@ -52,27 +52,6 @@ export const RULE_LEARNER = Object.freeze({
   LOW_PRECISION: 0.5,
 });
 
-// ─── 合规报告 ────────────────────────────────────────────
-
-/** ComplianceReporter 默认 Quality Gate */
-export const QUALITY_GATE = Object.freeze({
-  MAX_ERRORS: 0,
-  MAX_WARNINGS: 20,
-  MIN_SCORE: 70,
-});
-
-/** ComplianceReporter 扣分权重 */
-export const COMPLIANCE_SCORING = Object.freeze({
-  ERROR_PENALTY: 5,
-  WARNING_PENALTY: 1,
-  INFO_PENALTY: 0.2,
-  PROBLEMATIC_RULE_PENALTY: 3,
-  HIGH_F1_BONUS: 5,
-  HIGH_F1_THRESHOLD: 0.8,
-  LOW_PRECISION_THRESHOLD: 0.5,
-  MAX_FILES_DEFAULT: 500,
-});
-
 // ─── 知识置信度 ──────────────────────────────────────────
 
 /** 知识条目默认置信度和阈值 */
@@ -127,8 +106,6 @@ export default {
   QUALITY_GRADES,
   CODE_LENGTH,
   RULE_LEARNER,
-  QUALITY_GATE,
-  COMPLIANCE_SCORING,
   KNOWLEDGE_CONFIDENCE,
   SEARCH,
   AI_CIRCUIT_BREAKER,

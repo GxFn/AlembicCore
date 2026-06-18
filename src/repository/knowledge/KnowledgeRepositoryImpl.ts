@@ -797,7 +797,7 @@ export class KnowledgeRepositoryImpl {
   }
 
   /**
-   * 活跃规则的 id + language (CoverageAnalyzer.#loadActiveRules) — sync
+   * 活跃规则的 id + language — sync
    */
   findActiveRuleIdsSync(): Array<{ id: string; language: string }> {
     return this.#drizzle

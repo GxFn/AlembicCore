@@ -1,22 +1,18 @@
 /**
  * Guard immune system integration
  *
- * 覆盖 Guard 免疫闭环中的 uncertainty、反馈确认、覆盖率、学习器和合规报告。
+ * 覆盖 Guard 免疫闭环中的 uncertainty、反馈确认和学习器。
  */
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { ComplianceReporter } from '../src/service/guard/ComplianceReporter.js';
-import { CoverageAnalyzer } from '../src/service/guard/CoverageAnalyzer.js';
 import { GuardCheckEngine } from '../src/service/guard/GuardCheckEngine.js';
 import { GuardFeedbackLoop } from '../src/service/guard/GuardFeedbackLoop.js';
 import { RuleLearner } from '../src/service/guard/RuleLearner.js';
 import { UncertaintyCollector } from '../src/service/guard/UncertaintyCollector.js';
 
 type GuardEngineDb = ConstructorParameters<typeof GuardCheckEngine>[0];
-type CoverageKnowledgeRepo = ConstructorParameters<typeof CoverageAnalyzer>[0];
-type CoverageViolationRepo = ConstructorParameters<typeof CoverageAnalyzer>[1];
 type RuleLearnerSignalBus = NonNullable<
   NonNullable<ConstructorParameters<typeof RuleLearner>[1]>['signalBus']
 >;
@@ -85,36 +81,6 @@ describe('Guard immune system integration', () => {
     expect(confirmations).toEqual([{ action: 'insert', recipeId: 'safe-eval-alternative' }]);
   });
 
-  it('produces coverage matrix from module files and rule languages', () => {
-    const knowledgeRepo = {
-      findActiveRuleIdsSync() {
-        return [
-          { id: 'r1', language: 'swift' },
-          { id: 'r2', language: 'objectivec' },
-          { id: 'r3', language: 'swift' },
-        ];
-      },
-    } as unknown as CoverageKnowledgeRepo;
-    const guardViolationRepo = {
-      findRecentViolationsJson() {
-        return [];
-      },
-    } as unknown as CoverageViolationRepo;
-
-    const analyzer = new CoverageAnalyzer(knowledgeRepo, guardViolationRepo);
-    const result = analyzer.analyze(
-      new Map([
-        ['BDUIKit', ['BDUIKit/A.swift', 'BDUIKit/B.swift']],
-        ['BDNet', ['BDNet/C.m', 'BDNet/D.h']],
-        ['BDAuth', []],
-      ])
-    );
-
-    expect(result.modules).toHaveLength(3);
-    expect(result.zeroModules).toContain('BDAuth');
-    expect(result.modules.find((module) => module.module === 'BDUIKit')?.coverage).toBe(100);
-  });
-
   it('identifies precision drops and emits RuleLearner signals', () => {
     const tmpRoot = mkdtempSync(join(tmpdir(), 'alembic-core-rule-learner-'));
     const signalBus = { send: vi.fn() } as unknown as RuleLearnerSignalBus;
@@ -142,69 +108,6 @@ describe('Guard immune system integration', () => {
         expect.any(Number),
         expect.objectContaining({ target: 'bad-rule' })
       );
-    } finally {
-      rmSync(tmpRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('generates three-dimensional compliance scores from collected project files', async () => {
-    const tmpRoot = mkdtempSync(join(tmpdir(), 'alembic-core-compliance-'));
-    writeFileSync(join(tmpRoot, 'a.swift'), 'let x = try! something()\n');
-
-    const mockEngine = {
-      auditFiles() {
-        return {
-          files: [
-            {
-              filePath: join(tmpRoot, 'a.swift'),
-              violations: [{ ruleId: 'swift-force-try', severity: 'warning', message: 'try!' }],
-              uncertainResults: [
-                {
-                  ruleId: 'ast-gap',
-                  message: 'AST unavailable',
-                  layer: 'ast',
-                  reason: 'ast_unavailable',
-                  detail: 'No tree-sitter',
-                },
-              ],
-              summary: { total: 1, errors: 0, warnings: 1, infos: 0, uncertain: 1 },
-            },
-          ],
-          crossFileViolations: [],
-          capabilityReport: {
-            checkCoverage: 75,
-            uncertainResults: [
-              {
-                ruleId: 'ast-gap',
-                message: 'AST unavailable',
-                layer: 'ast',
-                reason: 'ast_unavailable',
-                detail: 'No tree-sitter',
-              },
-            ],
-            boundaries: [
-              {
-                type: 'ast_language_gap',
-                description: 'AST skipped',
-                affectedRules: ['ast-gap'],
-                suggestedAction: 'Install tree-sitter',
-              },
-            ],
-          },
-        };
-      },
-    } as unknown as ConstructorParameters<typeof ComplianceReporter>[0];
-
-    try {
-      const reporter = new ComplianceReporter(mockEngine, null, null, null);
-      const report = await reporter.generate(tmpRoot);
-
-      expect(report.complianceScore).toBeDefined();
-      expect(report.coverageScore).toBe(75);
-      expect(report.confidenceScore).toBeLessThan(100);
-      expect(report.uncertainSummary.total).toBe(1);
-      expect(report.uncertainSummary.byLayer.ast).toBe(1);
-      expect(report.boundaries).toHaveLength(1);
     } finally {
       rmSync(tmpRoot, { recursive: true, force: true });
     }

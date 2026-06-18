@@ -284,7 +284,7 @@ export class GuardViolationRepositoryImpl extends RepositoryBase<
   }
 
   /**
-   * 最近的 violation JSON 列表 (CoverageAnalyzer.#getRecentViolations)
+   * 最近的 violation JSON 列表
    */
   findRecentViolationsJson(limit: number): Array<{ filePath: string; violationsJson: string }> {
     return this.drizzle
