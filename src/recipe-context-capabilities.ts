@@ -36,13 +36,95 @@ export {
   RecipeContextService,
 } from './service/recipe-context/RecipeContextService.js';
 
-import {
-  createRecipeContextServiceFromCore,
-  type RecipeContextCoreParts,
-} from './service/recipe-context/adapters/fromCore.js';
-export { createRecipeContextServiceFromCore };
+import { createRecipeContextServiceFromCore as createInternalRecipeContextServiceFromCore } from './service/recipe-context/adapters/fromCore.js';
+import type { RecipeContextService } from './service/recipe-context/RecipeContextService.js';
 
-export interface RecipeContextCoreServices extends RecipeContextCoreParts {}
+export interface RecipeContextKnowledgeEntry {
+  toJSON(): Record<string, unknown>;
+}
+
+export interface RecipeContextKnowledgeService {
+  get(id: string): Promise<RecipeContextKnowledgeEntry>;
+  list(
+    filters: Record<string, unknown>,
+    pagination: { page?: number; pageSize?: number }
+  ): Promise<{
+    data: RecipeContextKnowledgeEntry[];
+    pagination?: { page?: number; pageSize?: number; total?: number };
+  }>;
+}
+
+export interface RecipeContextSourceRefRecord {
+  recipeId: string;
+  sourcePath: string;
+  status: string;
+  newPath?: string | null;
+  verifiedAt?: number;
+}
+
+export interface RecipeContextSourceRefService {
+  findByRecipeId(recipeId: string): RecipeContextSourceRefRecord[];
+  findBySourcePath(sourcePath: string): RecipeContextSourceRefRecord[];
+  findByStatus(status: string): RecipeContextSourceRefRecord[];
+  findStale(): RecipeContextSourceRefRecord[];
+  findRenamed(): RecipeContextSourceRefRecord[];
+}
+
+export interface RecipeContextSearchItem {
+  id: string;
+  title?: string;
+  score?: number;
+  vectorScore?: number;
+  vectorUsed?: boolean;
+  semanticUsed?: boolean;
+  fallbackReason?: string;
+  matchedFilters?: Record<string, string[]>;
+  [key: string]: unknown;
+}
+
+export interface RecipeContextSearchResponse {
+  items: RecipeContextSearchItem[];
+  total?: number;
+  searchMeta?: {
+    vectorUsed?: boolean;
+    semanticUsed?: boolean;
+    fallbackReason?: string;
+    [key: string]: unknown;
+  };
+}
+
+export interface RecipeContextSearchService {
+  search(query: string, options: Record<string, unknown>): Promise<RecipeContextSearchResponse>;
+}
+
+export interface RecipeContextVectorHit {
+  id: string;
+  score: number;
+  vectorUsed?: boolean;
+  semanticUsed?: boolean;
+  fallbackReason?: string;
+  recipeId?: string;
+  regionClass?: string;
+  content?: string;
+  text?: string;
+  metadata?: Record<string, unknown>;
+  item?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface RecipeContextVectorService {
+  hybridSearch(
+    query: string,
+    opts: { topK?: number; filter?: Record<string, unknown> | null }
+  ): Promise<RecipeContextVectorHit[]>;
+}
+
+export interface RecipeContextCoreServices {
+  knowledge: RecipeContextKnowledgeService;
+  sourceRefRepository: RecipeContextSourceRefService;
+  searchEngine?: RecipeContextSearchService | null;
+  vectorService?: RecipeContextVectorService | null;
+}
 
 export interface RecipeContextCapabilities {
   execute: RecipeContextContract['execute'];
@@ -77,6 +159,12 @@ export function createRecipeContextCapabilities(
       recipeContext.execute({ kind: 'relations', payload }),
   };
   return Object.freeze(capabilities);
+}
+
+export function createRecipeContextServiceFromCore(
+  parts: RecipeContextCoreServices
+): RecipeContextService {
+  return createInternalRecipeContextServiceFromCore(parts);
 }
 
 export function createRecipeContextCapabilitiesFromCore(

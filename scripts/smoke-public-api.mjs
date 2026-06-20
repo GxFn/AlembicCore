@@ -356,6 +356,17 @@ const requiredTypeDeclarations = {
     'WorkflowSkillHooks',
   ],
 };
+const forbiddenTypeDeclarationRefs = {
+  '@alembic/core/recipe-context-capabilities': [
+    './service/recipe-context/adapters/',
+    'service/recipe-context/adapters',
+    'KnowledgeReadFacade',
+    'RecipeContextCoreParts',
+    'SearchEngineFacade',
+    'SourceRefRepositoryFacade',
+    'VectorServiceFacade',
+  ],
+};
 
 const imported = [];
 
@@ -405,6 +416,12 @@ for (const [specifier, exportNames] of Object.entries(requiredTypeDeclarations))
   for (const exportName of exportNames) {
     if (!new RegExp(`\\b${exportName}\\b`).test(declaration)) {
       throw new Error(`Missing ${specifier} type declaration: ${exportName}`);
+    }
+  }
+
+  for (const forbiddenRef of forbiddenTypeDeclarationRefs[specifier] ?? []) {
+    if (declaration.includes(forbiddenRef)) {
+      throw new Error(`Forbidden ${specifier} type declaration reference: ${forbiddenRef}`);
     }
   }
 }
