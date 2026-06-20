@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CapabilityProbe } from '../src/core/capability/index.js';
+import { CapabilityProbe } from '../src/capability.js';
 
 const tempRoots: string[] = [];
 

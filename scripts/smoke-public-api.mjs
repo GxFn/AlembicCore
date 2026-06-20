@@ -30,6 +30,7 @@ forbiddenExportPaths.push(
   './workflows/capabilities/project-intelligence'
 );
 const requiredSubpathExports = {
+  '@alembic/core/capability': ['CapabilityProbe'],
   '@alembic/core/config': [
     'CANDIDATES_DIR',
     'ConfigDefaults',
@@ -216,6 +217,10 @@ const requiredSubpathExports = {
   ],
 };
 const requiredTypeDeclarations = {
+  '@alembic/core/capability': [
+    'CapabilityProbeOptions',
+    'CapabilityProbeStatus',
+  ],
   '@alembic/core/daemon': [
     'AlembicApiAiCapability',
     'AlembicApiAiConfigSource',

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "description": "AlembicCore public API boundary policy. Exact stable and provisional exports are intentional; wildcard exports are migration-only.",
   "expectedCounts": {
-    "stable-public": 19,
+    "stable-public": 20,
     "provisional-public": 10,
     "transitional-internal": 29,
     "internal-only": 0,
@@ -156,6 +156,14 @@
             "reloadProjectAstPlugins"
           ],
           "reason": "Grammar resource and AST plugin reload contracts are generic AST support and stay on ./core/ast; project-information answers route through ./project-context."
+        },
+        "@alembic/core/core/capability": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./capability",
+          "symbols": [
+            "CapabilityProbe"
+          ],
+          "reason": "CapabilityProbe is now exported by the stable ./capability facade; old core/capability imports stay as compatibility until consumer test fixtures and configs migrate."
         },
         "@alembic/core/core/discovery": {
           "decision": "consumer-ready-stable",
@@ -1042,6 +1050,10 @@
           "stableRoute": "./database",
           "disposition": "keep-provisional, review-by 2026-09-12"
         },
+        "./core/capability": {
+          "stableRoute": "./capability",
+          "disposition": "keep-provisional until CO-3 consumer test/config migration evidence is green"
+        },
         "./domain/knowledge": {
           "stableRoute": "./knowledge",
           "disposition": "keep-provisional, review-by 2026-09-12"
@@ -1112,6 +1124,7 @@
   },
   "stablePublicExports": [
     ".",
+    "./capability",
     "./daemon",
     "./database",
     "./dimensions",
