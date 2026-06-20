@@ -14,6 +14,10 @@
       "types": "./dist/capability.d.ts",
       "import": "./dist/capability.js"
     },
+    "./enhancement": {
+      "types": "./dist/enhancement.d.ts",
+      "import": "./dist/enhancement.js"
+    },
     "./logging": {
       "types": "./dist/logging.d.ts",
       "import": "./dist/logging.js"
@@ -50,9 +54,17 @@
       "types": "./dist/project-context.d.ts",
       "import": "./dist/project-context.js"
     },
+    "./project-context-capabilities": {
+      "types": "./dist/project-context-capabilities.d.ts",
+      "import": "./dist/project-context-capabilities.js"
+    },
     "./recipe-context": {
       "types": "./dist/recipe-context.d.ts",
       "import": "./dist/recipe-context.js"
+    },
+    "./recipe-context-capabilities": {
+      "types": "./dist/recipe-context-capabilities.d.ts",
+      "import": "./dist/recipe-context-capabilities.js"
     },
     "./report": {
       "types": "./dist/report.d.ts",
@@ -201,6 +213,10 @@
     "./types": {
       "types": "./dist/types/index.d.ts",
       "import": "./dist/types/index.js"
+    },
+    "./test-fixtures": {
+      "types": "./dist/test-fixtures.d.ts",
+      "import": "./dist/test-fixtures.js"
     },
     "./workflows": {
       "types": "./dist/workflows/index.d.ts",

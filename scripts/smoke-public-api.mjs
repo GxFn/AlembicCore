@@ -31,6 +31,12 @@ forbiddenExportPaths.push(
 );
 const requiredSubpathExports = {
   '@alembic/core/capability': ['CapabilityProbe'],
+  '@alembic/core/enhancement': [
+    'FrameworkEnhancements',
+    'getFrameworkEnhancements',
+    'initFrameworkEnhancements',
+    'resolveFrameworkEnhancements',
+  ],
   '@alembic/core/config': [
     'CANDIDATES_DIR',
     'ConfigDefaults',
@@ -129,10 +135,25 @@ const requiredSubpathExports = {
     'SUBMIT_REQUIREMENTS',
   ],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
-  '@alembic/core/project-context': ['ProjectContext'],
+  '@alembic/core/project-context': [
+    'ProjectContext',
+    'ProjectContextCapabilities',
+    'createProjectContextCapabilities',
+  ],
+  '@alembic/core/project-context-capabilities': [
+    'ProjectContextCapabilities',
+    'createProjectContextCapabilities',
+  ],
   '@alembic/core/recipe-context': [
     'RecipeContextService',
     'createRecipeContextService',
+    'createRecipeContextServiceFromCore',
+  ],
+  '@alembic/core/recipe-context-capabilities': [
+    'RECIPE_CONTEXT_REQUEST_KIND_VALUES',
+    'RecipeContextService',
+    'createRecipeContextCapabilities',
+    'createRecipeContextCapabilitiesFromCore',
     'createRecipeContextServiceFromCore',
   ],
   '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],
@@ -207,6 +228,13 @@ const requiredSubpathExports = {
     'validateCoreLegacyContractConvergence',
   ],
   '@alembic/core/types': ['normalizeFileChangeEventSource'],
+  '@alembic/core/test-fixtures': [
+    'CapabilityProbe',
+    'CORE_GRAMMAR_RESOURCE_FILES',
+    'ensureProjectGrammarResources',
+    'listCoreGrammarResources',
+    'reloadProjectAstPlugins',
+  ],
   '@alembic/core/vector': [
     'OllamaEmbedProvider',
     'applyEmbedLane',
@@ -220,6 +248,11 @@ const requiredTypeDeclarations = {
   '@alembic/core/capability': [
     'CapabilityProbeOptions',
     'CapabilityProbeStatus',
+  ],
+  '@alembic/core/enhancement': [
+    'EnhancementPack',
+    'EnhancementRegistry',
+    'FrameworkEnhancementResolverOptions',
   ],
   '@alembic/core/daemon': [
     'AlembicApiAiCapability',
@@ -288,9 +321,15 @@ const requiredTypeDeclarations = {
   ],
   '@alembic/core/project-context': [
     'ProjectContext',
+    'ProjectContextCapabilities',
+    'ProjectContextCapabilityQuery',
     'ProjectContextEnvelope',
     'ProjectContextRequest',
     'ProjectContextResult',
+  ],
+  '@alembic/core/project-context-capabilities': [
+    'ProjectContextCapabilities',
+    'ProjectContextCapabilityQuery',
   ],
   '@alembic/core/recipe-context': [
     'RecipeContextContract',
@@ -298,7 +337,18 @@ const requiredTypeDeclarations = {
     'RecipeContextRequest',
     'RecipeContextResult',
   ],
+  '@alembic/core/recipe-context-capabilities': [
+    'RecipeContextCapabilities',
+    'RecipeContextCoreServices',
+    'RecipeContextEnvelope',
+    'RecipeContextRequest',
+  ],
   '@alembic/core/report': ['ReportEntry', 'ReportQueryOptions', 'ReportReader', 'ReportStore'],
+  '@alembic/core/test-fixtures': [
+    'CapabilityProbeOptions',
+    'CapabilityProbeStatus',
+    'CoreGrammarResourceFile',
+  ],
   '@alembic/core/types': [
     'IncrementalPlan',
     'McpContext',

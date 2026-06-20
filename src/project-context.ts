@@ -29,4 +29,12 @@ export type {
   SpaceContext,
 } from './domain/project-context/index.js';
 export { buildProjectContextPresenterInput } from './domain/project-context/index.js';
+export type {
+  ProjectContextCapabilities as ProjectContextCapabilitiesContract,
+  ProjectContextCapabilityQuery,
+} from './project-context-capabilities.js';
+export {
+  createProjectContextCapabilities,
+  ProjectContextCapabilities,
+} from './project-context-capabilities.js';
 export { ProjectContext } from './service/project-context/ProjectContextService.js';

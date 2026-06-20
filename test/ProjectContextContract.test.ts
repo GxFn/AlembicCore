@@ -24,7 +24,7 @@ const EXPECTED_PROJECT_CONTEXT_REQUEST_KINDS = [
 ] as const;
 
 describe('ProjectContext PCQ-0 contract skeleton', () => {
-  it('exposes the stable package subpath and one runtime entrypoint', async () => {
+  it('exposes the stable package subpath and runtime entrypoints', async () => {
     const packageJson = JSON.parse(
       fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')
     ) as { exports: Record<string, { import: string; types: string }> };
@@ -36,9 +36,14 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
     });
     expect(Object.keys(publicModule).sort()).toEqual([
       'ProjectContext',
+      'ProjectContextCapabilities',
       'buildProjectContextPresenterInput',
+      'createProjectContextCapabilities',
     ]);
     expect(ProjectContext.execute).toBeInstanceOf(Function);
+    expect(publicModule.ProjectContextCapabilities.executeFileSymbolsQuery).toBeInstanceOf(
+      Function
+    );
     expect(publicModule.buildProjectContextPresenterInput).toBeInstanceOf(Function);
   });
 
