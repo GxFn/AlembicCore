@@ -177,11 +177,26 @@
           "decision": "consumer-ready-stable",
           "targetFacade": "./test-fixtures",
           "symbols": [
+            "detectConflict",
             "getDiscovererRegistry",
+            "loadPreference",
             "parseGradleProject",
-            "resetDiscovererRegistry"
+            "resetDiscovererRegistry",
+            "savePreference"
           ],
-          "reason": "CO-5B exposes discoverer registry and parser helpers through ./test-fixtures so downstream integration tests can migrate away from the transitional core/discovery route."
+          "reason": "CO-5B exposes discoverer registry and parser helpers through ./test-fixtures, and CO-5D adds the real DiscovererPreference helpers for the last Plugin preference-test residual. Downstream tests can migrate away from the transitional core/discovery route without changing production discovery behavior."
+        },
+        "@alembic/core/project-intelligence": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./test-fixtures",
+          "symbols": [
+            "buildEntityGraphInput",
+            "materializeCallGraph",
+            "resolveProjectAnalysisMaterialization",
+            "runPhase1_7_CallGraph",
+            "runPhase2_DependencyGraph"
+          ],
+          "reason": "The retired project-intelligence aggregate remains absent as a package export. CO-5D exposes only the real Core-backed materialization and phase-runner helpers through the test-only ./test-fixtures facade so downstream ProjectAnalysisMaterialization tests can preserve behavior without resurrecting the old route."
         },
         "@alembic/core/service/evolution/ContentImpactAnalyzer": {
           "decision": "consumer-ready-stable",

@@ -51,10 +51,17 @@ export {
   listCoreGrammarResources,
   reloadProjectAstPlugins,
 } from './core/ast/index.js';
+export type {
+  ConflictResult,
+  DetectMatch,
+  DiscovererPreferenceData,
+} from './core/discovery/index.js';
 export {
   CustomConfigDiscoverer,
+  detectConflict,
   getDiscovererRegistry,
   inferConventionRole,
+  loadPreference,
   parseBoxfile,
   parseCMakeProject,
   parseFlutterPluginsDeps,
@@ -66,7 +73,25 @@ export {
   parseStarlarkBuildFile,
   RULE_TO_LANGUAGE,
   resetDiscovererRegistry,
+  savePreference,
 } from './core/discovery/index.js';
+export type {
+  AstProjectSummaryLike,
+  DepGraphData,
+  DiscovererLike,
+  PhaseContainer,
+  PhaseLogger,
+  ProjectAnalysisMaterializationInput,
+  ProjectAnalysisMaterializationOptions,
+  ProjectEntityGraphInput,
+} from './service/project-intelligence/AnalysisPhaseRunners.js';
+export {
+  buildEntityGraphInput,
+  materializeCallGraph,
+  resolveProjectAnalysisMaterialization,
+  runPhase1_7_CallGraph,
+  runPhase2_DependencyGraph,
+} from './service/project-intelligence/AnalysisPhaseRunners.js';
 export {
   dartAstPlugin,
   goAstPlugin,
