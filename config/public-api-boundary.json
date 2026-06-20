@@ -54,7 +54,7 @@
     },
     "facadeReadiness": {
       "schemaVersion": 1,
-      "description": "Wave 3B readiness map for shared/config/types/candidate deep imports. This does not delete wildcard exports; it tells consumers which exact facade can replace each deep specifier.",
+      "description": "Wave 3B / CO-5B readiness map for shared/config/types/candidate deep imports and test-only AST/discovery/project-analysis migration. This does not delete wildcard exports; it tells consumers which exact facade can replace each deep specifier.",
       "groups": {
         "./repository/sync/*": {
           "decision": "consumer-ready-stable",
@@ -63,8 +63,8 @@
         },
         "./core/ast/*": {
           "decision": "keep-transitional",
-          "targetFacade": "./core/ast/*",
-          "reason": "Language-specific AST modules are still test and grammar registration support. Project-level consumers should prefer the stable project-intelligence facade, but lang-* files are not collapsed in this wave."
+          "targetFacade": "./test-fixtures",
+          "reason": "Language-specific AST modules are still kept for grammar registration compatibility. CO-5B exposes named language plugin fixtures from ./test-fixtures so downstream parser tests can migrate away from lang-* deep imports before any route shrink."
         },
         "./infrastructure/database/drizzle/*": {
           "decision": "keep-transitional",
@@ -139,32 +139,49 @@
         },
         "@alembic/core/core/AstAnalyzer": {
           "decision": "consumer-ready-stable",
-          "targetFacade": "./core",
+          "targetFacade": "./test-fixtures",
           "symbols": [
             "analyzeFile",
+            "analyzeProject",
             "analyzeSourceFile",
+            "isAvailable",
             "parseToTree"
           ],
-          "reason": "File-level AST analysis is a generic syntax utility and stays on ./core; project-level context queries route through ./project-context."
+          "reason": "CO-5B exposes real AST test helpers through ./test-fixtures for downstream parser/project-analysis tests; product project-information queries still route through ./project-context."
+        },
+        "@alembic/core/core/analysis": {
+          "decision": "consumer-ready-stable",
+          "targetFacade": "./test-fixtures",
+          "symbols": [
+            "CallGraphAnalyzer",
+            "CallEdgeResolver",
+            "DataFlowInferrer",
+            "ImportPathResolver",
+            "ImportRecord",
+            "SymbolTableBuilder"
+          ],
+          "reason": "CO-5B exposes analysis classes through the test-only fixture facade so focused CallGraphAnalyzer tests can stop importing the transitional core/analysis route."
         },
         "@alembic/core/core/ast": {
           "decision": "consumer-ready-stable",
-          "targetFacade": "./core/ast",
+          "targetFacade": "./test-fixtures",
           "symbols": [
             "CORE_GRAMMAR_RESOURCE_FILES",
             "ensureProjectGrammarResources",
+            "prepareProjectAnalysisTestFixtures",
             "reloadProjectAstPlugins"
           ],
-          "reason": "Grammar resource and AST plugin reload contracts are generic AST support and stay on ./core/ast; project-information answers route through ./project-context."
+          "reason": "CO-5B exposes grammar/resource preparation helpers through ./test-fixtures for test migrations; project-information answers route through ./project-context."
         },
         "@alembic/core/core/discovery": {
           "decision": "consumer-ready-stable",
-          "targetFacade": "./core/discovery",
+          "targetFacade": "./test-fixtures",
           "symbols": [
             "getDiscovererRegistry",
+            "parseGradleProject",
             "resetDiscovererRegistry"
           ],
-          "reason": "Discovery registry contracts are generic project-shape support and stay on ./core/discovery; language detection is exposed by ./shared and project-information answers route through ./project-context."
+          "reason": "CO-5B exposes discoverer registry and parser helpers through ./test-fixtures so downstream integration tests can migrate away from the transitional core/discovery route."
         },
         "@alembic/core/service/evolution/ContentImpactAnalyzer": {
           "decision": "consumer-ready-stable",

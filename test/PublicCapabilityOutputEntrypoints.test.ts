@@ -20,9 +20,13 @@ import {
   type RecipeContextCoreServices,
 } from '../src/recipe-context-capabilities.js';
 import {
+  analyzeProject,
   CapabilityProbe,
   CORE_GRAMMAR_RESOURCE_FILES,
+  getDiscovererRegistry,
+  ImportRecord,
   listCoreGrammarResources,
+  typeScriptAstPlugin,
 } from '../src/test-fixtures.js';
 
 describe('public capability output entrypoints', () => {
@@ -118,8 +122,13 @@ describe('public capability output entrypoints', () => {
 
   it('exposes test fixture imports without keeping consumers on old core routes', () => {
     const resources = listCoreGrammarResources();
+    const registry = getDiscovererRegistry();
 
     expect(CapabilityProbe).toBeInstanceOf(Function);
+    expect(analyzeProject).toBeInstanceOf(Function);
+    expect(ImportRecord).toBeInstanceOf(Function);
+    expect(typeScriptAstPlugin.extractCallSites).toBeInstanceOf(Function);
+    expect(registry.getAll().map((discoverer) => discoverer.id)).toContain('generic');
     expect(resources).toHaveLength(CORE_GRAMMAR_RESOURCE_FILES.length);
   });
 });
