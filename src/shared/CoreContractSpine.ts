@@ -554,14 +554,14 @@ export const CORE_CONTRACT_SPINE_FIELD_POLICIES = [
 export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
   {
     cleanupBlocker:
-      'Alembic and AlembicPlugin still import the daemon, shared, guard, search, core, and core/ast public subpaths; direct narrowing of the remaining facades waits for consumer migration.',
+      'Alembic and AlembicPlugin still import the daemon, shared, guard, search, core, core/analysis, core/ast, and core/discovery public subpaths; capability and enhancement duplicate routes were retired by CO-4 after consumer migration.',
     currentCompatibilityOwner: ['Alembic', 'AlembicPlugin', 'AlembicAgent'],
     currentConsumers: ['Alembic', 'AlembicPlugin', 'AlembicAgent'],
     decisionRationale:
       'Current product source scans still consume broad public families, so D9 records them as owned Core public contracts instead of narrowing exports early.',
     id: 'D9-C01',
     legacySurface:
-      'Public package exports for the daemon, shared, guard, search, and core/* families. SD-5 phase-2 (0.3.0 RW2) removed the zero-consumer wildcard subpaths; the canonical facades and the consumer-backed core/ast wildcard remain.',
+      'Public package exports for the daemon, shared, guard, search, and remaining core/* families. SD-5 phase-2 (0.3.0 RW2) removed the zero-consumer wildcard subpaths; CO-4 retired cleared capability/enhancement duplicates; the canonical facades and consumer-backed core/ast wildcard remain.',
     publicExposurePolicy:
       'Preserved only as Core-owned deterministic public package boundaries; runtime, UI, MCP, CLI, AI-provider, and tool execution stay outside Core.',
     registryRows: ['I01', 'I03', 'I04', 'I05', 'I06', 'I07', 'I08', 'I21', 'I23'],
@@ -578,9 +578,7 @@ export const CORE_LEGACY_CONTRACT_CONVERGENCE_CANDIDATES = [
       './core/analysis',
       './core/ast',
       './core/ast/*',
-      './core/capability',
       './core/discovery',
-      './core/enhancement',
     ],
     sourceFiles: ['package.json', 'src/search.ts', 'src/daemon/index.ts', 'src/shared/index.ts'],
     status: 'preserved-with-owner',

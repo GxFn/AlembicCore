@@ -58,10 +58,6 @@
       "types": "./dist/project-context-capabilities.d.ts",
       "import": "./dist/project-context-capabilities.js"
     },
-    "./recipe-context": {
-      "types": "./dist/recipe-context.d.ts",
-      "import": "./dist/recipe-context.js"
-    },
     "./recipe-context-capabilities": {
       "types": "./dist/recipe-context-capabilities.d.ts",
       "import": "./dist/recipe-context-capabilities.js"
@@ -126,17 +122,9 @@
       "types": "./dist/core/ast/*.d.ts",
       "import": "./dist/core/ast/*.js"
     },
-    "./core/capability": {
-      "types": "./dist/core/capability/index.d.ts",
-      "import": "./dist/core/capability/index.js"
-    },
     "./core/discovery": {
       "types": "./dist/core/discovery/index.d.ts",
       "import": "./dist/core/discovery/index.js"
-    },
-    "./core/enhancement": {
-      "types": "./dist/core/enhancement/index.d.ts",
-      "import": "./dist/core/enhancement/index.js"
     },
     "./infrastructure/database": {
       "types": "./dist/infrastructure/database/index.d.ts",

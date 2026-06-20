@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import { CapabilityProbe } from '../src/capability.js';
-import { CapabilityProbe as LegacyCapabilityProbe } from '../src/core/capability/index.js';
 import { EvolutionPolicy } from '../src/evolution.js';
 import { runFullResetPolicy } from '../src/host-agent-workflows.js';
 import {
@@ -25,10 +24,8 @@ describe('CCIC-5 residual public readiness entrypoints', () => {
     expect(runFullResetPolicy).toBeTypeOf('function');
   });
 
-  it('keeps residual service and capability facades provisional but importable', () => {
-    // CapabilityProbe 的稳定入口已经收敛到 ./capability；旧 core/capability 只保留迁移兼容。
+  it('keeps residual service facades provisional while capability uses its stable facade', () => {
     expect(CapabilityProbe).toBeTypeOf('function');
-    expect(LegacyCapabilityProbe).toBe(CapabilityProbe);
     expect(BootstrapDedup).toBeTypeOf('function');
     expect(FeedbackCollector).toBeTypeOf('function');
     expect(QualityScorer).toBeTypeOf('function');

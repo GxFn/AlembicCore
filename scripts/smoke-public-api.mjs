@@ -25,7 +25,10 @@ const forbiddenRootExports = [
 ];
 const forbiddenExportPaths = ['./source-graph'];
 forbiddenExportPaths.push(
+  './core/capability',
+  './core/enhancement',
   './project-intelligence',
+  './recipe-context',
   './service/panorama',
   './workflows/capabilities/project-intelligence'
 );
@@ -143,11 +146,6 @@ const requiredSubpathExports = {
   '@alembic/core/project-context-capabilities': [
     'ProjectContextCapabilities',
     'createProjectContextCapabilities',
-  ],
-  '@alembic/core/recipe-context': [
-    'RecipeContextService',
-    'createRecipeContextService',
-    'createRecipeContextServiceFromCore',
   ],
   '@alembic/core/recipe-context-capabilities': [
     'RECIPE_CONTEXT_REQUEST_KIND_VALUES',
@@ -330,12 +328,6 @@ const requiredTypeDeclarations = {
   '@alembic/core/project-context-capabilities': [
     'ProjectContextCapabilities',
     'ProjectContextCapabilityQuery',
-  ],
-  '@alembic/core/recipe-context': [
-    'RecipeContextContract',
-    'RecipeContextEnvelope',
-    'RecipeContextRequest',
-    'RecipeContextResult',
   ],
   '@alembic/core/recipe-context-capabilities': [
     'RecipeContextCapabilities',

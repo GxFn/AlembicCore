@@ -1,10 +1,8 @@
-// Public entry for @alembic/core/recipe-context (GMAP-2): the Core read facade
-// for recipe data, peer to @alembic/core/project-context. It exposes the
-// RecipeContextService (execute() with detail / search / prime / source-refs /
-// relations read kinds), the read-only ports, and the adapters that bind
-// concrete Core services (KnowledgeService / RecipeSourceRefRepository /
-// SearchEngine / VectorService) to those ports. Lifecycle/create stays in
-// KnowledgeService — nothing here can mutate recipe state.
+// Internal RecipeContext read facade (GMAP-2). The public package route moved
+// to ./recipe-context-capabilities; this source file stays for Core-local
+// service tests and implementation wiring. It still exposes the read-only ports
+// and service adapters used inside Core, and nothing here can mutate recipe
+// state.
 
 export type {
   RecipeContext as RecipeContextContract,

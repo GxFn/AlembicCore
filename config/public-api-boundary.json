@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "description": "AlembicCore public API boundary policy. Exact stable and provisional exports are intentional; wildcard exports are migration-only.",
   "expectedCounts": {
-    "stable-public": 24,
-    "provisional-public": 10,
+    "stable-public": 23,
+    "provisional-public": 8,
     "transitional-internal": 29,
     "internal-only": 0,
     "forbidden": 0
@@ -157,14 +157,6 @@
           ],
           "reason": "Grammar resource and AST plugin reload contracts are generic AST support and stay on ./core/ast; project-information answers route through ./project-context."
         },
-        "@alembic/core/core/capability": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./capability",
-          "symbols": [
-            "CapabilityProbe"
-          ],
-          "reason": "CapabilityProbe is now exported by the stable ./capability facade; old core/capability imports stay as compatibility until consumer test fixtures and configs migrate."
-        },
         "@alembic/core/core/discovery": {
           "decision": "consumer-ready-stable",
           "targetFacade": "./core/discovery",
@@ -173,16 +165,6 @@
             "resetDiscovererRegistry"
           ],
           "reason": "Discovery registry contracts are generic project-shape support and stay on ./core/discovery; language detection is exposed by ./shared and project-information answers route through ./project-context."
-        },
-        "@alembic/core/core/enhancement": {
-          "decision": "consumer-ready-stable",
-          "targetFacade": "./enhancement",
-          "symbols": [
-            "getFrameworkEnhancements",
-            "initFrameworkEnhancements",
-            "resolveFrameworkEnhancements"
-          ],
-          "reason": "Framework enhancement consumers can route through the stable ./enhancement facade, backed by the existing enhancement registry and real pack resolution. The old core/enhancement entry remains for CO-3 consumer migration."
         },
         "@alembic/core/service/evolution/ContentImpactAnalyzer": {
           "decision": "consumer-ready-stable",
@@ -481,6 +463,24 @@
         "replacementFacade": "./host-agent-workflows",
         "note": "The old public project scan runner route is withdrawn; ProjectContext-backed host-agent producer contracts are exposed through ./host-agent-workflows and project facts route through ./project-context.",
         "scanEvidence": "PCI-1B retry consumer gate: npm run lint:consumer-core-imports passed; production rg over Alembic/lib, Alembic/bin and AlembicPlugin/lib found no @alembic/core/workflows/capabilities/project-intelligence imports."
+      },
+      "./core/capability": {
+        "removedAt": "2026-06-21",
+        "replacementFacade": "./capability",
+        "note": "CO-4 retired the legacy CapabilityProbe package route after CO-3A/CO-3B moved current consumers to ./capability or ./test-fixtures; the implementation remains Core-internal.",
+        "scanEvidence": "CO-4 fresh consumer scan: rg -n -P --glob '!**/vendor/**' \"@alembic/core/(?:core/(?:enhancement|capability)|recipe-context(?!-capabilities))\" ../Alembic ../AlembicPlugin ../AlembicAgent returned zero matches."
+      },
+      "./core/enhancement": {
+        "removedAt": "2026-06-21",
+        "replacementFacade": "./enhancement",
+        "note": "CO-4 retired the legacy framework enhancement package route after CO-3A/CO-3B moved current consumers to ./enhancement; the registry stays Core-internal.",
+        "scanEvidence": "CO-4 fresh consumer scan: rg -n -P --glob '!**/vendor/**' \"@alembic/core/(?:core/(?:enhancement|capability)|recipe-context(?!-capabilities))\" ../Alembic ../AlembicPlugin ../AlembicAgent returned zero matches."
+      },
+      "./recipe-context": {
+        "removedAt": "2026-06-21",
+        "replacementFacade": "./recipe-context-capabilities",
+        "note": "CO-4 retired the old RecipeContext public route after CO-3B moved MCP handlers to the clean capability facade; detail/search/prime/relations handlers remain implemented and are not reclassified here.",
+        "scanEvidence": "CO-4 fresh consumer scan: rg -n -P --glob '!**/vendor/**' \"@alembic/core/(?:core/(?:enhancement|capability)|recipe-context(?!-capabilities))\" ../Alembic ../AlembicPlugin ../AlembicAgent returned zero matches."
       },
       "./service/evolution": {
         "removedAt": "2026-06-12",
@@ -1051,14 +1051,6 @@
           "stableRoute": "./database",
           "disposition": "keep-provisional, review-by 2026-09-12"
         },
-        "./core/capability": {
-          "stableRoute": "./capability",
-          "disposition": "keep-provisional until CO-3 consumer test/config migration evidence is green"
-        },
-        "./core/enhancement": {
-          "stableRoute": "./enhancement",
-          "disposition": "keep-provisional until CO-3 runtime DI and test migration evidence is green"
-        },
         "./domain/knowledge": {
           "stableRoute": "./knowledge",
           "disposition": "keep-provisional, review-by 2026-09-12"
@@ -1071,8 +1063,6 @@
       "note": "Shrink-only runtime-symbol budgets for provisional facades: a provisional facade may not re-export more runtime symbols than its frozen baseline (narrowness vs its transitional predecessors as of the CO1 freeze). Lower a baseline when a facade narrows; raising one requires a controller decision recorded in this file.",
       "baselines": {
         "./config": 47,
-        "./core/capability": 1,
-        "./core/enhancement": 4,
         "./infrastructure/report": 1,
         "./service/bootstrap": 1,
         "./service/candidate": 2,
@@ -1123,6 +1113,19 @@
             "wildcardExports": 7
           },
           "note": "PCI-1B retry: retired public project-information routes ./project-intelligence, ./service/panorama, and ./workflows/capabilities/project-intelligence after consumer/import gates passed."
+        },
+        {
+          "date": "2026-06-21",
+          "exports": 60,
+          "stable-public": 23,
+          "provisional-public": 8,
+          "transitional-internal": 29,
+          "wildcardExports": 7,
+          "maxCounts": {
+            "transitional-internal": 29,
+            "wildcardExports": 7
+          },
+          "note": "CO-4: retired cleared legacy public routes ./core/capability, ./core/enhancement, and ./recipe-context after CO-3 consumer migrations and fresh zero scans."
         }
       ]
     }
@@ -1145,7 +1148,6 @@
     "./project-context",
     "./project-context-capabilities",
     "./recipe-context-capabilities",
-    "./recipe-context",
     "./repositories",
     "./report",
     "./search",
@@ -1155,8 +1157,6 @@
   ],
   "provisionalPublicExports": [
     "./config",
-    "./core/capability",
-    "./core/enhancement",
     "./infrastructure/report",
     "./service/bootstrap",
     "./service/candidate",
