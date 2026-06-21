@@ -38,6 +38,7 @@ import type { SyncCoordinator } from './SyncCoordinator.js';
 
 export interface EmbedProvider {
   embed(texts: string | string[]): Promise<number[] | number[][]>;
+  isAvailable?(): Promise<boolean>;
 }
 
 export interface VectorServiceConfig {
@@ -77,6 +78,31 @@ export interface VectorStats {
   quantized: boolean;
   embedProviderAvailable: boolean;
   autoSyncEnabled: boolean;
+}
+
+export type VectorAvailabilityStatus = 'available' | 'degraded' | 'unavailable';
+
+export type VectorAvailabilityReason =
+  | 'embed-provider-ready'
+  | 'embed-provider-configured'
+  | 'embed-provider-missing'
+  | 'embed-provider-unavailable'
+  | 'embed-provider-probe-failed';
+
+export type VectorAvailabilityProbeStatus =
+  | 'available'
+  | 'error'
+  | 'not-applicable'
+  | 'not-supported'
+  | 'unavailable';
+
+export interface VectorAvailability {
+  available: boolean;
+  status: VectorAvailabilityStatus;
+  reason: VectorAvailabilityReason;
+  embedProviderConfigured: boolean;
+  probeStatus: VectorAvailabilityProbeStatus;
+  detail?: string;
 }
 
 export interface ProgressInfo {
@@ -274,8 +300,17 @@ export class VectorService {
       }
 
       // 检查 embed provider 可用性
-      if (!this.#embedProvider) {
-        issues.push('No embedding provider configured. Semantic search will not work.');
+      const availability = await this.getAvailability();
+      if (!availability.available) {
+        if (availability.reason === 'embed-provider-missing') {
+          issues.push('No embedding provider configured. Semantic search will not work.');
+        } else {
+          issues.push(
+            `Embedding provider unavailable: ${availability.reason}${
+              availability.detail ? ` (${availability.detail})` : ''
+            }.`
+          );
+        }
       }
 
       // 孤儿向量检查: 检查 entry_ 前缀的 ID 是否有未知的
@@ -682,6 +717,64 @@ export class VectorService {
   }
 
   // ═══ 维护 ═══
+
+  /** Standard vector readiness probe for consumers that should not inspect stats/provider internals. */
+  async isAvailable(): Promise<boolean> {
+    return (await this.getAvailability()).available;
+  }
+
+  /** Structured readiness state for observable vector degradation. */
+  async getAvailability(): Promise<VectorAvailability> {
+    if (!this.#embedProvider) {
+      return {
+        available: false,
+        embedProviderConfigured: false,
+        probeStatus: 'not-applicable',
+        reason: 'embed-provider-missing',
+        status: 'unavailable',
+      };
+    }
+
+    if (typeof this.#embedProvider.isAvailable !== 'function') {
+      return {
+        available: true,
+        embedProviderConfigured: true,
+        probeStatus: 'not-supported',
+        reason: 'embed-provider-configured',
+        status: 'available',
+      };
+    }
+
+    try {
+      const providerAvailable = await this.#embedProvider.isAvailable();
+      if (providerAvailable) {
+        return {
+          available: true,
+          embedProviderConfigured: true,
+          probeStatus: 'available',
+          reason: 'embed-provider-ready',
+          status: 'available',
+        };
+      }
+
+      return {
+        available: false,
+        embedProviderConfigured: true,
+        probeStatus: 'unavailable',
+        reason: 'embed-provider-unavailable',
+        status: 'degraded',
+      };
+    } catch (err: unknown) {
+      return {
+        available: false,
+        detail: err instanceof Error ? err.message : String(err),
+        embedProviderConfigured: true,
+        probeStatus: 'error',
+        reason: 'embed-provider-probe-failed',
+        status: 'degraded',
+      };
+    }
+  }
 
   /** 获取向量索引统计信息 */
   async getStats(): Promise<VectorStats> {

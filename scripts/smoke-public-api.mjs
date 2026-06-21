@@ -413,6 +413,12 @@ const requiredTypeDeclarations = {
     'WorkflowDatabaseLike',
     'WorkflowSkillHooks',
   ],
+  '@alembic/core/vector': [
+    'VectorAvailability',
+    'VectorAvailabilityProbeStatus',
+    'VectorAvailabilityReason',
+    'VectorAvailabilityStatus',
+  ],
 };
 const forbiddenTypeDeclarationRefs = {
   '@alembic/core/recipe-context-capabilities': [
