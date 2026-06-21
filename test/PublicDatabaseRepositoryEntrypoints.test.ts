@@ -13,6 +13,7 @@ import {
   isAlembicRepositoryKey,
   KnowledgeEdgeRepositoryImpl,
   KnowledgeRepositoryImpl,
+  PlanRepositoryImpl,
   ProposalRepository,
   RawDbSyncAdapter,
   RecipeSourceRefRepositoryImpl,
@@ -121,7 +122,9 @@ describe('public database and repository entrypoints', () => {
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('memoryRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('recipeSourceRefRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('sourceGraphRepository');
+    expect(ALEMBIC_REPOSITORY_KEYS).toContain('planRepository');
     expect(isAlembicRepositoryKey('proposalRepository')).toBe(true);
+    expect(isAlembicRepositoryKey('planRepository')).toBe(true);
     expect(isAlembicRepositoryKey('sourceGraphRepository')).toBe(true);
     expect(isAlembicRepositoryKey('tokenUsageStore')).toBe(false);
   });
@@ -132,6 +135,7 @@ describe('public database and repository entrypoints', () => {
     expect(CodeEntityRepositoryImpl).toBeDefined();
     expect(RecipeSourceRefRepositoryImpl).toBeDefined();
     expect(SourceGraphRepositoryImpl).toBeDefined();
+    expect(PlanRepositoryImpl).toBeDefined();
     expect(ProposalRepository).toBeDefined();
     expect(WarningRepository).toBeDefined();
     expect(RawDbSyncAdapter).toBeDefined();

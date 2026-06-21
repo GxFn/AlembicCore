@@ -67,6 +67,11 @@ export class RecipeSourceRefRepositoryImpl {
       .all() as RecipeSourceRefEntity[];
   }
 
+  /** 查询全部来源引用（Plan ledger 读时投影使用） */
+  findAll(): RecipeSourceRefEntity[] {
+    return this.#drizzle.select().from(recipeSourceRefs).all() as RecipeSourceRefEntity[];
+  }
+
   /** 查找指定复合键 */
   findOne(recipeId: string, sourcePath: string): RecipeSourceRefEntity | null {
     const row = this.#drizzle

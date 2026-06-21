@@ -82,6 +82,28 @@ export class LifecycleEventRepository {
     return rows.map((r) => this.#mapRow(r));
   }
 
+  /** 最近生命周期事件（Plan ledger 读时投影使用） */
+  findRecent(limit = 50): TransitionEventRow[] {
+    const rows = this.#drizzle
+      .select()
+      .from(lifecycleTransitionEvents)
+      .orderBy(desc(lifecycleTransitionEvents.createdAt))
+      .limit(limit)
+      .all();
+
+    return rows.map((r) => ({
+      id: r.id,
+      recipeId: r.recipeId,
+      fromState: r.fromState,
+      toState: r.toState,
+      trigger: r.trigger as TransitionEvent['trigger'],
+      operatorId: r.operatorId,
+      evidence: r.evidenceJson ? safeJsonParse(r.evidenceJson, null) : null,
+      proposalId: r.proposalId ?? null,
+      createdAt: r.createdAt,
+    }));
+  }
+
   /** 统计指定时间之后的事件数量 */
   countSince(since: number): number {
     const result = this.#drizzle

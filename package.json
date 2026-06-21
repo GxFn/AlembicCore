@@ -38,6 +38,10 @@
       "types": "./dist/memory.d.ts",
       "import": "./dist/memory.js"
     },
+    "./plans": {
+      "types": "./dist/plans.d.ts",
+      "import": "./dist/plans.js"
+    },
     "./search": {
       "types": "./dist/search.d.ts",
       "import": "./dist/search.js"

@@ -24,6 +24,7 @@ const EXPECTED_VERSIONS = [
   '009_knowledge_dimension_id',
   '010_source_graph',
   '011_guard_violations_attribution',
+  '012_plans',
 ];
 
 describe('Migrations re-run / idempotency (fresh DB)', () => {
@@ -68,6 +69,7 @@ describe('Migrations re-run / idempotency (fresh DB)', () => {
       'knowledge_entries',
       'code_entities',
       'recipe_source_refs',
+      'plans',
       'audit_logs',
     ]) {
       expect(tables).toContain(table);

@@ -52,6 +52,7 @@ describe('DatabaseConnection and repository migration integration', () => {
       '009_knowledge_dimension_id',
       '010_source_graph',
       '011_guard_violations_attribution',
+      '012_plans',
     ]);
 
     const tables = db
@@ -66,6 +67,7 @@ describe('DatabaseConnection and repository migration integration', () => {
     expect(tables).toContain('source_graph_files');
     expect(tables).toContain('source_graph_symbols');
     expect(tables).toContain('source_graph_edges');
+    expect(tables).toContain('plans');
     expect(tables).not.toContain('remote_commands');
     expect(tables).not.toContain('remote_state');
   });

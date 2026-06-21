@@ -138,6 +138,15 @@ const requiredSubpathExports = {
     'SUBMIT_REQUIREMENTS',
   ],
   '@alembic/core/memory': ['MemoryRepositoryImpl', 'createSemanticMemoryRepository'],
+  '@alembic/core/plans': [
+    'PlanLedgerService',
+    'PlanRepositoryImpl',
+    'buildPlanDraftInformationPackage',
+    'compareProjectContextSignature',
+    'computeProjectContextSignature',
+    'projectPlanGenerationState',
+    'projectPlanGenerationStateFromRecords',
+  ],
   '@alembic/core/project-context': [
     'ProjectContext',
     'ProjectContextCapabilities',
@@ -154,7 +163,11 @@ const requiredSubpathExports = {
     'createRecipeContextCapabilitiesFromCore',
     'createRecipeContextServiceFromCore',
   ],
-  '@alembic/core/repositories': ['getProposalSourceLabel', 'normalizeProposalSource'],
+  '@alembic/core/repositories': [
+    'PlanRepositoryImpl',
+    'getProposalSourceLabel',
+    'normalizeProposalSource',
+  ],
   '@alembic/core/service/candidate': ['aggregateCandidates', 'findSimilarRecipes'],
   '@alembic/core/search': [
     'AuthoritySignal',
@@ -344,6 +357,13 @@ const requiredTypeDeclarations = {
     'ProjectSkillRuntimeExportReceipt',
     'ProjectSkillRuntimeExportStatus',
     'ProjectSkillRuntimeExportStrategy',
+  ],
+  '@alembic/core/plans': [
+    'PlanGenerationState',
+    'PlanIntent',
+    'PlanRecord',
+    'PlanSignatureComparison',
+    'PlanView',
   ],
   '@alembic/core/project-context': [
     'ProjectContext',

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "description": "AlembicCore public API boundary policy. Exact stable and provisional exports are intentional; wildcard exports are migration-only.",
   "expectedCounts": {
-    "stable-public": 23,
+    "stable-public": 24,
     "provisional-public": 8,
     "transitional-internal": 29,
     "internal-only": 0,
@@ -1177,6 +1177,7 @@
     "./knowledge",
     "./logging",
     "./memory",
+    "./plans",
     "./project-context",
     "./project-context-capabilities",
     "./recipe-context-capabilities",

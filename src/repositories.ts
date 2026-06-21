@@ -62,6 +62,7 @@ import {
   type SemanticMemorySimilarityResult,
   type SemanticMemoryUpdate,
 } from './repository/memory/MemoryRepository.js';
+import { PlanRepositoryImpl } from './repository/plan/PlanRepository.js';
 import {
   type SessionEntity,
   type SessionInsert,
@@ -149,6 +150,7 @@ export type SourceRefRepository = RecipeSourceRefRepositoryImpl;
 export type EvolutionProposalRepository = ProposalRepository;
 export type EvolutionWarningRepository = WarningRepository;
 export type EvolutionLifecycleEventRepository = LifecycleEventRepository;
+export type PlanRepository = PlanRepositoryImpl;
 
 export {
   BootstrapRepositoryImpl,
@@ -158,6 +160,7 @@ export {
   KnowledgeRepositoryImpl,
   LifecycleEventRepository,
   MemoryRepositoryImpl,
+  PlanRepositoryImpl,
   ProposalRepository,
   RawDbSyncAdapter,
   RecipeSourceRefRepositoryImpl,
@@ -188,6 +191,7 @@ export interface AlembicRepositoryBundle {
   warningRepository: EvolutionWarningRepository;
   lifecycleEventRepository: EvolutionLifecycleEventRepository;
   recipeSourceRefRepository: SourceRefRepository;
+  planRepository: PlanRepository;
 }
 
 export const ALEMBIC_REPOSITORY_KEYS = [
@@ -203,6 +207,7 @@ export const ALEMBIC_REPOSITORY_KEYS = [
   'warningRepository',
   'lifecycleEventRepository',
   'recipeSourceRefRepository',
+  'planRepository',
 ] as const;
 
 export type AlembicRepositoryKey = (typeof ALEMBIC_REPOSITORY_KEYS)[number];
@@ -225,6 +230,7 @@ export function createAlembicRepositories(
     warningRepository: new WarningRepository(drizzle),
     lifecycleEventRepository: new LifecycleEventRepository(drizzle),
     recipeSourceRefRepository: new RecipeSourceRefRepositoryImpl(drizzle),
+    planRepository: new PlanRepositoryImpl(drizzle),
   };
 }
 
