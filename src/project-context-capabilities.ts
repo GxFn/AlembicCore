@@ -4,7 +4,22 @@ import type {
   ProjectContextRequest,
   ProjectContextResult,
 } from './domain/project-context/index.js';
+import {
+  type ArchitectureIntelligenceInput,
+  type ArchitectureIntelligenceReport,
+  analyzeArchitectureIntelligence,
+} from './service/project-context/architectureIntelligence/index.js';
 import { ProjectContext } from './service/project-context/ProjectContextService.js';
+
+export type * from './service/project-context/architectureIntelligence/index.js';
+export {
+  ArchitectureStyleClassifier,
+  analyzeArchitectureIntelligence,
+  analyzeArchitectureIntelligenceFromProjectContext,
+  ComplexityAnalyzer,
+  DomainSignalDetector,
+  ProjectInformationSupplementAnalyzer,
+} from './service/project-context/architectureIntelligence/index.js';
 
 export type ProjectContextCapabilityQuery<TPayload = unknown> = Omit<
   ProjectContextRequest<TPayload>,
@@ -42,6 +57,9 @@ export interface ProjectContextCapabilities {
   executeSourceSliceQuery<TPayload = unknown>(
     input: ProjectContextCapabilityQuery<TPayload>
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
+  analyzeArchitectureIntelligence(
+    input: ArchitectureIntelligenceInput
+  ): ArchitectureIntelligenceReport;
 }
 
 export function createProjectContextCapabilities(
@@ -69,6 +87,8 @@ export function createProjectContextCapabilities(
       projectContext.execute({ ...input, kind: 'file-symbols' }),
     executeSourceSliceQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
       projectContext.execute({ ...input, kind: 'source-slice' }),
+    analyzeArchitectureIntelligence: (input: ArchitectureIntelligenceInput) =>
+      analyzeArchitectureIntelligence(input),
   };
   return Object.freeze(capabilities);
 }

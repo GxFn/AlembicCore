@@ -1,4 +1,5 @@
 export * from './anchorRange/index.js';
+export * from './architectureIntelligence/index.js';
 export * from './fileFlow/index.js';
 export * from './fileSymbols/index.js';
 export * from './interface/index.js';

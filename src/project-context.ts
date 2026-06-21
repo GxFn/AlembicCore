@@ -30,8 +30,29 @@ export type {
 } from './domain/project-context/index.js';
 export { buildProjectContextPresenterInput } from './domain/project-context/index.js';
 export type {
+  ArchitectureCodeEntitySnapshot,
+  ArchitectureDimensionCoverageSnapshot,
+  ArchitectureDomain,
+  ArchitectureEvidence,
+  ArchitectureEvidenceSource,
+  ArchitectureGraphModuleSnapshot,
+  ArchitectureGraphSnapshot,
+  ArchitectureIntelligenceInput,
+  ArchitectureIntelligenceReport,
+  ArchitectureKnowledgeEdgeSnapshot,
+  ArchitectureManifestDependency,
+  ArchitectureStyle,
+  ArchitectureStyleReport,
+  CallFlowAggregateReport,
+  ComplexityReport,
+  CouplingAnalysisReport,
+  DomainSignal,
+  DomainSignalReport,
+  HealthGap,
   ProjectContextCapabilities as ProjectContextCapabilitiesContract,
   ProjectContextCapabilityQuery,
+  ProjectInformationSupplementReport,
+  RefinedModuleRole,
 } from './project-context-capabilities.js';
 export {
   createProjectContextCapabilities,
