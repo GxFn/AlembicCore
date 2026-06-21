@@ -6,6 +6,7 @@ export * from './KnowledgeService.js';
 export type { SyncAllReport } from './KnowledgeSyncService.js';
 export { KnowledgeSyncService } from './KnowledgeSyncService.js';
 export * from './RecipeExtractor.js';
+export * from './RecipeFreshnessService.js';
 export * from './RecipePathRewriter.js';
 export * from './RecipeProductionGateway.js';
 export * from './SourceRefReconciler.js';

@@ -43,6 +43,11 @@ export interface ReconcileReport {
   cleaned?: number;
 }
 
+export interface ReconcileRecipeSourceRefsInput {
+  id: string;
+  reasoning?: unknown;
+}
+
 export interface RepairReport {
   /** 成功检测到 rename 的条目 */
   renamed: number;
@@ -123,12 +128,7 @@ export class SourceRefReconciler {
         continue;
       }
 
-      report.recipesProcessed++;
-      this.#deleteDroppedSourceRefs(row.id, sources, report);
-
-      for (const sourcePath of sources) {
-        this.#reconcileSourceRef(row.id, sourcePath, { force, now, report });
-      }
+      this.#reconcileRecipeSourceRefs(row.id, sources, { countRecipe: true, force, now, report });
     }
 
     this.#logger.info('SourceRefReconciler: reconcile complete', {
@@ -147,16 +147,85 @@ export class SourceRefReconciler {
     return report;
   }
 
-  #parseReasoningSources(reasoningJson: string): string[] {
+  /**
+   * RG7: refresh source_refs for one known Recipe immediately after create/evolve.
+   *
+   * Unlike the full reconcile path, an explicit per-recipe refresh treats an
+   * empty `reasoning.sources` list as a real update and removes previously
+   * bridged refs for that Recipe only. That is the create/evolve timing repair
+   * boundary; unrelated Recipe rows stay untouched.
+   */
+  async reconcileRecipeSourceRefs(
+    recipe: ReconcileRecipeSourceRefsInput,
+    opts?: { force?: boolean }
+  ): Promise<ReconcileReport> {
+    const report: ReconcileReport = {
+      inserted: 0,
+      active: 0,
+      stale: 0,
+      skipped: 0,
+      recipesProcessed: 0,
+    };
+
+    if (!this.#sourceRefRepo.isAccessible()) {
+      this.#logger.warn('SourceRefReconciler: recipe_source_refs table not accessible, skipping', {
+        recipeId: recipe.id,
+      });
+      return report;
+    }
+
+    const sources = this.#parseReasoningSources(recipe.reasoning);
+    this.#reconcileRecipeSourceRefs(recipe.id, sources, {
+      countRecipe: true,
+      force: opts?.force ?? true,
+      now: Date.now(),
+      report,
+    });
+
+    this.#logger.info('SourceRefReconciler: recipe source refs refreshed', {
+      active: report.active,
+      cleaned: report.cleaned ?? 0,
+      inserted: report.inserted,
+      recipeId: recipe.id,
+      skipped: report.skipped,
+      stale: report.stale,
+    });
+
+    return report;
+  }
+
+  #parseReasoningSources(reasoningInput: unknown): string[] {
     try {
-      const reasoning = JSON.parse(reasoningJson) as { sources?: unknown };
-      return Array.isArray(reasoning.sources)
+      const reasoning =
+        typeof reasoningInput === 'string'
+          ? (JSON.parse(reasoningInput) as { sources?: unknown })
+          : (reasoningInput as { sources?: unknown } | null);
+      return Array.isArray(reasoning?.sources)
         ? reasoning.sources.filter(
             (source): source is string => typeof source === 'string' && source.length > 0
           )
         : [];
     } catch {
       return [];
+    }
+  }
+
+  #reconcileRecipeSourceRefs(
+    recipeId: string,
+    sources: readonly string[],
+    opts: { countRecipe: boolean; force: boolean; now: number; report: ReconcileReport }
+  ): void {
+    if (opts.countRecipe) {
+      opts.report.recipesProcessed++;
+    }
+    this.#deleteDroppedSourceRefs(recipeId, sources, opts.report);
+
+    for (const sourcePath of sources) {
+      this.#reconcileSourceRef(recipeId, sourcePath, {
+        force: opts.force,
+        now: opts.now,
+        report: opts.report,
+      });
     }
   }
 
