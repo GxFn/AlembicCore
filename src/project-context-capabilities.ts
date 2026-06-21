@@ -9,6 +9,17 @@ import {
   type ArchitectureIntelligenceReport,
   analyzeArchitectureIntelligence,
 } from './service/project-context/architectureIntelligence/index.js';
+import {
+  aggregateDynamicPlanningSignals,
+  buildDimensionPlanningAids,
+  type DimensionPlanningAidInput,
+  type DimensionPlanningAidReport,
+  type DynamicSignalGatewayInput,
+  type DynamicSignalReport,
+  resolveSignalAwareActiveDimensions,
+  type SignalAwareDimensionSelectionInput,
+  type SignalAwareDimensionSelectionResult,
+} from './service/project-context/dimensionPlanning/index.js';
 import { ProjectContext } from './service/project-context/ProjectContextService.js';
 
 export type * from './service/project-context/architectureIntelligence/index.js';
@@ -20,6 +31,15 @@ export {
   DomainSignalDetector,
   ProjectInformationSupplementAnalyzer,
 } from './service/project-context/architectureIntelligence/index.js';
+export type * from './service/project-context/dimensionPlanning/index.js';
+export {
+  aggregateDynamicPlanningSignals,
+  buildDimensionPlanningAids,
+  DynamicSignalGateway,
+  ModuleDeltaDetector,
+  queryPerModuleCoverage,
+  resolveSignalAwareActiveDimensions,
+} from './service/project-context/dimensionPlanning/index.js';
 
 export type ProjectContextCapabilityQuery<TPayload = unknown> = Omit<
   ProjectContextRequest<TPayload>,
@@ -60,6 +80,11 @@ export interface ProjectContextCapabilities {
   analyzeArchitectureIntelligence(
     input: ArchitectureIntelligenceInput
   ): ArchitectureIntelligenceReport;
+  resolveSignalAwareActiveDimensions(
+    input: SignalAwareDimensionSelectionInput
+  ): SignalAwareDimensionSelectionResult;
+  buildDimensionPlanningAids(input: DimensionPlanningAidInput): DimensionPlanningAidReport;
+  aggregateDynamicPlanningSignals(input: DynamicSignalGatewayInput): DynamicSignalReport;
 }
 
 export function createProjectContextCapabilities(
@@ -89,6 +114,12 @@ export function createProjectContextCapabilities(
       projectContext.execute({ ...input, kind: 'source-slice' }),
     analyzeArchitectureIntelligence: (input: ArchitectureIntelligenceInput) =>
       analyzeArchitectureIntelligence(input),
+    resolveSignalAwareActiveDimensions: (input: SignalAwareDimensionSelectionInput) =>
+      resolveSignalAwareActiveDimensions(input),
+    buildDimensionPlanningAids: (input: DimensionPlanningAidInput) =>
+      buildDimensionPlanningAids(input),
+    aggregateDynamicPlanningSignals: (input: DynamicSignalGatewayInput) =>
+      aggregateDynamicPlanningSignals(input),
   };
   return Object.freeze(capabilities);
 }

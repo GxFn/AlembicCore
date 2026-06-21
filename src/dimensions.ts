@@ -31,3 +31,12 @@ export type {
   UnifiedDimension,
   UniversalDimId,
 } from './domain/dimension/UnifiedDimension.js';
+export type * from './service/project-context/dimensionPlanning/index.js';
+export {
+  aggregateDynamicPlanningSignals,
+  buildDimensionPlanningAids,
+  DynamicSignalGateway,
+  ModuleDeltaDetector,
+  queryPerModuleCoverage,
+  resolveSignalAwareActiveDimensions,
+} from './service/project-context/dimensionPlanning/index.js';

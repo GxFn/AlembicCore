@@ -1,0 +1,1151 @@
+import { DIMENSION_REGISTRY, type UnifiedDimension } from '../../../domain/dimension/index.js';
+import type {
+  ArchitectureDomain,
+  ArchitectureEvidence,
+  ArchitectureIntelligenceReport,
+  ComplexityReport,
+  DomainSignal,
+  DomainSignalReport,
+} from '../architectureIntelligence/index.js';
+import type {
+  CrossDimensionConstraint,
+  DimensionInformationStep,
+  DimensionPlanningAidInput,
+  DimensionPlanningAidReport,
+  DimensionSelectionDecision,
+  DimensionSelectionReason,
+  DynamicPlanningSignal,
+  DynamicSignalGatewayInput,
+  DynamicSignalReport,
+  ModuleChange,
+  ModuleCoverageQueryInput,
+  ModuleCoverageReport,
+  ModuleDeltaDetectorInput,
+  ModuleDeltaReport,
+  ModuleDeltaSnapshot,
+  ModuleDimensionCoverage,
+  ModuleRenameCandidate,
+  ProjectScaleDecision,
+  RecommendedDimension,
+  SignalAwareDimensionSelectionInput,
+  SignalAwareDimensionSelectionResult,
+} from './contracts.js';
+
+export type * from './contracts.js';
+
+const DEFAULT_DOMAIN_CONFIDENCE_THRESHOLD = 0.35;
+const DEFAULT_MODULE_RENAME_SIMILARITY_THRESHOLD = 0.9;
+const DEFAULT_MODULE_COVERAGE_TARGET = 2;
+
+const FOUNDATIONAL_DIMENSIONS = new Set([
+  'architecture',
+  'coding-standards',
+  'design-patterns',
+  'agent-guidelines',
+]);
+
+const DIMENSION_DOMAINS: Readonly<Record<string, readonly ArchitectureDomain[]>> = {
+  'error-resilience': ['error-handling'],
+  'concurrency-async': ['concurrency'],
+  'data-event-flow': ['database', 'concurrency'],
+  'networking-api': ['api'],
+  'ui-interaction': ['ui'],
+  'testing-quality': ['testing'],
+  'security-auth': ['auth', 'security'],
+  'observability-logging': ['observability'],
+  'react-patterns': ['ui'],
+  'vue-patterns': ['ui'],
+  'spring-patterns': ['api', 'database'],
+  'swiftui-patterns': ['ui'],
+  'django-fastapi': ['api', 'database'],
+};
+
+const FRAMEWORK_EVIDENCE_PATTERNS: Readonly<Record<string, readonly RegExp[]>> = {
+  'react-patterns': [/\breact\b/i, /\btsx\b/i],
+  'vue-patterns': [/\bvue\b/i, /\bnuxt\b/i],
+  'spring-patterns': [/\bspring\b/i, /\bspring-boot\b/i],
+  'swiftui-patterns': [/\bswiftui\b/i],
+  'django-fastapi': [/\bdjango\b/i, /\bfastapi\b/i, /\bflask\b/i],
+};
+
+export class ModuleDeltaDetector {
+  detect(input: ModuleDeltaDetectorInput): ModuleDeltaReport {
+    return detectModuleDelta(input);
+  }
+}
+
+export class DynamicSignalGateway {
+  aggregate(input: DynamicSignalGatewayInput): DynamicSignalReport {
+    return aggregateDynamicPlanningSignals(input);
+  }
+}
+
+export function resolveSignalAwareActiveDimensions(
+  input: SignalAwareDimensionSelectionInput
+): SignalAwareDimensionSelectionResult {
+  const domainReport = input.architectureIntelligence?.domains ?? input.domainSignals;
+  const complexity = input.architectureIntelligence?.complexity ?? input.complexity;
+  const threshold = input.confidenceThreshold ?? DEFAULT_DOMAIN_CONFIDENCE_THRESHOLD;
+  const primaryLanguage = normalizeToken(input.primaryLanguage);
+  const frameworks = new Set((input.detectedFrameworks ?? []).map(normalizeToken));
+  const dimensions = input.dimensions ?? DIMENSION_REGISTRY;
+  const decisions = dimensions.map((dimension) =>
+    decideDimension({
+      dimension,
+      primaryLanguage,
+      frameworks,
+      domainReport,
+      complexity,
+      threshold,
+    })
+  );
+  const activeDimensions = decisions
+    .filter((decision) => decision.kind === 'active')
+    .map((decision) => decision.dimension);
+  const skippedDimensions = decisions
+    .filter((decision) => decision.kind === 'skipped' || decision.kind === 'unavailable')
+    .map((decision) => decision.dimension);
+  const lowConfidenceDimensions = decisions.filter(
+    (decision) => decision.kind === 'low-confidence'
+  );
+  const unavailableSignals = buildUnavailableSignals(input);
+
+  return Object.freeze({
+    activeDimensions: Object.freeze(activeDimensions),
+    skippedDimensions: Object.freeze(skippedDimensions),
+    lowConfidenceDimensions: Object.freeze(lowConfidenceDimensions),
+    decisions: Object.freeze(decisions),
+    unavailableSignals: Object.freeze(unavailableSignals),
+  });
+}
+
+export function buildDimensionPlanningAids(
+  input: DimensionPlanningAidInput
+): DimensionPlanningAidReport {
+  const selection = resolveSignalAwareActiveDimensions(input);
+  const architecture = input.architectureIntelligence;
+  const complexity = architecture?.complexity ?? input.complexity;
+  const dynamicSignals = input.dynamicSignals ?? emptyDynamicSignalReport();
+  const scaleDecision = decideProjectScale(complexity);
+  const recommendations = selection.activeDimensions.map((dimension) =>
+    recommendDimension({
+      dimension,
+      decision: selection.decisions.find((candidate) => candidate.dimension.id === dimension.id),
+      architecture,
+      dynamicSignals,
+    })
+  );
+  const recommendedDimensions = recommendations
+    .sort(compareRecommendations)
+    .slice(0, input.maxRecommendedDimensions ?? recommendations.length);
+  const informationGatheringSteps = mergeInformationSteps(
+    recommendedDimensions.flatMap((recommendation) => recommendation.informationSteps)
+  );
+  const crossDimensionConstraints = buildCrossDimensionConstraints(selection, dynamicSignals);
+  const subsetHints = buildSubsetHints(scaleDecision, recommendedDimensions, dynamicSignals);
+  const lowConfidenceSignals = selection.lowConfidenceDimensions.map(
+    (decision) => `${decision.dimension.id}:${decision.detail}`
+  );
+
+  return Object.freeze({
+    selection,
+    recommendedDimensions: Object.freeze(recommendedDimensions),
+    dimensionOrder: Object.freeze(recommendedDimensions.map((item) => item.dimension.id)),
+    informationGatheringSteps: Object.freeze(informationGatheringSteps),
+    scaleDecision,
+    subsetHints: Object.freeze(subsetHints),
+    crossDimensionConstraints: Object.freeze(crossDimensionConstraints),
+    lowConfidenceSignals: Object.freeze(lowConfidenceSignals),
+    unavailableSignals: selection.unavailableSignals,
+  });
+}
+
+export function aggregateDynamicPlanningSignals(
+  input: DynamicSignalGatewayInput
+): DynamicSignalReport {
+  const moduleDelta = input.moduleDelta ? detectModuleDelta(input.moduleDelta) : emptyModuleDelta();
+  const coverage = input.moduleCoverage
+    ? queryPerModuleCoverage(input.moduleCoverage)
+    : queryPerModuleCoverage({ records: [] });
+  const planSignals: DynamicPlanningSignal[] = [];
+  const proposalByStatus = countBy(input.proposals ?? [], (proposal) => proposal.status ?? 'open');
+  const proposalByType = countBy(input.proposals ?? [], (proposal) => proposal.type ?? 'unknown');
+  const activeProposals = (input.proposals ?? []).filter((proposal) =>
+    isActiveStatus(proposal.status)
+  );
+  for (const proposal of activeProposals) {
+    planSignals.push({
+      kind: 'proposal',
+      priority: Math.round((proposal.confidence ?? 0.5) * 100),
+      dimensionIds: inferDimensionIdsFromText(
+        `${proposal.type ?? ''} ${proposal.description ?? ''} ${JSON.stringify(
+          proposal.evidence ?? []
+        )}`
+      ),
+      moduleIds: [],
+      recipeIds: [proposal.targetRecipeId, ...(proposal.relatedRecipeIds ?? [])].filter(isPresent),
+      reason: proposal.description ?? `active proposal ${proposal.id}`,
+    });
+  }
+
+  const openDecaySignals = (input.decaySignals ?? []).filter((signal) =>
+    isActiveDecayStatus(signal.status)
+  );
+  for (const signal of openDecaySignals) {
+    planSignals.push({
+      kind: 'decay',
+      priority: Math.round((signal.confidence ?? 0.5) * 90),
+      dimensionIds: inferDimensionIdsFromText(
+        `${signal.description ?? ''} ${JSON.stringify(signal.evidence ?? [])}`
+      ),
+      moduleIds: [],
+      recipeIds: [signal.targetRecipeId].filter(isPresent),
+      reason: signal.description ?? `open decay signal ${signal.id}`,
+    });
+  }
+
+  for (const item of input.dimensionCoverage ?? []) {
+    const gap = Math.max(0, item.targetCount - item.existingCount);
+    if (gap <= 0 && (item.decayingRecipeIds?.length ?? 0) === 0) {
+      continue;
+    }
+    planSignals.push({
+      kind: 'coverage-gap',
+      priority: 70 + Math.min(20, gap * 4) + (item.decayingRecipeIds?.length ?? 0),
+      dimensionIds: [item.dimensionId],
+      moduleIds: [],
+      recipeIds: [...(item.decayingRecipeIds ?? [])],
+      reason: `dimension ${item.dimensionId} coverage ${item.existingCount}/${item.targetCount}`,
+    });
+  }
+
+  for (const gap of coverage.gaps) {
+    planSignals.push({
+      kind: 'coverage-gap',
+      priority: gap.status === 'missing' ? 80 : 65,
+      dimensionIds: [gap.dimensionId],
+      moduleIds: [gap.moduleId],
+      recipeIds: [],
+      reason: `module ${gap.moduleId} has ${gap.status} coverage for ${gap.dimensionId}`,
+    });
+  }
+
+  for (const change of moduleDelta.added) {
+    planSignals.push({
+      kind: 'new-module',
+      priority: 75,
+      dimensionIds: ['architecture'],
+      moduleIds: [change.moduleId],
+      recipeIds: [],
+      reason: `new module ${change.moduleName}`,
+    });
+  }
+  for (const change of moduleDelta.changed) {
+    planSignals.push({
+      kind: 'changed-module',
+      priority: 60 + Math.min(15, change.changedFiles.length * 3),
+      dimensionIds: ['architecture'],
+      moduleIds: [change.moduleId],
+      recipeIds: [],
+      reason: `changed module ${change.moduleName}`,
+    });
+  }
+
+  const hotspotModuleIds =
+    input.architectureIntelligence?.complexity.hotspots.map((hotspot) => hotspot.moduleId) ?? [];
+  for (const moduleId of hotspotModuleIds) {
+    planSignals.push({
+      kind: 'hotspot',
+      priority: 72,
+      dimensionIds: ['architecture', 'performance-optimization'],
+      moduleIds: [moduleId],
+      recipeIds: [],
+      reason: `complexity hotspot ${moduleId}`,
+    });
+  }
+
+  return Object.freeze({
+    proposals: Object.freeze({
+      activeCount: activeProposals.length,
+      byStatus: Object.freeze(proposalByStatus),
+      byType: Object.freeze(proposalByType),
+    }),
+    decay: Object.freeze({
+      openCount: openDecaySignals.length,
+      affectedRecipeIds: Object.freeze(
+        openDecaySignals.map((signal) => signal.targetRecipeId).filter(isPresent)
+      ),
+    }),
+    coverage,
+    moduleDelta,
+    hotspotModuleIds: Object.freeze([...hotspotModuleIds].sort()),
+    planSignals: Object.freeze(planSignals.sort(comparePlanSignals)),
+  });
+}
+
+export function detectModuleDelta(input: ModuleDeltaDetectorInput): ModuleDeltaReport {
+  const previousById = new Map(input.previousModules.map((module) => [module.moduleId, module]));
+  const currentById = new Map(input.currentModules.map((module) => [module.moduleId, module]));
+  const changedFileSet = new Set(input.changedFiles ?? []);
+  const added: ModuleChange[] = [];
+  const changed: ModuleChange[] = [];
+  const removed: ModuleChange[] = [];
+
+  for (const current of input.currentModules) {
+    const previous = previousById.get(current.moduleId);
+    if (!previous) {
+      added.push(moduleChange('added', current.moduleId, current.moduleName, undefined, current));
+      continue;
+    }
+    const changedFiles = resolveModuleChangedFiles(previous, current, changedFileSet);
+    if (changedFiles.length > 0 || previous.fingerprint !== current.fingerprint) {
+      changed.push({
+        ...moduleChange('changed', current.moduleId, current.moduleName, previous, current),
+        changedFiles,
+      });
+    }
+  }
+
+  for (const previous of input.previousModules) {
+    if (!currentById.has(previous.moduleId)) {
+      removed.push(moduleChange('removed', previous.moduleId, previous.moduleName, previous));
+    }
+  }
+
+  const threshold = input.renameSimilarityThreshold ?? DEFAULT_MODULE_RENAME_SIMILARITY_THRESHOLD;
+  const renameCandidates = removed
+    .flatMap((removedChange) =>
+      added.map((addedChange) =>
+        buildRenameCandidate(removedChange.previous!, addedChange.current!, threshold)
+      )
+    )
+    .filter(isPresent)
+    .sort(
+      (a, b) => b.similarity - a.similarity || a.previousModuleId.localeCompare(b.previousModuleId)
+    );
+  const affectedModuleIds = uniqueSorted([
+    ...added.map((item) => item.moduleId),
+    ...changed.map((item) => item.moduleId),
+    ...removed.map((item) => item.moduleId),
+  ]);
+
+  return Object.freeze({
+    added: Object.freeze(added.sort(compareModuleChange)),
+    changed: Object.freeze(changed.sort(compareModuleChange)),
+    removed: Object.freeze(removed.sort(compareModuleChange)),
+    renameCandidates: Object.freeze(renameCandidates),
+    affectedModuleIds: Object.freeze(affectedModuleIds),
+  });
+}
+
+export function queryPerModuleCoverage(input: ModuleCoverageQueryInput): ModuleCoverageReport {
+  const target = input.targetPerModuleDimension ?? DEFAULT_MODULE_COVERAGE_TARGET;
+  const moduleFilter = input.moduleIds ? new Set(input.moduleIds) : null;
+  const dimensionFilter = input.dimensionIds ? new Set(input.dimensionIds) : null;
+  const moduleIds = uniqueSorted([
+    ...(input.moduleIds ?? []),
+    ...input.records.map((record) => record.moduleId),
+  ]).filter((moduleId) => !moduleFilter || moduleFilter.has(moduleId));
+  const dimensionIds = uniqueSorted([
+    ...(input.dimensionIds ?? []),
+    ...input.records.map((record) => record.dimensionId),
+  ]).filter((dimensionId) => !dimensionFilter || dimensionFilter.has(dimensionId));
+  const records = input.records.filter(
+    (record) =>
+      (!moduleFilter || moduleFilter.has(record.moduleId)) &&
+      (!dimensionFilter || dimensionFilter.has(record.dimensionId))
+  );
+  const moduleNames = new Map(
+    records
+      .filter((record) => record.moduleName)
+      .map((record) => [record.moduleId, record.moduleName as string])
+  );
+  const byModule = moduleIds.map(
+    (
+      moduleId
+    ): { moduleId: string; moduleName?: string; dimensions: ModuleDimensionCoverage[] } => {
+      const dimensions = dimensionIds.map((dimensionId) => {
+        const matching = records.filter(
+          (record) => record.moduleId === moduleId && record.dimensionId === dimensionId
+        );
+        const healthy = matching.filter((record) => isHealthyCoverageStatus(record.status));
+        const decaying = matching.filter((record) => record.status === 'decaying');
+        const healthyCount = healthy.length;
+        const gap = Math.max(0, target - healthyCount);
+        const status: ModuleDimensionCoverage['status'] =
+          healthyCount === 0 ? 'missing' : gap > 0 ? 'weak' : 'covered';
+        return {
+          dimensionId,
+          healthyCount,
+          decayingCount: decaying.length,
+          recipeIds: uniqueSorted(matching.map((record) => record.recipeId)),
+          sourceRefs: uniqueSorted(matching.flatMap((record) => record.sourceRefs ?? [])),
+          gap,
+          status,
+        };
+      });
+      return {
+        moduleId,
+        moduleName: moduleNames.get(moduleId),
+        dimensions,
+      };
+    }
+  );
+  const gaps = byModule.flatMap((module) =>
+    module.dimensions
+      .filter((dimension) => dimension.status !== 'covered')
+      .map((dimension) => ({
+        moduleId: module.moduleId,
+        moduleName: module.moduleName,
+        dimensionId: dimension.dimensionId,
+        gap: dimension.gap,
+        status: dimension.status as 'weak' | 'missing',
+      }))
+  );
+
+  return Object.freeze({
+    targetPerModuleDimension: target,
+    byModule: Object.freeze(byModule),
+    gaps: Object.freeze(gaps.sort((a, b) => b.gap - a.gap || a.moduleId.localeCompare(b.moduleId))),
+  });
+}
+
+function decideDimension({
+  dimension,
+  primaryLanguage,
+  frameworks,
+  domainReport,
+  complexity,
+  threshold,
+}: {
+  dimension: UnifiedDimension;
+  primaryLanguage: string;
+  frameworks: Set<string>;
+  domainReport: DomainSignalReport | undefined;
+  complexity: ComplexityReport | undefined;
+  threshold: number;
+}): DimensionSelectionDecision {
+  const languageResult = evaluateLanguageCondition(dimension, primaryLanguage);
+  if (!languageResult.ok) {
+    return buildDecision(
+      dimension,
+      'skipped',
+      ['language-mismatch'],
+      0,
+      [],
+      [],
+      languageResult.detail
+    );
+  }
+  const frameworkResult = evaluateFrameworkCondition(dimension, frameworks, domainReport);
+  if (!frameworkResult.ok) {
+    return buildDecision(
+      dimension,
+      'skipped',
+      ['framework-signal-missing'],
+      frameworkResult.confidence,
+      mappedDomains(dimension.id),
+      frameworkResult.evidence,
+      frameworkResult.detail
+    );
+  }
+  const baseReasons: DimensionSelectionReason[] = [
+    ...languageResult.reasons,
+    ...frameworkResult.reasons,
+  ];
+  if (FOUNDATIONAL_DIMENSIONS.has(dimension.id)) {
+    return buildDecision(
+      dimension,
+      'active',
+      ['foundational', ...baseReasons],
+      Math.max(0.65, frameworkResult.confidence),
+      [],
+      frameworkResult.evidence,
+      'foundational planning dimension'
+    );
+  }
+  if (dimension.layer === 'language') {
+    return buildDecision(
+      dimension,
+      'active',
+      ['language-match', ...baseReasons],
+      Math.max(0.6, frameworkResult.confidence),
+      [],
+      frameworkResult.evidence,
+      `language dimension for ${primaryLanguage}`
+    );
+  }
+  if (dimension.layer === 'framework') {
+    return buildDecision(
+      dimension,
+      'active',
+      [
+        frameworkResult.reasons.includes('framework-evidence')
+          ? 'framework-evidence'
+          : 'framework-match',
+        ...baseReasons,
+      ],
+      Math.max(0.62, frameworkResult.confidence),
+      mappedDomains(dimension.id),
+      frameworkResult.evidence,
+      `framework dimension ${dimension.id}`
+    );
+  }
+  if (dimension.id === 'performance-optimization' && hasComplexitySignal(complexity)) {
+    return buildDecision(
+      dimension,
+      'active',
+      ['complexity-signal', ...baseReasons],
+      complexityConfidence(complexity),
+      [],
+      [],
+      'complexity or hotspot signal requires performance planning'
+    );
+  }
+
+  const domains = mappedDomains(dimension.id);
+  if (!domainReport || domains.length === 0) {
+    return buildDecision(
+      dimension,
+      'unavailable',
+      ['domain-signal-missing', ...baseReasons],
+      0,
+      domains,
+      [],
+      'domain signal report is unavailable'
+    );
+  }
+  const domainSignals = domains.map((domain) => signalFor(domainReport, domain)).filter(isPresent);
+  const confidence = Math.max(0, ...domainSignals.map((signal) => signal.confidence));
+  const evidence = domainSignals.flatMap((signal) => signal.evidence);
+  if (domainSignals.some((signal) => signal.present && signal.confidence >= threshold)) {
+    return buildDecision(
+      dimension,
+      'active',
+      ['domain-signal', ...baseReasons],
+      confidence,
+      domains,
+      evidence,
+      `domain signal present: ${domains.join(',')}`
+    );
+  }
+  if (confidence > 0) {
+    return buildDecision(
+      dimension,
+      'low-confidence',
+      ['low-confidence-domain', ...baseReasons],
+      confidence,
+      domains,
+      evidence,
+      `domain evidence below threshold ${threshold}`
+    );
+  }
+  return buildDecision(
+    dimension,
+    'skipped',
+    ['domain-signal-missing', ...baseReasons],
+    0,
+    domains,
+    [],
+    `no matching domain signal: ${domains.join(',') || 'none'}`
+  );
+}
+
+function evaluateLanguageCondition(
+  dimension: UnifiedDimension,
+  primaryLanguage: string
+): { ok: boolean; detail: string; reasons: DimensionSelectionReason[] } {
+  const languages = dimension.conditions?.languages?.map(normalizeToken);
+  if (!languages?.length) {
+    return { ok: true, detail: 'no language condition', reasons: [] };
+  }
+  const ok = languages.includes(primaryLanguage);
+  return {
+    ok,
+    detail: ok
+      ? `language matched ${primaryLanguage}`
+      : `language ${primaryLanguage} not in ${languages.join(',')}`,
+    reasons: ok ? ['language-match'] : [],
+  };
+}
+
+function evaluateFrameworkCondition(
+  dimension: UnifiedDimension,
+  frameworks: Set<string>,
+  domainReport: DomainSignalReport | undefined
+): {
+  ok: boolean;
+  detail: string;
+  confidence: number;
+  evidence: ArchitectureEvidence[];
+  reasons: DimensionSelectionReason[];
+} {
+  const requiredFrameworks = dimension.conditions?.frameworks?.map(normalizeToken);
+  if (!requiredFrameworks?.length) {
+    return { ok: true, detail: 'no framework condition', confidence: 0, evidence: [], reasons: [] };
+  }
+  const matchedFramework = requiredFrameworks.find((framework) => frameworks.has(framework));
+  if (matchedFramework) {
+    return {
+      ok: true,
+      detail: `framework matched ${matchedFramework}`,
+      confidence: 0.65,
+      evidence: [],
+      reasons: ['framework-match'],
+    };
+  }
+  const evidence = frameworkEvidence(dimension.id, domainReport);
+  if (evidence.length > 0) {
+    return {
+      ok: true,
+      detail: `framework evidence matched ${dimension.id}`,
+      confidence: 0.58,
+      evidence,
+      reasons: ['framework-evidence'],
+    };
+  }
+  return {
+    ok: false,
+    detail: `framework signal missing: ${requiredFrameworks.join(',')}`,
+    confidence: 0,
+    evidence: [],
+    reasons: [],
+  };
+}
+
+function buildDecision(
+  dimension: UnifiedDimension,
+  kind: DimensionSelectionDecision['kind'],
+  reasons: readonly DimensionSelectionReason[],
+  confidence: number,
+  domains: readonly ArchitectureDomain[],
+  evidence: readonly ArchitectureEvidence[],
+  detail: string
+): DimensionSelectionDecision {
+  return Object.freeze({
+    dimension,
+    kind,
+    reasons: Object.freeze(uniqueSorted(reasons)),
+    confidence: round(confidence),
+    domains: Object.freeze([...domains]),
+    evidence: Object.freeze(sortEvidence(evidence)),
+    detail,
+  });
+}
+
+function recommendDimension({
+  dimension,
+  decision,
+  architecture,
+  dynamicSignals,
+}: {
+  dimension: UnifiedDimension;
+  decision: DimensionSelectionDecision | undefined;
+  architecture: ArchitectureIntelligenceReport | undefined;
+  dynamicSignals: DynamicSignalReport;
+}): RecommendedDimension {
+  const dynamicMatches = dynamicSignals.planSignals.filter((signal) =>
+    signalMatchesDimension(signal, dimension)
+  );
+  const healthGaps =
+    architecture?.supplements.healthGaps.filter((gap) =>
+      signalIdMatchesDimension(gap.dimension, dimension)
+    ) ?? [];
+  const score =
+    dimension.weight * 20 +
+    (6 - (dimension.tierHint ?? 5)) * 6 +
+    (decision?.confidence ?? 0) * 50 +
+    dynamicMatches.reduce((sum, signal) => sum + signal.priority / 8, 0) +
+    healthGaps.length * 18;
+  const reasons = uniqueSorted([
+    ...(decision?.reasons ?? []),
+    ...dynamicMatches.map((signal) => signal.kind),
+    ...healthGaps.map((gap) => `health-gap:${gap.status}`),
+  ]);
+  return Object.freeze({
+    dimension,
+    priorityScore: round(score),
+    reasons: Object.freeze(reasons),
+    evidence: Object.freeze(
+      sortEvidence([...(decision?.evidence ?? []), ...healthGaps.flatMap((gap) => gap.evidence)])
+    ),
+    informationSteps: Object.freeze(stepsForDimension(dimension, dynamicMatches)),
+  });
+}
+
+function stepsForDimension(
+  dimension: UnifiedDimension,
+  dynamicMatches: readonly DynamicPlanningSignal[]
+): DimensionInformationStep[] {
+  const steps: DimensionInformationStep[] = [
+    {
+      stepId: `repo:${dimension.id}`,
+      tool: 'project-context.repo',
+      dimensions: [dimension.id],
+      reason: 'confirm project language, frameworks, commands, and source roots',
+      priority: 90,
+    },
+    {
+      stepId: `map:${dimension.id}`,
+      tool: 'project-context.map',
+      dimensions: [dimension.id],
+      reason: 'collect module roles, dependencies, layers, cycles, and hotspots',
+      priority: 85,
+    },
+  ];
+  const domains = mappedDomains(dimension.id);
+  if (domains.includes('api') || domains.includes('database') || domains.includes('concurrency')) {
+    steps.push({
+      stepId: `flow:${dimension.id}`,
+      tool: 'project-context.file-flow',
+      dimensions: [dimension.id],
+      reason: 'inspect imports, call flow, and data/event paths for the dimension',
+      priority: 80,
+    });
+  }
+  if (domains.includes('ui') || domains.includes('testing') || dimension.layer !== 'universal') {
+    steps.push({
+      stepId: `symbols:${dimension.id}`,
+      tool: 'project-context.file-symbols',
+      dimensions: [dimension.id],
+      reason: 'inspect concrete symbols that prove framework, UI, test, or language idioms',
+      priority: 78,
+    });
+  }
+  if (dynamicMatches.some((signal) => signal.kind === 'coverage-gap' || signal.kind === 'decay')) {
+    steps.push({
+      stepId: `coverage:${dimension.id}`,
+      tool: 'recipe-context.coverage',
+      dimensions: [dimension.id],
+      reason: 'verify existing recipe coverage and decay before producing new guidance',
+      priority: 88,
+    });
+  }
+  if (dynamicMatches.some((signal) => signal.kind === 'proposal')) {
+    steps.push({
+      stepId: `proposal:${dimension.id}`,
+      tool: 'evolution.proposals',
+      dimensions: [dimension.id],
+      reason: 'review active evolution proposals tied to this dimension',
+      priority: 82,
+    });
+  }
+  if (
+    dimension.id === 'performance-optimization' ||
+    dynamicMatches.some((signal) => signal.kind === 'hotspot')
+  ) {
+    steps.push({
+      stepId: `slice:${dimension.id}`,
+      tool: 'project-context.source-slice',
+      dimensions: [dimension.id],
+      reason: 'inspect bounded source slices for hotspot or performance-sensitive modules',
+      priority: 84,
+    });
+  }
+  return steps.sort((a, b) => b.priority - a.priority || a.stepId.localeCompare(b.stepId));
+}
+
+function decideProjectScale(complexity: ComplexityReport | undefined): ProjectScaleDecision {
+  const project = complexity?.project;
+  if (!project) {
+    return Object.freeze({
+      scale: 'small',
+      budgetLevel: 'focused',
+      maxDimensionsPerDraft: 6,
+      moduleBatchSize: 2,
+      reasons: Object.freeze(['complexity report unavailable; start with a focused draft']),
+    });
+  }
+  if (project.moduleCount >= 30 || project.lineCount >= 50000 || project.complexityScore >= 14) {
+    return scaleDecision('very-large', 'expanded', 8, 4, project);
+  }
+  if (project.moduleCount >= 12 || project.lineCount >= 12000 || project.complexityScore >= 10) {
+    return scaleDecision('large', 'expanded', 10, 4, project);
+  }
+  if (project.moduleCount >= 5 || project.lineCount >= 3000 || project.complexityScore >= 5) {
+    return scaleDecision('medium', 'standard', 12, 3, project);
+  }
+  return scaleDecision('small', 'focused', 6, 2, project);
+}
+
+function scaleDecision(
+  scale: ProjectScaleDecision['scale'],
+  budgetLevel: ProjectScaleDecision['budgetLevel'],
+  maxDimensionsPerDraft: number,
+  moduleBatchSize: number,
+  project: ComplexityReport['project']
+): ProjectScaleDecision {
+  return Object.freeze({
+    scale,
+    budgetLevel,
+    maxDimensionsPerDraft,
+    moduleBatchSize,
+    reasons: Object.freeze([
+      `modules=${project.moduleCount}`,
+      `files=${project.fileCount}`,
+      `lines=${project.lineCount}`,
+      `complexity=${project.complexityScore}`,
+      `hotspots=${project.hotspotCount}`,
+    ]),
+  });
+}
+
+function buildCrossDimensionConstraints(
+  selection: SignalAwareDimensionSelectionResult,
+  dynamicSignals: DynamicSignalReport
+): CrossDimensionConstraint[] {
+  const active = new Set(selection.activeDimensions.map((dimension) => dimension.id));
+  const constraints: CrossDimensionConstraint[] = [];
+  if (active.has('networking-api')) {
+    constraints.push({
+      id: 'networking-needs-error-resilience',
+      dimensions: ['networking-api', 'error-resilience'],
+      severity: active.has('error-resilience') ? 'recommended' : 'required',
+      reason:
+        'network/API planning must check retry, timeout, failure mapping, and user-visible errors',
+    });
+  }
+  if (active.has('security-auth') || active.has('networking-api')) {
+    constraints.push({
+      id: 'security-cross-check',
+      dimensions: ['security-auth', 'networking-api', 'data-event-flow'],
+      severity: 'recommended',
+      reason: 'auth/security signals should be checked against API and persistence data paths',
+    });
+  }
+  if (active.has('ui-interaction') && active.has('performance-optimization')) {
+    constraints.push({
+      id: 'ui-performance-source-slice',
+      dimensions: ['ui-interaction', 'performance-optimization'],
+      severity: 'recommended',
+      reason:
+        'UI hotspot decisions need bounded source slices before performance recipes are planned',
+    });
+  }
+  if (dynamicSignals.coverage.gaps.length > 0) {
+    constraints.push({
+      id: 'coverage-before-production',
+      dimensions: uniqueSorted(dynamicSignals.coverage.gaps.map((gap) => gap.dimensionId)),
+      severity: 'required',
+      reason: 'coverage gaps must be reviewed before later recipe generation writes new outputs',
+    });
+  }
+  return constraints.sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function buildSubsetHints(
+  scale: ProjectScaleDecision,
+  recommendations: readonly RecommendedDimension[],
+  dynamicSignals: DynamicSignalReport
+): string[] {
+  const hints = [
+    `${scale.scale} project: draft at most ${scale.maxDimensionsPerDraft} dimensions per pass`,
+    `batch modules in groups of ${scale.moduleBatchSize}`,
+  ];
+  const coverageDims = uniqueSorted(dynamicSignals.coverage.gaps.map((gap) => gap.dimensionId));
+  if (coverageDims.length > 0) {
+    hints.push(`prioritize coverage gaps: ${coverageDims.join(',')}`);
+  }
+  const hotspotModules = dynamicSignals.hotspotModuleIds;
+  if (hotspotModules.length > 0) {
+    hints.push(`inspect hotspot modules first: ${hotspotModules.join(',')}`);
+  }
+  if (recommendations.length > scale.maxDimensionsPerDraft) {
+    hints.push('split later Plan draft into multiple dimension subsets');
+  }
+  return hints;
+}
+
+function queryIdsForDimension(dimension: UnifiedDimension): readonly string[] {
+  return uniqueSorted([dimension.id, ...mappedDomains(dimension.id), ...dimension.matchTopics]);
+}
+
+function signalMatchesDimension(
+  signal: DynamicPlanningSignal,
+  dimension: UnifiedDimension
+): boolean {
+  return signal.dimensionIds.some((id) => signalIdMatchesDimension(id, dimension));
+}
+
+function signalIdMatchesDimension(id: string, dimension: UnifiedDimension): boolean {
+  const normalized = normalizeToken(id);
+  return queryIdsForDimension(dimension).map(normalizeToken).includes(normalized);
+}
+
+function inferDimensionIdsFromText(text: string): string[] {
+  const normalized = text.toLowerCase();
+  const result = new Set<string>();
+  for (const dimension of DIMENSION_REGISTRY) {
+    const ids = queryIdsForDimension(dimension);
+    if (ids.some((id) => normalized.includes(normalizeToken(id)))) {
+      result.add(dimension.id);
+    }
+  }
+  return [...result].sort();
+}
+
+function moduleChange(
+  reason: ModuleChange['reason'],
+  moduleId: string,
+  moduleName: string,
+  previous?: ModuleDeltaSnapshot,
+  current?: ModuleDeltaSnapshot
+): ModuleChange {
+  return {
+    moduleId,
+    moduleName,
+    previous,
+    current,
+    changedFiles: [],
+    reason,
+  };
+}
+
+function resolveModuleChangedFiles(
+  previous: ModuleDeltaSnapshot,
+  current: ModuleDeltaSnapshot,
+  changedFileSet: ReadonlySet<string>
+): string[] {
+  const previousFiles = new Set(previous.files ?? []);
+  const currentFiles = new Set(current.files ?? []);
+  if (changedFileSet.size > 0) {
+    return uniqueSorted([...currentFiles].filter((file) => changedFileSet.has(file)));
+  }
+  return uniqueSorted([
+    ...[...currentFiles].filter((file) => !previousFiles.has(file)),
+    ...[...previousFiles].filter((file) => !currentFiles.has(file)),
+  ]);
+}
+
+function buildRenameCandidate(
+  previous: ModuleDeltaSnapshot,
+  current: ModuleDeltaSnapshot,
+  threshold: number
+): ModuleRenameCandidate | null {
+  const previousFiles = new Set(previous.files ?? []);
+  const currentFiles = new Set(current.files ?? []);
+  const sharedFiles = uniqueSorted([...previousFiles].filter((file) => currentFiles.has(file)));
+  const fileScore =
+    previousFiles.size + currentFiles.size === 0
+      ? 0
+      : sharedFiles.length / new Set([...previousFiles, ...currentFiles]).size;
+  const nameScore = normalizedSimilarity(previous.moduleName, current.moduleName);
+  const similarity = round(Math.max(fileScore, nameScore));
+  if (similarity < threshold) {
+    return null;
+  }
+  return {
+    previousModuleId: previous.moduleId,
+    currentModuleId: current.moduleId,
+    previousName: previous.moduleName,
+    currentName: current.moduleName,
+    similarity,
+    sharedFiles,
+  };
+}
+
+function normalizedSimilarity(a: string, b: string): number {
+  const left = normalizeName(a);
+  const right = normalizeName(b);
+  if (left === right) {
+    return 1;
+  }
+  const maxLength = Math.max(left.length, right.length, 1);
+  return 1 - levenshtein(left, right) / maxLength;
+}
+
+function levenshtein(a: string, b: string): number {
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i += 1) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j += 1) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      current[j] = Math.min(current[j - 1] + 1, previous[j] + 1, previous[j - 1] + cost);
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[b.length] ?? 0;
+}
+
+function frameworkEvidence(
+  dimensionId: string,
+  domainReport: DomainSignalReport | undefined
+): ArchitectureEvidence[] {
+  const patterns = FRAMEWORK_EVIDENCE_PATTERNS[dimensionId] ?? [];
+  if (!domainReport || patterns.length === 0) {
+    return [];
+  }
+  return sortEvidence(
+    domainReport.domains
+      .flatMap((domain) => domain.evidence)
+      .filter((item) =>
+        patterns.some((pattern) => pattern.test(`${item.label} ${item.filePath ?? ''}`))
+      )
+  );
+}
+
+function mappedDomains(dimensionId: string): readonly ArchitectureDomain[] {
+  return DIMENSION_DOMAINS[dimensionId] ?? [];
+}
+
+function signalFor(report: DomainSignalReport, domain: ArchitectureDomain): DomainSignal | null {
+  return report.domains.find((signal) => signal.domain === domain) ?? null;
+}
+
+function hasComplexitySignal(complexity: ComplexityReport | undefined): boolean {
+  if (!complexity) {
+    return false;
+  }
+  return (
+    complexity.project.severity !== 'low' ||
+    complexity.project.hotspotCount > 0 ||
+    complexity.hotspots.length > 0
+  );
+}
+
+function complexityConfidence(complexity: ComplexityReport | undefined): number {
+  if (!complexity) {
+    return 0;
+  }
+  if (complexity.project.severity === 'high') {
+    return 0.9;
+  }
+  if (complexity.project.severity === 'medium') {
+    return 0.68;
+  }
+  return complexity.hotspots.length > 0 ? 0.55 : 0.3;
+}
+
+function emptyDynamicSignalReport(): DynamicSignalReport {
+  return {
+    proposals: { activeCount: 0, byStatus: {}, byType: {} },
+    decay: { openCount: 0, affectedRecipeIds: [] },
+    coverage: queryPerModuleCoverage({ records: [] }),
+    moduleDelta: emptyModuleDelta(),
+    hotspotModuleIds: [],
+    planSignals: [],
+  };
+}
+
+function emptyModuleDelta(): ModuleDeltaReport {
+  return {
+    added: [],
+    changed: [],
+    removed: [],
+    renameCandidates: [],
+    affectedModuleIds: [],
+  };
+}
+
+function buildUnavailableSignals(input: SignalAwareDimensionSelectionInput): string[] {
+  const missing = [];
+  if (!input.architectureIntelligence && !input.domainSignals) {
+    missing.push('domainSignals');
+  }
+  if (!input.architectureIntelligence && !input.styles) {
+    missing.push('architectureStyles');
+  }
+  if (!input.architectureIntelligence && !input.complexity) {
+    missing.push('complexity');
+  }
+  if (!input.architectureIntelligence && !input.supplements) {
+    missing.push('projectInformationSupplements');
+  }
+  return missing;
+}
+
+function isActiveStatus(status: string | undefined): boolean {
+  return !status || status === 'pending' || status === 'observing' || status === 'open';
+}
+
+function isActiveDecayStatus(status: string | undefined): boolean {
+  return !status || status === 'open' || status === 'decaying' || status === 'pending';
+}
+
+function isHealthyCoverageStatus(status: string | undefined): boolean {
+  return (
+    !status ||
+    status === 'active' ||
+    status === 'evolving' ||
+    status === 'staging' ||
+    status === 'unknown'
+  );
+}
+
+function compareRecommendations(a: RecommendedDimension, b: RecommendedDimension): number {
+  return (
+    b.priorityScore - a.priorityScore ||
+    (a.dimension.tierHint ?? 99) - (b.dimension.tierHint ?? 99) ||
+    a.dimension.id.localeCompare(b.dimension.id)
+  );
+}
+
+function comparePlanSignals(a: DynamicPlanningSignal, b: DynamicPlanningSignal): number {
+  return (
+    b.priority - a.priority || a.kind.localeCompare(b.kind) || a.reason.localeCompare(b.reason)
+  );
+}
+
+function compareModuleChange(a: ModuleChange, b: ModuleChange): number {
+  return a.moduleId.localeCompare(b.moduleId);
+}
+
+function mergeInformationSteps(
+  steps: readonly DimensionInformationStep[]
+): DimensionInformationStep[] {
+  const byId = new Map<string, DimensionInformationStep>();
+  for (const step of steps) {
+    const existing = byId.get(step.stepId);
+    if (!existing) {
+      byId.set(step.stepId, step);
+      continue;
+    }
+    byId.set(step.stepId, {
+      ...existing,
+      dimensions: uniqueSorted([...existing.dimensions, ...step.dimensions]),
+      priority: Math.max(existing.priority, step.priority),
+    });
+  }
+  return [...byId.values()].sort(
+    (a, b) => b.priority - a.priority || a.stepId.localeCompare(b.stepId)
+  );
+}
+
+function countBy<T>(items: readonly T[], selector: (item: T) => string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = selector(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function sortEvidence(evidence: readonly ArchitectureEvidence[]): ArchitectureEvidence[] {
+  return [...evidence].sort(
+    (a, b) =>
+      b.weight - a.weight ||
+      a.source.localeCompare(b.source) ||
+      a.label.localeCompare(b.label) ||
+      (a.filePath ?? '').localeCompare(b.filePath ?? '')
+  );
+}
+
+function uniqueSorted<T extends string>(values: readonly T[]): T[] {
+  return [...new Set(values)].sort();
+}
+
+function normalizeToken(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function normalizeName(value: string): string {
+  return value.replace(/[^a-z0-9]+/gi, '').toLowerCase();
+}
+
+function round(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function isPresent<T>(value: T | null | undefined | false | ''): value is T {
+  return Boolean(value);
+}
