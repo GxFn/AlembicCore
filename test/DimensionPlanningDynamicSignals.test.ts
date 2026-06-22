@@ -4,6 +4,7 @@ import {
   buildDimensionPlanningAids,
   queryPerModuleCoverage,
   resolveActiveDimensions,
+  resolvePlanDimensionDefinitions,
   resolveSignalAwareActiveDimensions,
 } from '../src/dimensions.js';
 import type {
@@ -429,6 +430,23 @@ describe('dimension planning dynamic signals', () => {
     expect(plainSignalAware.activeDimensions.map((dimension) => dimension.id)).toContain(
       'swift-objc-idiom'
     );
+  });
+
+  it('resolves confirmed Plan dimension ids without legacy language/framework recomputation', () => {
+    const legacySwiftIds = resolveActiveDimensions('swift').map((dimension) => dimension.id);
+    const resolution = resolvePlanDimensionDefinitions([
+      'swiftui-patterns',
+      'networking-api',
+      'swiftui-patterns',
+      'missing-plan-dimension',
+    ]);
+
+    expect(legacySwiftIds).not.toContain('swiftui-patterns');
+    expect(resolution.dimensions.map((dimension) => dimension.id)).toEqual([
+      'swiftui-patterns',
+      'networking-api',
+    ]);
+    expect(resolution.missingDimensionIds).toEqual(['missing-plan-dimension']);
   });
 
   it('builds planning aids with ordered dimensions, tool steps, scale, and constraints', () => {

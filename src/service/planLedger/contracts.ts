@@ -2,7 +2,7 @@ import type { DimensionPlanningAidReport } from '../project-context/dimensionPla
 
 export type PlanStatus = 'draft' | 'confirmed' | 'superseded' | 'archived';
 export type PlanStageId = 'coldStart' | 'deepMining' | 'moduleMining';
-export type PlanDraftSource = 'plugin-deterministic' | 'host-agent' | 'test-fixture';
+export type PlanDraftSource = 'plugin-collected-facts' | 'host-agent' | 'test-fixture';
 
 export interface PlanProjectProfile {
   projectType?: string;
@@ -115,7 +115,6 @@ export interface SavePlanDraftInput {
   projectContextSignature: string;
   lastUpdatedFromCommit?: string | null;
   createdBy?: string;
-  intent: PlanIntent;
   planningBrief?: Record<string, unknown> | null;
   rationale?: readonly string[];
   createdAt?: number;
@@ -126,7 +125,7 @@ export interface ConfirmPlanInput {
   version: number;
   confirmedBy?: string;
   rationale?: readonly string[];
-  intentPatch?: Partial<PlanIntent>;
+  intent: PlanIntent;
   confirmedAt?: number;
 }
 
@@ -205,7 +204,7 @@ export interface PlanView {
 }
 
 export interface PlanDraftInformationPackage {
-  intent: PlanIntent;
+  draftSource: Extract<PlanDraftSource, 'plugin-collected-facts'>;
   planningBrief: Record<string, unknown>;
   sourceReports: {
     planningAids?: DimensionPlanningAidReport;

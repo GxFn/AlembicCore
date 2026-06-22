@@ -1,3 +1,4 @@
+export type { PlanDimensionDefinitionResolution } from './domain/dimension/index.js';
 export {
   ALL_DIMENSION_IDS,
   buildTierPlan,
@@ -13,6 +14,7 @@ export {
   LANGUAGE_DIM_IDS,
   PRE_SUBMIT_CHECKLIST,
   resolveActiveDimensions,
+  resolvePlanDimensionDefinitions,
   sopToCompactText,
   UNIVERSAL_DIM_IDS,
 } from './domain/dimension/index.js';

@@ -7,12 +7,9 @@ import type {
   PlanCoverageBucket,
   PlanDraftInformationPackage,
   PlanGenerationState,
-  PlanIntent,
   PlanModuleBinding,
-  PlanNextAction,
   PlanRecord,
   PlanSignatureComparison,
-  PlanStageId,
   PlanView,
   ProjectContextSignatureInput,
   SavePlanDraftInput,
@@ -113,109 +110,45 @@ export class PlanLedgerService {
 export function buildPlanDraftInformationPackage(
   input: BuildPlanDraftInformationPackageInput
 ): PlanDraftInformationPackage {
-  const dimensionOrder = input.planningAids?.dimensionOrder ?? [];
-  const recommended = input.planningAids?.recommendedDimensions ?? [];
-  const maxBudget = input.hints?.maxBudget;
-  const perDimensionTarget = resolvePerDimensionTarget(input.planningAids, maxBudget);
-  const dimensions = recommended.map((item, index) => ({
-    dimensionId: item.dimension.id,
-    priority: index + 1,
-    rationale: item.reasons.join('; ') || 'recommended by planning aids',
-    stage: resolveStage(index, recommended.length),
-    targetRecipes: perDimensionTarget,
-  }));
-  const selectedDimensionIds =
-    dimensions.length > 0 ? dimensions.map((dimension) => dimension.dimensionId) : dimensionOrder;
-  const totalRecipeBudget =
-    maxBudget ?? Math.max(selectedDimensionIds.length * perDimensionTarget, perDimensionTarget);
   const focusModules = input.hints?.focusModules ?? [];
-  const moduleBindings = focusModules.map(
-    (modulePath, index): PlanModuleBinding => ({
-      modulePath,
-      dimensions: selectedDimensionIds,
-      targetRecipes: Math.max(1, Math.ceil(perDimensionTarget / 2)),
-      priority: index + 1,
-    })
-  );
-  const plannedNextActions: PlanNextAction[] = (
-    input.planningAids?.informationGatheringSteps ?? []
-  ).map((step, index) => ({
-    tool: step.tool,
-    reason: step.reason,
-    order: index + 1,
-    dimensionIds: step.dimensions,
-  }));
-
-  const intent: PlanIntent = {
-    projectProfile: input.projectProfile,
-    dimensions,
-    scale: {
-      totalRecipeBudget,
-      perStage: {
-        coldStart: Math.ceil(totalRecipeBudget * 0.55),
-        deepMining: Math.ceil(totalRecipeBudget * 0.3),
-        module: Math.max(moduleBindings.length, Math.floor(totalRecipeBudget * 0.15)),
-      },
-      depthLevels: ['baseline', 'deepening', 'module-scoped'],
-      budgetLevel: input.planningAids?.scaleDecision.budgetLevel,
-      scale: input.planningAids?.scaleDecision.scale,
-    },
-    moduleBindings,
-    stages: {
-      coldStart: {
-        dimensions: selectedDimensionIds.filter(
-          (_, index) => resolveStage(index, selectedDimensionIds.length) === 'coldStart'
-        ),
-        breadthBudget: Math.ceil(totalRecipeBudget * 0.55),
-      },
-      deepMining: {
-        dimensions: selectedDimensionIds.filter(
-          (_, index) => resolveStage(index, selectedDimensionIds.length) !== 'coldStart'
-        ),
-        depthBudget: Math.ceil(totalRecipeBudget * 0.3),
-        focusModules,
-      },
-      moduleMining: {
-        perModule: moduleBindings,
-      },
-    },
-    plannedNextActions,
-    evidenceRefs: [
-      {
-        kind: 'project-context',
-        ref: input.projectContextSignature,
-        detail: 'projectContextSignature',
-      },
-    ],
-    draftSource: 'plugin-deterministic',
-  };
+  const selection = input.planningAids?.selection;
+  const activeDimensionIds = selection?.activeDimensions.map((dimension) => dimension.id) ?? [];
+  const skippedDimensionIds = selection?.skippedDimensions.map((dimension) => dimension.id) ?? [];
+  const lowConfidenceDimensionIds =
+    selection?.lowConfidenceDimensions.map((decision) => decision.dimension.id) ?? [];
+  const informationSteps = input.planningAids?.informationGatheringSteps ?? [];
 
   return {
-    intent,
+    draftSource: 'plugin-collected-facts',
     planningBrief: {
-      defaultOrder: selectedDimensionIds,
+      draftSource: 'plugin-collected-facts',
       agentDecisionChecklist: [
-        'choose dimensions from observed project signals',
-        'set scale and per-stage budgets before generation',
-        'confirm module bindings before scoped mining',
-        'run recipe-context and evolution tools only when evidence requires them',
+        'author a complete Plan intent from sourceReports before confirm',
+        'include every relevant dimension id and rationale in the confirm payload',
+        'set total and per-stage budgets explicitly in the confirm payload',
+        'confirm module bindings and planned next actions explicitly',
       ],
       evidenceFields: [
         'projectContextSignature',
-        'dimensionOrder',
-        'scaleDecision',
-        'plannedNextActions',
+        'sourceReports.planningAids.selection',
+        'sourceReports.dynamicSignals',
+        'sourceReports.missionBriefing',
       ],
+      factualDimensionSignals: {
+        activeDimensionIds,
+        skippedDimensionIds,
+        lowConfidenceDimensionIds,
+        unavailableSignals: selection?.unavailableSignals ?? [],
+      },
+      focusModules,
       sopField: 'planningBrief',
-      toolCapabilityMatrix: plannedNextActions.map((action) => ({
-        order: action.order,
-        tool: action.tool,
-        dimensions: action.dimensionIds ?? [],
-        reason: action.reason,
+      toolCapabilityMatrix: informationSteps.map((step, index) => ({
+        order: index + 1,
+        tool: step.tool,
+        dimensions: step.dimensions,
+        reason: step.reason,
       })),
-      scaleDecision: input.planningAids?.scaleDecision ?? null,
-      subsetHints: input.planningAids?.subsetHints ?? [],
-      crossDimensionConstraints: input.planningAids?.crossDimensionConstraints ?? [],
+      scaleObservation: input.planningAids?.scaleDecision ?? null,
     },
     sourceReports: {
       planningAids: input.planningAids,
@@ -517,31 +450,6 @@ function resolveModulePath(
     .map((binding) => binding.modulePath.replace(/\\/g, '/'))
     .sort((a, b) => b.length - a.length)
     .find((modulePath) => normalized === modulePath || normalized.startsWith(`${modulePath}/`));
-}
-
-function resolvePerDimensionTarget(
-  planningAids: BuildPlanDraftInformationPackageInput['planningAids'],
-  maxBudget?: number
-): number {
-  const dimensionCount = Math.max(1, planningAids?.dimensionOrder.length ?? 1);
-  if (maxBudget) {
-    return Math.max(1, Math.floor(maxBudget / dimensionCount));
-  }
-  const level = planningAids?.scaleDecision.budgetLevel;
-  if (level === 'focused') {
-    return 3;
-  }
-  if (level === 'expanded') {
-    return 7;
-  }
-  return 5;
-}
-
-function resolveStage(index: number, total: number): PlanStageId {
-  if (total <= 2 || index < Math.ceil(total * 0.55)) {
-    return 'coldStart';
-  }
-  return 'deepMining';
 }
 
 function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {

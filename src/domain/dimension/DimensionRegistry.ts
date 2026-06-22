@@ -605,6 +605,11 @@ export const DIMENSION_DISPLAY_GROUP: Record<string, string> = Object.fromEntrie
 /** 所有维度 ID 集合（用于兼容旧 category/knowledgeType 维度归属） */
 const DIMENSION_ID_SET = new Set<string>(DIMENSION_REGISTRY.map((d) => d.id));
 
+export interface PlanDimensionDefinitionResolution {
+  dimensions: readonly UnifiedDimension[];
+  missingDimensionIds: readonly string[];
+}
+
 /** 按 ID 获取维度 */
 export function getDimension(id: string): UnifiedDimension | undefined {
   return DIMENSION_REGISTRY.find((d) => d.id === id);
@@ -638,6 +643,41 @@ export function resolveActiveDimensions(
       dim.conditions.frameworks.some((f) => detectedFrameworks.includes(f));
     // languages 必须匹配；frameworks 条件存在时也需匹配
     return langMatch && (dim.conditions.frameworks ? fwMatch : true);
+  });
+}
+
+/**
+ * 按已确认 Plan 的维度 ID 解析维度定义。
+ *
+ * 这是 Plan generation scope 的 canonical 路径：调用方已经拥有 Agent
+ * 确认后的 Plan ids，因此这里只做 ID→定义解析，不再按语言、framework
+ * 或 signal-aware selector 重新裁剪，避免无信号时把已确认维度收窄。
+ */
+export function resolvePlanDimensionDefinitions(
+  dimensionIds: readonly string[],
+  dimensions: readonly UnifiedDimension[] = DIMENSION_REGISTRY
+): PlanDimensionDefinitionResolution {
+  const byId = new Map(dimensions.map((dimension) => [dimension.id, dimension]));
+  const seen = new Set<string>();
+  const resolved: UnifiedDimension[] = [];
+  const missing: string[] = [];
+
+  for (const dimensionId of dimensionIds) {
+    if (!dimensionId || seen.has(dimensionId)) {
+      continue;
+    }
+    seen.add(dimensionId);
+    const dimension = byId.get(dimensionId);
+    if (dimension) {
+      resolved.push(dimension);
+    } else {
+      missing.push(dimensionId);
+    }
+  }
+
+  return Object.freeze({
+    dimensions: Object.freeze(resolved),
+    missingDimensionIds: Object.freeze(missing),
   });
 }
 

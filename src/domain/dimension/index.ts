@@ -5,6 +5,7 @@
  */
 
 export { DimensionCopy } from './DimensionCopy.js';
+export type { PlanDimensionDefinitionResolution } from './DimensionRegistry.js';
 export {
   buildTierPlan,
   classifyRecipeToDimension,
@@ -13,6 +14,7 @@ export {
   getDimension,
   getDimensionsByLayer,
   resolveActiveDimensions,
+  resolvePlanDimensionDefinitions,
 } from './DimensionRegistry.js';
 export {
   getDimensionFocusKeywords,

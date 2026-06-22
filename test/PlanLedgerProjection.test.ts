@@ -11,6 +11,7 @@ import {
   buildPlanDraftInformationPackage,
   compareProjectContextSignature,
   computeProjectContextSignature,
+  type PlanIntent,
   PlanLedgerService,
 } from '../src/plans.js';
 import { createAlembicRepositories } from '../src/repositories.js';
@@ -79,69 +80,40 @@ describe('Plan ledger projection', () => {
       projectContextSignature: signature,
       lastUpdatedFromCommit: 'abc123',
       createdBy: 'test',
-      intent: {
-        ...draftPackage.intent,
-        dimensions: [
-          {
-            dimensionId: 'architecture',
-            priority: 1,
-            rationale: 'Architecture is foundational for the test fixture.',
-            stage: 'coldStart',
-            targetRecipes: 2,
-          },
-          {
-            dimensionId: 'testing-quality',
-            priority: 2,
-            rationale: 'Tests are explicit in the fixture scope.',
-            stage: 'deepMining',
-            targetRecipes: 1,
-          },
-        ],
-        scale: {
-          totalRecipeBudget: 3,
-          perStage: { coldStart: 2, deepMining: 1, module: 1 },
-          depthLevels: ['baseline', 'deepening'],
-          budgetLevel: 'focused',
-          scale: 'small',
-        },
-        moduleBindings: [
-          {
-            modulePath: 'Sources/BiliDiliApp',
-            dimensions: ['architecture', 'testing-quality'],
-            targetRecipes: 2,
-            priority: 1,
-          },
-        ],
-        stages: {
-          coldStart: { dimensions: ['architecture'], breadthBudget: 2 },
-          deepMining: {
-            dimensions: ['testing-quality'],
-            depthBudget: 1,
-            focusModules: ['Sources/BiliDiliApp'],
-          },
-          moduleMining: {
-            perModule: [
-              {
-                modulePath: 'Sources/BiliDiliApp',
-                dimensions: ['architecture', 'testing-quality'],
-                targetRecipes: 2,
-                priority: 1,
-              },
-            ],
-          },
-        },
-      },
       planningBrief: draftPackage.planningBrief,
       rationale: ['fixture draft'],
+    });
+    expect(draft.intent.dimensions).toEqual([]);
+    expect(draft.intent.draftSource).toBe('plugin-collected-facts');
+    expect(draft.planningBrief).toBeNull();
+
+    const completeIntent = completeBilidiliPlanIntent({
+      projectProfile: {
+        projectType: 'ios-app',
+        primaryLanguage: 'swift',
+        frameworks: ['SwiftUI'],
+        moduleCount: 1,
+        fileCount: 1,
+        architectureHints: ['layered'],
+      },
     });
     const confirmed = repositories.planRepository.confirm({
       planId: draft.planId,
       version: draft.version,
       confirmedBy: 'test',
       rationale: ['fixture confirmed'],
+      intent: completeIntent,
     });
 
     expect(confirmed.status).toBe('confirmed');
+    expect(confirmed.intent).toMatchObject({
+      draftSource: 'host-agent',
+      dimensions: [
+        expect.objectContaining({ dimensionId: 'architecture' }),
+        expect.objectContaining({ dimensionId: 'testing-quality' }),
+      ],
+      moduleBindings: [expect.objectContaining({ modulePath: 'Sources/BiliDiliApp' })],
+    });
     expect(repositories.planRepository.getActiveConfirmed(tmpDir)?.planId).toBe('plan-bilidili');
 
     const recipe = new KnowledgeEntry({
@@ -223,9 +195,10 @@ describe('Plan ledger projection', () => {
     const row = runtime.sqlite
       .prepare('SELECT intent_json FROM plans WHERE plan_id = ? AND version = ?')
       .get('plan-bilidili', 1) as { intent_json: string };
-    expect(row.intent_json).not.toContain('codeRecipeMapping');
-    expect(row.intent_json).not.toContain('coverage');
-    expect(row.intent_json).not.toContain('pendingProposals');
+    const persistedIntent = JSON.parse(row.intent_json) as Record<string, unknown>;
+    expect(persistedIntent).not.toHaveProperty('codeRecipeMapping');
+    expect(persistedIntent).not.toHaveProperty('coverage');
+    expect(persistedIntent).not.toHaveProperty('pendingProposals');
 
     const columns = runtime.sqlite
       .prepare("PRAGMA table_info('plans')")
@@ -272,7 +245,7 @@ describe('Plan ledger projection', () => {
     });
   });
 
-  it('builds a deterministic draft information package from planning aids', () => {
+  it('builds a facts-only draft information package without authoritative Plan intent', () => {
     const planningAids = buildDimensionPlanningAids({
       primaryLanguage: 'typescript',
       detectedFrameworks: ['react'],
@@ -296,14 +269,130 @@ describe('Plan ledger projection', () => {
       hints: { focusModules: ['src/app'], maxBudget: 6 },
     });
 
-    expect(draftPackage.intent.draftSource).toBe('plugin-deterministic');
-    expect(draftPackage.intent.dimensions.length).toBeGreaterThan(0);
-    expect(draftPackage.intent.moduleBindings[0]).toMatchObject({
-      modulePath: 'src/app',
-      priority: 1,
-    });
+    expect('intent' in draftPackage).toBe(false);
+    expect(draftPackage.draftSource).toBe('plugin-collected-facts');
     expect(draftPackage.planningBrief).toMatchObject({
-      defaultOrder: draftPackage.intent.dimensions.map((dimension) => dimension.dimensionId),
+      draftSource: 'plugin-collected-facts',
+      factualDimensionSignals: expect.objectContaining({
+        activeDimensionIds: expect.arrayContaining(['architecture']),
+      }),
+      focusModules: ['src/app'],
     });
+    expect(draftPackage.planningBrief).not.toHaveProperty('defaultOrder');
+    expect(draftPackage.sourceReports.planningAids).toBe(planningAids);
+  });
+
+  it('requires a complete Agent-authored Plan payload before confirm', async () => {
+    const repositories = createAlembicRepositories(runtime.connection);
+    const signature = computeProjectContextSignature({ projectRoot: tmpDir });
+    const draft = repositories.planRepository.saveDraft({
+      planId: 'plan-complete-required',
+      projectRoot: tmpDir,
+      projectContextSignature: signature,
+      createdBy: 'test',
+      rationale: ['draft facts gathered'],
+    });
+
+    expect(() =>
+      repositories.planRepository.confirm({
+        planId: draft.planId,
+        version: draft.version,
+        confirmedBy: 'test',
+        rationale: ['incomplete payload'],
+        intent: {
+          ...completeBilidiliPlanIntent(),
+          plannedNextActions: [],
+        },
+      })
+    ).toThrow(/plannedNextActions are required/);
+
+    const confirmed = repositories.planRepository.confirm({
+      planId: draft.planId,
+      version: draft.version,
+      confirmedBy: 'test',
+      rationale: ['complete payload'],
+      intent: completeBilidiliPlanIntent(),
+    });
+
+    expect(confirmed.intent.draftSource).toBe('host-agent');
+    expect(confirmed.intent.plannedNextActions).toHaveLength(2);
   });
 });
+
+function completeBilidiliPlanIntent(
+  overrides: Partial<Pick<PlanIntent, 'projectProfile'>> = {}
+): PlanIntent {
+  const moduleBinding = {
+    modulePath: 'Sources/BiliDiliApp',
+    dimensions: ['architecture', 'testing-quality'],
+    targetRecipes: 2,
+    priority: 1,
+  };
+  return {
+    projectProfile: overrides.projectProfile ?? {
+      projectType: 'ios-app',
+      primaryLanguage: 'swift',
+      frameworks: ['SwiftUI'],
+      moduleCount: 1,
+      fileCount: 1,
+    },
+    dimensions: [
+      {
+        dimensionId: 'architecture',
+        priority: 1,
+        rationale: 'Architecture is foundational for the fixture.',
+        stage: 'coldStart',
+        targetRecipes: 2,
+      },
+      {
+        dimensionId: 'testing-quality',
+        priority: 2,
+        rationale: 'Tests are explicit in the fixture scope.',
+        stage: 'deepMining',
+        targetRecipes: 1,
+      },
+    ],
+    scale: {
+      totalRecipeBudget: 3,
+      perStage: { coldStart: 2, deepMining: 1, module: 1 },
+      depthLevels: ['baseline', 'deepening'],
+      budgetLevel: 'focused',
+      scale: 'small',
+    },
+    moduleBindings: [moduleBinding],
+    stages: {
+      coldStart: { dimensions: ['architecture'], breadthBudget: 2 },
+      deepMining: {
+        dimensions: ['testing-quality'],
+        depthBudget: 1,
+        focusModules: ['Sources/BiliDiliApp'],
+      },
+      moduleMining: {
+        perModule: [moduleBinding],
+      },
+    },
+    plannedNextActions: [
+      {
+        tool: 'project-context.map',
+        reason: 'Collect architecture evidence.',
+        order: 1,
+        dimensionIds: ['architecture'],
+      },
+      {
+        tool: 'recipe-context.coverage',
+        reason: 'Check testing coverage.',
+        order: 2,
+        dimensionIds: ['testing-quality'],
+        modulePaths: ['Sources/BiliDiliApp'],
+      },
+    ],
+    evidenceRefs: [
+      {
+        kind: 'project-context',
+        ref: 'pcsig:fixture',
+        detail: 'projectContextSignature',
+      },
+    ],
+    draftSource: 'host-agent',
+  };
+}

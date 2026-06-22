@@ -9,6 +9,7 @@
 
 import {
   resolveActiveDimensions as _resolveActive,
+  resolvePlanDimensionDefinitions as _resolvePlanDimensionDefinitions,
   DIMENSION_REGISTRY,
   type UnifiedDimension,
 } from '../../../../domain/dimension/index.js';
@@ -89,4 +90,42 @@ export function resolveActiveDimensions(
       dim.conditions.frameworks.some((f) => detectedFrameworks.includes(f));
     return langMatch && (dim.conditions.frameworks ? fwMatch : true);
   });
+}
+
+/**
+ * Plan generation scope 专用：按 confirmed Plan IDs 解析维度定义。
+ *
+ * 该路径不再用语言/框架重算活跃维度，避免 no-signal 场景把
+ * Agent 已确认的 framework/domain 维度裁掉。下游 Plugin/Alembic
+ * 迁移 generation scope 时应优先接此入口。
+ */
+export function resolvePlanDimensionDefinitions(
+  allDimensions: BaseDimension[],
+  dimensionIds: readonly string[]
+): { dimensions: BaseDimension[]; missingDimensionIds: readonly string[] } {
+  if (allDimensions === baseDimensions) {
+    const resolution = _resolvePlanDimensionDefinitions(dimensionIds);
+    return {
+      dimensions: resolution.dimensions.map(toBaseDimension),
+      missingDimensionIds: resolution.missingDimensionIds,
+    };
+  }
+
+  const byId = new Map(allDimensions.map((dimension) => [dimension.id, dimension]));
+  const seen = new Set<string>();
+  const dimensions: BaseDimension[] = [];
+  const missingDimensionIds: string[] = [];
+  for (const dimensionId of dimensionIds) {
+    if (!dimensionId || seen.has(dimensionId)) {
+      continue;
+    }
+    seen.add(dimensionId);
+    const dimension = byId.get(dimensionId);
+    if (dimension) {
+      dimensions.push(dimension);
+    } else {
+      missingDimensionIds.push(dimensionId);
+    }
+  }
+  return { dimensions, missingDimensionIds };
 }
