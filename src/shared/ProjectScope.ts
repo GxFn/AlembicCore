@@ -161,20 +161,30 @@ export interface CanonicalSourceIdentityInput {
 
 export type ProjectScopeSourceRefResolutionStatus = 'resolved' | 'missing';
 
+export type ProjectScopeSourceRefResolutionReason =
+  | 'qualified-path'
+  | 'relative-path'
+  | 'not-found';
+
 export interface ProjectScopeSourceRefResolution {
   identity: CanonicalSourceIdentity | null;
   input: string;
-  reason: string;
+  reason: ProjectScopeSourceRefResolutionReason;
   status: ProjectScopeSourceRefResolutionStatus;
 }
 
 export interface ProjectScopeSourceRefIndex {
   byQualifiedPath: ReadonlyMap<string, CanonicalSourceIdentity>;
+  byRelativePath: ReadonlyMap<string, CanonicalSourceIdentity>;
+  singleFolderKey: string | null;
 }
 
 export type ProjectScopeSourceRefNormalizationStatus = 'active' | 'missing';
 
-export type ProjectScopeSourceRefNormalizationReason = 'qualified-path' | 'not-found';
+export type ProjectScopeSourceRefNormalizationReason =
+  | 'qualified-path'
+  | 'relative-path'
+  | 'not-found';
 
 export interface NormalizedProjectScopeSourceRef {
   absolutePath: string | null;
@@ -624,12 +634,20 @@ export function buildProjectScopeSourceRefIndex(
   identities: readonly CanonicalSourceIdentity[]
 ): ProjectScopeSourceRefIndex {
   const byQualifiedPath = new Map<string, CanonicalSourceIdentity>();
+  const byRelativePath = new Map<string, CanonicalSourceIdentity>();
+  const folderKeys = new Set<string>();
 
   for (const identity of identities) {
     byQualifiedPath.set(normalizeComparableSourcePath(identity.qualifiedPath), identity);
+    byRelativePath.set(normalizeComparableSourcePath(identity.relativePath), identity);
+    folderKeys.add(canonicalSourceIdentityFolderKey(identity));
   }
 
-  return { byQualifiedPath };
+  return {
+    byQualifiedPath,
+    byRelativePath,
+    singleFolderKey: folderKeys.size === 1 ? [...folderKeys][0] : null,
+  };
 }
 
 export function resolveProjectScopeSourceRef(
@@ -641,6 +659,12 @@ export function resolveProjectScopeSourceRef(
   if (qualified) {
     return { identity: qualified, input: sourceRef, reason: 'qualified-path', status: 'resolved' };
   }
+  if (index.singleFolderKey) {
+    const relative = index.byRelativePath.get(normalized);
+    if (relative) {
+      return { identity: relative, input: sourceRef, reason: 'relative-path', status: 'resolved' };
+    }
+  }
   return { identity: null, input: sourceRef, reason: 'not-found', status: 'missing' };
 }
 
@@ -650,7 +674,11 @@ export function normalizeProjectScopeSourceRef(
 ): NormalizedProjectScopeSourceRef {
   const resolution = resolveProjectScopeSourceRef(sourceRef, index);
   if (resolution.status === 'resolved' && resolution.identity) {
-    return normalizeResolvedProjectScopeSourceRef(sourceRef, resolution.identity, 'qualified-path');
+    return normalizeResolvedProjectScopeSourceRef(
+      sourceRef,
+      resolution.identity,
+      resolution.reason
+    );
   }
 
   return normalizeRejectedProjectScopeSourceRef(sourceRef, {
@@ -954,7 +982,7 @@ function normalizeResolvedProjectScopeSourceRef(
 function normalizeRejectedProjectScopeSourceRef(
   input: string,
   output: {
-    reason: Exclude<ProjectScopeSourceRefNormalizationReason, 'qualified-path'>;
+    reason: Exclude<ProjectScopeSourceRefNormalizationReason, 'qualified-path' | 'relative-path'>;
     status: Exclude<ProjectScopeSourceRefNormalizationStatus, 'active'>;
   }
 ): NormalizedProjectScopeSourceRef {
@@ -971,6 +999,16 @@ function normalizeRejectedProjectScopeSourceRef(
     relativePath: null,
     status: output.status,
   };
+}
+
+function canonicalSourceIdentityFolderKey(identity: CanonicalSourceIdentity): string {
+  return (
+    normalizeNullableString(identity.folderId) ??
+    normalizeNullableString(identity.folderPath) ??
+    normalizeNullableString(identity.folderDisplayName) ??
+    normalizeNullableString(identity.projectScopeId) ??
+    '__unscoped__'
+  );
 }
 
 function cloneRecord(value: Record<string, unknown> | null | undefined): Record<string, unknown> {

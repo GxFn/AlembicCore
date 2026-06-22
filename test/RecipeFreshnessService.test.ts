@@ -150,6 +150,50 @@ describe('Recipe freshness primitives', () => {
     expect(repo.findOne('r2', 'src/dropped.ts')).toMatchObject({ status: 'active' });
   });
 
+  it('keeps existing project-relative source refs with line ranges active', async () => {
+    const existingFeedRepository =
+      'Sources/Infrastructure/Networking/Repository/FeedRepository.swift';
+    const existingHomeView = 'Sources/Features/Home/Views/HomeCategoryView.swift';
+    const missingVideoFeedViewModel = 'Sources/Features/VideoFeed/VideoFeedViewModel.swift';
+    for (const sourcePath of [existingFeedRepository, existingHomeView]) {
+      fs.mkdirSync(path.dirname(path.join(tmpDir, sourcePath)), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, sourcePath), 'let live = true\n');
+    }
+
+    const repo = new InMemorySourceRefRepository();
+    const reconciler = buildReconciler(tmpDir, repo);
+
+    const report = await reconciler.reconcileRecipeSourceRefs(
+      {
+        id: 'rg10-recipe',
+        reasoning: {
+          sources: [
+            `${missingVideoFeedViewModel}:1-78`,
+            `${existingFeedRepository}:1-69`,
+            `${existingHomeView}:1-150`,
+          ],
+        },
+      },
+      { force: true }
+    );
+
+    expect(report).toMatchObject({
+      active: 2,
+      inserted: 3,
+      recipesProcessed: 1,
+      stale: 1,
+    });
+    expect(repo.findOne('rg10-recipe', `${existingFeedRepository}:1-69`)).toMatchObject({
+      status: 'active',
+    });
+    expect(repo.findOne('rg10-recipe', `${existingHomeView}:1-150`)).toMatchObject({
+      status: 'active',
+    });
+    expect(repo.findOne('rg10-recipe', `${missingVideoFeedViewModel}:1-78`)).toMatchObject({
+      status: 'stale',
+    });
+  });
+
   it('refreshes source refs then vector entry and region indexes when vectors are available', async () => {
     const repo = new InMemorySourceRefRepository();
     const reconciler = buildReconciler(tmpDir, repo);

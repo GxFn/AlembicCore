@@ -137,6 +137,43 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
     }
   });
 
+  it('does not block a new same-project session after bootstrap completion and restart', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-completed-'));
+    try {
+      const projectRoot = join(dataRoot, 'repo');
+      const manager = new BootstrapSessionManager({ dataRoot });
+      const completed = manager.createSession({ projectRoot, dimensions: [dimensions[0]] });
+
+      completed.markDimensionComplete('architecture', {
+        analysisText: '## Architecture\n\nA complete bootstrap session should not keep the lease.',
+        keyFindings: ['Completed bootstrap sessions release their project lease'],
+        referencedFiles: ['src/service.ts'],
+        recipeIds: ['recipe-1'],
+        candidateCount: 1,
+      });
+
+      expect(manager.getSessionStatus(completed.id, { projectRoot })).toMatchObject({
+        reason: 'session_complete',
+        state: 'complete',
+      });
+
+      const restartedManager = new BootstrapSessionManager({ dataRoot });
+      expect(restartedManager.getSessionStatus(completed.id, { projectRoot })).toMatchObject({
+        reason: 'session_complete',
+        state: 'complete',
+      });
+
+      const next = restartedManager.createSession({ projectRoot, dimensions });
+      expect(next.id).not.toBe(completed.id);
+      expect(restartedManager.getSessionStatus(next.id, { projectRoot })).toMatchObject({
+        reason: 'session_active',
+        state: 'active',
+      });
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reports wrong-project session mismatch without returning the session', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-mismatch-'));
     try {

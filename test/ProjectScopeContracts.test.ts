@@ -229,6 +229,35 @@ describe('ProjectScope multi-root contracts', () => {
     });
   });
 
+  it('resolves project-relative sourceRefs when the index has one source folder', () => {
+    const controlRoot = path.join('/workspace', 'AlembicWorkspace');
+    const identity = createCanonicalSourceIdentity({
+      folderDisplayName: 'BiliDili',
+      folderId: 'folder-bilidili',
+      folderPath: path.join(controlRoot, 'BiliDili'),
+      projectRoot: controlRoot,
+      projectScopeId: 'scope-bilidili',
+      sourcePath: 'Sources/Features/Home/Views/HomeCategoryView.swift',
+    });
+    const index = buildProjectScopeSourceRefIndex([identity]);
+
+    expect(
+      resolveProjectScopeSourceRef('Sources/Features/Home/Views/HomeCategoryView.swift', index)
+    ).toMatchObject({
+      identity,
+      reason: 'relative-path',
+      status: 'resolved',
+    });
+    expect(
+      normalizeProjectScopeSourceRef('Sources/Features/Home/Views/HomeCategoryView.swift', index)
+    ).toMatchObject({
+      folderId: 'folder-bilidili',
+      normalizedRef: 'BiliDili/Sources/Features/Home/Views/HomeCategoryView.swift',
+      reason: 'relative-path',
+      status: 'active',
+    });
+  });
+
   it('normalizes only repo-qualified ProjectScope sourceRefs', () => {
     const controlRoot = path.join('/workspace', 'AlembicWorkspace');
     const coreIndex = createCanonicalSourceIdentity({

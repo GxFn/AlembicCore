@@ -86,6 +86,7 @@ export interface BootstrapSessionLookupOptions {
 export type BootstrapSessionPublicState =
   | 'active'
   | 'bootstrap_in_progress'
+  | 'complete'
   | 'expired'
   | 'session_not_found'
   | 'session_project_mismatch';
@@ -248,6 +249,10 @@ export class BootstrapSession {
     return this.completedDimensions.size >= this.dimensions.length;
   }
 
+  get isBlockingLease() {
+    return !this.isExpired && !this.isComplete;
+  }
+
   getProgress() {
     return {
       completed: this.completedDimensions.size,
@@ -398,7 +403,7 @@ export class BootstrapSession {
       projectRoot: this.projectRoot,
       startedAt: this.startedAt,
       expiresAt: this.expiresAt,
-      state: this.isExpired ? 'expired' : 'active',
+      state: this.isExpired ? 'expired' : this.isComplete ? 'complete' : 'active',
       progress: this.getProgress(),
       dimensionCount: this.dimensions.length,
     };
@@ -442,7 +447,7 @@ export class BootstrapSessionManager {
     this.#loadFromDisk();
     const projectKey = sessionProjectKey(opts.projectRoot);
     const existing = this.#sessionsByProject.get(projectKey);
-    if (existing?.isExpired) {
+    if (existing && !existing.isBlockingLease) {
       this.#sessionsByProject.delete(projectKey);
     } else if (existing && !options.replace) {
       throw new BootstrapSessionLeaseError(existing);
@@ -527,6 +532,15 @@ export class BootstrapSessionManager {
           problemClass: 'request-problem',
         };
       }
+      if (session.isComplete) {
+        return {
+          state: 'complete',
+          reason: 'session_complete',
+          sessionId: session.id,
+          projectRoot: session.projectRoot,
+          expiresAt: session.expiresAt,
+        };
+      }
       return {
         state: 'active',
         reason: 'session_active',
@@ -538,7 +552,7 @@ export class BootstrapSessionManager {
 
     if (options.projectRoot) {
       const activeForProject = this.#sessionsByProject.get(sessionProjectKey(options.projectRoot));
-      if (activeForProject && !activeForProject.isExpired) {
+      if (activeForProject?.isBlockingLease) {
         return new BootstrapSessionLeaseError(activeForProject).toJSON();
       }
     }

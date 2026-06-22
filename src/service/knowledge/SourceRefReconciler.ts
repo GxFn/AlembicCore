@@ -273,9 +273,13 @@ export class SourceRefReconciler {
   }
 
   #sourcePathExists(sourcePath: string): boolean {
-    // ProjectScope 场景只接受 repo-qualified qualifiedPath 定位，避免裸相对路径跨仓库误解析。
-    const resolvedSource = this.#resolveSourcePath(sourcePath);
-    return resolvedSource.status === 'resolved' && fs.existsSync(resolvedSource.absolutePath);
+    for (const candidatePath of sourcePathFilesystemCandidates(sourcePath)) {
+      const resolvedSource = this.#resolveSourcePath(candidatePath);
+      if (resolvedSource.status === 'resolved' && fs.existsSync(resolvedSource.absolutePath)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   #updateExistingSourceRef(
@@ -544,4 +548,28 @@ export class SourceRefReconciler {
       status: 'resolved',
     };
   }
+}
+
+function sourcePathFilesystemCandidates(sourcePath: string): string[] {
+  const candidates: string[] = [];
+  const enqueue = (candidate: string): void => {
+    const trimmed = candidate.trim();
+    if (trimmed.length > 0 && !candidates.includes(trimmed)) {
+      candidates.push(trimmed);
+    }
+  };
+
+  enqueue(sourcePath);
+  enqueue(stripSourceLocationSuffix(sourcePath));
+  enqueue(stripSourceFragmentSuffix(sourcePath));
+  enqueue(stripSourceFragmentSuffix(stripSourceLocationSuffix(sourcePath)));
+  return candidates;
+}
+
+function stripSourceLocationSuffix(sourcePath: string): string {
+  return sourcePath.replace(/:\d+(?:-\d+)?(?::\d+)?$/, '');
+}
+
+function stripSourceFragmentSuffix(sourcePath: string): string {
+  return sourcePath.replace(/#L\d+(?:-L?\d+)?$/i, '');
 }
