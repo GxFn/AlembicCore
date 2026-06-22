@@ -449,7 +449,7 @@ describe('dimension planning dynamic signals', () => {
     expect(resolution.missingDimensionIds).toEqual(['missing-plan-dimension']);
   });
 
-  it('builds planning aids with ordered dimensions, tool steps, scale, and constraints', () => {
+  it('builds planning aids as factual dimension signals without recommendation order', () => {
     const architecture = analyzeArchitectureIntelligence({
       projectContext: bilidiliProjectContext(),
       graph: {
@@ -462,7 +462,7 @@ describe('dimension planning dynamic signals', () => {
       dynamicSignals: dynamicSignals(),
     });
 
-    expect(aids.dimensionOrder).toEqual(
+    expect(aids.selection.activeDimensions.map((dimension) => dimension.id)).toEqual(
       expect.arrayContaining(['networking-api', 'ui-interaction', 'testing-quality'])
     );
     expect(aids.informationGatheringSteps.map((step) => step.tool)).toEqual(
@@ -473,10 +473,15 @@ describe('dimension planning dynamic signals', () => {
         'recipe-context.coverage',
       ])
     );
-    expect(aids.scaleDecision.scale).toBe('medium');
     expect(aids.crossDimensionConstraints.map((constraint) => constraint.id)).toContain(
       'coverage-before-production'
     );
+    expect(aids.crossDimensionConstraints.map((constraint) => constraint.severity)).not.toContain(
+      'recommended'
+    );
+    expect(aids).not.toHaveProperty('recommendedDimensions');
+    expect(aids).not.toHaveProperty('dimensionOrder');
+    expect(aids).not.toHaveProperty('subsetHints');
     expect(aids.unavailableSignals).toEqual([]);
   });
 

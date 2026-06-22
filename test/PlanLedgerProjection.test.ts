@@ -69,7 +69,6 @@ describe('Plan ledger projection', () => {
       planningAids: buildDimensionPlanningAids({
         primaryLanguage: 'swift',
         detectedFrameworks: ['SwiftUI'],
-        maxRecommendedDimensions: 2,
       }),
       hints: { focusModules: ['Sources/BiliDiliApp'], maxBudget: 4 },
     });
@@ -249,7 +248,6 @@ describe('Plan ledger projection', () => {
     const planningAids = buildDimensionPlanningAids({
       primaryLanguage: 'typescript',
       detectedFrameworks: ['react'],
-      maxRecommendedDimensions: 3,
     });
     const signature = computeProjectContextSignature({
       projectRoot: tmpDir,
@@ -280,6 +278,12 @@ describe('Plan ledger projection', () => {
     });
     expect(draftPackage.planningBrief).not.toHaveProperty('defaultOrder');
     expect(draftPackage.sourceReports.planningAids).toBe(planningAids);
+    expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('recommendedDimensions');
+    expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('dimensionOrder');
+    expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('subsetHints');
+    expect(JSON.stringify(draftPackage)).not.toMatch(
+      /recommendedDimensions|dimensionOrder|maxRecommendedDimensions|subsetHints|defaultOrder/
+    );
   });
 
   it('requires a complete Agent-authored Plan payload before confirm', async () => {

@@ -2,7 +2,6 @@ import { DIMENSION_REGISTRY, type UnifiedDimension } from '../../../domain/dimen
 import type {
   ArchitectureDomain,
   ArchitectureEvidence,
-  ArchitectureIntelligenceReport,
   ComplexityReport,
   DomainSignal,
   DomainSignalReport,
@@ -25,8 +24,6 @@ import type {
   ModuleDeltaSnapshot,
   ModuleDimensionCoverage,
   ModuleRenameCandidate,
-  ProjectScaleDecision,
-  RecommendedDimension,
   SignalAwareDimensionSelectionInput,
   SignalAwareDimensionSelectionResult,
 } from './contracts.js';
@@ -123,37 +120,23 @@ export function buildDimensionPlanningAids(
   input: DimensionPlanningAidInput
 ): DimensionPlanningAidReport {
   const selection = resolveSignalAwareActiveDimensions(input);
-  const architecture = input.architectureIntelligence;
-  const complexity = architecture?.complexity ?? input.complexity;
   const dynamicSignals = input.dynamicSignals ?? emptyDynamicSignalReport();
-  const scaleDecision = decideProjectScale(complexity);
-  const recommendations = selection.activeDimensions.map((dimension) =>
-    recommendDimension({
-      dimension,
-      decision: selection.decisions.find((candidate) => candidate.dimension.id === dimension.id),
-      architecture,
-      dynamicSignals,
-    })
-  );
-  const recommendedDimensions = recommendations
-    .sort(compareRecommendations)
-    .slice(0, input.maxRecommendedDimensions ?? recommendations.length);
   const informationGatheringSteps = mergeInformationSteps(
-    recommendedDimensions.flatMap((recommendation) => recommendation.informationSteps)
+    selection.activeDimensions.flatMap((dimension) =>
+      stepsForDimension(
+        dimension,
+        dynamicSignals.planSignals.filter((signal) => signalMatchesDimension(signal, dimension))
+      )
+    )
   );
   const crossDimensionConstraints = buildCrossDimensionConstraints(selection, dynamicSignals);
-  const subsetHints = buildSubsetHints(scaleDecision, recommendedDimensions, dynamicSignals);
   const lowConfidenceSignals = selection.lowConfidenceDimensions.map(
     (decision) => `${decision.dimension.id}:${decision.detail}`
   );
 
   return Object.freeze({
     selection,
-    recommendedDimensions: Object.freeze(recommendedDimensions),
-    dimensionOrder: Object.freeze(recommendedDimensions.map((item) => item.dimension.id)),
     informationGatheringSteps: Object.freeze(informationGatheringSteps),
-    scaleDecision,
-    subsetHints: Object.freeze(subsetHints),
     crossDimensionConstraints: Object.freeze(crossDimensionConstraints),
     lowConfidenceSignals: Object.freeze(lowConfidenceSignals),
     unavailableSignals: selection.unavailableSignals,
@@ -633,46 +616,6 @@ function buildDecision(
   });
 }
 
-function recommendDimension({
-  dimension,
-  decision,
-  architecture,
-  dynamicSignals,
-}: {
-  dimension: UnifiedDimension;
-  decision: DimensionSelectionDecision | undefined;
-  architecture: ArchitectureIntelligenceReport | undefined;
-  dynamicSignals: DynamicSignalReport;
-}): RecommendedDimension {
-  const dynamicMatches = dynamicSignals.planSignals.filter((signal) =>
-    signalMatchesDimension(signal, dimension)
-  );
-  const healthGaps =
-    architecture?.supplements.healthGaps.filter((gap) =>
-      signalIdMatchesDimension(gap.dimension, dimension)
-    ) ?? [];
-  const score =
-    dimension.weight * 20 +
-    (6 - (dimension.tierHint ?? 5)) * 6 +
-    (decision?.confidence ?? 0) * 50 +
-    dynamicMatches.reduce((sum, signal) => sum + signal.priority / 8, 0) +
-    healthGaps.length * 18;
-  const reasons = uniqueSorted([
-    ...(decision?.reasons ?? []),
-    ...dynamicMatches.map((signal) => signal.kind),
-    ...healthGaps.map((gap) => `health-gap:${gap.status}`),
-  ]);
-  return Object.freeze({
-    dimension,
-    priorityScore: round(score),
-    reasons: Object.freeze(reasons),
-    evidence: Object.freeze(
-      sortEvidence([...(decision?.evidence ?? []), ...healthGaps.flatMap((gap) => gap.evidence)])
-    ),
-    informationSteps: Object.freeze(stepsForDimension(dimension, dynamicMatches)),
-  });
-}
-
 function stepsForDimension(
   dimension: UnifiedDimension,
   dynamicMatches: readonly DynamicPlanningSignal[]
@@ -745,51 +688,6 @@ function stepsForDimension(
   return steps.sort((a, b) => b.priority - a.priority || a.stepId.localeCompare(b.stepId));
 }
 
-function decideProjectScale(complexity: ComplexityReport | undefined): ProjectScaleDecision {
-  const project = complexity?.project;
-  if (!project) {
-    return Object.freeze({
-      scale: 'small',
-      budgetLevel: 'focused',
-      maxDimensionsPerDraft: 6,
-      moduleBatchSize: 2,
-      reasons: Object.freeze(['complexity report unavailable; start with a focused draft']),
-    });
-  }
-  if (project.moduleCount >= 30 || project.lineCount >= 50000 || project.complexityScore >= 14) {
-    return scaleDecision('very-large', 'expanded', 8, 4, project);
-  }
-  if (project.moduleCount >= 12 || project.lineCount >= 12000 || project.complexityScore >= 10) {
-    return scaleDecision('large', 'expanded', 10, 4, project);
-  }
-  if (project.moduleCount >= 5 || project.lineCount >= 3000 || project.complexityScore >= 5) {
-    return scaleDecision('medium', 'standard', 12, 3, project);
-  }
-  return scaleDecision('small', 'focused', 6, 2, project);
-}
-
-function scaleDecision(
-  scale: ProjectScaleDecision['scale'],
-  budgetLevel: ProjectScaleDecision['budgetLevel'],
-  maxDimensionsPerDraft: number,
-  moduleBatchSize: number,
-  project: ComplexityReport['project']
-): ProjectScaleDecision {
-  return Object.freeze({
-    scale,
-    budgetLevel,
-    maxDimensionsPerDraft,
-    moduleBatchSize,
-    reasons: Object.freeze([
-      `modules=${project.moduleCount}`,
-      `files=${project.fileCount}`,
-      `lines=${project.lineCount}`,
-      `complexity=${project.complexityScore}`,
-      `hotspots=${project.hotspotCount}`,
-    ]),
-  });
-}
-
 function buildCrossDimensionConstraints(
   selection: SignalAwareDimensionSelectionResult,
   dynamicSignals: DynamicSignalReport
@@ -800,7 +698,7 @@ function buildCrossDimensionConstraints(
     constraints.push({
       id: 'networking-needs-error-resilience',
       dimensions: ['networking-api', 'error-resilience'],
-      severity: active.has('error-resilience') ? 'recommended' : 'required',
+      severity: active.has('error-resilience') ? 'related' : 'required',
       reason:
         'network/API planning must check retry, timeout, failure mapping, and user-visible errors',
     });
@@ -809,7 +707,7 @@ function buildCrossDimensionConstraints(
     constraints.push({
       id: 'security-cross-check',
       dimensions: ['security-auth', 'networking-api', 'data-event-flow'],
-      severity: 'recommended',
+      severity: 'related',
       reason: 'auth/security signals should be checked against API and persistence data paths',
     });
   }
@@ -817,7 +715,7 @@ function buildCrossDimensionConstraints(
     constraints.push({
       id: 'ui-performance-source-slice',
       dimensions: ['ui-interaction', 'performance-optimization'],
-      severity: 'recommended',
+      severity: 'related',
       reason:
         'UI hotspot decisions need bounded source slices before performance recipes are planned',
     });
@@ -831,29 +729,6 @@ function buildCrossDimensionConstraints(
     });
   }
   return constraints.sort((a, b) => a.id.localeCompare(b.id));
-}
-
-function buildSubsetHints(
-  scale: ProjectScaleDecision,
-  recommendations: readonly RecommendedDimension[],
-  dynamicSignals: DynamicSignalReport
-): string[] {
-  const hints = [
-    `${scale.scale} project: draft at most ${scale.maxDimensionsPerDraft} dimensions per pass`,
-    `batch modules in groups of ${scale.moduleBatchSize}`,
-  ];
-  const coverageDims = uniqueSorted(dynamicSignals.coverage.gaps.map((gap) => gap.dimensionId));
-  if (coverageDims.length > 0) {
-    hints.push(`prioritize coverage gaps: ${coverageDims.join(',')}`);
-  }
-  const hotspotModules = dynamicSignals.hotspotModuleIds;
-  if (hotspotModules.length > 0) {
-    hints.push(`inspect hotspot modules first: ${hotspotModules.join(',')}`);
-  }
-  if (recommendations.length > scale.maxDimensionsPerDraft) {
-    hints.push('split later Plan draft into multiple dimension subsets');
-  }
-  return hints;
 }
 
 function queryIdsForDimension(dimension: UnifiedDimension): readonly string[] {
@@ -1069,14 +944,6 @@ function isHealthyCoverageStatus(status: string | undefined): boolean {
     status === 'evolving' ||
     status === 'staging' ||
     status === 'unknown'
-  );
-}
-
-function compareRecommendations(a: RecommendedDimension, b: RecommendedDimension): number {
-  return (
-    b.priorityScore - a.priorityScore ||
-    (a.dimension.tierHint ?? 99) - (b.dimension.tierHint ?? 99) ||
-    a.dimension.id.localeCompare(b.dimension.id)
   );
 }
 

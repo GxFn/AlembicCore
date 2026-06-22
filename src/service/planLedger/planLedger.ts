@@ -148,7 +148,6 @@ export function buildPlanDraftInformationPackage(
         dimensions: step.dimensions,
         reason: step.reason,
       })),
-      scaleObservation: input.planningAids?.scaleDecision ?? null,
     },
     sourceReports: {
       planningAids: input.planningAids,

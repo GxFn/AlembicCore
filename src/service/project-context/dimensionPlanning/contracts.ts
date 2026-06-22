@@ -77,41 +77,20 @@ export interface DimensionInformationStep {
   priority: number;
 }
 
-export interface RecommendedDimension {
-  dimension: UnifiedDimension;
-  priorityScore: number;
-  reasons: readonly string[];
-  evidence: readonly ArchitectureEvidence[];
-  informationSteps: readonly DimensionInformationStep[];
-}
-
-export interface ProjectScaleDecision {
-  scale: ProjectPlanningScale;
-  budgetLevel: ProjectPlanningBudgetLevel;
-  maxDimensionsPerDraft: number;
-  moduleBatchSize: number;
-  reasons: readonly string[];
-}
-
 export interface CrossDimensionConstraint {
   id: string;
   dimensions: readonly string[];
-  severity: 'required' | 'recommended';
+  severity: 'required' | 'related';
   reason: string;
 }
 
 export interface DimensionPlanningAidInput extends SignalAwareDimensionSelectionInput {
   dynamicSignals?: DynamicSignalReport;
-  maxRecommendedDimensions?: number;
 }
 
 export interface DimensionPlanningAidReport {
   selection: SignalAwareDimensionSelectionResult;
-  recommendedDimensions: readonly RecommendedDimension[];
-  dimensionOrder: readonly string[];
   informationGatheringSteps: readonly DimensionInformationStep[];
-  scaleDecision: ProjectScaleDecision;
-  subsetHints: readonly string[];
   crossDimensionConstraints: readonly CrossDimensionConstraint[];
   lowConfidenceSignals: readonly string[];
   unavailableSignals: readonly string[];
