@@ -3,7 +3,6 @@ import {
   aggregateDynamicPlanningSignals,
   buildDimensionPlanningAids,
   queryPerModuleCoverage,
-  resolveActiveDimensions,
   resolvePlanDimensionDefinitions,
   resolveSignalAwareActiveDimensions,
 } from '../src/dimensions.js';
@@ -403,10 +402,10 @@ describe('dimension planning dynamic signals', () => {
         projectContext: plainSwiftProjectContext(),
       }),
     });
-    const legacySwiftIds = resolveActiveDimensions('swift').map((dimension) => dimension.id);
+    const signalAwareIds = signalAware.activeDimensions.map((dimension) => dimension.id);
+    const plainSignalAwareIds = plainSignalAware.activeDimensions.map((dimension) => dimension.id);
 
-    expect(legacySwiftIds).toEqual(expect.arrayContaining(['networking-api', 'ui-interaction']));
-    expect(signalAware.activeDimensions.map((dimension) => dimension.id)).toEqual(
+    expect(signalAwareIds).toEqual(
       expect.arrayContaining([
         'networking-api',
         'ui-interaction',
@@ -419,7 +418,7 @@ describe('dimension planning dynamic signals', () => {
       signalAware.decisions.find((decision) => decision.dimension.id === 'networking-api')?.evidence
         .length
     ).toBeGreaterThan(0);
-    expect(plainSignalAware.activeDimensions.map((dimension) => dimension.id)).not.toEqual(
+    expect(plainSignalAwareIds).not.toEqual(
       expect.arrayContaining([
         'networking-api',
         'ui-interaction',
@@ -427,13 +426,19 @@ describe('dimension planning dynamic signals', () => {
         'swiftui-patterns',
       ])
     );
-    expect(plainSignalAware.activeDimensions.map((dimension) => dimension.id)).toContain(
-      'swift-objc-idiom'
+    expect(plainSignalAwareIds).toEqual(
+      expect.arrayContaining(['architecture', 'swift-objc-idiom'])
     );
+    expect(plainSignalAwareIds).not.toEqual(
+      expect.arrayContaining(['coding-standards', 'design-patterns', 'agent-guidelines'])
+    );
+    expect(
+      plainSignalAware.decisions.find((decision) => decision.dimension.id === 'coding-standards')
+        ?.kind
+    ).not.toBe('active');
   });
 
   it('resolves confirmed Plan dimension ids without legacy language/framework recomputation', () => {
-    const legacySwiftIds = resolveActiveDimensions('swift').map((dimension) => dimension.id);
     const resolution = resolvePlanDimensionDefinitions([
       'swiftui-patterns',
       'networking-api',
@@ -441,7 +446,6 @@ describe('dimension planning dynamic signals', () => {
       'missing-plan-dimension',
     ]);
 
-    expect(legacySwiftIds).not.toContain('swiftui-patterns');
     expect(resolution.dimensions.map((dimension) => dimension.id)).toEqual([
       'swiftui-patterns',
       'networking-api',

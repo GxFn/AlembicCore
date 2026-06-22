@@ -13,7 +13,6 @@ export {
   DIMENSION_REGISTRY,
   getDimension,
   getDimensionsByLayer,
-  resolveActiveDimensions,
   resolvePlanDimensionDefinitions,
 } from './DimensionRegistry.js';
 export {

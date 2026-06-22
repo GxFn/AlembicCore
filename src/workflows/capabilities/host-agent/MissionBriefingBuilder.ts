@@ -1071,7 +1071,7 @@ function summarizePanorama(
  * @param opts.depGraphData discoverer.getDependencyGraph() 结果
  * @param opts.guardAudit GuardCheckEngine.auditFiles() 结果
  * @param opts.targets allTargets 列表
- * @param opts.activeDimensions resolveActiveDimensions() 结果
+ * @param opts.activeDimensions signal-aware dimension selection result
  * @param opts.skills 已加载的 bootstrap skills
  * @param opts.session BootstrapSession 实例
  * @returns Mission Briefing 响应数据

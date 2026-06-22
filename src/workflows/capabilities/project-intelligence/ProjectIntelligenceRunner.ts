@@ -11,11 +11,17 @@
  *   Phase 2   → 依赖关系 → knowledge_edges
  *   Phase 2.1 → Module 实体写入 Entity Graph
  *   Phase 3   → Guard 规则审计
- *   Phase 4   → 维度条件化过滤 + Enhancement Pack + 语言画像
+ *   Phase 4   → signal-aware 维度选择 + Enhancement Pack + 语言画像
  */
 
 import { DimensionCopy } from '../../../domain/dimension/DimensionCopy.js';
 import type { SourceGraphRepositoryImpl } from '../../../repository/source-graph/SourceGraphRepository.js';
+import type {
+  ArchitectureDomain,
+  ArchitectureEvidence,
+  DomainSignalReport,
+} from '../../../service/project-context/architectureIntelligence/index.js';
+import { resolveSignalAwareActiveDimensions } from '../../../service/project-context/dimensionPlanning/index.js';
 import {
   type AllPhasesContext,
   type AllPhasesOptions,
@@ -45,11 +51,7 @@ import {
 } from '../../../service/source-graph/SourceGraphLifecycle.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import type { IncrementalPlan } from '../../../types/workflows.js';
-import {
-  type BaseDimension,
-  baseDimensions,
-  resolveActiveDimensions,
-} from '../planning/dimensions/BaseDimensions.js';
+import { type BaseDimension, toBaseDimension } from '../planning/dimensions/BaseDimensions.js';
 import { detectPrimaryLanguage } from '../presentation/LanguageExtensionBuilder.js';
 import { evaluateProjectAnalysisIncrementalPlan } from './ProjectIntelligenceIncrementalPlanner.js';
 import {
@@ -86,6 +88,175 @@ export {
   runPhase2_DependencyGraph,
   writeDependencyEdges,
 } from '../../../service/project-intelligence/AnalysisPhaseRunners.js';
+
+type ProjectAnalysisSignalPattern = {
+  label: string;
+  pattern: RegExp;
+  weight: number;
+};
+
+const PROJECT_ANALYSIS_DOMAIN_ORDER: readonly ArchitectureDomain[] = [
+  'auth',
+  'api',
+  'ui',
+  'database',
+  'concurrency',
+  'security',
+  'observability',
+  'error-handling',
+  'testing',
+];
+
+const PROJECT_ANALYSIS_SIGNAL_PATTERNS: Readonly<
+  Record<ArchitectureDomain, readonly ProjectAnalysisSignalPattern[]>
+> = {
+  auth: [
+    { label: 'auth', pattern: /\b(auth|oauth|login|session|credential|token)\b/i, weight: 0.65 },
+  ],
+  api: [
+    { label: 'api', pattern: /\b(api|endpoint|request|response|rest|graphql)\b/i, weight: 0.6 },
+    { label: 'http', pattern: /\b(fetch|axios|urlsession|httpclient|https?)\b/i, weight: 0.7 },
+  ],
+  ui: [
+    { label: 'ui', pattern: /\b(ui|view|screen|component|button|navigation)\b/i, weight: 0.58 },
+    { label: 'SwiftUI', pattern: /\bswiftui\b/i, weight: 0.75 },
+    { label: 'React', pattern: /\b(react|tsx|jsx)\b/i, weight: 0.72 },
+    { label: 'Vue', pattern: /\b(vue|nuxt)\b/i, weight: 0.72 },
+  ],
+  database: [
+    {
+      label: 'database',
+      pattern: /\b(database|sqlite|sql|repository|coredata|realm|prisma|typeorm|modelcontext)\b/i,
+      weight: 0.66,
+    },
+  ],
+  concurrency: [
+    { label: 'async', pattern: /\b(async|await|actor|task|promise|thread|queue)\b/i, weight: 0.64 },
+    { label: 'Combine', pattern: /\bcombine\b/i, weight: 0.72 },
+  ],
+  security: [
+    {
+      label: 'security',
+      pattern: /\b(security|permission|encrypt|decrypt|keychain|csrf|xss)\b/i,
+      weight: 0.66,
+    },
+  ],
+  observability: [
+    { label: 'logging', pattern: /\b(log|logger|trace|metric|telemetry|span)\b/i, weight: 0.6 },
+  ],
+  'error-handling': [
+    { label: 'error handling', pattern: /\b(error|exception|retry|timeout)\b/i, weight: 0.58 },
+  ],
+  testing: [
+    { label: 'test', pattern: /\b(test|spec|mock|fixture|assert|expect)\b/i, weight: 0.6 },
+    { label: 'XCTest', pattern: /\bxctest\b/i, weight: 0.76 },
+    { label: 'Vitest', pattern: /\bvitest\b/i, weight: 0.74 },
+    { label: 'Jest', pattern: /\bjest\b/i, weight: 0.74 },
+  ],
+};
+
+function buildProjectAnalysisDomainSignals({
+  allFiles,
+  allTargets,
+  detectedFrameworks,
+}: {
+  allFiles: BootstrapFileEntry[];
+  allTargets: TargetItem[];
+  detectedFrameworks: readonly string[];
+}): DomainSignalReport {
+  const buckets = new Map<ArchitectureDomain, ArchitectureEvidence[]>();
+
+  const addEvidence = (domain: ArchitectureDomain, evidence: ArchitectureEvidence) => {
+    const bucket = buckets.get(domain) ?? [];
+    if (
+      !bucket.some((item) => item.label === evidence.label && item.filePath === evidence.filePath)
+    ) {
+      bucket.push(evidence);
+      buckets.set(domain, bucket);
+    }
+  };
+
+  const inspectText = (
+    text: string,
+    sourceLabel: string,
+    sourceWeight: number,
+    filePath?: string
+  ) => {
+    for (const domain of PROJECT_ANALYSIS_DOMAIN_ORDER) {
+      for (const signal of PROJECT_ANALYSIS_SIGNAL_PATTERNS[domain]) {
+        if (signal.pattern.test(text)) {
+          addEvidence(domain, {
+            source: 'derived',
+            label: `${signal.label}: ${sourceLabel}`,
+            weight: Math.max(sourceWeight, signal.weight),
+            filePath,
+          });
+        }
+      }
+    }
+  };
+
+  for (const framework of detectedFrameworks) {
+    inspectText(framework, `framework ${framework}`, 0.72);
+  }
+  for (const target of allTargets) {
+    if (typeof target === 'string') {
+      inspectText(target, `target ${target}`, 0.5);
+      continue;
+    }
+    const targetText = [target.name, target.framework, target.type, target.packageName]
+      .filter(Boolean)
+      .join(' ');
+    inspectText(targetText, `target ${target.name}`, 0.55);
+  }
+  for (const file of allFiles) {
+    const filePath = file.relativePath || file.path;
+    inspectText(
+      `${file.name} ${file.relativePath} ${file.targetName}`,
+      `file ${filePath}`,
+      0.5,
+      filePath
+    );
+    inspectText(
+      file.content.slice(0, 25_000),
+      `content ${filePath}`,
+      file.isTest ? 0.76 : 0.64,
+      filePath
+    );
+    if (file.isTest) {
+      addEvidence('testing', {
+        source: 'derived',
+        label: `test file: ${filePath}`,
+        weight: 0.78,
+        filePath,
+      });
+    }
+  }
+
+  const domains = PROJECT_ANALYSIS_DOMAIN_ORDER.map((domain) => {
+    const evidence = (buckets.get(domain) ?? [])
+      .sort((a, b) => b.weight - a.weight || a.label.localeCompare(b.label))
+      .slice(0, 8);
+    const totalWeight = evidence.reduce((sum, item) => sum + item.weight, 0);
+    const confidence =
+      evidence.length > 0 ? Math.min(0.95, 0.3 + Math.min(0.65, totalWeight / 3)) : 0;
+    return {
+      domain,
+      present: evidence.length > 0,
+      confidence,
+      evidence,
+      moduleSignals: [],
+    };
+  });
+
+  return {
+    domains,
+    projectPresentDomains: domains
+      .filter((domain) => domain.present)
+      .map((domain) => domain.domain),
+    evidenceCount: domains.reduce((count, domain) => count + domain.evidence.length, 0),
+  };
+}
 
 // ── Phase 3: Guard 审计 ────────────────────────────────────
 
@@ -192,10 +363,10 @@ export async function runPhase3_GuardAudit(
   return audit;
 }
 
-// ── Phase 4: 维度解析 + Enhancement Pack ───────────────────
+// ── Phase 4: signal-aware 维度解析 + Enhancement Pack ───────
 
 /**
- * Phase 4: 维度条件化过滤 + Enhancement Pack 动态追加 + 语言画像 + Skill 增强
+ * Phase 4: signal-aware 维度选择 + Enhancement Pack 动态追加 + 语言画像 + Skill 增强
  *
  * @param params.astProjectSummary AST 结果（供 Enhancement Pack 模式检测）
  * @param params.guardEngine Guard 引擎（供 Enhancement Pack 规则注入）
@@ -219,8 +390,18 @@ export async function runPhase4_DimensionResolve(params: Phase4Params) {
     .map((t: TargetItem) => (typeof t === 'object' ? t.framework : null))
     .filter(Boolean) as string[];
 
-  // 条件维度过滤
-  const activeDimensions = resolveActiveDimensions(baseDimensions, primaryLang, detectedFrameworks);
+  const domainSignals = buildProjectAnalysisDomainSignals({
+    allFiles,
+    allTargets,
+    detectedFrameworks,
+  });
+  const signalAwareSelection = resolveSignalAwareActiveDimensions({
+    primaryLanguage: primaryLang,
+    detectedFrameworks,
+    domainSignals,
+  });
+  const activeDimensions = signalAwareSelection.activeDimensions.map(toBaseDimension);
+  const selectedBaseDimensionCount = activeDimensions.length;
 
   // Enhancement Pack 动态追加
   const enhancementPackInfo: { id: string; displayName: string }[] = [];
@@ -267,7 +448,7 @@ export async function runPhase4_DimensionResolve(params: Phase4Params) {
     if (matchedPacks.length > 0) {
       logger.info(
         `[Bootstrap] Enhancement packs: ${matchedPacks.map((p) => p.id).join(', ')} → ` +
-          `+${activeDimensions.length - baseDimensions.length} dims, ${enhancementGuardRules.length} guard rules, ${enhancementPatterns.length} patterns`
+          `+${activeDimensions.length - selectedBaseDimensionCount} dims, ${enhancementGuardRules.length} guard rules, ${enhancementPatterns.length} patterns`
       );
     }
   } catch (enhErr: unknown) {

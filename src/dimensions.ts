@@ -13,7 +13,6 @@ export {
   getDimensionsByLayer,
   LANGUAGE_DIM_IDS,
   PRE_SUBMIT_CHECKLIST,
-  resolveActiveDimensions,
   resolvePlanDimensionDefinitions,
   sopToCompactText,
   UNIVERSAL_DIM_IDS,

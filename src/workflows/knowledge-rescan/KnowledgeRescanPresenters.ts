@@ -4,7 +4,6 @@ import type {
   InternalRescanGapPlan,
   RelevanceAuditSummary,
 } from '../capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
-import { summarizePanorama as summarizeProjectPanorama } from '../capabilities/presentation/PanoramaSummaryPresenter.js';
 import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult, RecipeSnapshot } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
@@ -167,7 +166,7 @@ export function presentInternalKnowledgeRescanResponse({
           edgesCreated: snapshot.callGraph.edgesCreated || 0,
         }
       : null,
-    panorama: snapshot.panorama ? summarizeProjectPanorama(snapshot.panorama) : null,
+    panorama: null,
     bootstrapSession: bootstrapSession ? bootstrapSession.toJSON() : null,
     sessionId,
     asyncFill: executionDimensionCount > 0,

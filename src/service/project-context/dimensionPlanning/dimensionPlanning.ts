@@ -33,12 +33,7 @@ const DEFAULT_DOMAIN_CONFIDENCE_THRESHOLD = 0.35;
 const DEFAULT_MODULE_RENAME_SIMILARITY_THRESHOLD = 0.9;
 const DEFAULT_MODULE_COVERAGE_TARGET = 2;
 
-const FOUNDATIONAL_DIMENSIONS = new Set([
-  'architecture',
-  'coding-standards',
-  'design-patterns',
-  'agent-guidelines',
-]);
+const MINIMAL_FOUNDATIONAL_DIMENSIONS = new Set(['architecture']);
 
 const DIMENSION_DOMAINS: Readonly<Record<string, readonly ArchitectureDomain[]>> = {
   'error-resilience': ['error-handling'],
@@ -433,7 +428,7 @@ function decideDimension({
     ...languageResult.reasons,
     ...frameworkResult.reasons,
   ];
-  if (FOUNDATIONAL_DIMENSIONS.has(dimension.id)) {
+  if (MINIMAL_FOUNDATIONAL_DIMENSIONS.has(dimension.id)) {
     return buildDecision(
       dimension,
       'active',
@@ -442,33 +437,6 @@ function decideDimension({
       [],
       frameworkResult.evidence,
       'foundational planning dimension'
-    );
-  }
-  if (dimension.layer === 'language') {
-    return buildDecision(
-      dimension,
-      'active',
-      ['language-match', ...baseReasons],
-      Math.max(0.6, frameworkResult.confidence),
-      [],
-      frameworkResult.evidence,
-      `language dimension for ${primaryLanguage}`
-    );
-  }
-  if (dimension.layer === 'framework') {
-    return buildDecision(
-      dimension,
-      'active',
-      [
-        frameworkResult.reasons.includes('framework-evidence')
-          ? 'framework-evidence'
-          : 'framework-match',
-        ...baseReasons,
-      ],
-      Math.max(0.62, frameworkResult.confidence),
-      mappedDomains(dimension.id),
-      frameworkResult.evidence,
-      `framework dimension ${dimension.id}`
     );
   }
   if (dimension.id === 'performance-optimization' && hasComplexitySignal(complexity)) {
@@ -484,40 +452,65 @@ function decideDimension({
   }
 
   const domains = mappedDomains(dimension.id);
-  if (!domainReport || domains.length === 0) {
+  if (domains.length > 0) {
+    if (!domainReport) {
+      return buildDecision(
+        dimension,
+        'unavailable',
+        ['domain-signal-missing', ...baseReasons],
+        0,
+        domains,
+        [],
+        'domain signal report is unavailable'
+      );
+    }
+    const domainSignals = domains
+      .map((domain) => signalFor(domainReport, domain))
+      .filter(isPresent);
+    const confidence = Math.max(0, ...domainSignals.map((signal) => signal.confidence));
+    const evidence = domainSignals.flatMap((signal) => signal.evidence);
+    if (domainSignals.some((signal) => signal.present && signal.confidence >= threshold)) {
+      return buildDecision(
+        dimension,
+        'active',
+        ['domain-signal', ...baseReasons],
+        confidence,
+        domains,
+        evidence,
+        `domain signal present: ${domains.join(',')}`
+      );
+    }
+    if (confidence > 0) {
+      return buildDecision(
+        dimension,
+        'low-confidence',
+        ['low-confidence-domain', ...baseReasons],
+        confidence,
+        domains,
+        evidence,
+        `domain evidence below threshold ${threshold}`
+      );
+    }
     return buildDecision(
       dimension,
-      'unavailable',
+      'skipped',
       ['domain-signal-missing', ...baseReasons],
       0,
       domains,
       [],
-      'domain signal report is unavailable'
+      `no matching domain signal: ${domains.join(',')}`
     );
   }
-  const domainSignals = domains.map((domain) => signalFor(domainReport, domain)).filter(isPresent);
-  const confidence = Math.max(0, ...domainSignals.map((signal) => signal.confidence));
-  const evidence = domainSignals.flatMap((signal) => signal.evidence);
-  if (domainSignals.some((signal) => signal.present && signal.confidence >= threshold)) {
+
+  if (dimension.layer === 'language') {
     return buildDecision(
       dimension,
       'active',
-      ['domain-signal', ...baseReasons],
-      confidence,
-      domains,
-      evidence,
-      `domain signal present: ${domains.join(',')}`
-    );
-  }
-  if (confidence > 0) {
-    return buildDecision(
-      dimension,
-      'low-confidence',
-      ['low-confidence-domain', ...baseReasons],
-      confidence,
-      domains,
-      evidence,
-      `domain evidence below threshold ${threshold}`
+      ['language-match', ...baseReasons],
+      Math.max(0.6, frameworkResult.confidence),
+      [],
+      frameworkResult.evidence,
+      `language dimension for ${primaryLanguage}`
     );
   }
   return buildDecision(
@@ -525,9 +518,9 @@ function decideDimension({
     'skipped',
     ['domain-signal-missing', ...baseReasons],
     0,
-    domains,
     [],
-    `no matching domain signal: ${domains.join(',') || 'none'}`
+    [],
+    'dimension requires explicit plan id, domain signal, or dynamic signal'
   );
 }
 

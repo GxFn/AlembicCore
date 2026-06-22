@@ -623,30 +623,6 @@ export function getDimensionsByLayer(
 }
 
 /**
- * 根据项目语言和框架过滤出活跃维度
- *
- * - Layer 1 (universal): 全部返回
- * - Layer 2 (language): 仅当项目语言匹配时返回
- * - Layer 3 (framework): 仅当项目语言+框架均匹配时返回
- */
-export function resolveActiveDimensions(
-  primaryLang: string,
-  detectedFrameworks: string[] = []
-): readonly UnifiedDimension[] {
-  return DIMENSION_REGISTRY.filter((dim) => {
-    if (!dim.conditions) {
-      return true; // Layer 1: 无条件 → 通用维度
-    }
-    const langMatch = !dim.conditions.languages || dim.conditions.languages.includes(primaryLang);
-    const fwMatch =
-      !dim.conditions.frameworks ||
-      dim.conditions.frameworks.some((f) => detectedFrameworks.includes(f));
-    // languages 必须匹配；frameworks 条件存在时也需匹配
-    return langMatch && (dim.conditions.frameworks ? fwMatch : true);
-  });
-}
-
-/**
  * 按已确认 Plan 的维度 ID 解析维度定义。
  *
  * 这是 Plan generation scope 的 canonical 路径：调用方已经拥有 Agent

@@ -10,7 +10,6 @@ import type {
 } from '../../types/ProjectSnapshot.js';
 import { buildInternalNextSteps } from '../capabilities/host-agent/MissionBriefingSupport.js';
 import { buildLanguageExtension as buildProjectLanguageExtension } from '../capabilities/presentation/LanguageExtensionBuilder.js';
-import { summarizePanorama as summarizeProjectPanorama } from '../capabilities/presentation/PanoramaSummaryPresenter.js';
 import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
@@ -199,7 +198,7 @@ export function presentInternalColdStartResponse({
         }
       : null,
     sourceGraph: presentSourceGraphLifecycle(snapshot),
-    panorama: snapshot.panorama ? summarizeProjectPanorama(snapshot.panorama) : null,
+    panorama: null,
     localPackageModules:
       snapshot.localPackageModules.length > 0 ? snapshot.localPackageModules : null,
     warnings: snapshot.warnings.length > 0 ? snapshot.warnings : undefined,
