@@ -72,7 +72,6 @@ export function buildColdStartWorkflowPlan({
     dependencyEdges: true,
     moduleEntities: true,
     guardViolations: true,
-    panorama: true,
   };
 
   return {

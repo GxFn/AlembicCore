@@ -102,15 +102,6 @@ export {
   typeScriptAstPlugin,
   tsxAstPlugin,
 };
-export { CouplingAnalyzer } from './service/panorama/CouplingAnalyzer.js';
-export type { ConfigLayer } from './service/panorama/LayerInferrer.js';
-export { LayerInferrer } from './service/panorama/LayerInferrer.js';
-export { ModuleDiscoverer } from './service/panorama/ModuleDiscoverer.js';
-export { PanoramaAggregator } from './service/panorama/PanoramaAggregator.js';
-export { PanoramaScanner } from './service/panorama/PanoramaScanner.js';
-export { PanoramaService } from './service/panorama/PanoramaService.js';
-export type { CyclicDependency, Edge } from './service/panorama/PanoramaTypes.js';
-export { type ModuleCandidate, RoleRefiner } from './service/panorama/RoleRefiner.js';
 export {
   default as LanguageService,
   LanguageService as LanguageServiceClass,

@@ -8,7 +8,7 @@
  *   - MD5 hash 差量检测避免无效重解析
  *   - 60s 最大频率保护（防 git checkout 等批量变更风暴）
  *   - 增量解析：单文件变更只影响对应模块
- *   - 通过 SignalBus 触发 PanoramaService 缓存失效
+ *   - 通过 SignalBus 发布 lifecycle 配置变更事件
  *   - 通过 RealtimeService 推送 Dashboard WebSocket 事件
  *
  * @module ConfigWatcher
@@ -366,7 +366,7 @@ export class ConfigWatcher {
       this.#lastFullRebuild = now;
     }
 
-    // 发射信号 → PanoramaService 缓存失效
+    // 发射 lifecycle 信号，供下游增量观察者处理配置变更。
     if (this.#signalBus) {
       this.#signalBus.send('lifecycle', 'ConfigWatcher', 1.0, {
         metadata: {

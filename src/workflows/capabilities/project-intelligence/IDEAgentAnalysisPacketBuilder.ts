@@ -1451,7 +1451,7 @@ function collectPanoramaHints(panorama: PanoramaResult | null): string[] {
   ];
 }
 
-// 兼容两类 Panorama 输入：ProjectSnapshot 归一化数组，以及 PanoramaService 原始 layers.levels / modules Map。
+// 兼容两类 legacy panorama 输入：ProjectSnapshot 归一化数组，以及旧 raw layers.levels / modules Map。
 function collectPanoramaLayerHints(panorama: PanoramaResult | null): string[] {
   const rawLayers = panorama?.layers as unknown;
   const layers = Array.isArray(rawLayers)

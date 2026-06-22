@@ -584,7 +584,6 @@ export class KnowledgeEdgeRepositoryImpl extends RepositoryBase<
 
   /**
    * 查询指定关系的边，过滤条件：from 侧是 module 或在指定项目的 code_entities 中存在
-   * (用于 CouplingAnalyzer 构建模块间依赖边)
    */
   async findEdgesFilteredByEntityExistence(
     relation: string,

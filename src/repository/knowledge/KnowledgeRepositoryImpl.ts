@@ -609,11 +609,11 @@ export class KnowledgeRepositoryImpl {
     return result.changes > 0;
   }
 
-  /* ─── Panorama 域查询 (Phase 5e) ─── */
+  /* ─── Recipe metadata queries ─── */
 
   /**
    * 获取活跃 Recipe 的元数据 (title, category, topicHint, kind)
-   * 用于 DimensionAnalyzer 维度分类分析
+   * 用于维度相关分析
    */
   async findRecipeMetadata(lifecycles: readonly string[]): Promise<
     Array<{
@@ -648,7 +648,7 @@ export class KnowledgeRepositoryImpl {
   }
 
   /**
-   * 按模块相关关键词搜索 Recipe (PanoramaService.#findModuleRecipes)
+   * 按模块相关关键词搜索 Recipe
    * @param lifecycles - 活跃生命周期
    * @param moduleName - 模块名
    * @param categories - 角色关联的分类列表
@@ -689,7 +689,7 @@ export class KnowledgeRepositoryImpl {
   }
 
   /**
-   * 统计 COUNTABLE_LIFECYCLES 范围内的知识条目数 (PanoramaAggregator.#getProjectRecipeCount)
+   * 统计 COUNTABLE_LIFECYCLES 范围内的知识条目数
    */
   async countByCountableLifecycles(): Promise<number> {
     const rows = this.#drizzle

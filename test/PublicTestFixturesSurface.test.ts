@@ -110,7 +110,6 @@ describe('public test-fixtures migration surface', () => {
       dependencyEdges: true,
       moduleEntities: true,
       guardViolations: true,
-      panorama: true,
       sourceGraph: true,
     });
     expect(resolveProjectAnalysisMaterialization(false)).toEqual({
@@ -119,13 +118,11 @@ describe('public test-fixtures migration surface', () => {
       dependencyEdges: false,
       moduleEntities: false,
       guardViolations: false,
-      panorama: false,
       sourceGraph: false,
     });
     expect(resolveProjectAnalysisMaterialization({ dependencyEdges: false })).toMatchObject({
       codeEntityGraph: true,
       dependencyEdges: false,
-      panorama: true,
     });
 
     const astProjectSummary = createAstSummaryWithCallSite();

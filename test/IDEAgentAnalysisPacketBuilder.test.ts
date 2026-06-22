@@ -474,7 +474,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
     expect(packet.structuralEvidenceRefs.length).toBeGreaterThan(0);
   });
 
-  it('handles raw PanoramaService shape with layers.levels, modules Map, and cycles', () => {
+  it('handles legacy raw panorama shape with layers.levels, modules Map, and cycles', () => {
     const packet = buildIDEAgentAnalysisPacketFromSnapshot(
       makeSnapshot({
         panoramaResult: {

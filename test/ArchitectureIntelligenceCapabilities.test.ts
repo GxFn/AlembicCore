@@ -468,72 +468,70 @@ describe('architecture intelligence capabilities', () => {
 
   it('does not infer domains from language alone', () => {
     const detector = new DomainSignalDetector();
-    const report = detector.detect({
-      projectContext: {
-        project: { projectRoot: '/fixture/plain-typescript' },
-        envelopes: [],
-        refs: [],
-        files: [{ filePath: 'src/main.ts', language: 'typescript', lineCount: 40 }],
-        warnings: [],
-        unavailable: [],
-        repo: {
-          repo: { id: 'plain', name: 'plain', root: '/fixture/plain-typescript' },
-          languages: [{ language: 'typescript', fileCount: 1 }],
-          buildSystems: [],
-          packageSystems: [],
-          targets: [],
-          localPackages: [],
-          sourceRoots: [{ path: 'src' }],
-          entrypoints: [],
-          commands: [],
-          topAreas: [{ path: 'src' }],
-          configFiles: [],
-          nextRefs: [],
-        },
-        map: {
-          repo: { id: 'plain', name: 'plain', root: '/fixture/plain-typescript' },
-          modules: [{ id: 'core', name: 'Core', ownedFileCount: 1 }],
-          layers: [],
-          dependencySummary: { edgeCount: 0, notes: [] },
-          cycles: [],
-          hotspots: [],
-          majorFlows: [],
-          externalDependencyHotspots: [],
-          nextRefs: [],
-        },
-        modules: [
-          moduleContext('core', 'Core', {
-            filePath: 'src/main.ts',
-            language: 'typescript',
-            lineCount: 40,
-          }),
-        ],
-        moduleLayers: [],
-        fileFlows: [],
-        fileSymbols: [],
-        sourceSlices: [],
-        anchorRanges: [],
+    const plainProjectContext: ProjectContextPresenterInput = {
+      project: { projectRoot: '/fixture/plain-typescript' },
+      envelopes: [],
+      refs: [],
+      files: [{ filePath: 'src/main.ts', language: 'typescript', lineCount: 40 }],
+      warnings: [],
+      unavailable: [],
+      repo: {
+        repo: { id: 'plain', name: 'plain', root: '/fixture/plain-typescript' },
+        languages: [{ language: 'typescript', fileCount: 1 }],
+        buildSystems: [],
+        packageSystems: [],
+        targets: [],
+        localPackages: [],
+        sourceRoots: [{ path: 'src' }],
+        entrypoints: [],
+        commands: [],
+        topAreas: [{ path: 'src' }],
+        configFiles: [],
+        nextRefs: [],
       },
+      map: {
+        repo: { id: 'plain', name: 'plain', root: '/fixture/plain-typescript' },
+        modules: [{ id: 'core', name: 'Core', ownedFileCount: 1 }],
+        layers: [],
+        dependencySummary: { edgeCount: 0, notes: [] },
+        cycles: [],
+        hotspots: [],
+        majorFlows: [],
+        externalDependencyHotspots: [],
+        nextRefs: [],
+      },
+      modules: [
+        moduleContext('core', 'Core', {
+          filePath: 'src/main.ts',
+          language: 'typescript',
+          lineCount: 40,
+        }),
+      ],
+      moduleLayers: [],
+      fileFlows: [],
+      fileSymbols: [],
+      sourceSlices: [],
+      anchorRanges: [],
+    };
+    const report = detector.detect({
+      projectContext: plainProjectContext,
       graph: {},
     });
 
     expect(report.projectPresentDomains).toEqual([]);
     expect(report.evidenceCount).toBe(0);
+    expect(
+      analyzeArchitectureIntelligence({
+        projectContext: plainProjectContext,
+        graph: {},
+      }).styles.primary
+    ).toBe('unknown');
   });
 
-  it('provides Panorama-free role, coupling, layer, health-gap, and call-flow supplements', () => {
+  it('retains only the Panorama-free supplement marker', () => {
     const supplements = new ProjectInformationSupplementAnalyzer().analyze(fixtureInput());
 
-    expect(supplements.panoramaServiceFree).toBe(true);
-    expect(supplements.roles.find((item) => item.moduleId === 'auth')?.refinedRole).toBe('auth');
-    expect(
-      supplements.coupling.metrics.find((item) => item.moduleId === 'api')?.fanOut
-    ).toBeGreaterThan(1);
-    expect(supplements.layers.levels.length).toBeGreaterThanOrEqual(3);
-    expect(supplements.healthGaps.map((gap) => gap.dimension)).toEqual(
-      expect.arrayContaining(['security', 'testing'])
-    );
-    expect(supplements.callFlow.topCalled.map((item) => item.id)).toContain('AuthTokenService');
+    expect(supplements).toEqual({ panoramaServiceFree: true });
 
     const source = readFileSync(
       new URL(
@@ -544,6 +542,9 @@ describe('architecture intelligence capabilities', () => {
     );
     expect(source).not.toContain('PanoramaService');
     expect(source).not.toContain('service/panorama');
+    expect(source).not.toContain('coupling:');
+    expect(source).not.toContain('roles:');
+    expect(source).not.toContain('callFlow:');
   });
 
   it('exposes architecture intelligence through the ProjectContext capabilities facade', () => {

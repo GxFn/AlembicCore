@@ -2,13 +2,10 @@
  * AnalysisPhaseRunners — 共享 Phase 1-2.1 项目分析阶段函数
  *
  * Extracted from workflows/capabilities/project-intelligence/
- * ProjectIntelligenceRunner.ts (Train A IC4): PanoramaScanner (service
- * layer) consumes these phase runners, and the old location forced a
- * service→workflows dependency inversion that lived as a blessed
- * layer-contract exception (CO2-PANORAMA-RUNNER-INVERSION). The phase
- * functions only depend on core/shared/types, so they belong below the
- * workflows layer; ProjectIntelligenceRunner re-exports them so the
- * public `@alembic/core/project-intelligence` surface is unchanged.
+ * ProjectIntelligenceRunner.ts (Train A IC4). The phase functions only depend
+ * on core/shared/types, so they belong below the workflows layer;
+ * ProjectIntelligenceRunner re-exports them so the public
+ * `@alembic/core/project-intelligence` surface is unchanged.
  *
  * Phase 概览:
  *   Phase 1   → 文件收集（DiscovererRegistry → 多语言项目类型检测）
@@ -252,7 +249,6 @@ export interface ProjectAnalysisMaterializationOptions {
   dependencyEdges: boolean;
   moduleEntities: boolean;
   guardViolations: boolean;
-  panorama: boolean;
 }
 
 export type ProjectAnalysisMaterializationInput =
@@ -266,7 +262,6 @@ export const DEFAULT_PROJECT_ANALYSIS_MATERIALIZATION: ProjectAnalysisMaterializ
   dependencyEdges: true,
   moduleEntities: true,
   guardViolations: true,
-  panorama: true,
 };
 
 export function resolveProjectAnalysisMaterialization(
@@ -280,7 +275,6 @@ export function resolveProjectAnalysisMaterialization(
       dependencyEdges: false,
       moduleEntities: false,
       guardViolations: false,
-      panorama: false,
     };
   }
 

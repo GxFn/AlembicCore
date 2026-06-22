@@ -131,7 +131,6 @@ describe('SourceGraphLifecycleService', () => {
           dependencyEdges: false,
           moduleEntities: false,
           guardViolations: false,
-          panorama: false,
         },
         sourceGraph: {
           repoId: 'fixture',

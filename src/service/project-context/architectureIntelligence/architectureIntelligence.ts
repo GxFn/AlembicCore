@@ -9,7 +9,7 @@ import {
   type RepoContext,
   type SymbolSummary,
 } from '../../../domain/project-context/index.js';
-import { LanguageProfiles, type ModuleRole } from '../../../shared/LanguageProfiles.js';
+import { LanguageProfiles } from '../../../shared/LanguageProfiles.js';
 import type {
   ArchitectureDomain,
   ArchitectureEvidence,
@@ -20,20 +20,12 @@ import type {
   ArchitectureKnowledgeEdgeSnapshot,
   ArchitectureStyle,
   ArchitectureStyleReport,
-  CallFlowAggregateReport,
   ComplexityReport,
-  CouplingAnalysisReport,
-  CouplingCycle,
-  CouplingEdge,
   DomainSignal,
   DomainSignalReport,
-  HealthGap,
-  LayerInferenceLevel,
-  LayerInferenceReport,
   ModuleComplexityMetric,
   ModuleDomainSignal,
   ProjectInformationSupplementReport,
-  RefinedModuleRole,
 } from './contracts.js';
 
 export type * from './contracts.js';
@@ -204,48 +196,6 @@ const CONFIG_KIND_PATTERNS: ReadonlyArray<{
   { pattern: /worker|queue|bull|celery|sidekiq/i, domains: ['concurrency'] },
 ];
 
-const ROLE_NAME_PATTERNS: ReadonlyArray<{ pattern: RegExp; role: ModuleRole; weight: number }> = [
-  { pattern: /auth|session|token/i, role: 'auth', weight: 0.8 },
-  { pattern: /ui|view|screen|component|page|widget/i, role: 'ui', weight: 0.75 },
-  { pattern: /api|network|http|client|server/i, role: 'networking', weight: 0.75 },
-  { pattern: /repository|storage|database|db|model|entity/i, role: 'storage', weight: 0.75 },
-  { pattern: /route|router|navigation/i, role: 'routing', weight: 0.7 },
-  { pattern: /test|spec|mock|fixture/i, role: 'test', weight: 0.8 },
-  { pattern: /service|manager|provider/i, role: 'service', weight: 0.55 },
-  { pattern: /core|base|shared|foundation/i, role: 'core', weight: 0.55 },
-  { pattern: /app|main|bootstrap|launch/i, role: 'app', weight: 0.55 },
-  { pattern: /util|helper|common/i, role: 'utility', weight: 0.5 },
-];
-
-const CONFIG_LAYER_TO_ROLE: Readonly<Record<string, ModuleRole>> = {
-  vendors: 'utility',
-  vendor: 'utility',
-  basics: 'core',
-  basic: 'core',
-  foundation: 'core',
-  core: 'core',
-  services: 'service',
-  service: 'service',
-  components: 'feature',
-  component: 'feature',
-  application: 'app',
-  app: 'app',
-  ui: 'ui',
-  networking: 'networking',
-  network: 'networking',
-  storage: 'storage',
-  model: 'model',
-  tests: 'test',
-  test: 'test',
-};
-
-const EDGE_WEIGHTS: Readonly<Record<string, number>> = {
-  depends_on: 0.5,
-  imports: 0.5,
-  calls: 1,
-  data_flow: 0.8,
-};
-
 interface ModuleFact {
   id: string;
   name: string;
@@ -271,9 +221,14 @@ interface SignalBucket {
 
 type SignalBuckets = Map<ArchitectureDomain, SignalBucket>;
 
-interface CouplingBuildResult {
-  report: CouplingAnalysisReport;
-  metricsByModule: Map<string, { fanIn: number; fanOut: number }>;
+interface ModuleEdgeMetrics {
+  fanIn: number;
+  fanOut: number;
+}
+
+interface ModuleEdgeMetricsReport {
+  edgeCount: number;
+  metricsByModule: Map<string, ModuleEdgeMetrics>;
 }
 
 export class DomainSignalDetector {
@@ -336,21 +291,10 @@ export class DomainSignalDetector {
 
 export class ProjectInformationSupplementAnalyzer {
   analyze(
-    input: ArchitectureIntelligenceInput,
-    domains?: DomainSignalReport
+    _input: ArchitectureIntelligenceInput,
+    _domains?: DomainSignalReport
   ): ProjectInformationSupplementReport {
-    const facts = normalizeFacts(input);
-    const effectiveDomains = domains ?? new DomainSignalDetector().detect(input);
-    const couplingBuild = buildCoupling(facts);
-    const roles = refineRoles(facts, effectiveDomains, couplingBuild.metricsByModule);
-    const layers = inferLayers(facts, couplingBuild.report);
-
     return {
-      roles,
-      coupling: couplingBuild.report,
-      layers,
-      healthGaps: detectHealthGaps(facts, roles),
-      callFlow: aggregateCallFlow(facts.graph),
       panoramaServiceFree: true,
     };
   }
@@ -360,27 +304,22 @@ export class ArchitectureStyleClassifier {
   classify(
     input: ArchitectureIntelligenceInput,
     domains?: DomainSignalReport,
-    supplements?: ProjectInformationSupplementReport
+    _supplements?: ProjectInformationSupplementReport
   ): ArchitectureStyleReport {
     const facts = normalizeFacts(input);
     const effectiveDomains = domains ?? new DomainSignalDetector().detect(input);
-    const effectiveSupplements =
-      supplements ?? new ProjectInformationSupplementAnalyzer().analyze(input, effectiveDomains);
     const styleBuckets = new Map<ArchitectureStyle, SignalBucket>();
     const addStyle = (style: ArchitectureStyle, label: string, weight: number) => {
       addStyleEvidence(styleBuckets, style, evidence('derived', label, weight));
     };
     const map = facts.presenter.map;
     const repo = facts.presenter.repo;
+    const edgeMetrics = collectModuleEdgeMetrics(facts);
     const moduleCount =
       map?.modules.length ?? facts.modules.length ?? facts.graph.modules?.length ?? 0;
-    const edgeCount =
-      map?.dependencySummary.edgeCount ?? effectiveSupplements.coupling.edges.length;
-    const cycleCount = Math.max(
-      map?.cycles.length ?? 0,
-      effectiveSupplements.coupling.cycles.length
-    );
-    const layerCount = Math.max(map?.layers.length ?? 0, effectiveSupplements.layers.levels.length);
+    const edgeCount = map?.dependencySummary.edgeCount ?? edgeMetrics.edgeCount;
+    const cycleCount = map?.cycles.length ?? 0;
+    const layerCount = map?.layers.length ?? 0;
     const density =
       moduleCount > 1 ? edgeCount / Math.max(1, moduleCount * Math.max(1, moduleCount - 1)) : 0;
 
@@ -461,13 +400,13 @@ export class ArchitectureStyleClassifier {
     if (layerCount >= 2 && cycleCount === 0) {
       addStyle('layered', `layers:${layerCount}:acyclic`, 0.55);
     }
-    if (moduleCount <= 2 && moduleCount > 0) {
+    if (moduleCount <= 2 && moduleCount > 0 && edgeCount > 0) {
       addStyle('monolith', `small-module-count:${moduleCount}`, 0.45);
     }
     if (cycleCount > 0 || density >= 0.45) {
       addStyle(
         'monolith',
-        `high-coupling:density=${density.toFixed(2)} cycles=${cycleCount}`,
+        `dense-dependency-signals:density=${density.toFixed(2)} cycles=${cycleCount}`,
         0.45
       );
     }
@@ -488,7 +427,8 @@ export class ArchitectureStyleClassifier {
         /plugin|extension/i.test(`${module.name} ${module.role ?? ''}`)
       ) ||
       (moduleCount <= 3 &&
-        Math.max(...effectiveSupplements.coupling.metrics.map((m) => m.fanIn), 0) >= 3)
+        Math.max(...[...edgeMetrics.metricsByModule.values()].map((metric) => metric.fanIn), 0) >=
+          3)
     ) {
       addStyle('plugin', 'plugin-module-or-core-fanin', 0.45);
     }
@@ -496,19 +436,18 @@ export class ArchitectureStyleClassifier {
       addStyle('library', 'package-system-without-runtime-entrypoint', 0.35);
     }
 
-    const styles = (
-      [
-        'monolith',
-        'layered',
-        'microservices',
-        'event-driven',
-        'cli',
-        'library',
-        'plugin',
-        'frontend',
-        'backend',
-      ] as const
-    ).map((style) => {
+    const knownStyleIds = [
+      'monolith',
+      'layered',
+      'microservices',
+      'event-driven',
+      'cli',
+      'library',
+      'plugin',
+      'frontend',
+      'backend',
+    ] as const;
+    const styles = knownStyleIds.map((style) => {
       const bucket = styleBuckets.get(style) ?? { score: 0, evidence: [] };
       return {
         style,
@@ -517,14 +456,19 @@ export class ArchitectureStyleClassifier {
         evidence: sortEvidence(bucket.evidence),
       };
     });
-    const primary =
-      [...styles].sort((a, b) => b.confidence - a.confidence)[0] ??
-      ({ style: 'monolith', confidence: 0 } as const);
+    const presentStyles = styles.filter((style) => style.present);
+    const primary = [...presentStyles].sort((a, b) => b.confidence - a.confidence)[0];
+    const unknown = {
+      style: 'unknown' as const,
+      present: primary === undefined,
+      confidence: 0,
+      evidence: [],
+    };
 
     return {
-      primary: primary.style,
-      confidence: primary.confidence,
-      styles,
+      primary: primary?.style ?? 'unknown',
+      confidence: primary?.confidence ?? 0,
+      styles: [unknown, ...styles],
     };
   }
 }
@@ -532,18 +476,11 @@ export class ArchitectureStyleClassifier {
 export class ComplexityAnalyzer {
   analyze(
     input: ArchitectureIntelligenceInput,
-    supplements?: ProjectInformationSupplementReport
+    _supplements?: ProjectInformationSupplementReport
   ): ComplexityReport {
     const facts = normalizeFacts(input);
-    const effectiveSupplements =
-      supplements ?? new ProjectInformationSupplementAnalyzer().analyze(input);
-    const couplingByModule = new Map(
-      effectiveSupplements.coupling.metrics.map((metric) => [
-        metric.moduleId,
-        { fanIn: metric.fanIn, fanOut: metric.fanOut },
-      ])
-    );
-    const cycleCounts = countCyclesByModule(effectiveSupplements.coupling.cycles);
+    const edgeMetrics = collectModuleEdgeMetrics(facts);
+    const cycleCounts = new Map<string, number>();
     const hotspotScores = collectHotspotScores(facts.presenter.map);
     const moduleMetrics = facts.modules.map((module): ModuleComplexityMetric => {
       const fileCount =
@@ -552,7 +489,7 @@ export class ComplexityAnalyzer {
           .length ||
         0;
       const lineCount = sumModuleLines(facts.presenter, module);
-      const fan = couplingByModule.get(module.id) ?? { fanIn: 0, fanOut: 0 };
+      const fan = edgeMetrics.metricsByModule.get(module.id) ?? { fanIn: 0, fanOut: 0 };
       const cycleCount = cycleCounts.get(module.id) ?? 0;
       const hotspotScore = hotspotScores.get(module.id) ?? hotspotScores.get(module.name) ?? 0;
       const complexityScore =
@@ -592,12 +529,8 @@ export class ComplexityAnalyzer {
     ]).size;
     const lineCount = facts.presenter.files.reduce((sum, file) => sum + (file.lineCount ?? 0), 0);
     const dependencyEdgeCount =
-      facts.presenter.map?.dependencySummary.edgeCount ??
-      effectiveSupplements.coupling.edges.length;
-    const cycleCount = Math.max(
-      facts.presenter.map?.cycles.length ?? 0,
-      effectiveSupplements.coupling.cycles.length
-    );
+      facts.presenter.map?.dependencySummary.edgeCount ?? edgeMetrics.edgeCount;
+    const cycleCount = facts.presenter.map?.cycles.length ?? 0;
     const hotspotCount = Math.max(
       facts.presenter.map?.hotspots.length ?? 0,
       moduleMetrics.filter((metric) => metric.severity === 'high').length
@@ -952,371 +885,6 @@ function domainsFromText(text: string): ArchitectureDomain[] {
   return result;
 }
 
-function refineRoles(
-  facts: NormalizedFacts,
-  domains: DomainSignalReport,
-  couplingByModule: Map<string, { fanIn: number; fanOut: number }>
-): RefinedModuleRole[] {
-  const moduleDomainMap = new Map<string, ArchitectureDomain[]>();
-  for (const signal of domains.domains) {
-    for (const moduleSignal of signal.moduleSignals) {
-      if (!moduleSignal.present) {
-        continue;
-      }
-      const list = getOrCreate(moduleDomainMap, moduleSignal.moduleId, () => []);
-      list.push(signal.domain);
-    }
-  }
-
-  return facts.modules.map((module): RefinedModuleRole => {
-    const scores = new Map<string, { score: number; evidence: ArchitectureEvidence[] }>();
-    const push = (role: string, score: number, item: ArchitectureEvidence) => {
-      const bucket = getOrCreate(scores, role, () => ({ score: 0, evidence: [] }));
-      bucket.score += score;
-      bucket.evidence.push(item);
-    };
-
-    if (module.role) {
-      push(
-        module.role,
-        module.roleConfidence ?? 0.55,
-        evidence('project-context-map', `module-role:${module.role}`, 0.55, {
-          moduleId: module.id,
-          ref: module.ref,
-        })
-      );
-    }
-    if (module.configLayer) {
-      const mapped = CONFIG_LAYER_TO_ROLE[module.configLayer.toLowerCase()];
-      if (mapped) {
-        push(
-          mapped,
-          0.75,
-          evidence('project-context-config', `config-layer:${module.configLayer}`, 0.75, {
-            moduleId: module.id,
-            ref: module.ref,
-          })
-        );
-      }
-    }
-    for (const pattern of ROLE_NAME_PATTERNS) {
-      if (pattern.pattern.test(module.name)) {
-        push(
-          pattern.role,
-          pattern.weight,
-          evidence('derived', `module-name:${module.name}`, pattern.weight, {
-            moduleId: module.id,
-            ref: module.ref,
-          })
-        );
-      }
-    }
-    for (const domain of moduleDomainMap.get(module.id) ?? []) {
-      const role = roleFromDomain(domain);
-      if (role) {
-        push(
-          role,
-          0.45,
-          evidence('derived', `domain-signal:${domain}`, 0.45, {
-            moduleId: module.id,
-            ref: module.ref,
-          })
-        );
-      }
-    }
-    const fan = couplingByModule.get(module.id);
-    if (fan && fan.fanIn > fan.fanOut + 1) {
-      push(
-        'core',
-        0.35,
-        evidence('shared-graph-edge', `fan-in:${fan.fanIn}`, 0.35, { moduleId: module.id })
-      );
-    } else if (fan && fan.fanOut > fan.fanIn + 1) {
-      push(
-        'service',
-        0.25,
-        evidence('shared-graph-edge', `fan-out:${fan.fanOut}`, 0.25, { moduleId: module.id })
-      );
-    }
-
-    const sorted = [...scores.entries()]
-      .map(([role, bucket]) => ({
-        role,
-        score: round(bucket.score),
-        evidence: sortEvidence(bucket.evidence),
-      }))
-      .sort((a, b) => b.score - a.score);
-    const top = sorted[0];
-    const second = sorted[1];
-    const confidence = top ? clampConfidence(top.score) : 0;
-    const resolution = !top
-      ? 'fallback'
-      : second && top.score - second.score < 0.15
-        ? 'uncertain'
-        : confidence >= 0.4
-          ? 'clear'
-          : 'fallback';
-    return {
-      moduleId: module.id,
-      moduleName: module.name,
-      refinedRole: top?.role ?? module.role ?? 'feature',
-      confidence,
-      resolution,
-      evidence: top?.evidence ?? [],
-      alternatives: sorted.slice(1, 4).map((item) => ({ role: item.role, score: item.score })),
-    };
-  });
-}
-
-function roleFromDomain(domain: ArchitectureDomain): ModuleRole | null {
-  switch (domain) {
-    case 'auth':
-      return 'auth';
-    case 'api':
-      return 'networking';
-    case 'ui':
-      return 'ui';
-    case 'database':
-      return 'storage';
-    case 'testing':
-      return 'test';
-    case 'concurrency':
-    case 'security':
-    case 'observability':
-    case 'error-handling':
-      return 'service';
-  }
-}
-
-function buildCoupling(facts: NormalizedFacts): CouplingBuildResult {
-  const edges = new Map<string, CouplingEdge>();
-  const add = (
-    from: string | undefined,
-    to: string | undefined,
-    relation: string,
-    weight: number,
-    item: ArchitectureEvidence
-  ) => {
-    if (!from || !to || from === to) {
-      return;
-    }
-    const key = `${from}\u0000${to}\u0000${relation}`;
-    const existing = edges.get(key);
-    if (existing) {
-      existing.weight += weight;
-      existing.evidence.push(item);
-      return;
-    }
-    edges.set(key, { from, to, relation, weight, evidence: [item] });
-  };
-
-  for (const edge of facts.graph.edges ?? []) {
-    const fromModule = resolveGraphEndpointModule(facts, edge.fromId, edge.fromType);
-    const toModule = resolveGraphEndpointModule(facts, edge.toId, edge.toType);
-    add(
-      fromModule?.id,
-      toModule?.id,
-      edge.relation,
-      edge.weight ?? EDGE_WEIGHTS[edge.relation] ?? 0.5,
-      evidence(
-        'shared-graph-edge',
-        `edge:${edge.relation}:${edge.fromId}->${edge.toId}`,
-        edge.weight ?? EDGE_WEIGHTS[edge.relation] ?? 0.5,
-        {
-          moduleId: fromModule?.id,
-        }
-      )
-    );
-  }
-
-  for (const module of facts.presenter.modules) {
-    for (const relation of [...module.outflow, ...module.inflow]) {
-      const from = resolveRelationEndpointModule(facts, relation.from, relation.fromRef);
-      const to = resolveRelationEndpointModule(facts, relation.to, relation.toRef);
-      add(
-        from?.id,
-        to?.id,
-        relation.kind,
-        EDGE_WEIGHTS[relation.kind] ?? 0.35,
-        evidence(
-          'project-context-map',
-          `relation:${relation.kind}:${relationText(relation)}`,
-          EDGE_WEIGHTS[relation.kind] ?? 0.35,
-          {
-            moduleId: from?.id,
-            ref: relation.ref,
-          }
-        )
-      );
-    }
-  }
-
-  const metrics = new Map<string, { fanIn: number; fanOut: number }>();
-  for (const module of facts.modules) {
-    metrics.set(module.id, { fanIn: 0, fanOut: 0 });
-  }
-  for (const edge of edges.values()) {
-    const from = metrics.get(edge.from);
-    const to = metrics.get(edge.to);
-    if (from) {
-      from.fanOut += 1;
-    }
-    if (to) {
-      to.fanIn += 1;
-    }
-  }
-
-  const cycles = tarjanCycles(
-    facts.modules.map((module) => module.id),
-    [...edges.values()]
-  );
-  return {
-    report: {
-      metrics: facts.modules.map((module) => {
-        const metric = metrics.get(module.id) ?? { fanIn: 0, fanOut: 0 };
-        return {
-          moduleId: module.id,
-          moduleName: module.name,
-          fanIn: metric.fanIn,
-          fanOut: metric.fanOut,
-        };
-      }),
-      edges: [...edges.values()].map((edge) => ({
-        ...edge,
-        weight: round(edge.weight),
-        evidence: sortEvidence(edge.evidence),
-      })),
-      cycles,
-    },
-    metricsByModule: metrics,
-  };
-}
-
-function inferLayers(
-  facts: NormalizedFacts,
-  coupling: CouplingAnalysisReport
-): LayerInferenceReport {
-  if ((facts.presenter.map?.layers.length ?? 0) > 0) {
-    const levels: LayerInferenceLevel[] = facts.presenter
-      .map!.layers.map((layer, index) => ({
-        level: layer.order ?? index,
-        name: layer.name,
-        modules: facts.modules
-          .filter((module) => module.configLayer === layer.name || module.role === layer.name)
-          .map((module) => module.id),
-        evidence: [
-          evidence('project-context-map', `layer:${layer.name}`, 0.7, {
-            ref: layer.ref,
-          }),
-        ],
-      }))
-      .sort((a, b) => a.level - b.level);
-    if (levels.every((level) => level.modules.length === 0)) {
-      for (const module of facts.modules) {
-        const level = levels.find((candidate) => candidate.name === module.configLayer);
-        level?.modules.push(module.id);
-      }
-    }
-    return {
-      levels,
-      violations: detectLayerViolations(levels, coupling.edges),
-      configBased: true,
-    };
-  }
-
-  const moduleLevels = inferTopologicalLevels(
-    facts.modules.map((module) => module.id),
-    coupling.edges
-  );
-  const groups = new Map<number, string[]>();
-  for (const [moduleId, level] of moduleLevels) {
-    const list = getOrCreate(groups, level, () => []);
-    list.push(moduleId);
-  }
-  const levels = [...groups.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(
-      ([level, modules]): LayerInferenceLevel => ({
-        level,
-        name: inferLayerName(
-          modules.map((id) => facts.modules.find((module) => module.id === id)?.name ?? id),
-          level
-        ),
-        modules: modules.sort(),
-        evidence: [evidence('derived', `topology-level:${level}`, 0.45)],
-      })
-    );
-  return {
-    levels,
-    violations: detectLayerViolations(levels, coupling.edges),
-    configBased: false,
-  };
-}
-
-function detectHealthGaps(
-  facts: NormalizedFacts,
-  roles: readonly RefinedModuleRole[]
-): HealthGap[] {
-  const roleSet = new Set(roles.map((role) => String(role.refinedRole)));
-  return [...(facts.graph.dimensionCoverage ?? [])]
-    .filter(
-      (dimension) =>
-        dimension.status === 'missing' || dimension.status === 'weak' || dimension.recipeCount <= 1
-    )
-    .map((dimension): HealthGap => {
-      const status =
-        dimension.status === 'weak' || dimension.recipeCount === 1 ? 'weak' : 'missing';
-      const affectedRoles = [...(dimension.relatedRoles ?? [])].filter((role) => roleSet.has(role));
-      const highWeight = (dimension.weight ?? 0.5) >= 0.9;
-      return {
-        dimension: dimension.id,
-        dimensionName: dimension.name ?? dimension.id,
-        recipeCount: dimension.recipeCount,
-        status,
-        priority:
-          status === 'missing' && (highWeight || affectedRoles.length > 0)
-            ? 'high'
-            : status === 'missing'
-              ? 'medium'
-              : 'low',
-        suggestedTopics: [...(dimension.suggestedTopics ?? [])],
-        affectedRoles,
-        evidence: [
-          evidence(
-            'shared-graph-health',
-            `dimension:${dimension.id}:recipes=${dimension.recipeCount}`,
-            0.5
-          ),
-        ],
-      };
-    });
-}
-
-function aggregateCallFlow(graph: ArchitectureGraphSnapshot): CallFlowAggregateReport {
-  const calls = (graph.edges ?? []).filter((edge) => edge.relation === 'calls');
-  const dataFlows = (graph.edges ?? []).filter((edge) => edge.relation === 'data_flow');
-  const incomingCalls = countBy(calls, (edge) => edge.toId);
-  const outgoingCalls = countBy(calls, (edge) => edge.fromId);
-  const dataOut = countBy(dataFlows, (edge) => edge.fromId);
-  const dataIn = countBy(dataFlows, (edge) => edge.toId);
-
-  return {
-    topCalled: [...incomingCalls.entries()]
-      .map(([id, callCount]) => ({ id, callCount }))
-      .sort((a, b) => b.callCount - a.callCount)
-      .slice(0, 10),
-    entryPoints: [...outgoingCalls.keys()].filter((id) => !incomingCalls.has(id)).slice(0, 20),
-    dataProducers: [...dataOut.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([id]) => id)
-      .slice(0, 20),
-    dataConsumers: [...dataIn.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([id]) => id)
-      .slice(0, 20),
-  };
-}
-
 function addSignal(
   buckets: SignalBuckets,
   domain: ArchitectureDomain,
@@ -1425,141 +993,53 @@ function resolveEntityModule(
   return undefined;
 }
 
-function tarjanCycles(nodes: readonly string[], edges: readonly CouplingEdge[]): CouplingCycle[] {
-  const adjacency = new Map<string, Set<string>>();
-  for (const node of nodes) {
-    adjacency.set(node, new Set());
-  }
-  for (const edge of edges) {
-    if (!adjacency.has(edge.from)) {
-      adjacency.set(edge.from, new Set());
-    }
-    adjacency.get(edge.from)!.add(edge.to);
-    if (!adjacency.has(edge.to)) {
-      adjacency.set(edge.to, new Set());
-    }
+function collectModuleEdgeMetrics(facts: NormalizedFacts): ModuleEdgeMetricsReport {
+  const metrics = new Map<string, ModuleEdgeMetrics>();
+  const seenEdges = new Set<string>();
+  for (const module of facts.modules) {
+    metrics.set(module.id, { fanIn: 0, fanOut: 0 });
   }
 
-  let index = 0;
-  const stack: string[] = [];
-  const onStack = new Set<string>();
-  const indices = new Map<string, number>();
-  const lowlinks = new Map<string, number>();
-  const cycles: CouplingCycle[] = [];
-
-  const connect = (node: string) => {
-    indices.set(node, index);
-    lowlinks.set(node, index);
-    index += 1;
-    stack.push(node);
-    onStack.add(node);
-
-    for (const next of adjacency.get(node) ?? []) {
-      if (!indices.has(next)) {
-        connect(next);
-        lowlinks.set(node, Math.min(lowlinks.get(node)!, lowlinks.get(next)!));
-      } else if (onStack.has(next)) {
-        lowlinks.set(node, Math.min(lowlinks.get(node)!, indices.get(next)!));
-      }
+  const add = (from: ModuleFact | undefined, to: ModuleFact | undefined, relation: string) => {
+    if (!from || !to || from.id === to.id) {
+      return;
     }
-
-    if (lowlinks.get(node) === indices.get(node)) {
-      const component: string[] = [];
-      let current: string;
-      do {
-        current = stack.pop()!;
-        onStack.delete(current);
-        component.push(current);
-      } while (current !== node);
-      if (component.length > 1) {
-        cycles.push({
-          cycle: component.reverse(),
-          severity: component.length > 3 ? 'error' : 'warning',
-        });
-      }
+    const key = `${from.id}\u0000${to.id}\u0000${relation}`;
+    if (seenEdges.has(key)) {
+      return;
+    }
+    seenEdges.add(key);
+    const fromMetric = metrics.get(from.id);
+    const toMetric = metrics.get(to.id);
+    if (fromMetric) {
+      fromMetric.fanOut += 1;
+    }
+    if (toMetric) {
+      toMetric.fanIn += 1;
     }
   };
 
-  for (const node of adjacency.keys()) {
-    if (!indices.has(node)) {
-      connect(node);
+  for (const edge of facts.graph.edges ?? []) {
+    add(
+      resolveGraphEndpointModule(facts, edge.fromId, edge.fromType),
+      resolveGraphEndpointModule(facts, edge.toId, edge.toType),
+      edge.relation
+    );
+  }
+  for (const module of facts.presenter.modules) {
+    for (const relation of [...module.outflow, ...module.inflow]) {
+      add(
+        resolveRelationEndpointModule(facts, relation.from, relation.fromRef),
+        resolveRelationEndpointModule(facts, relation.to, relation.toRef),
+        relation.kind
+      );
     }
   }
-  return cycles;
-}
 
-function inferTopologicalLevels(
-  moduleIds: readonly string[],
-  edges: readonly CouplingEdge[]
-): Map<string, number> {
-  const level = new Map<string, number>();
-  for (const moduleId of moduleIds) {
-    level.set(moduleId, 0);
-  }
-  for (let i = 0; i < moduleIds.length + 1; i++) {
-    let changed = false;
-    for (const edge of edges) {
-      const target = level.get(edge.to) ?? 0;
-      const source = level.get(edge.from) ?? 0;
-      const nextSource = Math.max(source, target + 1);
-      if (nextSource !== source) {
-        level.set(edge.from, nextSource);
-        changed = true;
-      }
-    }
-    if (!changed) {
-      break;
-    }
-  }
-  return level;
-}
-
-function detectLayerViolations(
-  levels: readonly LayerInferenceLevel[],
-  edges: readonly CouplingEdge[]
-): LayerInferenceReport['violations'] {
-  const levelByModule = new Map<string, number>();
-  for (const level of levels) {
-    for (const module of level.modules) {
-      levelByModule.set(module, level.level);
-    }
-  }
-  return edges
-    .map((edge) => {
-      const fromLayer = levelByModule.get(edge.from);
-      const toLayer = levelByModule.get(edge.to);
-      if (fromLayer === undefined || toLayer === undefined || fromLayer <= toLayer) {
-        return null;
-      }
-      return {
-        from: edge.from,
-        to: edge.to,
-        fromLayer,
-        toLayer,
-        relation: edge.relation,
-      };
-    })
-    .filter((item): item is LayerInferenceReport['violations'][number] => item !== null);
-}
-
-function inferLayerName(moduleNames: readonly string[], level: number): string {
-  const text = moduleNames.join(' ');
-  if (/core|foundation|base|shared/i.test(text)) {
-    return 'Foundation';
-  }
-  if (/model|entity|database|storage|repository/i.test(text)) {
-    return 'Data';
-  }
-  if (/service|api|network|auth/i.test(text)) {
-    return 'Service';
-  }
-  if (/ui|view|screen|component/i.test(text)) {
-    return 'UI';
-  }
-  if (/app|main|cli/i.test(text)) {
-    return 'Application';
-  }
-  return `Layer ${level}`;
+  return {
+    edgeCount: seenEdges.size,
+    metricsByModule: metrics,
+  };
 }
 
 function sumModuleLines(presenter: ProjectContextPresenterInput, module: ModuleFact): number {
@@ -1609,16 +1089,6 @@ function moduleComplexityEvidence(
   return items;
 }
 
-function countCyclesByModule(cycles: readonly CouplingCycle[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const cycle of cycles) {
-    for (const module of cycle.cycle) {
-      counts.set(module, (counts.get(module) ?? 0) + 1);
-    }
-  }
-  return counts;
-}
-
 function collectHotspotScores(map: ProjectMap | undefined): Map<string, number> {
   const scores = new Map<string, number>();
   for (const hotspot of map?.hotspots ?? []) {
@@ -1635,15 +1105,6 @@ function collectHotspotScores(map: ProjectMap | undefined): Map<string, number> 
 
 function countEdgesByRelation(graph: ArchitectureGraphSnapshot, relation: string): number {
   return (graph.edges ?? []).filter((edge) => edge.relation === relation).length;
-}
-
-function countBy<T>(items: readonly T[], key: (item: T) => string): Map<string, number> {
-  const map = new Map<string, number>();
-  for (const item of items) {
-    const k = key(item);
-    map.set(k, (map.get(k) ?? 0) + 1);
-  }
-  return map;
 }
 
 function hasConfig(repo: RepoContext | undefined, pattern: RegExp): boolean {

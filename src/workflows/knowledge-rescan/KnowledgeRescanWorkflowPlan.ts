@@ -50,7 +50,6 @@ export function buildKnowledgeRescanWorkflowPlan({
     dependencyEdges: true,
     moduleEntities: true,
     guardViolations: true,
-    panorama: true,
   };
 
   return {

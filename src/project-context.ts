@@ -43,16 +43,12 @@ export type {
   ArchitectureManifestDependency,
   ArchitectureStyle,
   ArchitectureStyleReport,
-  CallFlowAggregateReport,
   ComplexityReport,
-  CouplingAnalysisReport,
   DomainSignal,
   DomainSignalReport,
-  HealthGap,
   ProjectContextCapabilities as ProjectContextCapabilitiesContract,
   ProjectContextCapabilityQuery,
   ProjectInformationSupplementReport,
-  RefinedModuleRole,
 } from './project-context-capabilities.js';
 export {
   createProjectContextCapabilities,

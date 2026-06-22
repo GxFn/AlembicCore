@@ -61,6 +61,7 @@ export interface DomainSignalReport {
 }
 
 export type ArchitectureStyle =
+  | 'unknown'
   | 'monolith'
   | 'layered'
   | 'microservices'
@@ -149,87 +150,7 @@ export interface ArchitectureIntelligenceInput {
   primaryLanguage?: string;
 }
 
-export interface RefinedModuleRole {
-  moduleId: string;
-  moduleName: string;
-  refinedRole: ModuleRole | string;
-  confidence: number;
-  resolution: 'clear' | 'uncertain' | 'fallback';
-  evidence: ArchitectureEvidence[];
-  alternatives: Array<{ role: ModuleRole | string; score: number }>;
-}
-
-export interface CouplingMetric {
-  moduleId: string;
-  moduleName: string;
-  fanIn: number;
-  fanOut: number;
-}
-
-export interface CouplingEdge {
-  from: string;
-  to: string;
-  relation: string;
-  weight: number;
-  evidence: ArchitectureEvidence[];
-}
-
-export interface CouplingCycle {
-  cycle: string[];
-  severity: 'warning' | 'error';
-}
-
-export interface CouplingAnalysisReport {
-  metrics: CouplingMetric[];
-  edges: CouplingEdge[];
-  cycles: CouplingCycle[];
-}
-
-export interface LayerInferenceLevel {
-  level: number;
-  name: string;
-  modules: string[];
-  evidence: ArchitectureEvidence[];
-}
-
-export interface LayerViolation {
-  from: string;
-  to: string;
-  fromLayer: number;
-  toLayer: number;
-  relation: string;
-}
-
-export interface LayerInferenceReport {
-  levels: LayerInferenceLevel[];
-  violations: LayerViolation[];
-  configBased: boolean;
-}
-
-export interface HealthGap {
-  dimension: string;
-  dimensionName: string;
-  recipeCount: number;
-  status: 'weak' | 'missing';
-  priority: 'high' | 'medium' | 'low';
-  suggestedTopics: string[];
-  affectedRoles: string[];
-  evidence: ArchitectureEvidence[];
-}
-
-export interface CallFlowAggregateReport {
-  topCalled: Array<{ id: string; callCount: number }>;
-  entryPoints: string[];
-  dataProducers: string[];
-  dataConsumers: string[];
-}
-
 export interface ProjectInformationSupplementReport {
-  roles: RefinedModuleRole[];
-  coupling: CouplingAnalysisReport;
-  layers: LayerInferenceReport;
-  healthGaps: HealthGap[];
-  callFlow: CallFlowAggregateReport;
   panoramaServiceFree: true;
 }
 

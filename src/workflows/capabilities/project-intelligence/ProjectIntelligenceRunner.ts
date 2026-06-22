@@ -10,7 +10,6 @@
  *   Phase 1.6 → Code Entity Graph（代码实体关系图谱）
  *   Phase 2   → 依赖关系 → knowledge_edges
  *   Phase 2.1 → Module 实体写入 Entity Graph
- *   Phase 2.2 → Panorama 全景汇总（RoleRefiner + CouplingAnalyzer + LayerInferrer）
  *   Phase 3   → Guard 规则审计
  *   Phase 4   → 维度条件化过滤 + Enhancement Pack + 语言画像
  */
@@ -313,51 +312,6 @@ export async function runPhase4_DimensionResolve(params: Phase4Params) {
   };
 }
 
-export async function materializeProjectPanorama({
-  container,
-  logger,
-  report,
-}: {
-  container: PhaseContainer;
-  logger: PhaseLogger;
-  report: PhaseReport | null;
-}) {
-  const warnings: string[] = [];
-  let panoramaResult: Record<string, unknown> | null = null;
-
-  try {
-    const panoramaService = container.get('panoramaService');
-    if (
-      panoramaService &&
-      typeof (panoramaService as { invalidate?: () => void }).invalidate === 'function'
-    ) {
-      const pPanoStart = Date.now();
-      (panoramaService as { invalidate: () => void }).invalidate();
-      const result = await (
-        panoramaService as { getResult: () => Promise<Record<string, unknown>> }
-      ).getResult();
-      panoramaResult = result;
-      logger.info(`[Bootstrap] Phase 2.2: Panorama computed in ${Date.now() - pPanoStart}ms`);
-      if (report) {
-        const overview = await (
-          panoramaService as { getOverview: () => Promise<Record<string, unknown>> }
-        ).getOverview();
-        report.phases.panorama = {
-          moduleCount: (overview as { moduleCount?: number }).moduleCount ?? 0,
-          layerCount: (overview as { layerCount?: number }).layerCount ?? 0,
-          ms: Date.now() - pPanoStart,
-        };
-      }
-    }
-  } catch (err: unknown) {
-    warnings.push(
-      `Phase 2.2 panorama failed (non-blocking): ${err instanceof Error ? err.message : String(err)}`
-    );
-  }
-
-  return { panoramaResult, warnings };
-}
-
 export async function runPhase1_8_SourceGraphLifecycle({
   projectRoot,
   container,
@@ -619,19 +573,6 @@ export async function runAllPhases(
     materialize: materialization.moduleEntities,
   });
 
-  // ── Phase 2.2: Panorama 全景汇总 ──
-  // 必须在 Phase 2.1 之后：此时 code_entities 中已有 module 记录
-  let panoramaResult: Record<string, unknown> | null = null;
-  if (materialization.panorama) {
-    const panorama = await materializeProjectPanorama({
-      container: ctx.container,
-      logger: ctx.logger,
-      report,
-    });
-    panoramaResult = panorama.panoramaResult;
-    warnings.push(...panorama.warnings);
-  }
-
   // ── Phase 3: Guard 审计 ──
   const p3Start = Date.now();
   const phase3 = await runPhase3_GuardAudit(allFiles, ctx.container, ctx.logger, {
@@ -705,7 +646,7 @@ export async function runAllPhases(
     report, // NEW: Phase 级报告 (null if generateReport=false)
     incrementalPlan, // NEW: 增量评估结果 (null if incremental=false)
     sourceGraphResult,
-    panoramaResult, // Phase 2.2: 全景汇总 (null if panoramaService unavailable)
+    panoramaResult: null,
     isEmpty: false,
   };
 }

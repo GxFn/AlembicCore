@@ -1,8 +1,7 @@
 /**
  * CodeEntityRepository — AST 代码实体的仓储实现
  *
- * 从 CodeEntityGraph 和 PanoramaScanner 提取的数据操作，
- * 使用 Drizzle 类型安全 API。
+ * 从 CodeEntityGraph 提取的数据操作，使用 Drizzle 类型安全 API。
  */
 
 import { and, count, eq, inArray, isNotNull, like, ne, sql } from 'drizzle-orm';

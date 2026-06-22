@@ -1,5 +1,5 @@
 /**
- * LanguageProfiles — 全景分析多语言统一注册中心
+ * LanguageProfiles — 多语言分析统一注册中心
  *
  * 设计原则:
  *   1. **语言族 (LanguageFamily)** 是核心抽象 — 同族语言共享 import 语法、框架类体系、生态库
@@ -9,10 +9,10 @@
  *   4. **按关注点暴露 API** — 消费者调用自己需要的访问器，无需了解内部数据结构
  *
  * 消费者:
- *   - CouplingAnalyzer  → importPatterns, sourceExts
- *   - RoleRefiner        → familyOf, superclassRoles, protocolRoles, importRolePatterns
- *   - TechStackProfiler  → knownLibraries, keywordCategories
- *   - ModuleDiscoverer   → skipDirs, artifactSuffixes, vendorDirs, sourceExts
+ *   - dependency graph consumers → importPatterns, sourceExts
+ *   - role/style consumers       → familyOf, superclassRoles, protocolRoles, importRolePatterns
+ *   - tech stack consumers       → knownLibraries, keywordCategories
+ *   - filesystem consumers       → skipDirs, artifactSuffixes, vendorDirs, sourceExts
  *
  * @module LanguageProfiles
  */
@@ -60,18 +60,18 @@ interface FamilyProfile {
   /** 该族包含的规范语言 ID (LanguageService normalize 后的值) */
   languages: string[];
 
-  /* ─── CouplingAnalyzer: 依赖提取 ─────────── */
+  /* ─── Dependency extraction ──────────────── */
   importPatterns: ImportPattern[];
 
-  /* ─── RoleRefiner: 角色推断 ──────────────── */
+  /* ─── Role inference ─────────────────────── */
   superclassRoles: Record<string, ModuleRole>;
   protocolRoles: Record<string, ModuleRole>;
   importRolePatterns: RolePattern[];
 
-  /* ─── TechStackProfiler: 库分类 ─────────── */
+  /* ─── Library classification ─────────────── */
   knownLibraries: Record<string, string>;
 
-  /* ─── ModuleDiscoverer: 文件系统启发 ────── */
+  /* ─── Filesystem heuristics ──────────────── */
   artifactSuffixes: string[];
   vendorDirs: string[];
   extraSkipDirs: string[];
@@ -768,13 +768,13 @@ export class LanguageProfiles {
     return fam ? [fam] : ALL_FAMILIES.map((fp) => fp.family);
   }
 
-  /* ─── CouplingAnalyzer: Import Extraction ───── */
+  /* ─── Import extraction ─────────────────────── */
 
   /**
    * 获取所有 import 解析模式 (合并全部语言族 + C/C++)
    *
-   * CouplingAnalyzer 对每行代码尝试所有模式，
-   * 按「特异性递减」排列：最特殊的模式在前。
+   * 依赖图消费者对每行代码尝试所有模式，按「特异性递减」排列：
+   * 最特殊的模式在前。
    */
   static get importPatterns(): readonly ImportPattern[] {
     if (!_importPatterns) {
@@ -790,13 +790,13 @@ export class LanguageProfiles {
   /**
    * 源代码文件扩展名集合 — 委托 LanguageService
    *
-   * 消除 CouplingAnalyzer / ModuleDiscoverer 自建 SOURCE_EXTS 的重复。
+   * 消除各分析消费者自建 SOURCE_EXTS 的重复。
    */
   static get sourceExts(): ReadonlySet<string> {
     return LanguageService.sourceExts;
   }
 
-  /* ─── RoleRefiner: Role Inference ───────────── */
+  /* ─── Role inference ────────────────────────── */
 
   /**
    * 合并指定语言族的超类→角色映射
@@ -844,12 +844,12 @@ export class LanguageProfiles {
     return patterns;
   }
 
-  /* ─── TechStackProfiler: Library Classification ── */
+  /* ─── Library classification ──────────────────── */
 
   /**
    * 获取全量已知库→分类映射 (合并所有族 + 跨平台库)
    *
-   * TechStackProfiler 不按族过滤 — 外部依赖可能跨生态
+   * 不按族过滤 — 外部依赖可能跨生态。
    */
   static get knownLibraries(): Readonly<Record<string, string>> {
     if (!_knownLibraries) {
@@ -867,7 +867,7 @@ export class LanguageProfiles {
     return KEYWORD_CATEGORIES;
   }
 
-  /* ─── ModuleDiscoverer: Filesystem Heuristics ── */
+  /* ─── Filesystem heuristics ─────────────────── */
 
   /**
    * 应跳过的目录名集合 (合并 LanguageService.scanSkipDirs + 各族额外目录)

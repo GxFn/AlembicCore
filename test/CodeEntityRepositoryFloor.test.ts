@@ -82,9 +82,8 @@ describe('CodeEntityRepository floor', () => {
 
   test('batchInsertIgnore skips existing composite keys instead of updating them', async () => {
     await repo.upsert(entity({ name: 'Original' }));
-    // Return value counts processed entities (2), not actual inserts — the
-    // single consumer (PanoramaScanner) ignores it; the contract that
-    // matters is the conflict-skip below.
+    // Return value counts processed entities (2), not actual inserts; the
+    // contract that matters is the conflict-skip below.
     const processed = await repo.batchInsertIgnore([
       entity({ name: 'ShouldNotOverwrite' }),
       entity({ entityId: 'new.New', name: 'New' }),
