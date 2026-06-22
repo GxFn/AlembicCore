@@ -68,6 +68,27 @@ export class GitDiffCheckpointService {
   ensureCheckpoint(input: EnsureGitDiffCheckpointInput): EnsureGitDiffCheckpointResult {
     const existing = this.#checkpointRepository.get(input);
     if (existing) {
+      const planCommit =
+        this.#planRepository.getActiveConfirmed(input.projectRoot)?.lastUpdatedFromCommit ?? null;
+      if (planCommit && isEmptyCheckpointInitialization(existing)) {
+        const now = input.now ?? Date.now();
+        const checkpoint = this.#checkpointRepository.upsert({
+          projectRoot: input.projectRoot,
+          scopeId: input.scopeId,
+          folderId: input.folderId,
+          checkpointCommit: planCommit,
+          initialFromPlanCommit: planCommit,
+          mergeBaseCommit: existing.mergeBaseCommit,
+          targetCommit: existing.targetCommit,
+          lastRouteStatus: existing.lastRouteStatus,
+          lastRouteReason: existing.lastRouteReason,
+          lastScannedAt: existing.lastScannedAt,
+          advancedAt: existing.advancedAt,
+          createdAt: existing.createdAt,
+          updatedAt: now,
+        });
+        return { checkpoint, source: 'active-confirmed-plan' };
+      }
       return { checkpoint: existing, source: 'existing-checkpoint' };
     }
 
@@ -128,6 +149,10 @@ export class GitDiffCheckpointService {
           },
     };
   }
+}
+
+function isEmptyCheckpointInitialization(checkpoint: GitDiffCheckpointRecord): boolean {
+  return checkpoint.checkpointCommit === null && checkpoint.initialFromPlanCommit === null;
 }
 
 function defaultRouteReason(status: GitDiffCheckpointRouteStatus): string {
