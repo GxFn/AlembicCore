@@ -10,6 +10,7 @@ import {
   ALEMBIC_REPOSITORY_KEYS,
   CodeEntityRepositoryImpl,
   createAlembicRepositories,
+  GitDiffCheckpointRepository,
   isAlembicRepositoryKey,
   KnowledgeEdgeRepositoryImpl,
   KnowledgeRepositoryImpl,
@@ -123,8 +124,10 @@ describe('public database and repository entrypoints', () => {
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('recipeSourceRefRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('sourceGraphRepository');
     expect(ALEMBIC_REPOSITORY_KEYS).toContain('planRepository');
+    expect(ALEMBIC_REPOSITORY_KEYS).toContain('gitDiffCheckpointRepository');
     expect(isAlembicRepositoryKey('proposalRepository')).toBe(true);
     expect(isAlembicRepositoryKey('planRepository')).toBe(true);
+    expect(isAlembicRepositoryKey('gitDiffCheckpointRepository')).toBe(true);
     expect(isAlembicRepositoryKey('sourceGraphRepository')).toBe(true);
     expect(isAlembicRepositoryKey('tokenUsageStore')).toBe(false);
   });
@@ -136,6 +139,7 @@ describe('public database and repository entrypoints', () => {
     expect(RecipeSourceRefRepositoryImpl).toBeDefined();
     expect(SourceGraphRepositoryImpl).toBeDefined();
     expect(PlanRepositoryImpl).toBeDefined();
+    expect(GitDiffCheckpointRepository).toBeDefined();
     expect(ProposalRepository).toBeDefined();
     expect(WarningRepository).toBeDefined();
     expect(RawDbSyncAdapter).toBeDefined();

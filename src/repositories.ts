@@ -13,6 +13,13 @@ import {
   CodeEntityRepositoryImpl,
 } from './repository/code/CodeEntityRepository.js';
 import {
+  type GitDiffCheckpointRecord,
+  GitDiffCheckpointRepository,
+  type GitDiffCheckpointRouteStatus,
+  type GitDiffCheckpointScope,
+  type UpsertGitDiffCheckpointInput,
+} from './repository/evolution/GitDiffCheckpointRepository.js';
+import {
   LifecycleEventRepository,
   type RecordEventInput,
   type TransitionEventRow,
@@ -99,6 +106,9 @@ export type {
   DimensionStatMeta,
   EdgeInsert,
   EdgeStats,
+  GitDiffCheckpointRecord,
+  GitDiffCheckpointRouteStatus,
+  GitDiffCheckpointScope,
   GuardViolationEntity,
   GuardViolationInsert,
   KnowledgeEdge,
@@ -129,6 +139,7 @@ export type {
   SourceGraphSymbolSearchOptions,
   SyncRepo,
   TransitionEventRow,
+  UpsertGitDiffCheckpointInput,
   ViolationRecord,
   ViolationStatByRule,
   ViolationStats,
@@ -150,12 +161,14 @@ export type SourceRefRepository = RecipeSourceRefRepositoryImpl;
 export type EvolutionProposalRepository = ProposalRepository;
 export type EvolutionWarningRepository = WarningRepository;
 export type EvolutionLifecycleEventRepository = LifecycleEventRepository;
+export type EvolutionGitDiffCheckpointRepository = GitDiffCheckpointRepository;
 export type PlanRepository = PlanRepositoryImpl;
 
 export {
   BootstrapRepositoryImpl,
   CodeEntityRepositoryImpl,
   GuardViolationRepositoryImpl,
+  GitDiffCheckpointRepository,
   KnowledgeEdgeRepositoryImpl,
   KnowledgeRepositoryImpl,
   LifecycleEventRepository,
@@ -190,6 +203,7 @@ export interface AlembicRepositoryBundle {
   proposalRepository: EvolutionProposalRepository;
   warningRepository: EvolutionWarningRepository;
   lifecycleEventRepository: EvolutionLifecycleEventRepository;
+  gitDiffCheckpointRepository: EvolutionGitDiffCheckpointRepository;
   recipeSourceRefRepository: SourceRefRepository;
   planRepository: PlanRepository;
 }
@@ -206,6 +220,7 @@ export const ALEMBIC_REPOSITORY_KEYS = [
   'proposalRepository',
   'warningRepository',
   'lifecycleEventRepository',
+  'gitDiffCheckpointRepository',
   'recipeSourceRefRepository',
   'planRepository',
 ] as const;
@@ -229,6 +244,7 @@ export function createAlembicRepositories(
     proposalRepository: new ProposalRepository(drizzle),
     warningRepository: new WarningRepository(drizzle),
     lifecycleEventRepository: new LifecycleEventRepository(drizzle),
+    gitDiffCheckpointRepository: new GitDiffCheckpointRepository(drizzle),
     recipeSourceRefRepository: new RecipeSourceRefRepositoryImpl(drizzle),
     planRepository: new PlanRepositoryImpl(drizzle),
   };

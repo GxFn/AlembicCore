@@ -53,6 +53,7 @@ describe('DatabaseConnection and repository migration integration', () => {
       '010_source_graph',
       '011_guard_violations_attribution',
       '012_plans',
+      '013_git_diff_checkpoints',
     ]);
 
     const tables = db
@@ -68,6 +69,7 @@ describe('DatabaseConnection and repository migration integration', () => {
     expect(tables).toContain('source_graph_symbols');
     expect(tables).toContain('source_graph_edges');
     expect(tables).toContain('plans');
+    expect(tables).toContain('git_diff_checkpoints');
     expect(tables).not.toContain('remote_commands');
     expect(tables).not.toContain('remote_state');
   });

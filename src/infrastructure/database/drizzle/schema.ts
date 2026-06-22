@@ -4,7 +4,7 @@
  * 所有表定义从 active migrations 忠实翻译。
  * DB 列名与 migration 保持一致；实体映射由 repository 层处理。
  *
- * 表清单 (15 个业务表 + schema_migrations):
+ * 表清单 (20 个业务表 + schema_migrations):
  *   001: knowledge_entries, knowledge_edges, guard_violations, audit_logs,
  *        sessions, token_usage, semantic_memories, bootstrap_snapshots,
  *        bootstrap_dim_files, code_entities
@@ -16,6 +16,7 @@
  *   010: source_graph_generations, source_graph_files,
  *        source_graph_symbols, source_graph_edges
  *   012: plans
+ *   013: git_diff_checkpoints
  *   内部: schema_migrations
  *
  * 注: Task 系统为纯内存 + JSONL 信号架构，不使用数据库表。
@@ -655,5 +656,38 @@ export const sourceGraphEdges = sqliteTable(
     index('idx_sge_from_file').on(table.fromFilePath),
     index('idx_sge_to_file').on(table.toFilePath),
     index('idx_sge_provenance').on(table.provenance),
+  ]
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 20. git_diff_checkpoints — durable git diff route checkpoints (migration 013)
+// ═══════════════════════════════════════════════════════════════
+
+export const gitDiffCheckpoints = sqliteTable(
+  'git_diff_checkpoints',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    projectRoot: text('project_root').notNull(),
+    scopeId: text('scope_id').notNull(),
+    folderId: text('folder_id').notNull(),
+    checkpointCommit: text('checkpoint_commit'),
+    initialFromPlanCommit: text('initial_from_plan_commit'),
+    mergeBaseCommit: text('merge_base_commit'),
+    targetCommit: text('target_commit'),
+    lastRouteStatus: text('last_route_status').notNull().default('initialized'),
+    lastRouteReason: text('last_route_reason'),
+    lastScannedAt: integer('last_scanned_at'),
+    advancedAt: integer('advanced_at'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('git_diff_checkpoints_scope_unique').on(
+      table.projectRoot,
+      table.scopeId,
+      table.folderId
+    ),
+    index('idx_git_diff_checkpoints_project').on(table.projectRoot),
+    index('idx_git_diff_checkpoints_updated_at').on(table.updatedAt),
   ]
 );

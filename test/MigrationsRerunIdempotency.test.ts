@@ -25,6 +25,7 @@ const EXPECTED_VERSIONS = [
   '010_source_graph',
   '011_guard_violations_attribution',
   '012_plans',
+  '013_git_diff_checkpoints',
 ];
 
 describe('Migrations re-run / idempotency (fresh DB)', () => {
@@ -70,6 +71,7 @@ describe('Migrations re-run / idempotency (fresh DB)', () => {
       'code_entities',
       'recipe_source_refs',
       'plans',
+      'git_diff_checkpoints',
       'audit_logs',
     ]) {
       expect(tables).toContain(table);
