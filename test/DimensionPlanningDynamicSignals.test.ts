@@ -473,15 +473,13 @@ describe('dimension planning dynamic signals', () => {
         'recipe-context.coverage',
       ])
     );
-    expect(aids.crossDimensionConstraints.map((constraint) => constraint.id)).toContain(
-      'coverage-before-production'
-    );
-    expect(aids.crossDimensionConstraints.map((constraint) => constraint.severity)).not.toContain(
-      'recommended'
-    );
     expect(aids).not.toHaveProperty('recommendedDimensions');
     expect(aids).not.toHaveProperty('dimensionOrder');
     expect(aids).not.toHaveProperty('subsetHints');
+    expect(aids).not.toHaveProperty('crossDimensionConstraints');
+    expect(JSON.stringify(aids)).not.toMatch(
+      /recommendedDimensions|dimensionOrder|maxRecommendedDimensions|subsetHints|crossDimensionConstraints|CrossDimensionConstraint|buildCrossDimensionConstraints/
+    );
     expect(aids.unavailableSignals).toEqual([]);
   });
 

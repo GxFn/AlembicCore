@@ -281,8 +281,9 @@ describe('Plan ledger projection', () => {
     expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('recommendedDimensions');
     expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('dimensionOrder');
     expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('subsetHints');
+    expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('crossDimensionConstraints');
     expect(JSON.stringify(draftPackage)).not.toMatch(
-      /recommendedDimensions|dimensionOrder|maxRecommendedDimensions|subsetHints|defaultOrder/
+      /recommendedDimensions|dimensionOrder|maxRecommendedDimensions|subsetHints|defaultOrder|crossDimensionConstraints|CrossDimensionConstraint|buildCrossDimensionConstraints/
     );
   });
 

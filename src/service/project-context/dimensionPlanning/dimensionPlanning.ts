@@ -7,7 +7,6 @@ import type {
   DomainSignalReport,
 } from '../architectureIntelligence/index.js';
 import type {
-  CrossDimensionConstraint,
   DimensionInformationStep,
   DimensionPlanningAidInput,
   DimensionPlanningAidReport,
@@ -129,7 +128,6 @@ export function buildDimensionPlanningAids(
       )
     )
   );
-  const crossDimensionConstraints = buildCrossDimensionConstraints(selection, dynamicSignals);
   const lowConfidenceSignals = selection.lowConfidenceDimensions.map(
     (decision) => `${decision.dimension.id}:${decision.detail}`
   );
@@ -137,7 +135,6 @@ export function buildDimensionPlanningAids(
   return Object.freeze({
     selection,
     informationGatheringSteps: Object.freeze(informationGatheringSteps),
-    crossDimensionConstraints: Object.freeze(crossDimensionConstraints),
     lowConfidenceSignals: Object.freeze(lowConfidenceSignals),
     unavailableSignals: selection.unavailableSignals,
   });
@@ -686,49 +683,6 @@ function stepsForDimension(
     });
   }
   return steps.sort((a, b) => b.priority - a.priority || a.stepId.localeCompare(b.stepId));
-}
-
-function buildCrossDimensionConstraints(
-  selection: SignalAwareDimensionSelectionResult,
-  dynamicSignals: DynamicSignalReport
-): CrossDimensionConstraint[] {
-  const active = new Set(selection.activeDimensions.map((dimension) => dimension.id));
-  const constraints: CrossDimensionConstraint[] = [];
-  if (active.has('networking-api')) {
-    constraints.push({
-      id: 'networking-needs-error-resilience',
-      dimensions: ['networking-api', 'error-resilience'],
-      severity: active.has('error-resilience') ? 'related' : 'required',
-      reason:
-        'network/API planning must check retry, timeout, failure mapping, and user-visible errors',
-    });
-  }
-  if (active.has('security-auth') || active.has('networking-api')) {
-    constraints.push({
-      id: 'security-cross-check',
-      dimensions: ['security-auth', 'networking-api', 'data-event-flow'],
-      severity: 'related',
-      reason: 'auth/security signals should be checked against API and persistence data paths',
-    });
-  }
-  if (active.has('ui-interaction') && active.has('performance-optimization')) {
-    constraints.push({
-      id: 'ui-performance-source-slice',
-      dimensions: ['ui-interaction', 'performance-optimization'],
-      severity: 'related',
-      reason:
-        'UI hotspot decisions need bounded source slices before performance recipes are planned',
-    });
-  }
-  if (dynamicSignals.coverage.gaps.length > 0) {
-    constraints.push({
-      id: 'coverage-before-production',
-      dimensions: uniqueSorted(dynamicSignals.coverage.gaps.map((gap) => gap.dimensionId)),
-      severity: 'required',
-      reason: 'coverage gaps must be reviewed before later recipe generation writes new outputs',
-    });
-  }
-  return constraints.sort((a, b) => a.id.localeCompare(b.id));
 }
 
 function queryIdsForDimension(dimension: UnifiedDimension): readonly string[] {

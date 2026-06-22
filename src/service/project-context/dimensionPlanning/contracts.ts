@@ -77,13 +77,6 @@ export interface DimensionInformationStep {
   priority: number;
 }
 
-export interface CrossDimensionConstraint {
-  id: string;
-  dimensions: readonly string[];
-  severity: 'required' | 'related';
-  reason: string;
-}
-
 export interface DimensionPlanningAidInput extends SignalAwareDimensionSelectionInput {
   dynamicSignals?: DynamicSignalReport;
 }
@@ -91,7 +84,6 @@ export interface DimensionPlanningAidInput extends SignalAwareDimensionSelection
 export interface DimensionPlanningAidReport {
   selection: SignalAwareDimensionSelectionResult;
   informationGatheringSteps: readonly DimensionInformationStep[];
-  crossDimensionConstraints: readonly CrossDimensionConstraint[];
   lowConfidenceSignals: readonly string[];
   unavailableSignals: readonly string[];
 }
