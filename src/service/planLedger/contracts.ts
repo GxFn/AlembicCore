@@ -176,6 +176,10 @@ export interface PlanCoverageBucket {
   missing: number;
 }
 
+export type PlanModuleDimensionCoverage = Readonly<
+  Record<string, Readonly<Record<string, PlanCoverageBucket>>>
+>;
+
 export interface PlanCoverageGap {
   dimensionId: string;
   modulePath?: string;
@@ -189,6 +193,7 @@ export interface PlanGenerationState {
   coverage: {
     byDimension: Readonly<Record<string, PlanCoverageBucket>>;
     byModule: Readonly<Record<string, PlanCoverageBucket & { dimensions: readonly string[] }>>;
+    byModuleDimension: PlanModuleDimensionCoverage;
     generated: number;
     planned: number;
     gaps: readonly PlanCoverageGap[];

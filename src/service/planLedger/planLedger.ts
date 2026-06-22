@@ -216,7 +216,7 @@ export function projectPlanGenerationStateFromRecords(input: {
     mergeMapping(mappings, {
       codeRegion: sourceFile || `recipe:${recipe.id}`,
       recipeIds: [recipe.id],
-      status: isStaleRecipe(recipe) ? 'stale' : 'generated',
+      status: isStaleRecipe(recipe) ? 'stale' : 'missing',
       dimensionIds: [resolveRecipeDimensionId(recipe)],
       modulePath: sourceFile
         ? resolveModulePath(sourceFile, input.plan.intent.moduleBindings)
@@ -314,6 +314,7 @@ function buildCoverage(
 ): PlanGenerationState['coverage'] {
   const byDimension: Record<string, PlanCoverageBucket> = {};
   const byModule: Record<string, PlanCoverageBucket & { dimensions: readonly string[] }> = {};
+  const byModuleDimension: Record<string, Record<string, PlanCoverageBucket>> = {};
   const uniqueGeneratedRecipes = new Set<string>();
 
   for (const dimension of plan.intent.dimensions) {
@@ -332,6 +333,15 @@ function buildCoverage(
       missing: 0,
       dimensions: binding.dimensions,
     };
+    byModuleDimension[binding.modulePath] = {};
+    for (const dimensionId of binding.dimensions) {
+      byModuleDimension[binding.modulePath][dimensionId] = {
+        planned: resolveModuleDimensionTarget(plan, binding, dimensionId),
+        generated: 0,
+        stale: 0,
+        missing: 0,
+      };
+    }
   }
 
   for (const mapping of mappings) {
@@ -365,6 +375,23 @@ function buildCoverage(
       } else if (mapping.status === 'generated') {
         moduleBucket.generated += mapping.recipeIds.length;
       }
+      const moduleDimensions =
+        byModuleDimension[mapping.modulePath] ?? (byModuleDimension[mapping.modulePath] = {});
+      for (const dimensionId of mapping.dimensionIds) {
+        const moduleDimensionBucket =
+          moduleDimensions[dimensionId] ??
+          (moduleDimensions[dimensionId] = {
+            planned: 0,
+            generated: 0,
+            stale: 0,
+            missing: 0,
+          });
+        if (mapping.status === 'stale') {
+          moduleDimensionBucket.stale += mapping.recipeIds.length;
+        } else if (mapping.status === 'generated') {
+          moduleDimensionBucket.generated += mapping.recipeIds.length;
+        }
+      }
     }
   }
 
@@ -380,22 +407,28 @@ function buildCoverage(
       });
     }
   }
-  for (const [modulePath, bucket] of Object.entries(byModule)) {
+  for (const bucket of Object.values(byModule)) {
     bucket.missing = Math.max(0, bucket.planned - bucket.generated);
-    if (bucket.missing > 0 && bucket.dimensions.length > 0) {
-      gaps.push({
-        dimensionId: bucket.dimensions[0],
-        modulePath,
-        planned: bucket.planned,
-        generated: bucket.generated,
-        missing: bucket.missing,
-      });
+  }
+  for (const [modulePath, dimensions] of Object.entries(byModuleDimension)) {
+    for (const [dimensionId, bucket] of Object.entries(dimensions)) {
+      bucket.missing = Math.max(0, bucket.planned - bucket.generated);
+      if (bucket.missing > 0) {
+        gaps.push({
+          dimensionId,
+          modulePath,
+          planned: bucket.planned,
+          generated: bucket.generated,
+          missing: bucket.missing,
+        });
+      }
     }
   }
 
   return {
     byDimension,
     byModule,
+    byModuleDimension,
     generated: uniqueGeneratedRecipes.size,
     planned: plan.intent.scale.totalRecipeBudget,
     gaps: gaps.sort(
@@ -405,6 +438,17 @@ function buildCoverage(
         (a.modulePath ?? '').localeCompare(b.modulePath ?? '')
     ),
   };
+}
+
+function resolveModuleDimensionTarget(
+  plan: PlanRecord,
+  binding: PlanModuleBinding,
+  dimensionId: string
+): number {
+  const dimensionTarget = plan.intent.dimensions.find(
+    (dimension) => dimension.dimensionId === dimensionId
+  )?.targetRecipes;
+  return Math.min(binding.targetRecipes, dimensionTarget ?? binding.targetRecipes);
 }
 
 function mergeMapping(
@@ -419,11 +463,24 @@ function mergeMapping(
   mappings.set(next.codeRegion, {
     codeRegion: next.codeRegion,
     recipeIds: uniqueSorted([...existing.recipeIds, ...next.recipeIds]),
-    status: existing.status === 'stale' || next.status === 'stale' ? 'stale' : next.status,
+    status: mergeMappingStatus(existing.status, next.status),
     dimensionIds: uniqueSorted([...existing.dimensionIds, ...next.dimensionIds]),
     modulePath: existing.modulePath ?? next.modulePath,
     evidenceRefs: [...existing.evidenceRefs, ...next.evidenceRefs],
   });
+}
+
+function mergeMappingStatus(
+  existing: PlanCodeRecipeMapping['status'],
+  next: PlanCodeRecipeMapping['status']
+): PlanCodeRecipeMapping['status'] {
+  const rank: Record<PlanCodeRecipeMapping['status'], number> = {
+    planned: 0,
+    missing: 1,
+    generated: 2,
+    stale: 3,
+  };
+  return rank[next] > rank[existing] ? next : existing;
 }
 
 function isStaleRecipeRef(ref: SourceRefLike, recipe?: RecipeLike): boolean {

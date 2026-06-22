@@ -150,6 +150,82 @@ describe('Recipe freshness primitives', () => {
     expect(repo.findOne('r2', 'src/dropped.ts')).toMatchObject({ status: 'active' });
   });
 
+  it('keeps existing source refs when reasoning.sources is missing', async () => {
+    const repo = new InMemorySourceRefRepository([
+      {
+        newPath: null,
+        recipeId: 'r1',
+        sourcePath: 'src/live.ts',
+        status: 'active',
+        verifiedAt: 1,
+      },
+    ]);
+    const reconciler = buildReconciler(tmpDir, repo);
+
+    const report = await reconciler.reconcileRecipeSourceRefs(
+      { id: 'r1', reasoning: { confidence: 0.8 } },
+      { force: true }
+    );
+
+    expect(report).toMatchObject({
+      failed: 1,
+      recipesProcessed: 1,
+    });
+    expect(report.blockers?.[0]).toContain('missing');
+    expect(repo.findOne('r1', 'src/live.ts')).toMatchObject({ status: 'active' });
+  });
+
+  it('keeps existing source refs when reasoning JSON cannot be parsed', async () => {
+    const repo = new InMemorySourceRefRepository([
+      {
+        newPath: null,
+        recipeId: 'r1',
+        sourcePath: 'src/live.ts',
+        status: 'active',
+        verifiedAt: 1,
+      },
+    ]);
+    const reconciler = buildReconciler(tmpDir, repo);
+
+    const report = await reconciler.reconcileRecipeSourceRefs(
+      { id: 'r1', reasoning: '{not-json' },
+      { force: true }
+    );
+
+    expect(report).toMatchObject({
+      failed: 1,
+      recipesProcessed: 1,
+    });
+    expect(report.blockers?.[0]).toContain('parse-error');
+    expect(repo.findOne('r1', 'src/live.ts')).toMatchObject({ status: 'active' });
+  });
+
+  it('clears dropped refs only when reasoning.sources is explicitly empty', async () => {
+    const repo = new InMemorySourceRefRepository([
+      {
+        newPath: null,
+        recipeId: 'r1',
+        sourcePath: 'src/live.ts',
+        status: 'active',
+        verifiedAt: 1,
+      },
+    ]);
+    const reconciler = buildReconciler(tmpDir, repo);
+
+    const report = await reconciler.reconcileRecipeSourceRefs(
+      { id: 'r1', reasoning: { sources: [] } },
+      { force: true }
+    );
+
+    expect(report).toMatchObject({
+      cleaned: 1,
+      failed: 0,
+      recipesProcessed: 1,
+    });
+    expect(report.blockers).toEqual([]);
+    expect(repo.findOne('r1', 'src/live.ts')).toBeNull();
+  });
+
   it('keeps existing project-relative source refs with line ranges active', async () => {
     const existingFeedRepository =
       'Sources/Infrastructure/Networking/Repository/FeedRepository.swift';

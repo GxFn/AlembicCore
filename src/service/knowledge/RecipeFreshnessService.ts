@@ -181,13 +181,14 @@ export class RecipeFreshnessService {
         force: opts.forceSourceRefRefresh ?? true,
       });
       const rows = this.#sourceRefRepo.findByRecipeId(entry.id);
+      const errors = report.blockers ?? [];
       return {
         ...report,
         activeRefs: rows.filter((row) => row.status !== 'stale').map((row) => row.sourcePath),
         allRefs: rows.map((row) => row.sourcePath),
-        errors: [],
+        errors,
         staleRefs: rows.filter((row) => row.status === 'stale').map((row) => row.sourcePath),
-        status: 'completed',
+        status: (report.failed ?? 0) > 0 ? 'failed' : 'completed',
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -294,7 +295,9 @@ function emptySourceRefSummary(
     active: 0,
     activeRefs: [],
     allRefs: [],
+    blockers: [],
     errors: [],
+    failed: 0,
     inserted: 0,
     recipesProcessed: 0,
     skipped: 0,

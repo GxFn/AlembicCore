@@ -41,6 +41,10 @@ export interface ReconcileReport {
   recipesProcessed: number;
   /** 反向清理的旧行（不再被 reasoning.sources 引用） */
   cleaned?: number;
+  /** 解析失败或缺失来源字段的 recipe 数 */
+  failed?: number;
+  /** 阻止 source_ref 更新的可审计原因 */
+  blockers?: string[];
 }
 
 export interface ReconcileRecipeSourceRefsInput {
@@ -66,6 +70,16 @@ export interface ApplyReport {
 
 /** 默认跳过 24h 内已验证的条目 */
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+
+type ReasoningSourcesSuccess = { sources: readonly string[]; status: 'valid' | 'valid-empty' };
+type ReasoningSourcesFailure = { reason: string; status: 'missing' | 'parse-error' };
+type ReasoningSourcesParseResult = ReasoningSourcesFailure | ReasoningSourcesSuccess;
+
+function hasReasoningSources(
+  parsed: ReasoningSourcesParseResult
+): parsed is ReasoningSourcesSuccess {
+  return 'sources' in parsed;
+}
 
 export class SourceRefReconciler {
   #projectRoot: string;
@@ -108,6 +122,8 @@ export class SourceRefReconciler {
       stale: 0,
       skipped: 0,
       recipesProcessed: 0,
+      failed: 0,
+      blockers: [],
     };
 
     // 确保表可访问
@@ -122,13 +138,18 @@ export class SourceRefReconciler {
     const now = Date.now();
 
     for (const row of rows) {
-      const sources = this.#parseReasoningSources(row.reasoning);
-
-      if (sources.length === 0) {
+      const parsed = this.#parseReasoningSources(row.reasoning);
+      if (!hasReasoningSources(parsed)) {
+        this.#recordSourceParseBlocker(row.id, parsed, report);
         continue;
       }
 
-      this.#reconcileRecipeSourceRefs(row.id, sources, { countRecipe: true, force, now, report });
+      this.#reconcileRecipeSourceRefs(row.id, parsed.sources, {
+        countRecipe: true,
+        force,
+        now,
+        report,
+      });
     }
 
     this.#logger.info('SourceRefReconciler: reconcile complete', {
@@ -165,6 +186,8 @@ export class SourceRefReconciler {
       stale: 0,
       skipped: 0,
       recipesProcessed: 0,
+      failed: 0,
+      blockers: [],
     };
 
     if (!this.#sourceRefRepo.isAccessible()) {
@@ -174,8 +197,18 @@ export class SourceRefReconciler {
       return report;
     }
 
-    const sources = this.#parseReasoningSources(recipe.reasoning);
-    this.#reconcileRecipeSourceRefs(recipe.id, sources, {
+    const parsed = this.#parseReasoningSources(recipe.reasoning);
+    if (!hasReasoningSources(parsed)) {
+      this.#recordSourceParseBlocker(recipe.id, parsed, report);
+      this.#logger.warn('SourceRefReconciler: recipe source refs refresh blocked', {
+        reason: parsed.reason,
+        recipeId: recipe.id,
+        status: parsed.status,
+      });
+      return report;
+    }
+
+    this.#reconcileRecipeSourceRefs(recipe.id, parsed.sources, {
       countRecipe: true,
       force: opts?.force ?? true,
       now: Date.now(),
@@ -194,20 +227,44 @@ export class SourceRefReconciler {
     return report;
   }
 
-  #parseReasoningSources(reasoningInput: unknown): string[] {
+  #parseReasoningSources(reasoningInput: unknown): ReasoningSourcesParseResult {
     try {
       const reasoning =
         typeof reasoningInput === 'string'
           ? (JSON.parse(reasoningInput) as { sources?: unknown })
           : (reasoningInput as { sources?: unknown } | null);
-      return Array.isArray(reasoning?.sources)
-        ? reasoning.sources.filter(
-            (source): source is string => typeof source === 'string' && source.length > 0
-          )
-        : [];
-    } catch {
-      return [];
+      if (!reasoning || !('sources' in reasoning)) {
+        return { reason: 'reasoning.sources is missing', status: 'missing' };
+      }
+      if (!Array.isArray(reasoning.sources)) {
+        return { reason: 'reasoning.sources is not an array', status: 'parse-error' };
+      }
+      if (reasoning.sources.length === 0) {
+        return { sources: [], status: 'valid-empty' };
+      }
+      if (reasoning.sources.some((source) => typeof source !== 'string' || source.length === 0)) {
+        return { reason: 'reasoning.sources contains non-string entries', status: 'parse-error' };
+      }
+      return { sources: reasoning.sources, status: 'valid' };
+    } catch (error) {
+      return {
+        reason: error instanceof Error ? error.message : String(error),
+        status: 'parse-error',
+      };
     }
+  }
+
+  #recordSourceParseBlocker(
+    recipeId: string,
+    parsed: ReasoningSourcesFailure,
+    report: ReconcileReport
+  ): void {
+    report.recipesProcessed++;
+    report.failed = (report.failed ?? 0) + 1;
+    report.blockers = [
+      ...(report.blockers ?? []),
+      `recipe_source_refs:${recipeId}:${parsed.status}:${parsed.reason}`,
+    ];
   }
 
   #reconcileRecipeSourceRefs(

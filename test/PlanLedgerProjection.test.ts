@@ -15,6 +15,7 @@ import {
   PlanLedgerService,
 } from '../src/plans.js';
 import { createAlembicRepositories } from '../src/repositories.js';
+import { PlanRepositoryDataError } from '../src/repository/plan/PlanRepository.js';
 
 describe('Plan ledger projection', () => {
   let tmpDir: string;
@@ -188,6 +189,34 @@ describe('Plan ledger projection', () => {
       generated: 0,
       missing: 1,
     });
+    expect(
+      view?.state.coverage.byModuleDimension['Sources/BiliDiliApp']?.architecture
+    ).toMatchObject({
+      planned: 2,
+      generated: 1,
+      missing: 1,
+    });
+    expect(
+      view?.state.coverage.byModuleDimension['Sources/BiliDiliApp']?.['testing-quality']
+    ).toMatchObject({
+      planned: 1,
+      generated: 0,
+      missing: 1,
+    });
+    expect(view?.state.coverage.gaps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          dimensionId: 'architecture',
+          missing: 1,
+          modulePath: 'Sources/BiliDiliApp',
+        }),
+        expect.objectContaining({
+          dimensionId: 'testing-quality',
+          missing: 1,
+          modulePath: 'Sources/BiliDiliApp',
+        }),
+      ])
+    );
     expect(view?.state.pendingProposals).toHaveLength(1);
     expect(view?.state.generationChangeLog).toHaveLength(1);
 
@@ -205,6 +234,140 @@ describe('Plan ledger projection', () => {
       .map((column) => (column as { name: string }).name);
     expect(columns).not.toContain('state_json');
     expect(columns).not.toContain('coverage_json');
+  });
+
+  it('projects recipes without source refs as missing instead of generated from sourceFile', async () => {
+    const repositories = createAlembicRepositories(runtime.connection);
+    const signature = computeProjectContextSignature({
+      projectRoot: tmpDir,
+      commit: 'abc123',
+      files: [{ filePath: 'Sources/BiliDiliApp/App.swift', contentHash: 'app-hash' }],
+    });
+    const draft = repositories.planRepository.saveDraft({
+      planId: 'plan-missing-source-refs',
+      projectRoot: tmpDir,
+      projectContextSignature: signature,
+      createdBy: 'test',
+      rationale: ['fixture draft'],
+    });
+    repositories.planRepository.confirm({
+      planId: draft.planId,
+      version: draft.version,
+      confirmedBy: 'test',
+      rationale: ['fixture confirmed'],
+      intent: completeBilidiliPlanIntent(),
+    });
+
+    const recipe = new KnowledgeEntry({
+      id: 'recipe-without-source-refs',
+      title: 'SwiftUI app recipe without reconciled refs',
+      description: 'Recipe still carries legacy sourceFile but no source_refs row.',
+      lifecycle: 'active',
+      language: 'swift',
+      dimensionId: 'architecture',
+      category: 'architecture',
+      knowledgeType: 'code-pattern',
+      sourceFile: 'Sources/BiliDiliApp/App.swift',
+      content: { pattern: 'App entrypoint composes scenes.' },
+      reasoning: {
+        confidence: 0.9,
+        whyStandard: 'Fixture intentionally omits reasoning.sources.',
+      },
+    });
+    await repositories.knowledgeRepository.create(recipe);
+
+    const service = new PlanLedgerService(repositories);
+    const view = await service.getActivePlanView(tmpDir, signature);
+
+    expect(view?.state.codeRecipeMapping).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          codeRegion: 'Sources/BiliDiliApp/App.swift',
+          dimensionIds: ['architecture'],
+          modulePath: 'Sources/BiliDiliApp',
+          recipeIds: ['recipe-without-source-refs'],
+          status: 'missing',
+        }),
+      ])
+    );
+    expect(view?.state.coverage).toMatchObject({
+      generated: 0,
+      planned: 3,
+    });
+    expect(view?.state.coverage.byDimension.architecture).toMatchObject({
+      generated: 0,
+      missing: 2,
+      planned: 2,
+    });
+    expect(
+      view?.state.coverage.byModuleDimension['Sources/BiliDiliApp']?.architecture
+    ).toMatchObject({
+      generated: 0,
+      missing: 2,
+      planned: 2,
+    });
+  });
+
+  it('returns null for absent Plan rows and throws typed errors for damaged rows', () => {
+    const repositories = createAlembicRepositories(runtime.connection);
+    const signature = computeProjectContextSignature({ projectRoot: tmpDir });
+
+    expect(repositories.planRepository.get('missing-plan')).toBeNull();
+
+    const badStatus = repositories.planRepository.saveDraft({
+      planId: 'plan-bad-status',
+      projectRoot: tmpDir,
+      projectContextSignature: signature,
+      createdBy: 'test',
+      rationale: ['fixture draft'],
+    });
+    runtime.sqlite
+      .prepare('UPDATE plans SET status = ? WHERE plan_id = ? AND version = ?')
+      .run('unknown-status', badStatus.planId, badStatus.version);
+
+    expect(() => repositories.planRepository.get(badStatus.planId, badStatus.version)).toThrow(
+      PlanRepositoryDataError
+    );
+    try {
+      repositories.planRepository.get(badStatus.planId, badStatus.version);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'plan-row-unknown-status',
+        field: 'status',
+        planId: badStatus.planId,
+        version: badStatus.version,
+      });
+    }
+
+    const badJsonProjectRoot = path.join(tmpDir, 'bad-json-project');
+    const badJsonSignature = computeProjectContextSignature({ projectRoot: badJsonProjectRoot });
+    const badIntent = repositories.planRepository.saveDraft({
+      planId: 'plan-bad-intent-json',
+      projectRoot: badJsonProjectRoot,
+      projectContextSignature: badJsonSignature,
+      createdBy: 'test',
+      rationale: ['fixture draft'],
+    });
+    runtime.sqlite
+      .prepare('UPDATE plans SET intent_json = ? WHERE plan_id = ? AND version = ?')
+      .run('{not-json', badIntent.planId, badIntent.version);
+
+    expect(() => repositories.planRepository.get(badIntent.planId, badIntent.version)).toThrow(
+      PlanRepositoryDataError
+    );
+    expect(() => repositories.planRepository.listByProject(badJsonProjectRoot)).toThrow(
+      PlanRepositoryDataError
+    );
+    try {
+      repositories.planRepository.listByProject(badJsonProjectRoot);
+    } catch (error) {
+      expect(error).toMatchObject({
+        code: 'plan-row-invalid-json',
+        field: 'intent_json',
+        planId: badIntent.planId,
+        version: badIntent.version,
+      });
+    }
   });
 
   it('computes stable ProjectContext signatures and exposes mismatch detection', () => {

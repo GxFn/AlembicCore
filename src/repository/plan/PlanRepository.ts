@@ -13,6 +13,30 @@ import type {
 
 type PlanRow = typeof plans.$inferSelect;
 
+export type PlanRepositoryDataErrorCode = 'plan-row-invalid-json' | 'plan-row-unknown-status';
+
+export class PlanRepositoryDataError extends Error {
+  readonly code: PlanRepositoryDataErrorCode;
+  readonly field: string;
+  readonly planId: string;
+  readonly version: number;
+
+  constructor(input: {
+    code: PlanRepositoryDataErrorCode;
+    field: string;
+    message: string;
+    planId: string;
+    version: number;
+  }) {
+    super(input.message);
+    this.name = 'PlanRepositoryDataError';
+    this.code = input.code;
+    this.field = input.field;
+    this.planId = input.planId;
+    this.version = input.version;
+  }
+}
+
 export class PlanRepositoryImpl {
   readonly #drizzle: DrizzleDB;
 
@@ -154,7 +178,11 @@ export class PlanRepositoryImpl {
       .orderBy(desc(plans.updatedAt), desc(plans.version))
       .limit(limit)
       .all();
-    return rows.map((row) => PlanRepositoryImpl.mapRow(row));
+    const records: PlanRecord[] = [];
+    for (const row of rows) {
+      records.push(PlanRepositoryImpl.mapRow(row));
+    }
+    return records;
   }
 
   archive(planId: string, version: number, actor = 'agent'): boolean {
@@ -192,7 +220,7 @@ export class PlanRepositoryImpl {
     return {
       planId: row.planId,
       version: row.version,
-      status: normalizePlanStatus(row.status),
+      status: normalizePlanStatus(row.status, row),
       projectRoot: row.projectRoot,
       projectContextSignature: row.projectContextSignature,
       lastUpdatedFromCommit: row.lastUpdatedFromCommit ?? null,
@@ -202,10 +230,10 @@ export class PlanRepositoryImpl {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       supersedesPlanId: row.supersedesPlanId ?? null,
-      intent: safeJsonParse(row.intentJson, emptyPlanIntent()),
-      planningBrief: safeJsonParse(row.planningBriefJson, null),
-      rationale: safeJsonParse(row.rationaleJson, []),
-      intentChangeLog: safeJsonParse(row.changeLogJson, []),
+      intent: parsePlanJson(row, 'intent_json', row.intentJson, emptyPlanIntent()),
+      planningBrief: parsePlanJson(row, 'planning_brief_json', row.planningBriefJson, null),
+      rationale: parsePlanJson(row, 'rationale_json', row.rationaleJson, []),
+      intentChangeLog: parsePlanJson(row, 'change_log_json', row.changeLogJson, []),
     };
   }
 
@@ -215,21 +243,44 @@ export class PlanRepositoryImpl {
   }
 }
 
-function normalizePlanStatus(value: string): PlanStatus {
-  if (value === 'confirmed' || value === 'superseded' || value === 'archived') {
+function normalizePlanStatus(value: string, row: PlanRow): PlanStatus {
+  if (
+    value === 'draft' ||
+    value === 'confirmed' ||
+    value === 'superseded' ||
+    value === 'archived'
+  ) {
     return value;
   }
-  return 'draft';
+  throw new PlanRepositoryDataError({
+    code: 'plan-row-unknown-status',
+    field: 'status',
+    message: `Plan row has unknown status: ${row.planId}@${row.version} status=${value}`,
+    planId: row.planId,
+    version: row.version,
+  });
 }
 
-function safeJsonParse<T>(json: string | null | undefined, fallback: T): T {
+function parsePlanJson<T>(
+  row: PlanRow,
+  field: string,
+  json: string | null | undefined,
+  fallback: T
+): T {
   if (!json) {
     return fallback;
   }
   try {
     return JSON.parse(json) as T;
-  } catch {
-    return fallback;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new PlanRepositoryDataError({
+      code: 'plan-row-invalid-json',
+      field,
+      message: `Plan row has invalid JSON: ${row.planId}@${row.version} ${field}: ${detail}`,
+      planId: row.planId,
+      version: row.version,
+    });
   }
 }
 
