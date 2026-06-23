@@ -26,6 +26,7 @@ export type {
   EvolutionCandidateReason,
   EvolutionDecision,
   EvolutionResult,
+  GitDiffCheckpointBaselineProvider,
   GitDiffCheckpointInitializationSource,
   GitDiffCheckpointRecord,
   GitDiffCheckpointRouteStatus,

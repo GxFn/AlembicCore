@@ -1,35 +1,36 @@
-export { PlanRepositoryImpl } from './repository/plan/index.js';
 export type {
-  BuildPlanDraftInformationPackageInput,
-  ConfirmPlanInput,
-  PlanChangeLogEntry,
-  PlanCodeRecipeMapping,
-  PlanCoverageBucket,
-  PlanCoverageGap,
-  PlanDraftInformationPackage,
   PlanDraftSource,
   PlanEvidenceRef,
-  PlanGenerationState,
   PlanIntent,
   PlanModuleBinding,
   PlanNextAction,
   PlanProjectProfile,
-  PlanRecord,
   PlanScaleDecision,
-  PlanSignatureComparison,
+  PlanSelection,
   PlanStageId,
-  PlanStages,
-  PlanStageTarget,
-  PlanStatus,
+} from './service/planIntent/index.js';
+export {
+  hasPositiveStageBudget,
+  normalizeConfirmedPlanIntent,
+  unique,
+  validateCompletePlanIntent,
+} from './service/planIntent/index.js';
+export type {
+  BuildPlanDraftInformationPackageInput,
+  PlanCodeRecipeMapping,
+  PlanCoverageBucket,
+  PlanCoverageGap,
+  PlanDraftInformationPackage,
+  PlanGenerationState,
+  PlanSignatureComparison,
   PlanView,
   ProjectContextSignatureInput,
-  SavePlanDraftInput,
-} from './service/planLedger/index.js';
+} from './service/recipeStatus/index.js';
 export {
+  buildCoverage,
   buildPlanDraftInformationPackage,
   compareProjectContextSignature,
   computeProjectContextSignature,
-  PlanLedgerService,
   projectPlanGenerationState,
   projectPlanGenerationStateFromRecords,
-} from './service/planLedger/index.js';
+} from './service/recipeStatus/index.js';

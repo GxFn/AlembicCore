@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
 import { GitDiffCheckpointService } from '../src/evolution.js';
 import { pathGuard } from '../src/io.js';
-import type { PlanIntent } from '../src/plans.js';
 import { createAlembicRepositories } from '../src/repositories.js';
 
 describe('Git diff checkpoint repository and service', () => {
@@ -84,13 +83,12 @@ describe('Git diff checkpoint repository and service', () => {
     expect(repo.listByProjectRoot(tmpDir)).toHaveLength(2);
   });
 
-  it('initializes from the active confirmed Plan commit instead of guessing a git parent', () => {
+  it('initializes from the current HEAD baseline instead of guessing a git parent', () => {
     const repositories = createAlembicRepositories(runtime.connection);
-    confirmPlanFromCommit(repositories, tmpDir, 'plan-confirmed-commit');
 
     const service = new GitDiffCheckpointService({
       checkpointRepository: repositories.gitDiffCheckpointRepository,
-      planRepository: repositories.planRepository,
+      baselineProvider: { getBaselineCommit: () => 'current-head-commit' },
     });
     const result = service.ensureCheckpoint({
       projectRoot: tmpDir,
@@ -99,15 +97,14 @@ describe('Git diff checkpoint repository and service', () => {
       now: 200,
     });
 
-    expect(result.source).toBe('active-confirmed-plan');
-    expect(result.checkpoint.checkpointCommit).toBe('plan-confirmed-commit');
-    expect(result.checkpoint.initialFromPlanCommit).toBe('plan-confirmed-commit');
+    expect(result.source).toBe('current-head');
+    expect(result.checkpoint.checkpointCommit).toBe('current-head-commit');
+    expect(result.checkpoint.initialFromPlanCommit).toBe('current-head-commit');
     expect(result.checkpoint.lastRouteStatus).toBe('initialized');
   });
 
-  it('repairs an existing empty checkpoint from the active confirmed Plan commit', () => {
+  it('repairs an existing empty checkpoint from the current HEAD baseline', () => {
     const repositories = createAlembicRepositories(runtime.connection);
-    confirmPlanFromCommit(repositories, tmpDir, 'plan-confirmed-commit');
     repositories.gitDiffCheckpointRepository.upsert({
       projectRoot: tmpDir,
       scopeId: 'rescan',
@@ -124,7 +121,7 @@ describe('Git diff checkpoint repository and service', () => {
 
     const service = new GitDiffCheckpointService({
       checkpointRepository: repositories.gitDiffCheckpointRepository,
-      planRepository: repositories.planRepository,
+      baselineProvider: { getBaselineCommit: () => 'current-head-commit' },
     });
     const result = service.ensureCheckpoint({
       projectRoot: tmpDir,
@@ -133,9 +130,9 @@ describe('Git diff checkpoint repository and service', () => {
       now: 220,
     });
 
-    expect(result.source).toBe('active-confirmed-plan');
-    expect(result.checkpoint.checkpointCommit).toBe('plan-confirmed-commit');
-    expect(result.checkpoint.initialFromPlanCommit).toBe('plan-confirmed-commit');
+    expect(result.source).toBe('current-head');
+    expect(result.checkpoint.checkpointCommit).toBe('current-head-commit');
+    expect(result.checkpoint.initialFromPlanCommit).toBe('current-head-commit');
     expect(result.checkpoint.targetCommit).toBe('target-after-empty-row');
     expect(result.checkpoint.lastRouteStatus).toBe('skipped');
     expect(result.checkpoint.lastRouteReason).toBe(
@@ -145,9 +142,8 @@ describe('Git diff checkpoint repository and service', () => {
     expect(result.checkpoint.updatedAt).toBe(220);
   });
 
-  it('preserves an existing non-null checkpoint instead of replacing it from the Plan commit', () => {
+  it('preserves an existing non-null checkpoint instead of replacing it from current HEAD', () => {
     const repositories = createAlembicRepositories(runtime.connection);
-    confirmPlanFromCommit(repositories, tmpDir, 'plan-confirmed-commit');
     repositories.gitDiffCheckpointRepository.upsert({
       projectRoot: tmpDir,
       scopeId: 'rescan',
@@ -160,7 +156,7 @@ describe('Git diff checkpoint repository and service', () => {
 
     const service = new GitDiffCheckpointService({
       checkpointRepository: repositories.gitDiffCheckpointRepository,
-      planRepository: repositories.planRepository,
+      baselineProvider: { getBaselineCommit: () => 'current-head-commit' },
     });
     const result = service.ensureCheckpoint({
       projectRoot: tmpDir,
@@ -177,10 +173,9 @@ describe('Git diff checkpoint repository and service', () => {
 
   it('does not advance a repaired empty checkpoint on skipped route outcomes', () => {
     const repositories = createAlembicRepositories(runtime.connection);
-    confirmPlanFromCommit(repositories, tmpDir, 'plan-confirmed-commit');
     const service = new GitDiffCheckpointService({
       checkpointRepository: repositories.gitDiffCheckpointRepository,
-      planRepository: repositories.planRepository,
+      baselineProvider: { getBaselineCommit: () => 'current-head-commit' },
     });
     repositories.gitDiffCheckpointRepository.upsert({
       projectRoot: tmpDir,
@@ -205,11 +200,11 @@ describe('Git diff checkpoint repository and service', () => {
     });
 
     expect(result.advanced).toBe(false);
-    expect(result.checkpoint.checkpointCommit).toBe('plan-confirmed-commit');
-    expect(result.checkpoint.initialFromPlanCommit).toBe('plan-confirmed-commit');
+    expect(result.checkpoint.checkpointCommit).toBe('current-head-commit');
+    expect(result.checkpoint.initialFromPlanCommit).toBe('current-head-commit');
     expect(result.checkpoint.targetCommit).toBe('changed-target');
     expect(result.unresolvedRange).toEqual({
-      fromCommit: 'plan-confirmed-commit',
+      fromCommit: 'current-head-commit',
       toCommit: 'changed-target',
       mergeBaseCommit: 'merge-base',
     });
@@ -219,7 +214,7 @@ describe('Git diff checkpoint repository and service', () => {
     const repositories = createAlembicRepositories(runtime.connection);
     const service = new GitDiffCheckpointService({
       checkpointRepository: repositories.gitDiffCheckpointRepository,
-      planRepository: repositories.planRepository,
+      baselineProvider: { getBaselineCommit: () => null },
     });
     repositories.gitDiffCheckpointRepository.upsert({
       projectRoot: tmpDir,
@@ -261,7 +256,7 @@ describe('Git diff checkpoint repository and service', () => {
     const repositories = createAlembicRepositories(runtime.connection);
     const service = new GitDiffCheckpointService({
       checkpointRepository: repositories.gitDiffCheckpointRepository,
-      planRepository: repositories.planRepository,
+      baselineProvider: { getBaselineCommit: () => null },
     });
     repositories.gitDiffCheckpointRepository.upsert({
       projectRoot: tmpDir,
@@ -300,89 +295,3 @@ describe('Git diff checkpoint repository and service', () => {
     expect(routed.checkpoint.advancedAt).toBe(300);
   });
 });
-
-function completePlanIntent(): PlanIntent {
-  return {
-    projectProfile: {
-      projectType: 'fixture',
-      primaryLanguage: 'typescript',
-      frameworks: [],
-      moduleCount: 1,
-      fileCount: 1,
-      architectureHints: ['repository'],
-    },
-    dimensions: [
-      {
-        dimensionId: 'architecture',
-        priority: 1,
-        rationale: 'Checkpoint initialization fixture dimension.',
-        stage: 'coldStart',
-        targetRecipes: 1,
-      },
-    ],
-    scale: {
-      totalRecipeBudget: 1,
-      perStage: { coldStart: 1, deepMining: 0, module: 0 },
-      depthLevels: ['overview'],
-    },
-    moduleBindings: [
-      {
-        modulePath: 'src',
-        moduleId: 'src',
-        dimensions: ['architecture'],
-        targetRecipes: 1,
-        priority: 1,
-      },
-    ],
-    stages: {
-      coldStart: { dimensions: ['architecture'], breadthBudget: 1, depthBudget: 1 },
-      deepMining: { dimensions: [] },
-      moduleMining: {
-        perModule: [
-          {
-            modulePath: 'src',
-            moduleId: 'src',
-            dimensions: ['architecture'],
-            targetRecipes: 1,
-            priority: 1,
-          },
-        ],
-      },
-    },
-    plannedNextActions: [
-      {
-        tool: 'knowledge-rescan',
-        reason: 'Checkpoint fixture route.',
-        order: 1,
-        dimensionIds: ['architecture'],
-        modulePaths: ['src'],
-      },
-    ],
-    evidenceRefs: [{ kind: 'human', ref: 'test' }],
-    draftSource: 'host-agent',
-  };
-}
-
-function confirmPlanFromCommit(
-  repositories: ReturnType<typeof createAlembicRepositories>,
-  projectRoot: string,
-  lastUpdatedFromCommit: string
-): void {
-  const draft = repositories.planRepository.saveDraft({
-    planId: 'plan-checkpoint',
-    projectRoot,
-    projectContextSignature: 'signature-a',
-    lastUpdatedFromCommit,
-    createdBy: 'test',
-    rationale: ['checkpoint fixture'],
-    createdAt: 100,
-  });
-  repositories.planRepository.confirm({
-    planId: draft.planId,
-    version: draft.version,
-    confirmedBy: 'test',
-    confirmedAt: 120,
-    rationale: ['confirmed checkpoint fixture'],
-    intent: completePlanIntent(),
-  });
-}

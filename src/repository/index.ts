@@ -5,7 +5,6 @@ export * from './evolution/index.js';
 export * from './guard/index.js';
 export * from './knowledge/index.js';
 export * from './memory/index.js';
-export * from './plan/index.js';
 export * from './search/index.js';
 export * from './session/index.js';
 export * from './sourceref/index.js';

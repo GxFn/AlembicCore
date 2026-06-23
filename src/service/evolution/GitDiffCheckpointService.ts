@@ -4,7 +4,6 @@ import type {
   GitDiffCheckpointRouteStatus,
   GitDiffCheckpointScope,
 } from '../../repository/evolution/GitDiffCheckpointRepository.js';
-import type { PlanRepositoryImpl } from '../../repository/plan/index.js';
 
 export type {
   GitDiffCheckpointRecord,
@@ -14,12 +13,16 @@ export type {
 
 export type GitDiffCheckpointInitializationSource =
   | 'existing-checkpoint'
-  | 'active-confirmed-plan'
+  | 'current-head'
   | 'empty';
+
+export interface GitDiffCheckpointBaselineProvider {
+  getBaselineCommit(projectRoot: string): string | null;
+}
 
 export interface GitDiffCheckpointServiceRepositories {
   checkpointRepository: GitDiffCheckpointRepository;
-  planRepository: Pick<PlanRepositoryImpl, 'getActiveConfirmed'>;
+  baselineProvider: GitDiffCheckpointBaselineProvider;
 }
 
 export interface EnsureGitDiffCheckpointInput extends GitDiffCheckpointScope {
@@ -58,26 +61,25 @@ const ADVANCING_ROUTE_STATUSES = new Set<GitDiffCheckpointRouteStatus>([
 
 export class GitDiffCheckpointService {
   readonly #checkpointRepository: GitDiffCheckpointRepository;
-  readonly #planRepository: Pick<PlanRepositoryImpl, 'getActiveConfirmed'>;
+  readonly #baselineProvider: GitDiffCheckpointBaselineProvider;
 
   constructor(repositories: GitDiffCheckpointServiceRepositories) {
     this.#checkpointRepository = repositories.checkpointRepository;
-    this.#planRepository = repositories.planRepository;
+    this.#baselineProvider = repositories.baselineProvider;
   }
 
   ensureCheckpoint(input: EnsureGitDiffCheckpointInput): EnsureGitDiffCheckpointResult {
     const existing = this.#checkpointRepository.get(input);
     if (existing) {
-      const planCommit =
-        this.#planRepository.getActiveConfirmed(input.projectRoot)?.lastUpdatedFromCommit ?? null;
-      if (planCommit && isEmptyCheckpointInitialization(existing)) {
+      const baselineCommit = this.#baselineProvider.getBaselineCommit(input.projectRoot);
+      if (baselineCommit && isEmptyCheckpointInitialization(existing)) {
         const now = input.now ?? Date.now();
         const checkpoint = this.#checkpointRepository.upsert({
           projectRoot: input.projectRoot,
           scopeId: input.scopeId,
           folderId: input.folderId,
-          checkpointCommit: planCommit,
-          initialFromPlanCommit: planCommit,
+          checkpointCommit: baselineCommit,
+          initialFromPlanCommit: baselineCommit,
           mergeBaseCommit: existing.mergeBaseCommit,
           targetCommit: existing.targetCommit,
           lastRouteStatus: existing.lastRouteStatus,
@@ -87,20 +89,19 @@ export class GitDiffCheckpointService {
           createdAt: existing.createdAt,
           updatedAt: now,
         });
-        return { checkpoint, source: 'active-confirmed-plan' };
+        return { checkpoint, source: 'current-head' };
       }
       return { checkpoint: existing, source: 'existing-checkpoint' };
     }
 
-    const planCommit =
-      this.#planRepository.getActiveConfirmed(input.projectRoot)?.lastUpdatedFromCommit ?? null;
+    const baselineCommit = this.#baselineProvider.getBaselineCommit(input.projectRoot);
     const now = input.now ?? Date.now();
     const checkpoint = this.#checkpointRepository.upsert({
       projectRoot: input.projectRoot,
       scopeId: input.scopeId,
       folderId: input.folderId,
-      checkpointCommit: planCommit,
-      initialFromPlanCommit: planCommit,
+      checkpointCommit: baselineCommit,
+      initialFromPlanCommit: baselineCommit,
       lastRouteStatus: 'initialized',
       createdAt: now,
       updatedAt: now,
@@ -108,7 +109,7 @@ export class GitDiffCheckpointService {
 
     return {
       checkpoint,
-      source: planCommit ? 'active-confirmed-plan' : 'empty',
+      source: baselineCommit ? 'current-head' : 'empty',
     };
   }
 

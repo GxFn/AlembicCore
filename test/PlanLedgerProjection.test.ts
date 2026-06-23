@@ -11,18 +11,18 @@ import {
   compareProjectContextSignature,
   computeProjectContextSignature,
   type PlanIntent,
-  PlanLedgerService,
+  projectPlanGenerationState,
+  validateCompletePlanIntent,
 } from '../src/plans.js';
 import { createAlembicRepositories } from '../src/repositories.js';
-import { PlanRepositoryDataError } from '../src/repository/plan/PlanRepository.js';
 
-describe('Plan ledger projection', () => {
+describe('Recipe status projection from stateless Plan intent', () => {
   let tmpDir: string;
   let runtime: AlembicDatabaseRuntime;
   let oldQuiet: string | undefined;
 
   beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-plan-ledger-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-recipe-status-'));
     oldQuiet = process.env.ALEMBIC_QUIET;
     process.env.ALEMBIC_QUIET = '1';
     pathGuard.configure({ projectRoot: tmpDir, knowledgeBaseDir: 'Alembic' });
@@ -39,7 +39,7 @@ describe('Plan ledger projection', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('persists confirmed Plan intent and projects generation state from existing records', async () => {
+  it('projects generation state from existing recipe records without plan persistence', async () => {
     const repositories = createAlembicRepositories(runtime.connection);
     const signature = computeProjectContextSignature({
       projectRoot: tmpDir,
@@ -74,21 +74,9 @@ describe('Plan ledger projection', () => {
       },
       hints: { focusModules: ['Sources/BiliDiliApp'], maxBudget: 4 },
     });
+    expect(draftPackage.draftSource).toBe('plugin-collected-facts');
 
-    const draft = repositories.planRepository.saveDraft({
-      planId: 'plan-bilidili',
-      projectRoot: tmpDir,
-      projectContextSignature: signature,
-      lastUpdatedFromCommit: 'abc123',
-      createdBy: 'test',
-      planningBrief: draftPackage.planningBrief,
-      rationale: ['fixture draft'],
-    });
-    expect(draft.intent.dimensions).toEqual([]);
-    expect(draft.intent.draftSource).toBe('plugin-collected-facts');
-    expect(draft.planningBrief).toBeNull();
-
-    const completeIntent = completeBilidiliPlanIntent({
+    const intent = completeBilidiliPlanIntent({
       projectProfile: {
         projectType: 'ios-app',
         primaryLanguage: 'swift',
@@ -98,24 +86,7 @@ describe('Plan ledger projection', () => {
         architectureHints: ['layered'],
       },
     });
-    const confirmed = repositories.planRepository.confirm({
-      planId: draft.planId,
-      version: draft.version,
-      confirmedBy: 'test',
-      rationale: ['fixture confirmed'],
-      intent: completeIntent,
-    });
-
-    expect(confirmed.status).toBe('confirmed');
-    expect(confirmed.intent).toMatchObject({
-      draftSource: 'host-agent',
-      dimensions: [
-        expect.objectContaining({ dimensionId: 'architecture' }),
-        expect.objectContaining({ dimensionId: 'testing-quality' }),
-      ],
-      moduleBindings: [expect.objectContaining({ modulePath: 'Sources/BiliDiliApp' })],
-    });
-    expect(repositories.planRepository.getActiveConfirmed(tmpDir)?.planId).toBe('plan-bilidili');
+    expect(() => validateCompletePlanIntent(intent)).not.toThrow();
 
     const recipe = new KnowledgeEntry({
       id: 'recipe-architecture',
@@ -129,7 +100,7 @@ describe('Plan ledger projection', () => {
       sourceFile: 'Sources/BiliDiliApp/App.swift',
       content: {
         pattern: 'App entrypoint composes the SwiftUI scene graph.',
-        rationale: 'Used by Plan projection fixture.',
+        rationale: 'Used by recipe status fixture.',
       },
       reasoning: {
         confidence: 0.9,
@@ -149,7 +120,7 @@ describe('Plan ledger projection', () => {
       targetRecipeId: recipe.id,
       confidence: 0.8,
       source: 'host-agent',
-      description: 'Fixture proposal should project into Plan state.',
+      description: 'Fixture proposal should project into recipe status.',
       evidence: [{ source: 'test' }],
       status: 'pending',
     });
@@ -165,11 +136,9 @@ describe('Plan ledger projection', () => {
       createdAt: 200,
     });
 
-    const service = new PlanLedgerService(repositories);
-    const view = await service.getActivePlanView(tmpDir, signature);
+    const state = await projectPlanGenerationState({ intent, repositories });
 
-    expect(view?.signature.matches).toBe(true);
-    expect(view?.state.codeRecipeMapping).toEqual(
+    expect(state.codeRecipeMapping).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           codeRegion: 'Sources/BiliDiliApp/App.swift',
@@ -180,31 +149,29 @@ describe('Plan ledger projection', () => {
         }),
       ])
     );
-    expect(view?.state.coverage.byDimension.architecture).toMatchObject({
+    expect(state.coverage.byDimension.architecture).toMatchObject({
       planned: 2,
       generated: 1,
       missing: 1,
     });
-    expect(view?.state.coverage.byDimension['testing-quality']).toMatchObject({
+    expect(state.coverage.byDimension['testing-quality']).toMatchObject({
       planned: 1,
       generated: 0,
       missing: 1,
     });
-    expect(
-      view?.state.coverage.byModuleDimension['Sources/BiliDiliApp']?.architecture
-    ).toMatchObject({
+    expect(state.coverage.byModuleDimension['Sources/BiliDiliApp']?.architecture).toMatchObject({
       planned: 2,
       generated: 1,
       missing: 1,
     });
     expect(
-      view?.state.coverage.byModuleDimension['Sources/BiliDiliApp']?.['testing-quality']
+      state.coverage.byModuleDimension['Sources/BiliDiliApp']?.['testing-quality']
     ).toMatchObject({
       planned: 1,
       generated: 0,
       missing: 1,
     });
-    expect(view?.state.coverage.gaps).toEqual(
+    expect(state.coverage.gaps).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           dimensionId: 'architecture',
@@ -218,46 +185,19 @@ describe('Plan ledger projection', () => {
         }),
       ])
     );
-    expect(view?.state.pendingProposals).toHaveLength(1);
-    expect(view?.state.generationChangeLog).toHaveLength(1);
+    expect(state.pendingProposals).toHaveLength(1);
+    expect(state.generationChangeLog).toHaveLength(1);
 
-    const row = runtime.sqlite
-      .prepare('SELECT intent_json FROM plans WHERE plan_id = ? AND version = ?')
-      .get('plan-bilidili', 1) as { intent_json: string };
-    const persistedIntent = JSON.parse(row.intent_json) as Record<string, unknown>;
-    expect(persistedIntent).not.toHaveProperty('codeRecipeMapping');
-    expect(persistedIntent).not.toHaveProperty('coverage');
-    expect(persistedIntent).not.toHaveProperty('pendingProposals');
-
-    const columns = runtime.sqlite
-      .prepare("PRAGMA table_info('plans')")
+    const tables = runtime.sqlite
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all()
-      .map((column) => (column as { name: string }).name);
-    expect(columns).not.toContain('state_json');
-    expect(columns).not.toContain('coverage_json');
+      .map((row) => (row as { name: string }).name);
+    expect(tables).not.toContain('plans');
   });
 
   it('projects recipes without source refs as missing instead of generated from sourceFile', async () => {
     const repositories = createAlembicRepositories(runtime.connection);
-    const signature = computeProjectContextSignature({
-      projectRoot: tmpDir,
-      commit: 'abc123',
-      files: [{ filePath: 'Sources/BiliDiliApp/App.swift', contentHash: 'app-hash' }],
-    });
-    const draft = repositories.planRepository.saveDraft({
-      planId: 'plan-missing-source-refs',
-      projectRoot: tmpDir,
-      projectContextSignature: signature,
-      createdBy: 'test',
-      rationale: ['fixture draft'],
-    });
-    repositories.planRepository.confirm({
-      planId: draft.planId,
-      version: draft.version,
-      confirmedBy: 'test',
-      rationale: ['fixture confirmed'],
-      intent: completeBilidiliPlanIntent(),
-    });
+    const intent = completeBilidiliPlanIntent();
 
     const recipe = new KnowledgeEntry({
       id: 'recipe-without-source-refs',
@@ -277,10 +217,9 @@ describe('Plan ledger projection', () => {
     });
     await repositories.knowledgeRepository.create(recipe);
 
-    const service = new PlanLedgerService(repositories);
-    const view = await service.getActivePlanView(tmpDir, signature);
+    const state = await projectPlanGenerationState({ intent, repositories });
 
-    expect(view?.state.codeRecipeMapping).toEqual(
+    expect(state.codeRecipeMapping).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           codeRegion: 'Sources/BiliDiliApp/App.swift',
@@ -291,84 +230,20 @@ describe('Plan ledger projection', () => {
         }),
       ])
     );
-    expect(view?.state.coverage).toMatchObject({
+    expect(state.coverage).toMatchObject({
       generated: 0,
       planned: 3,
     });
-    expect(view?.state.coverage.byDimension.architecture).toMatchObject({
+    expect(state.coverage.byDimension.architecture).toMatchObject({
       generated: 0,
       missing: 2,
       planned: 2,
     });
-    expect(
-      view?.state.coverage.byModuleDimension['Sources/BiliDiliApp']?.architecture
-    ).toMatchObject({
+    expect(state.coverage.byModuleDimension['Sources/BiliDiliApp']?.architecture).toMatchObject({
       generated: 0,
       missing: 2,
       planned: 2,
     });
-  });
-
-  it('returns null for absent Plan rows and throws typed errors for damaged rows', () => {
-    const repositories = createAlembicRepositories(runtime.connection);
-    const signature = computeProjectContextSignature({ projectRoot: tmpDir });
-
-    expect(repositories.planRepository.get('missing-plan')).toBeNull();
-
-    const badStatus = repositories.planRepository.saveDraft({
-      planId: 'plan-bad-status',
-      projectRoot: tmpDir,
-      projectContextSignature: signature,
-      createdBy: 'test',
-      rationale: ['fixture draft'],
-    });
-    runtime.sqlite
-      .prepare('UPDATE plans SET status = ? WHERE plan_id = ? AND version = ?')
-      .run('unknown-status', badStatus.planId, badStatus.version);
-
-    expect(() => repositories.planRepository.get(badStatus.planId, badStatus.version)).toThrow(
-      PlanRepositoryDataError
-    );
-    try {
-      repositories.planRepository.get(badStatus.planId, badStatus.version);
-    } catch (error) {
-      expect(error).toMatchObject({
-        code: 'plan-row-unknown-status',
-        field: 'status',
-        planId: badStatus.planId,
-        version: badStatus.version,
-      });
-    }
-
-    const badJsonProjectRoot = path.join(tmpDir, 'bad-json-project');
-    const badJsonSignature = computeProjectContextSignature({ projectRoot: badJsonProjectRoot });
-    const badIntent = repositories.planRepository.saveDraft({
-      planId: 'plan-bad-intent-json',
-      projectRoot: badJsonProjectRoot,
-      projectContextSignature: badJsonSignature,
-      createdBy: 'test',
-      rationale: ['fixture draft'],
-    });
-    runtime.sqlite
-      .prepare('UPDATE plans SET intent_json = ? WHERE plan_id = ? AND version = ?')
-      .run('{not-json', badIntent.planId, badIntent.version);
-
-    expect(() => repositories.planRepository.get(badIntent.planId, badIntent.version)).toThrow(
-      PlanRepositoryDataError
-    );
-    expect(() => repositories.planRepository.listByProject(badJsonProjectRoot)).toThrow(
-      PlanRepositoryDataError
-    );
-    try {
-      repositories.planRepository.listByProject(badJsonProjectRoot);
-    } catch (error) {
-      expect(error).toMatchObject({
-        code: 'plan-row-invalid-json',
-        field: 'intent_json',
-        planId: badIntent.planId,
-        version: badIntent.version,
-      });
-    }
   });
 
   it('computes stable ProjectContext signatures and exposes mismatch detection', () => {
@@ -453,40 +328,25 @@ describe('Plan ledger projection', () => {
     );
   });
 
-  it('requires a complete Agent-authored Plan payload before confirm', async () => {
-    const repositories = createAlembicRepositories(runtime.connection);
-    const signature = computeProjectContextSignature({ projectRoot: tmpDir });
-    const draft = repositories.planRepository.saveDraft({
-      planId: 'plan-complete-required',
-      projectRoot: tmpDir,
-      projectContextSignature: signature,
-      createdBy: 'test',
-      rationale: ['draft facts gathered'],
-    });
-
+  it('requires a complete single-stage Agent-authored Plan payload before confirm', () => {
     expect(() =>
-      repositories.planRepository.confirm({
-        planId: draft.planId,
-        version: draft.version,
-        confirmedBy: 'test',
-        rationale: ['incomplete payload'],
-        intent: {
-          ...completeBilidiliPlanIntent(),
-          plannedNextActions: [],
-        },
+      validateCompletePlanIntent({
+        ...completeBilidiliPlanIntent(),
+        plannedNextActions: [],
       })
     ).toThrow(/plannedNextActions are required/);
 
-    const confirmed = repositories.planRepository.confirm({
-      planId: draft.planId,
-      version: draft.version,
-      confirmedBy: 'test',
-      rationale: ['complete payload'],
-      intent: completeBilidiliPlanIntent(),
-    });
+    expect(() =>
+      validateCompletePlanIntent({
+        ...completeBilidiliPlanIntent(),
+        scale: {
+          ...completeBilidiliPlanIntent().scale,
+          totalRecipeBudget: 0,
+        },
+      })
+    ).toThrow(/scale.totalRecipeBudget must be > 0/);
 
-    expect(confirmed.intent.draftSource).toBe('host-agent');
-    expect(confirmed.intent.plannedNextActions).toHaveLength(2);
+    expect(() => validateCompletePlanIntent(completeBilidiliPlanIntent())).not.toThrow();
   });
 });
 
@@ -500,6 +360,7 @@ function completeBilidiliPlanIntent(
     priority: 1,
   };
   return {
+    generationStage: 'coldStart',
     projectProfile: overrides.projectProfile ?? {
       projectType: 'ios-app',
       primaryLanguage: 'swift',
@@ -512,36 +373,22 @@ function completeBilidiliPlanIntent(
         dimensionId: 'architecture',
         priority: 1,
         rationale: 'Architecture is foundational for the fixture.',
-        stage: 'coldStart',
         targetRecipes: 2,
       },
       {
         dimensionId: 'testing-quality',
         priority: 2,
         rationale: 'Tests are explicit in the fixture scope.',
-        stage: 'deepMining',
         targetRecipes: 1,
       },
     ],
     scale: {
       totalRecipeBudget: 3,
-      perStage: { coldStart: 2, deepMining: 1, module: 1 },
       depthLevels: ['baseline', 'deepening'],
       budgetLevel: 'focused',
       scale: 'small',
     },
     moduleBindings: [moduleBinding],
-    stages: {
-      coldStart: { dimensions: ['architecture'], breadthBudget: 2 },
-      deepMining: {
-        dimensions: ['testing-quality'],
-        depthBudget: 1,
-        focusModules: ['Sources/BiliDiliApp'],
-      },
-      moduleMining: {
-        perModule: [moduleBinding],
-      },
-    },
     plannedNextActions: [
       {
         tool: 'project-context.map',

@@ -4,7 +4,7 @@
  * 所有表定义从 active migrations 忠实翻译。
  * DB 列名与 migration 保持一致；实体映射由 repository 层处理。
  *
- * 表清单 (20 个业务表 + schema_migrations):
+ * 表清单 (19 个业务表 + schema_migrations):
  *   001: knowledge_entries, knowledge_edges, guard_violations, audit_logs,
  *        sessions, token_usage, semantic_memories, bootstrap_snapshots,
  *        bootstrap_dim_files, code_entities
@@ -15,7 +15,6 @@
  *   009: knowledge_entries.dimensionId
  *   010: source_graph_generations, source_graph_files,
  *        source_graph_symbols, source_graph_edges
- *   012: plans
  *   013: git_diff_checkpoints
  *   内部: schema_migrations
  *
@@ -442,39 +441,7 @@ export const lifecycleTransitionEvents = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 14. plans — Plan intent ledger (migration 012)
-// ═══════════════════════════════════════════════════════════════
-
-export const plans = sqliteTable(
-  'plans',
-  {
-    id: integer('id').primaryKey({ autoIncrement: true }),
-    planId: text('plan_id').notNull(),
-    version: integer('version').notNull(),
-    status: text('status').notNull().default('draft'),
-    projectRoot: text('project_root').notNull(),
-    projectContextSignature: text('project_context_signature').notNull(),
-    lastUpdatedFromCommit: text('last_updated_from_commit'),
-    createdBy: text('created_by').notNull().default('agent'),
-    confirmedBy: text('confirmed_by'),
-    confirmedAt: integer('confirmed_at'),
-    createdAt: integer('created_at').notNull(),
-    updatedAt: integer('updated_at').notNull(),
-    supersedesPlanId: text('supersedes_plan_id'),
-    intentJson: text('intent_json').notNull().default('{}'),
-    planningBriefJson: text('planning_brief_json'),
-    rationaleJson: text('rationale_json').notNull().default('[]'),
-    changeLogJson: text('change_log_json').notNull().default('[]'),
-  },
-  (table) => [
-    uniqueIndex('plans_plan_version_unique').on(table.planId, table.version),
-    index('idx_plans_project_status').on(table.projectRoot, table.status),
-    index('idx_plans_updated_at').on(table.updatedAt),
-  ]
-);
-
-// ═══════════════════════════════════════════════════════════════
-// 15. recipe_warnings — 知识新陈代谢警告持久化 (migration 008)
+// 14. recipe_warnings — 知识新陈代谢警告持久化 (migration 008)
 // ═══════════════════════════════════════════════════════════════
 
 export const recipeWarnings = sqliteTable(

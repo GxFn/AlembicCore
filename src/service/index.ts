@@ -5,5 +5,6 @@ export * from './guard/index.js';
 export * from './knowledge/index.js';
 export * from './quality/index.js';
 export * from './recipe/index.js';
+export * from './recipeStatus/index.js';
 export * from './search/index.js';
 export * from './vector/index.js';

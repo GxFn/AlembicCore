@@ -24,7 +24,6 @@ const EXPECTED_VERSIONS = [
   '009_knowledge_dimension_id',
   '010_source_graph',
   '011_guard_violations_attribution',
-  '012_plans',
   '013_git_diff_checkpoints',
 ];
 
@@ -70,12 +69,12 @@ describe('Migrations re-run / idempotency (fresh DB)', () => {
       'knowledge_entries',
       'code_entities',
       'recipe_source_refs',
-      'plans',
       'git_diff_checkpoints',
       'audit_logs',
     ]) {
       expect(tables).toContain(table);
     }
+    expect(tables).not.toContain('plans');
   });
 
   test('full re-run is idempotent: no re-application, no errors, data preserved', async () => {
