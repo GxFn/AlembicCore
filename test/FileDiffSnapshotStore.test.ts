@@ -4,7 +4,7 @@ import {
   normalizeSnapshotPath,
   reconcileSnapshotHashes,
   type SnapshotData,
-} from '../src/workflows/capabilities/project-intelligence/FileDiffSnapshotStore.js';
+} from '../src/workflows/capabilities/persistence/FileDiffSnapshotStore.js';
 
 describe('normalizeSnapshotPath', () => {
   it('prefers project-relative path derived from absolute file path', () => {

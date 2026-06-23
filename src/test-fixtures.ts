@@ -51,6 +51,16 @@ export {
   listCoreGrammarResources,
   reloadProjectAstPlugins,
 } from './core/ast/index.js';
+export { plugin as dartAstPlugin } from './core/ast/lang-dart.js';
+export { plugin as goAstPlugin } from './core/ast/lang-go.js';
+export { plugin as javaAstPlugin } from './core/ast/lang-java.js';
+export { plugin as kotlinAstPlugin } from './core/ast/lang-kotlin.js';
+export { plugin as rustAstPlugin } from './core/ast/lang-rust.js';
+export { plugin as swiftAstPlugin } from './core/ast/lang-swift.js';
+export {
+  plugin as typeScriptAstPlugin,
+  tsxPlugin as tsxAstPlugin,
+} from './core/ast/lang-typescript.js';
 export type {
   ConflictResult,
   DetectMatch,
@@ -75,33 +85,6 @@ export {
   resetDiscovererRegistry,
   savePreference,
 } from './core/discovery/index.js';
-export type {
-  AstProjectSummaryLike,
-  DepGraphData,
-  DiscovererLike,
-  PhaseContainer,
-  PhaseLogger,
-  ProjectAnalysisMaterializationInput,
-  ProjectAnalysisMaterializationOptions,
-  ProjectEntityGraphInput,
-} from './service/project-intelligence/AnalysisPhaseRunners.js';
-export {
-  buildEntityGraphInput,
-  materializeCallGraph,
-  resolveProjectAnalysisMaterialization,
-  runPhase1_7_CallGraph,
-  runPhase2_DependencyGraph,
-} from './service/project-intelligence/AnalysisPhaseRunners.js';
-export {
-  dartAstPlugin,
-  goAstPlugin,
-  javaAstPlugin,
-  kotlinAstPlugin,
-  rustAstPlugin,
-  swiftAstPlugin,
-  typeScriptAstPlugin,
-  tsxAstPlugin,
-};
 export {
   default as LanguageService,
   LanguageService as LanguageServiceClass,
@@ -112,8 +95,7 @@ export {
   normalizeSnapshotPath,
   reconcileSnapshotHashes,
   type SnapshotData,
-} from './workflows/capabilities/project-intelligence/FileDiffSnapshotStore.js';
-export { evaluateProjectAnalysisIncrementalPlan } from './workflows/capabilities/project-intelligence/ProjectIntelligenceIncrementalPlanner.js';
+} from './workflows/capabilities/persistence/FileDiffSnapshotStore.js';
 
 export const AST_LANGUAGE_TEST_PLUGINS = Object.freeze({
   dart: dartAstPlugin,

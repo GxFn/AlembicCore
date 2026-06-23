@@ -10,28 +10,6 @@ export type {
   DimensionDef,
   MissionBriefingResult,
 } from './types/ProjectSnapshot.js';
-export * from './workflows/capabilities/host-agent/index.js';
-export type {
-  ProjectSkillAssetKind,
-  ProjectSkillAuthorizationStatus,
-  ProjectSkillConflictStatus,
-  ProjectSkillDeliveryAsset,
-  ProjectSkillDeliveryAuthorization,
-  ProjectSkillDeliveryEvidenceRef,
-  ProjectSkillDeliveryReceipt,
-  ProjectSkillDeliveryRoute,
-  ProjectSkillDeliveryValidationIssue,
-  ProjectSkillDeliveryValidationResult,
-  ProjectSkillLinkMode,
-  ProjectSkillManagedMarker,
-  ProjectSkillRuntimeExportReceipt,
-  ProjectSkillRuntimeExportStatus,
-  ProjectSkillRuntimeExportStrategy,
-} from './workflows/capabilities/host-agent/ProjectSkillDeliveryContracts.js';
-export * from './workflows/capabilities/persistence/index.js';
-export * from './workflows/capabilities/planning/dimensions/index.js';
-export * from './workflows/capabilities/planning/knowledge/index.js';
-export * from './workflows/capabilities/presentation/index.js';
 export {
   buildIDEAgentAnalysisPacketFromProjectContext,
   createIDEAgentAnalysisProgressSeed,
@@ -56,7 +34,29 @@ export {
   type IDEAgentStructuralEvidenceKind,
   type IDEAgentStructuralEvidenceRef,
   type IDEAgentStructuralHints,
-} from './workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
+} from './workflows/capabilities/host-agent/IDEAgentAnalysisPacketBuilder.js';
+export * from './workflows/capabilities/host-agent/index.js';
+export type {
+  ProjectSkillAssetKind,
+  ProjectSkillAuthorizationStatus,
+  ProjectSkillConflictStatus,
+  ProjectSkillDeliveryAsset,
+  ProjectSkillDeliveryAuthorization,
+  ProjectSkillDeliveryEvidenceRef,
+  ProjectSkillDeliveryReceipt,
+  ProjectSkillDeliveryRoute,
+  ProjectSkillDeliveryValidationIssue,
+  ProjectSkillDeliveryValidationResult,
+  ProjectSkillLinkMode,
+  ProjectSkillManagedMarker,
+  ProjectSkillRuntimeExportReceipt,
+  ProjectSkillRuntimeExportStatus,
+  ProjectSkillRuntimeExportStrategy,
+} from './workflows/capabilities/host-agent/ProjectSkillDeliveryContracts.js';
+export * from './workflows/capabilities/persistence/index.js';
+export * from './workflows/capabilities/planning/dimensions/index.js';
+export * from './workflows/capabilities/planning/knowledge/index.js';
+export * from './workflows/capabilities/presentation/index.js';
 export * from './workflows/capabilities/RecipeSnapshotTypes.js';
 export * from './workflows/capabilities/WorkflowCleanupPolicies.js';
 export * from './workflows/cold-start/index.js';

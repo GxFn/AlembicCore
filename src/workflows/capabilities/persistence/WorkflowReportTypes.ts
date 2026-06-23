@@ -1,6 +1,6 @@
 import type { BootstrapFile, IncrementalPlan } from '../../../types/workflows.js';
 import type { MiningSessionStore } from '../host-agent/MiningSessionStore.js';
-import type { FileDiffPlanner } from '../project-intelligence/FileDiffPlanner.js';
+import type { FileDiffPlanner } from './FileDiffPlanner.js';
 
 export interface DimensionStat {
   candidateCount?: number;
@@ -57,7 +57,6 @@ export interface WorkflowReport {
   semanticMemory: Record<string, unknown> | null;
   completion?: WorkflowCompletionSummary | null;
   snapshot?: WorkflowSnapshotSummary | null;
-  codeEntityGraph?: Record<string, unknown>;
   session?: Record<string, unknown>;
   terminal?: Record<string, unknown>;
   [key: string]: unknown;

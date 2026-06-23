@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   aggregateDynamicPlanningSignals,
-  buildDimensionPlanningAids,
   queryPerModuleCoverage,
   resolvePlanDimensionDefinitions,
-  resolveSignalAwareActiveDimensions,
 } from '../src/dimensions.js';
 import type {
   ProjectContextPresenterInput,
@@ -241,49 +239,6 @@ function bilidiliProjectContext(): ProjectContextPresenterInput {
   };
 }
 
-function plainSwiftProjectContext(): ProjectContextPresenterInput {
-  const plainFile = file('Sources/PlainCore/CoreModel.swift', 60);
-  return {
-    project: { projectRoot: '/fixture/plain-swift', displayName: 'PlainSwift' },
-    envelopes: [],
-    refs: [],
-    files: [plainFile],
-    warnings: [],
-    unavailable: [],
-    repo: {
-      repo: { id: 'plain', name: 'plain-swift', root: '/fixture/plain-swift' },
-      languages: [{ language: 'swift', fileCount: 1 }],
-      buildSystems: [],
-      packageSystems: [],
-      targets: [],
-      localPackages: [],
-      sourceRoots: [{ path: 'Sources' }],
-      entrypoints: [],
-      commands: [],
-      topAreas: [{ path: 'Sources/PlainCore' }],
-      configFiles: [],
-      nextRefs: [],
-    },
-    map: {
-      repo: { id: 'plain', name: 'plain-swift', root: '/fixture/plain-swift' },
-      modules: [{ id: 'core', name: 'PlainCore', role: 'core', ownedFileCount: 1 }],
-      layers: [],
-      dependencySummary: { edgeCount: 0, notes: [] },
-      cycles: [],
-      hotspots: [],
-      majorFlows: [],
-      externalDependencyHotspots: [],
-      nextRefs: [],
-    },
-    modules: [moduleContext('core', 'PlainCore', plainFile, 'core')],
-    moduleLayers: [],
-    fileFlows: [],
-    fileSymbols: [],
-    sourceSlices: [],
-    anchorRanges: [],
-  };
-}
-
 function dynamicSignals() {
   return aggregateDynamicPlanningSignals({
     architectureIntelligence: analyzeArchitectureIntelligence({
@@ -380,64 +335,6 @@ function dynamicSignals() {
 }
 
 describe('dimension planning dynamic signals', () => {
-  it('selects SwiftUI/network/concurrency/testing dimensions from evidence, not language alone', () => {
-    const bilidiliReport = analyzeArchitectureIntelligence({
-      projectContext: bilidiliProjectContext(),
-      graph: {
-        manifestDependencies: [
-          { name: 'SwiftUI' },
-          { name: 'URLSession' },
-          { name: 'XCTest' },
-          { name: 'Combine' },
-        ],
-      },
-    });
-    const signalAware = resolveSignalAwareActiveDimensions({
-      primaryLanguage: 'swift',
-      architectureIntelligence: bilidiliReport,
-    });
-    const plainSignalAware = resolveSignalAwareActiveDimensions({
-      primaryLanguage: 'swift',
-      architectureIntelligence: analyzeArchitectureIntelligence({
-        projectContext: plainSwiftProjectContext(),
-      }),
-    });
-    const signalAwareIds = signalAware.activeDimensions.map((dimension) => dimension.id);
-    const plainSignalAwareIds = plainSignalAware.activeDimensions.map((dimension) => dimension.id);
-
-    expect(signalAwareIds).toEqual(
-      expect.arrayContaining([
-        'networking-api',
-        'ui-interaction',
-        'concurrency-async',
-        'testing-quality',
-        'swiftui-patterns',
-      ])
-    );
-    expect(
-      signalAware.decisions.find((decision) => decision.dimension.id === 'networking-api')?.evidence
-        .length
-    ).toBeGreaterThan(0);
-    expect(plainSignalAwareIds).not.toEqual(
-      expect.arrayContaining([
-        'networking-api',
-        'ui-interaction',
-        'testing-quality',
-        'swiftui-patterns',
-      ])
-    );
-    expect(plainSignalAwareIds).toEqual(
-      expect.arrayContaining(['architecture', 'swift-objc-idiom'])
-    );
-    expect(plainSignalAwareIds).not.toEqual(
-      expect.arrayContaining(['coding-standards', 'design-patterns', 'agent-guidelines'])
-    );
-    expect(
-      plainSignalAware.decisions.find((decision) => decision.dimension.id === 'coding-standards')
-        ?.kind
-    ).not.toBe('active');
-  });
-
   it('resolves confirmed Plan dimension ids without legacy language/framework recomputation', () => {
     const resolution = resolvePlanDimensionDefinitions([
       'swiftui-patterns',
@@ -451,40 +348,6 @@ describe('dimension planning dynamic signals', () => {
       'networking-api',
     ]);
     expect(resolution.missingDimensionIds).toEqual(['missing-plan-dimension']);
-  });
-
-  it('builds planning aids as factual dimension signals without recommendation order', () => {
-    const architecture = analyzeArchitectureIntelligence({
-      projectContext: bilidiliProjectContext(),
-      graph: {
-        manifestDependencies: [{ name: 'SwiftUI' }, { name: 'URLSession' }, { name: 'XCTest' }],
-      },
-    });
-    const aids = buildDimensionPlanningAids({
-      primaryLanguage: 'swift',
-      architectureIntelligence: architecture,
-      dynamicSignals: dynamicSignals(),
-    });
-
-    expect(aids.selection.activeDimensions.map((dimension) => dimension.id)).toEqual(
-      expect.arrayContaining(['networking-api', 'ui-interaction', 'testing-quality'])
-    );
-    expect(aids.informationGatheringSteps.map((step) => step.tool)).toEqual(
-      expect.arrayContaining([
-        'project-context.map',
-        'project-context.file-flow',
-        'project-context.file-symbols',
-        'recipe-context.coverage',
-      ])
-    );
-    expect(aids).not.toHaveProperty('recommendedDimensions');
-    expect(aids).not.toHaveProperty('dimensionOrder');
-    expect(aids).not.toHaveProperty('subsetHints');
-    expect(aids).not.toHaveProperty('crossDimensionConstraints');
-    expect(JSON.stringify(aids)).not.toMatch(
-      /recommendedDimensions|dimensionOrder|maxRecommendedDimensions|subsetHints|crossDimensionConstraints|CrossDimensionConstraint|buildCrossDimensionConstraints/
-    );
-    expect(aids.unavailableSignals).toEqual([]);
   });
 
   it('aggregates proposals, decay, coverage gaps, module delta, rename candidates, and hotspots', () => {
@@ -529,7 +392,7 @@ describe('dimension planning dynamic signals', () => {
     );
   });
 
-  it('exposes RG-2 helpers through stable facades', () => {
+  it('exposes dynamic signal helpers without draft dimension judgment facades', () => {
     const capabilities = createProjectContextCapabilities({
       execute: async () => {
         throw new Error('dimension planning test supplies deterministic inputs directly');
@@ -549,8 +412,8 @@ describe('dimension planning dynamic signals', () => {
       ],
     });
 
-    expect(capabilities.resolveSignalAwareActiveDimensions).toBeInstanceOf(Function);
-    expect(capabilities.buildDimensionPlanningAids).toBeInstanceOf(Function);
+    expect(capabilities).not.toHaveProperty('resolveSignalAwareActiveDimensions');
+    expect(capabilities).not.toHaveProperty('buildDimensionPlanningAids');
     expect(capabilities.aggregateDynamicPlanningSignals).toBeInstanceOf(Function);
     expect(coverage.gaps).toEqual([]);
   });

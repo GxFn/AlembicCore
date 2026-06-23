@@ -3,7 +3,7 @@ import type {
   ProjectAnalysisMaterializationPlan,
   ProjectAnalysisPreparationOptions,
   ProjectAnalysisScanOptions,
-} from '../capabilities/project-intelligence/ProjectIntelligenceCapability.js';
+} from '../shared/ProjectAnalysisPlanTypes.js';
 import type { KnowledgeRescanWorkflowIntent } from './KnowledgeRescanIntent.js';
 
 export interface KnowledgeRescanWorkflowPlan {
@@ -44,8 +44,6 @@ export function buildKnowledgeRescanWorkflowPlan({
     logPrefix: 'Rescan',
   };
   const materialize: ProjectAnalysisMaterializationPlan = {
-    codeEntityGraph: true,
-    callGraph: true,
     sourceGraph: true,
     dependencyEdges: true,
     moduleEntities: true,

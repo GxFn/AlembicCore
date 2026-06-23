@@ -4,7 +4,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
-import { buildDimensionPlanningAids } from '../src/dimensions.js';
 import { pathGuard } from '../src/io.js';
 import { KnowledgeEntry } from '../src/knowledge.js';
 import {
@@ -67,10 +66,12 @@ describe('Plan ledger projection', () => {
         architectureHints: ['layered'],
       },
       projectContextSignature: signature,
-      planningAids: buildDimensionPlanningAids({
-        primaryLanguage: 'swift',
-        detectedFrameworks: ['SwiftUI'],
-      }),
+      planningAids: {
+        collectedFacts: {
+          primaryLanguage: 'swift',
+          detectedFrameworks: ['SwiftUI'],
+        },
+      },
       hints: { focusModules: ['Sources/BiliDiliApp'], maxBudget: 4 },
     });
 
@@ -408,10 +409,12 @@ describe('Plan ledger projection', () => {
   });
 
   it('builds a facts-only draft information package without authoritative Plan intent', () => {
-    const planningAids = buildDimensionPlanningAids({
-      primaryLanguage: 'typescript',
-      detectedFrameworks: ['react'],
-    });
+    const planningAids = {
+      collectedFacts: {
+        primaryLanguage: 'typescript',
+        detectedFrameworks: ['react'],
+      },
+    };
     const signature = computeProjectContextSignature({
       projectRoot: tmpDir,
       primaryLanguage: 'typescript',
@@ -434,12 +437,12 @@ describe('Plan ledger projection', () => {
     expect(draftPackage.draftSource).toBe('plugin-collected-facts');
     expect(draftPackage.planningBrief).toMatchObject({
       draftSource: 'plugin-collected-facts',
-      factualDimensionSignals: expect.objectContaining({
-        activeDimensionIds: expect.arrayContaining(['architecture']),
-      }),
+      sourceReportFields: ['sourceReports.planningAids'],
       focusModules: ['src/app'],
     });
     expect(draftPackage.planningBrief).not.toHaveProperty('defaultOrder');
+    expect(draftPackage.planningBrief).not.toHaveProperty('factualDimensionSignals');
+    expect(draftPackage.planningBrief).not.toHaveProperty('toolCapabilityMatrix');
     expect(draftPackage.sourceReports.planningAids).toBe(planningAids);
     expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('recommendedDimensions');
     expect(draftPackage.sourceReports.planningAids).not.toHaveProperty('dimensionOrder');

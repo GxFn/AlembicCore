@@ -6,7 +6,7 @@
  *
  * 与 FileChangeHandler 的区别:
  *   - FileChangeHandler 处理实时 IDE 事件，使用 git diff HEAD，逐个文件分析
- *   - RecipeImpactPlanner 处理 rescan 批量 diff，消费 runAllPhases 的 incrementalPlan 产出
+ *   - RecipeImpactPlanner 处理 rescan 批量 diff，消费分析快照的 incrementalPlan 产出
  *
  * @module service/evolution/RecipeImpactPlanner
  */

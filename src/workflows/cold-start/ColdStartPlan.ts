@@ -3,7 +3,7 @@ import type {
   ProjectAnalysisMaterializationPlan,
   ProjectAnalysisPreparationOptions,
   ProjectAnalysisScanOptions,
-} from '../capabilities/project-intelligence/ProjectIntelligenceCapability.js';
+} from '../shared/ProjectAnalysisPlanTypes.js';
 import type { ColdStartWorkflowIntent } from './ColdStartIntent.js';
 
 export interface ColdStartWorkflowPlan {
@@ -66,8 +66,6 @@ export function buildColdStartWorkflowPlan({
     logPrefix: 'Bootstrap',
   };
   const materialize: ProjectAnalysisMaterializationPlan = {
-    codeEntityGraph: true,
-    callGraph: true,
     sourceGraph: true,
     dependencyEdges: true,
     moduleEntities: true,

@@ -54,6 +54,10 @@ interface SourceRefLike {
   newPath?: string | null;
 }
 
+function isPresent<T>(value: T | null | undefined | false | ''): value is T {
+  return Boolean(value);
+}
+
 export class PlanLedgerService {
   readonly #repositories: PlanLedgerRepositories;
 
@@ -111,12 +115,11 @@ export function buildPlanDraftInformationPackage(
   input: BuildPlanDraftInformationPackageInput
 ): PlanDraftInformationPackage {
   const focusModules = input.hints?.focusModules ?? [];
-  const selection = input.planningAids?.selection;
-  const activeDimensionIds = selection?.activeDimensions.map((dimension) => dimension.id) ?? [];
-  const skippedDimensionIds = selection?.skippedDimensions.map((dimension) => dimension.id) ?? [];
-  const lowConfidenceDimensionIds =
-    selection?.lowConfidenceDimensions.map((decision) => decision.dimension.id) ?? [];
-  const informationSteps = input.planningAids?.informationGatheringSteps ?? [];
+  const sourceReportFields = [
+    input.planningAids ? 'sourceReports.planningAids' : null,
+    input.dynamicSignals ? 'sourceReports.dynamicSignals' : null,
+    input.missionBriefing ? 'sourceReports.missionBriefing' : null,
+  ].filter(isPresent);
 
   return {
     draftSource: 'plugin-collected-facts',
@@ -130,24 +133,13 @@ export function buildPlanDraftInformationPackage(
       ],
       evidenceFields: [
         'projectContextSignature',
-        'sourceReports.planningAids.selection',
+        'sourceReports.planningAids',
         'sourceReports.dynamicSignals',
         'sourceReports.missionBriefing',
       ],
-      factualDimensionSignals: {
-        activeDimensionIds,
-        skippedDimensionIds,
-        lowConfidenceDimensionIds,
-        unavailableSignals: selection?.unavailableSignals ?? [],
-      },
+      sourceReportFields,
       focusModules,
       sopField: 'planningBrief',
-      toolCapabilityMatrix: informationSteps.map((step, index) => ({
-        order: index + 1,
-        tool: step.tool,
-        dimensions: step.dimensions,
-        reason: step.reason,
-      })),
     },
     sourceReports: {
       planningAids: input.planningAids,

@@ -333,7 +333,7 @@ export interface MissionBriefingResult {
 // ─────────────────────────────────────────────────────────────
 
 /**
- * ProjectSnapshot 是 runAllPhases() 的完整产出。
+ * ProjectSnapshot 是分析流程的完整产出。
  *
  * 设计原则：
  * 1. **不可变** — 创建后不应被修改
@@ -342,7 +342,7 @@ export interface MissionBriefingResult {
  * 4. **单一定义** — 这是项目分析数据的唯一类型来源
  *
  * 用法：
- * - `buildProjectSnapshot()` 从 runAllPhases() 返回值构建
+ * - `buildProjectSnapshot()` 从分析快照输入构建
  * - 4 个 handler 从 snapshot 读取数据，不再解构/重组
  * - `SnapshotViews.ts` 提供面向消费者的衍生视图
  */
@@ -404,7 +404,7 @@ export interface ProjectSnapshot {
 
 /**
  * 构建快照的输入参数
- * 从 runAllPhases() 的松散返回值到类型化快照的桥梁
+ * 从分析快照输入到类型化快照的桥梁
  */
 export interface ProjectSnapshotInput {
   projectRoot: string;

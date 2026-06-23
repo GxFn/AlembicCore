@@ -1,5 +1,5 @@
 /**
- * ProjectSnapshot Builder — 从 runAllPhases() 的松散返回值构建类型化快照
+ * ProjectSnapshot Builder — 从分析快照输入构建类型化快照
  *
  * 职责：
  *   1. 类型归一化（unknown → typed interfaces）
@@ -33,9 +33,9 @@ import type {
 const SNAPSHOT_VERSION = '1.0.0';
 
 /**
- * 从 runAllPhases() 的松散返回值构建类型化的 ProjectSnapshot。
+ * 从分析快照输入构建类型化的 ProjectSnapshot。
  *
- * @param input runAllPhases() 返回值 + 额外的上下文信息
+ * @param input 分析快照输入 + 额外的上下文信息
  * @returns 不可变的 ProjectSnapshot 对象
  */
 export function buildProjectSnapshot(input: ProjectSnapshotInput): ProjectSnapshot {

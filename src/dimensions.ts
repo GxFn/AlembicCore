@@ -35,9 +35,7 @@ export type {
 export type * from './service/project-context/dimensionPlanning/index.js';
 export {
   aggregateDynamicPlanningSignals,
-  buildDimensionPlanningAids,
   DynamicSignalGateway,
   ModuleDeltaDetector,
   queryPerModuleCoverage,
-  resolveSignalAwareActiveDimensions,
 } from './service/project-context/dimensionPlanning/index.js';

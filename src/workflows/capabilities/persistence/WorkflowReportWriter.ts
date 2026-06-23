@@ -25,7 +25,6 @@ export async function writeWorkflowReport({
   ctx,
   dataRoot,
   sessionId,
-  projectRoot,
   projectInfo,
   dimensionStats,
   candidateResults,
@@ -67,7 +66,6 @@ export async function writeWorkflowReport({
       totalTokenUsage,
       totalToolCalls,
     });
-    await attachCodeEntityGraphTopology({ ctx, projectRoot, report });
     await writeWorkflowReportFile({ ctx, dataRoot, report });
     logger.info(`[Insight-v3] 📊 Workflow report saved to .asd/bootstrap-report.json`);
     return report;
@@ -347,39 +345,6 @@ function inferTerminalCapability(stageToolsets: Array<Record<string, unknown>>) 
     return 'terminal-run';
   }
   return 'baseline';
-}
-
-async function attachCodeEntityGraphTopology({
-  ctx,
-  projectRoot,
-  report,
-}: {
-  ctx: WorkflowResultPersistenceContext;
-  projectRoot: string;
-  report: WorkflowReport;
-}) {
-  try {
-    const { CodeEntityGraph } = await import('../../../service/knowledge/CodeEntityGraph.js');
-    const entityRepo = ctx.container.get('codeEntityRepository');
-    const edgeRepo = ctx.container.get('knowledgeEdgeRepository');
-    if (entityRepo && edgeRepo) {
-      const ceg = new CodeEntityGraph(
-        entityRepo as ConstructorParameters<typeof CodeEntityGraph>[0],
-        edgeRepo as ConstructorParameters<typeof CodeEntityGraph>[1],
-        { projectRoot, logger }
-      );
-      const topo = await ceg.getTopology();
-      report.codeEntityGraph = {
-        entities: topo.entities,
-        edges: topo.edges,
-        totalEntities: topo.totalEntities,
-        totalEdges: topo.totalEdges,
-        hotNodes: topo.hotNodes?.slice(0, 5),
-      };
-    }
-  } catch {
-    /* non-blocking */
-  }
 }
 
 async function writeWorkflowReportFile({

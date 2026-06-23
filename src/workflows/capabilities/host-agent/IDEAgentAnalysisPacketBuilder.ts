@@ -21,10 +21,12 @@ import type {
   LocalPackageModule,
   PanoramaResult,
   ProjectSnapshot,
+  ProjectSnapshotInput,
   SnapshotFile,
 } from '../../../types/ProjectSnapshot.js';
 import { buildProjectSnapshot } from '../../../types/projectSnapshotBuilder.js';
-import type { ProjectAnalysisResult } from './ProjectIntelligenceCapability.js';
+
+type ProjectAnalysisResult = Omit<ProjectSnapshotInput, 'projectRoot'>;
 
 export type IDEAgentAnalysisPacketProfile = 'cold-start' | 'rescan';
 

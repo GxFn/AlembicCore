@@ -22,8 +22,7 @@ import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
 import {
   buildIDEAgentAnalysisPacket,
   buildIDEAgentAnalysisPacketFromSnapshot,
-} from '../src/workflows/capabilities/project-intelligence/IDEAgentAnalysisPacketBuilder.js';
-import { ProjectIntelligenceCapability } from '../src/workflows/capabilities/project-intelligence/ProjectIntelligenceCapability.js';
+} from '../src/workflows/capabilities/host-agent/IDEAgentAnalysisPacketBuilder.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Find architectural boundaries' },
@@ -280,7 +279,6 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
       unknown
     >;
 
-    expect(ProjectIntelligenceCapability.run).toBeInstanceOf(Function);
     expect(buildIDEAgentAnalysisPacket).toBeInstanceOf(Function);
     expect(buildIDEAgentAnalysisPacketFromSnapshot).toBeInstanceOf(Function);
     expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacket')).toBe(false);

@@ -1,5 +1,3 @@
-import type { DimensionPlanningAidReport } from '../project-context/dimensionPlanning/index.js';
-
 export type PlanStatus = 'draft' | 'confirmed' | 'superseded' | 'archived';
 export type PlanStageId = 'coldStart' | 'deepMining' | 'moduleMining';
 export type PlanDraftSource = 'plugin-collected-facts' | 'host-agent' | 'test-fixture';
@@ -212,7 +210,7 @@ export interface PlanDraftInformationPackage {
   draftSource: Extract<PlanDraftSource, 'plugin-collected-facts'>;
   planningBrief: Record<string, unknown>;
   sourceReports: {
-    planningAids?: DimensionPlanningAidReport;
+    planningAids?: Record<string, unknown>;
     missionBriefing?: Record<string, unknown>;
     dynamicSignals?: Record<string, unknown>;
   };
@@ -221,7 +219,7 @@ export interface PlanDraftInformationPackage {
 export interface BuildPlanDraftInformationPackageInput {
   projectProfile: PlanProjectProfile;
   projectContextSignature: string;
-  planningAids?: DimensionPlanningAidReport;
+  planningAids?: Record<string, unknown>;
   missionBriefing?: Record<string, unknown>;
   dynamicSignals?: Record<string, unknown>;
   hints?: {
