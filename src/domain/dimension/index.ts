@@ -4,6 +4,17 @@
  * @module domain/dimension
  */
 
+export type {
+  DimensionAnalysisGuide,
+  DimensionCatalogPayloadItem,
+  DimensionLanguageApplicability,
+  DimensionSubmissionSpec,
+  ProjectLanguageFrameworkFacts,
+} from './DimensionCatalogPayload.js';
+export {
+  buildDimensionCatalogPayload,
+  resolveDimensionLanguageApplicability,
+} from './DimensionCatalogPayload.js';
 export { DimensionCopy } from './DimensionCopy.js';
 export type { PlanDimensionDefinitionResolution } from './DimensionRegistry.js';
 export {

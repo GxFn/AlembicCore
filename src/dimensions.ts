@@ -1,6 +1,14 @@
-export type { PlanDimensionDefinitionResolution } from './domain/dimension/index.js';
+export type {
+  DimensionAnalysisGuide,
+  DimensionCatalogPayloadItem,
+  DimensionLanguageApplicability,
+  DimensionSubmissionSpec,
+  PlanDimensionDefinitionResolution,
+  ProjectLanguageFrameworkFacts,
+} from './domain/dimension/index.js';
 export {
   ALL_DIMENSION_IDS,
+  buildDimensionCatalogPayload,
   buildTierPlan,
   classifyRecipeToDimension,
   DIMENSION_DISPLAY_GROUP,
@@ -13,6 +21,7 @@ export {
   getDimensionsByLayer,
   LANGUAGE_DIM_IDS,
   PRE_SUBMIT_CHECKLIST,
+  resolveDimensionLanguageApplicability,
   resolvePlanDimensionDefinitions,
   sopToCompactText,
   UNIVERSAL_DIM_IDS,
