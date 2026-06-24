@@ -16,6 +16,8 @@ import {
 import {
   buildProjectContextPresenterInput,
   type ProjectContextEnvelope,
+  type ProjectContextPresenterInput,
+  type ProjectContextRef,
   type ProjectContextResult,
 } from '../src/project-context.js';
 import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
@@ -271,6 +273,115 @@ function makeProjectContextEnvelopes(): ProjectContextEnvelope<ProjectContextRes
   ];
 }
 
+function makeProjectContextTargetFileCountFixture(): ProjectContextPresenterInput {
+  const project = {
+    projectRoot: '/fixture/bilidili',
+    displayName: 'BiliDili',
+  };
+  const ref = (
+    kind: ProjectContextRef['kind'],
+    id: string,
+    label: string,
+    filePath?: string
+  ): ProjectContextRef => ({
+    id,
+    kind,
+    label,
+    scope: {
+      projectRoot: project.projectRoot,
+      ...(filePath ? { filePath } : {}),
+      repoId: 'bilidili',
+    },
+  });
+  const packageRef = ref('path', 'pc:path:Package.swift', 'Package.swift', 'Package.swift');
+  const legacyRef = ref('path', 'pc:path:legacy', 'LegacyBridge', 'LegacyBridge');
+  const legacyHeadersRef = ref('path', 'pc:path:legacy-headers', 'LegacyHeaders', 'LegacyHeaders');
+  const networkFiles = ['NetworkClient.swift', 'HTTPTransport.swift', 'RequestBuilder.swift'].map(
+    (fileName) => ({
+      filePath: `Packages/AOXNetworkKit/Sources/${fileName}`,
+      language: 'swift',
+      ref: ref(
+        'file',
+        `pc:file:aox-network:${fileName}`,
+        fileName,
+        `Packages/AOXNetworkKit/Sources/${fileName}`
+      ),
+    })
+  );
+  const foundationFiles = ['Logger.swift', 'ResultExtensions.swift'].map((fileName) => ({
+    filePath: `Packages/AOXFoundationKit/Sources/${fileName}`,
+    language: 'swift',
+    ref: ref(
+      'file',
+      `pc:file:aox-foundation:${fileName}`,
+      fileName,
+      `Packages/AOXFoundationKit/Sources/${fileName}`
+    ),
+  }));
+
+  return {
+    project,
+    envelopes: [],
+    refs: [],
+    files: [...networkFiles, ...foundationFiles],
+    warnings: [],
+    unavailable: [],
+    repo: {
+      repo: { id: 'bilidili', name: 'BiliDili', root: '/fixture/bilidili' },
+      languages: [{ language: 'swift', fileCount: 5 }],
+      buildSystems: [{ kind: 'spm', configRefs: [packageRef] }],
+      packageSystems: [{ kind: 'spm', manifestRefs: [packageRef] }],
+      targets: [
+        { name: 'AOXNetworkKit', kind: 'library', refs: [packageRef] },
+        { name: 'AOXFoundationKit', kind: 'library', refs: [packageRef] },
+        { name: 'LegacyBridge', kind: 'library', refs: [legacyRef, legacyHeadersRef] },
+      ],
+      localPackages: [],
+      sourceRoots: [{ path: 'Packages' }],
+      entrypoints: [],
+      commands: [],
+      topAreas: [{ path: 'Packages/AOXNetworkKit' }, { path: 'Packages/AOXFoundationKit' }],
+      configFiles: [{ path: 'Package.swift', kind: 'spm', ref: packageRef }],
+      nextRefs: [],
+    },
+    modules: [
+      {
+        module: {
+          id: 'aox-network',
+          name: 'AOXNetworkKit',
+          role: 'networking',
+          ownedFileCount: networkFiles.length,
+          ref: ref('module', 'pc:module:aox-network', 'AOXNetworkKit'),
+        },
+        ownedFiles: networkFiles,
+        publicSurfaces: [],
+        inflow: [],
+        outflow: [],
+        nextRefs: [],
+      },
+      {
+        module: {
+          id: 'aox-foundation',
+          name: 'AOXFoundationKit',
+          role: 'core',
+          ownedFileCount: foundationFiles.length,
+          ref: ref('module', 'pc:module:aox-foundation', 'AOXFoundationKit'),
+        },
+        ownedFiles: foundationFiles,
+        publicSurfaces: [],
+        inflow: [],
+        outflow: [],
+        nextRefs: [],
+      },
+    ],
+    moduleLayers: [],
+    fileFlows: [],
+    fileSymbols: [],
+    sourceSlices: [],
+    anchorRanges: [],
+  };
+}
+
 describe('IDEAgentAnalysisPacketBuilder', () => {
   it('keeps snapshot packet builders internal while exposing ProjectContext public entrypoints', async () => {
     const rootModule = (await import('../src/index.js')) as Record<string, unknown>;
@@ -414,6 +525,41 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
       sourceFiles: [{ filePath: 'src/UserService.ts', language: 'typescript' }],
     });
     expect(JSON.stringify(briefing)).not.toContain('PROJECT_CONTEXT_SOURCE_BODY_SHOULD_NOT_LEAK');
+  });
+
+  it('builds ProjectContext target file counts from module owned files before anchor refs', () => {
+    const session = new BootstrapSession({
+      projectRoot: '/fixture/bilidili',
+      dimensions,
+    });
+    const briefing = buildProjectContextMissionBriefing({
+      projectContext: makeProjectContextTargetFileCountFixture(),
+      activeDimensions: dimensions,
+      session,
+    }) as {
+      targets: { name: string; fileCount?: number }[];
+      architectureOverview: {
+        layers: { name: string; modules: string[]; fileCount: number }[];
+        keyInsights: string[];
+      } | null;
+    };
+    const targetsByName = new Map(briefing.targets.map((target) => [target.name, target]));
+
+    expect(targetsByName.get('AOXNetworkKit')).toMatchObject({ fileCount: 3 });
+    expect(targetsByName.get('AOXFoundationKit')).toMatchObject({ fileCount: 2 });
+    expect(targetsByName.get('LegacyBridge')).toMatchObject({ fileCount: 2 });
+    expect(briefing.architectureOverview?.layers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'Other',
+          modules: ['AOXNetworkKit', 'AOXFoundationKit', 'LegacyBridge'],
+          fileCount: 7,
+        }),
+      ])
+    );
+    expect(briefing.architectureOverview?.keyInsights).toContain(
+      '2 local packages provide 71% of the codebase (5/7 files)'
+    );
   });
 
   it('keeps packet evidence independent from Mission Briefing compression', () => {

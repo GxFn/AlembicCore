@@ -1339,10 +1339,19 @@ function buildProjectContextProjectMeta(
 }
 
 function buildProjectContextTargets(input: ProjectContextPresenterInput): TargetInfo[] {
+  const moduleFileCounts = new Map(
+    input.modules.map((moduleContext) => [
+      moduleContext.module.name,
+      moduleContext.ownedFiles.length,
+    ])
+  );
   const repoTargets = input.repo?.targets.map((target) => ({
     name: target.name,
     type: target.kind ?? 'target',
-    fileCount: target.refs.length || undefined,
+    fileCount:
+      (moduleFileCounts.has(target.name)
+        ? moduleFileCounts.get(target.name)
+        : target.refs.length) || undefined,
   }));
   if (repoTargets?.length) {
     return repoTargets;
