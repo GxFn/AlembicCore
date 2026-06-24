@@ -1,10 +1,14 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
-import { GitDiffCheckpointService } from '../src/evolution.js';
+import {
+  createCurrentGitHeadBaselineProvider,
+  GitDiffCheckpointService,
+} from '../src/evolution.js';
 import { pathGuard } from '../src/io.js';
 import { createAlembicRepositories } from '../src/repositories.js';
 
@@ -100,6 +104,28 @@ describe('Git diff checkpoint repository and service', () => {
     expect(result.source).toBe('current-head');
     expect(result.checkpoint.checkpointCommit).toBe('current-head-commit');
     expect(result.checkpoint.initialFromPlanCommit).toBe('current-head-commit');
+    expect(result.checkpoint.lastRouteStatus).toBe('initialized');
+  });
+
+  it('initializes from a real git repository HEAD with the current-head source label', () => {
+    const repositories = createAlembicRepositories(runtime.connection);
+    const headCommit = createGitRepositoryHead(tmpDir);
+
+    const service = new GitDiffCheckpointService({
+      checkpointRepository: repositories.gitDiffCheckpointRepository,
+      baselineProvider: createCurrentGitHeadBaselineProvider(),
+    });
+    const result = service.ensureCheckpoint({
+      projectRoot: tmpDir,
+      scopeId: 'rescan',
+      folderId: 'src',
+      now: 210,
+    });
+
+    expect(headCommit).toMatch(/^[0-9a-f]{40}$/);
+    expect(result.source).toBe('current-head');
+    expect(result.checkpoint.checkpointCommit).toBe(headCommit);
+    expect(result.checkpoint.initialFromPlanCommit).toBe(headCommit);
     expect(result.checkpoint.lastRouteStatus).toBe('initialized');
   });
 
@@ -295,3 +321,21 @@ describe('Git diff checkpoint repository and service', () => {
     expect(routed.checkpoint.advancedAt).toBe(300);
   });
 });
+
+function createGitRepositoryHead(projectRoot: string): string {
+  runGit(projectRoot, ['init']);
+  runGit(projectRoot, ['config', 'user.email', 'alembic-core-test@example.invalid']);
+  runGit(projectRoot, ['config', 'user.name', 'Alembic Core Test']);
+  fs.writeFileSync(path.join(projectRoot, 'README.md'), '# test repository\n');
+  runGit(projectRoot, ['add', 'README.md']);
+  runGit(projectRoot, ['commit', '-m', 'initial commit']);
+  return runGit(projectRoot, ['rev-parse', 'HEAD']);
+}
+
+function runGit(projectRoot: string, args: string[]): string {
+  return execFileSync('git', args, {
+    cwd: projectRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  }).trim();
+}

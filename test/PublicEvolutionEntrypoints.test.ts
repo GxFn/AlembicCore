@@ -4,6 +4,8 @@ import {
   assessDiffImpact,
   ConsolidationAdvisor,
   ContentPatcher,
+  CurrentGitHeadBaselineProvider,
+  createCurrentGitHeadBaselineProvider,
   DecayDetector,
   EnhancementSuggester,
   EvolutionGateway,
@@ -20,6 +22,8 @@ describe('stable evolution entrypoint', () => {
   it('exposes high-reference evolution services through the stable evolution facade', () => {
     expect(ConsolidationAdvisor).toBeDefined();
     expect(ContentPatcher).toBeDefined();
+    expect(CurrentGitHeadBaselineProvider).toBeDefined();
+    expect(createCurrentGitHeadBaselineProvider).toBeDefined();
     expect(DecayDetector).toBeDefined();
     expect(EnhancementSuggester).toBeDefined();
     expect(EvolutionGateway).toBeDefined();

@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+
 import type {
   GitDiffCheckpointRecord,
   GitDiffCheckpointRepository,
@@ -23,6 +25,40 @@ export interface GitDiffCheckpointBaselineProvider {
 export interface GitDiffCheckpointServiceRepositories {
   checkpointRepository: GitDiffCheckpointRepository;
   baselineProvider: GitDiffCheckpointBaselineProvider;
+}
+
+export interface CurrentGitHeadBaselineProviderOptions {
+  gitBinary?: string;
+}
+
+export class CurrentGitHeadBaselineProvider implements GitDiffCheckpointBaselineProvider {
+  readonly #gitBinary: string;
+
+  constructor(options: CurrentGitHeadBaselineProviderOptions = {}) {
+    this.#gitBinary = options.gitBinary ?? 'git';
+  }
+
+  getBaselineCommit(projectRoot: string): string | null {
+    try {
+      const commit = execFileSync(
+        this.#gitBinary,
+        ['-C', projectRoot, 'rev-parse', '--verify', 'HEAD'],
+        {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }
+      ).trim();
+      return commit.length > 0 ? commit : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+export function createCurrentGitHeadBaselineProvider(
+  options?: CurrentGitHeadBaselineProviderOptions
+): GitDiffCheckpointBaselineProvider {
+  return new CurrentGitHeadBaselineProvider(options);
 }
 
 export interface EnsureGitDiffCheckpointInput extends GitDiffCheckpointScope {
