@@ -258,14 +258,16 @@
     "RELEASE-PLAYBOOK.md",
     "scripts/check-public-api-boundary.mjs",
     "scripts/check-release-readiness.mjs",
+    "scripts/clean-dist.mjs",
     "scripts/lint-consumer-core-imports.mjs",
     "scripts/public-api-boundary-policy.mjs",
     "scripts/report-public-api-closeout.mjs",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "build:check": "tsc -p tsconfig.json --noEmit",
+    "clean:dist": "node scripts/clean-dist.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
