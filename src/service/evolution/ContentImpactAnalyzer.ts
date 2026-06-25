@@ -49,14 +49,18 @@ export interface DiffImpactResult {
  * @param projectRoot 项目根目录绝对路径
  * @param relativePath 相对于项目根的文件路径
  * @param recipeTokens 预提取的 Recipe 特征标识符
+ * @param revisionRange 可选 git 修订范围（如 `mergeBase..HEAD`）；缺省→工作树 `git diff HEAD`（向后兼容），
+ *   给定→commit-range diff（committed→propose：改动已提交、工作树为空时仍可评估）。
+ *   仅透传给 getFileDiff；scorer（assessDiffImpact）与 diff 源无关，不受影响。
  * @returns 影响评估结果，或 null（无法获取 diff 时）
  */
 export function assessFileImpact(
   projectRoot: string,
   relativePath: string,
-  recipeTokens: RecipeTokens
+  recipeTokens: RecipeTokens,
+  revisionRange?: string
 ): DiffImpactResult | null {
-  const diffText = getFileDiff(projectRoot, relativePath);
+  const diffText = getFileDiff(projectRoot, relativePath, revisionRange);
   if (!diffText) {
     return null;
   }

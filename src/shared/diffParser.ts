@@ -26,12 +26,23 @@ export interface DiffHunk {
  *
  * @param projectRoot 项目根目录绝对路径
  * @param relativePath 相对于项目根的文件路径
+ * @param revisionRange 可选 git 修订范围（如 `mergeBase..HEAD`）。
+ *   缺省 → `git diff HEAD`（工作树，含 staged+unstaged；改动一旦 commit 即为空）——与改前字节兼容。
+ *   给定 → `git diff <revisionRange>`（commit-range）：用于「改动已提交、工作树为空」场景，
+ *   使 committed-impactful 改动仍可被影响评估（committed→propose 修复，maint-fix-core）。
  * @returns diff 文本，或 null（无 git / untracked / 无变更）
  */
-export function getFileDiff(projectRoot: string, relativePath: string): string | null {
+export function getFileDiff(
+  projectRoot: string,
+  relativePath: string,
+  revisionRange?: string
+): string | null {
   try {
-    // git diff HEAD -U0 -- file：包含 staged + unstaged 的变更
-    const output = execFileSync('git', ['diff', 'HEAD', '-U0', '--', relativePath], {
+    // 默认 `git diff HEAD`（工作树）；给定 revisionRange 时切到 commit-range diff。
+    // revisionRange 作为单个 git 修订实参传入 execFileSync（无 shell，`..` 范围语法安全）。
+    // 仅替换 diff 源，-U0/--/路径 与降级语义不变，缺省路径与改前逐字节一致。
+    const diffTarget = revisionRange ?? 'HEAD';
+    const output = execFileSync('git', ['diff', diffTarget, '-U0', '--', relativePath], {
       cwd: projectRoot,
       encoding: 'utf8',
       // 测试夹具或真实项目可能不是 git worktree；这里是可选增强路径，失败时必须安静降级。
