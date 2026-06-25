@@ -1,4 +1,5 @@
 export * from './BootstrapSession.js';
+export * from './CompletenessCritic.js';
 export * from './EvidenceStarterBuilder.js';
 export {
   type HostAgentDimensionCompleteArgs,
