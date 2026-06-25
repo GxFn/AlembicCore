@@ -3,13 +3,17 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { ProjectRegistry } from '../src/shared/ProjectRegistry.js';
-import { WorkspaceSettingsStore } from '../src/shared/WorkspaceSettingsStore.js';
+import { collectAiEnv, WorkspaceSettingsStore } from '../src/shared/WorkspaceSettingsStore.js';
 
 const ORIGINAL_ALEMBIC_HOME = process.env.ALEMBIC_HOME;
 const ORIGINAL_PROJECT_DIR = process.env.ALEMBIC_PROJECT_DIR;
 const ORIGINAL_PROVIDER = process.env.ALEMBIC_AI_PROVIDER;
 const ORIGINAL_GOOGLE_KEY = process.env.ALEMBIC_GOOGLE_API_KEY;
 const ORIGINAL_OPENAI_KEY = process.env.ALEMBIC_OPENAI_API_KEY;
+const ORIGINAL_LEGACY_EMBED_PROVIDER = process.env.ALEMBIC_EMBED_PROVIDER;
+const ORIGINAL_LEGACY_EMBED_MODEL = process.env.ALEMBIC_EMBED_MODEL;
+const ORIGINAL_LEGACY_EMBED_BASE_URL = process.env.ALEMBIC_EMBED_BASE_URL;
+const ORIGINAL_LEGACY_EMBED_KEY = process.env.ALEMBIC_EMBED_API_KEY;
 
 function useTempAlembicHome(): void {
   process.env.ALEMBIC_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-settings-home-'));
@@ -44,6 +48,26 @@ afterEach(() => {
     delete process.env.ALEMBIC_OPENAI_API_KEY;
   } else {
     process.env.ALEMBIC_OPENAI_API_KEY = ORIGINAL_OPENAI_KEY;
+  }
+  if (ORIGINAL_LEGACY_EMBED_PROVIDER === undefined) {
+    delete process.env.ALEMBIC_EMBED_PROVIDER;
+  } else {
+    process.env.ALEMBIC_EMBED_PROVIDER = ORIGINAL_LEGACY_EMBED_PROVIDER;
+  }
+  if (ORIGINAL_LEGACY_EMBED_MODEL === undefined) {
+    delete process.env.ALEMBIC_EMBED_MODEL;
+  } else {
+    process.env.ALEMBIC_EMBED_MODEL = ORIGINAL_LEGACY_EMBED_MODEL;
+  }
+  if (ORIGINAL_LEGACY_EMBED_BASE_URL === undefined) {
+    delete process.env.ALEMBIC_EMBED_BASE_URL;
+  } else {
+    process.env.ALEMBIC_EMBED_BASE_URL = ORIGINAL_LEGACY_EMBED_BASE_URL;
+  }
+  if (ORIGINAL_LEGACY_EMBED_KEY === undefined) {
+    delete process.env.ALEMBIC_EMBED_API_KEY;
+  } else {
+    process.env.ALEMBIC_EMBED_API_KEY = ORIGINAL_LEGACY_EMBED_KEY;
   }
 });
 
@@ -143,5 +167,99 @@ describe('WorkspaceSettingsStore', () => {
     expect(process.env.ALEMBIC_AI_PROVIDER).toBe('google');
     expect(process.env.ALEMBIC_GOOGLE_API_KEY).toBe('secret-google-key');
     expect(process.env.ALEMBIC_OPENAI_API_KEY).toBeUndefined();
+  });
+
+  test('ignores legacy embedding settings while preserving normal AI provider settings', () => {
+    useTempAlembicHome();
+    const projectRoot = makeProjectRoot();
+    ProjectRegistry.register(projectRoot, true);
+    const store = WorkspaceSettingsStore.fromProject(projectRoot);
+
+    fs.mkdirSync(path.dirname(store.settingsPath), { recursive: true });
+    fs.writeFileSync(
+      store.settingsPath,
+      JSON.stringify(
+        {
+          ai: {
+            provider: 'google',
+            model: 'gemini-3-flash-preview',
+            embedProvider: 'legacy-provider',
+            embedModel: 'legacy-model',
+            embedBaseUrl: 'http://legacy-embed.invalid',
+          },
+          version: 1,
+        },
+        null,
+        2
+      )
+    );
+    fs.writeFileSync(
+      store.secretsPath,
+      JSON.stringify(
+        {
+          ai: {
+            providerKeys: {
+              google: 'secret-google-key',
+            },
+            embedApiKey: 'legacy-embed-secret',
+          },
+          version: 1,
+        },
+        null,
+        2
+      )
+    );
+    delete process.env.ALEMBIC_AI_PROVIDER;
+    delete process.env.ALEMBIC_GOOGLE_API_KEY;
+    delete process.env.ALEMBIC_EMBED_PROVIDER;
+    delete process.env.ALEMBIC_EMBED_MODEL;
+    delete process.env.ALEMBIC_EMBED_BASE_URL;
+    delete process.env.ALEMBIC_EMBED_API_KEY;
+
+    const readResult = store.readAiConfig();
+    expect(readResult.env).toMatchObject({
+      ALEMBIC_AI_PROVIDER: 'google',
+      ALEMBIC_AI_MODEL: 'gemini-3-flash-preview',
+      ALEMBIC_GOOGLE_API_KEY: 'secret-google-key',
+    });
+    expect(Object.keys(readResult.env).filter((key) => key.startsWith('ALEMBIC_EMBED_'))).toEqual(
+      []
+    );
+
+    store.applyToProcessEnv({ override: true });
+    expect(process.env.ALEMBIC_AI_PROVIDER).toBe('google');
+    expect(process.env.ALEMBIC_GOOGLE_API_KEY).toBe('secret-google-key');
+    expect(process.env.ALEMBIC_EMBED_PROVIDER).toBeUndefined();
+    expect(process.env.ALEMBIC_EMBED_MODEL).toBeUndefined();
+    expect(process.env.ALEMBIC_EMBED_BASE_URL).toBeUndefined();
+    expect(process.env.ALEMBIC_EMBED_API_KEY).toBeUndefined();
+
+    const processEnv = collectAiEnv({
+      ALEMBIC_AI_PROVIDER: 'openai',
+      ALEMBIC_EMBED_PROVIDER: 'legacy-provider',
+      ALEMBIC_EMBED_MODEL: 'legacy-model',
+      ALEMBIC_EMBED_BASE_URL: 'http://legacy-embed.invalid',
+      ALEMBIC_EMBED_API_KEY: 'legacy-embed-secret',
+    });
+    expect(processEnv).toEqual({ ALEMBIC_AI_PROVIDER: 'openai' });
+
+    const writeResult = store.writeAiConfig({
+      ALEMBIC_AI_PROVIDER: 'openai',
+      ALEMBIC_OPENAI_API_KEY: 'secret-openai-key',
+      ALEMBIC_EMBED_PROVIDER: 'legacy-provider',
+      ALEMBIC_EMBED_MODEL: 'legacy-model',
+      ALEMBIC_EMBED_BASE_URL: 'http://legacy-embed.invalid',
+      ALEMBIC_EMBED_API_KEY: 'legacy-embed-secret',
+    });
+
+    expect(Object.keys(writeResult.env).filter((key) => key.startsWith('ALEMBIC_EMBED_'))).toEqual(
+      []
+    );
+    expect(JSON.stringify(JSON.parse(fs.readFileSync(store.settingsPath, 'utf8')))).not.toContain(
+      'legacy-'
+    );
+    expect(JSON.stringify(JSON.parse(fs.readFileSync(store.secretsPath, 'utf8')))).not.toContain(
+      'legacy-'
+    );
   });
 });

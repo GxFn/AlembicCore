@@ -7,7 +7,6 @@ export const AI_SECRET_ENV_KEYS = new Set([
   'ALEMBIC_OPENAI_API_KEY',
   'ALEMBIC_CLAUDE_API_KEY',
   'ALEMBIC_DEEPSEEK_API_KEY',
-  'ALEMBIC_EMBED_API_KEY',
 ]);
 
 export const AI_ENV_KEYS = [
@@ -19,10 +18,6 @@ export const AI_ENV_KEYS = [
   'ALEMBIC_DEEPSEEK_API_KEY',
   'ALEMBIC_AI_PROXY',
   'ALEMBIC_AI_REASONING_EFFORT',
-  'ALEMBIC_EMBED_PROVIDER',
-  'ALEMBIC_EMBED_MODEL',
-  'ALEMBIC_EMBED_BASE_URL',
-  'ALEMBIC_EMBED_API_KEY',
 ] as const;
 
 export const PROVIDER_KEY_ENV: Record<string, string> = {
@@ -37,9 +32,6 @@ const ENV_TO_SETTING_FIELD: Record<string, keyof WorkspaceAiSettings> = {
   ALEMBIC_AI_MODEL: 'model',
   ALEMBIC_AI_PROXY: 'proxy',
   ALEMBIC_AI_REASONING_EFFORT: 'reasoningEffort',
-  ALEMBIC_EMBED_PROVIDER: 'embedProvider',
-  ALEMBIC_EMBED_MODEL: 'embedModel',
-  ALEMBIC_EMBED_BASE_URL: 'embedBaseUrl',
 };
 
 const SETTING_FIELD_TO_ENV: Record<keyof WorkspaceAiSettings, string> = {
@@ -47,9 +39,6 @@ const SETTING_FIELD_TO_ENV: Record<keyof WorkspaceAiSettings, string> = {
   model: 'ALEMBIC_AI_MODEL',
   proxy: 'ALEMBIC_AI_PROXY',
   reasoningEffort: 'ALEMBIC_AI_REASONING_EFFORT',
-  embedProvider: 'ALEMBIC_EMBED_PROVIDER',
-  embedModel: 'ALEMBIC_EMBED_MODEL',
-  embedBaseUrl: 'ALEMBIC_EMBED_BASE_URL',
 };
 
 const ENV_TO_PROVIDER = Object.fromEntries(
@@ -61,9 +50,6 @@ export interface WorkspaceAiSettings {
   model?: string;
   proxy?: string;
   reasoningEffort?: string;
-  embedProvider?: string;
-  embedModel?: string;
-  embedBaseUrl?: string;
 }
 
 interface WorkspaceSettingsFile {
@@ -74,7 +60,6 @@ interface WorkspaceSettingsFile {
 
 interface WorkspaceSecretsFile {
   ai?: {
-    embedApiKey?: string;
     providerKeys?: Record<string, string>;
   };
   updatedAt?: string;
@@ -125,9 +110,6 @@ export class WorkspaceSettingsStore {
         env[envKey] = value;
       }
     }
-    if (typeof secrets.ai?.embedApiKey === 'string' && secrets.ai.embedApiKey.length > 0) {
-      env.ALEMBIC_EMBED_API_KEY = secrets.ai.embedApiKey;
-    }
 
     return {
       env,
@@ -159,21 +141,16 @@ export class WorkspaceSettingsStore {
       const provider = ENV_TO_PROVIDER[key];
       if (provider) {
         secrets.ai.providerKeys[provider] = value;
-        continue;
-      }
-      if (key === 'ALEMBIC_EMBED_API_KEY') {
-        secrets.ai.embedApiKey = value;
       }
     }
+    stripLegacyEmbedConfig(settings, secrets);
 
     const now = new Date().toISOString();
     settings.updatedAt = now;
     secrets.updatedAt = now;
     this.#writeJson(this.settingsPath, settings, 0o644);
     const hasSecrets =
-      Boolean(secrets.ai.embedApiKey) ||
-      Object.keys(secrets.ai.providerKeys || {}).length > 0 ||
-      existsSync(this.secretsPath);
+      Object.keys(secrets.ai.providerKeys || {}).length > 0 || existsSync(this.secretsPath);
     if (hasSecrets) {
       this.#writeJson(this.secretsPath, secrets, 0o600);
     }
@@ -202,6 +179,22 @@ export class WorkspaceSettingsStore {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { mode });
     chmodSync(filePath, mode);
+  }
+}
+
+function stripLegacyEmbedConfig(
+  settings: WorkspaceSettingsFile,
+  secrets: WorkspaceSecretsFile
+): void {
+  const aiSettings = settings.ai as Record<string, unknown> | undefined;
+  if (aiSettings) {
+    for (const field of ['embedProvider', 'embedModel', 'embedBaseUrl']) {
+      delete aiSettings[field];
+    }
+  }
+  const aiSecrets = secrets.ai as Record<string, unknown> | undefined;
+  if (aiSecrets) {
+    delete aiSecrets.embedApiKey;
   }
 }
 
