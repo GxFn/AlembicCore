@@ -739,4 +739,65 @@ describe('RecipeProductionGateway', () => {
       expect(result.created).toHaveLength(1);
     });
   });
+
+  describe('U1 #5 — moduleName canonical 派生', () => {
+    const opts = { skipSimilarityCheck: true, skipConsolidation: true };
+
+    it('从 sourceRefs 落点派生 canonical 模块 name（未显式给 moduleName）', async () => {
+      const deps = makeDeps({
+        knownModuleNames: ['auth', 'payment'],
+        resolveModuleFromSourceRefs: (refs) =>
+          refs.some((r) => r.includes('auth/')) ? 'auth' : undefined,
+      });
+      await new RecipeProductionGateway(deps).create({
+        source: 'agent-tool',
+        items: [makeItem({ sourceRefs: ['src/auth/login.ts'] })],
+        options: opts,
+      });
+      expect(vi.mocked(deps.knowledgeService.create).mock.calls[0][0].moduleName).toBe('auth');
+    });
+
+    it('Agent 显式 moduleName 属已知轴 → 保留；越界 → 留空（拒越界，不再恒空兜底）', async () => {
+      const inAxis = makeDeps({ knownModuleNames: ['auth', 'payment'] });
+      await new RecipeProductionGateway(inAxis).create({
+        source: 'agent-tool',
+        items: [makeItem({ moduleName: 'payment' })],
+        options: opts,
+      });
+      expect(vi.mocked(inAxis.knowledgeService.create).mock.calls[0][0].moduleName).toBe('payment');
+
+      const outAxis = makeDeps({ knownModuleNames: ['auth', 'payment'] });
+      await new RecipeProductionGateway(outAxis).create({
+        source: 'agent-tool',
+        items: [makeItem({ moduleName: 'nonexistent-module' })],
+        options: opts,
+      });
+      expect(vi.mocked(outAxis.knowledgeService.create).mock.calls[0][0].moduleName).toBe('');
+    });
+
+    it('派生不出（resolver 返回 undefined、无显式）→ 留空+诊断', async () => {
+      const deps = makeDeps({
+        knownModuleNames: ['auth'],
+        resolveModuleFromSourceRefs: () => undefined,
+      });
+      await new RecipeProductionGateway(deps).create({
+        source: 'agent-tool',
+        items: [makeItem({ sourceRefs: ['src/unknown/x.ts'] })],
+        options: opts,
+      });
+      expect(vi.mocked(deps.knowledgeService.create).mock.calls[0][0].moduleName).toBe('');
+    });
+
+    it('未注入模块轴 deps → 退回原行为（显式透传）', async () => {
+      const deps = makeDeps();
+      await new RecipeProductionGateway(deps).create({
+        source: 'agent-tool',
+        items: [makeItem({ moduleName: 'whatever-passthrough' })],
+        options: opts,
+      });
+      expect(vi.mocked(deps.knowledgeService.create).mock.calls[0][0].moduleName).toBe(
+        'whatever-passthrough'
+      );
+    });
+  });
 });

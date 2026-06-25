@@ -267,6 +267,10 @@ export interface GatewayDeps {
   evolutionGateway?: GatewayEvolutionGateway | null;
   /** 相似度检测函数（可选 — 默认导入 SimilarityService） */
   findSimilarRecipes?: GatewaySimilarityFn | null;
+  /** U1 #5：canonical 模块轴 name 校验集（Agent 显式 moduleName 须属此集；U1-Plugin 从 ProjectMap.modules 注入）。 */
+  knownModuleNames?: readonly string[];
+  /** U1 #5：从 candidate sourceRefs 落点派生 canonical 模块 name（U1-Plugin 从 ProjectContextMap 注入）。 */
+  resolveModuleFromSourceRefs?: (sourceRefs: string[]) => string | undefined;
 }
 
 /* ═══════════════════ Gateway ═══════════════════ */
@@ -279,6 +283,8 @@ export class RecipeProductionGateway {
   readonly #proposalRepo: GatewayProposalRepository | null;
   readonly #evolutionGateway: GatewayEvolutionGateway | null;
   readonly #findSimilarRecipes: GatewaySimilarityFn | null;
+  readonly #knownModuleNames: Set<string> | null;
+  readonly #resolveModuleFromSourceRefs: ((sourceRefs: string[]) => string | undefined) | null;
 
   constructor(deps: GatewayDeps) {
     this.#knowledgeService = deps.knowledgeService;
@@ -288,6 +294,36 @@ export class RecipeProductionGateway {
     this.#proposalRepo = deps.proposalRepository ?? null;
     this.#evolutionGateway = deps.evolutionGateway ?? null;
     this.#findSimilarRecipes = deps.findSimilarRecipes ?? null;
+    this.#knownModuleNames = deps.knownModuleNames ? new Set(deps.knownModuleNames) : null;
+    this.#resolveModuleFromSourceRefs = deps.resolveModuleFromSourceRefs ?? null;
+  }
+
+  /**
+   * U1 #5：moduleName canonical 派生 —— Agent 显式给则校验属已知模块轴（越界→留空+诊断）；
+   * 未显式则从 candidate sourceRefs 落点的 canonical 模块派生（与覆盖轴同源）；派生不出→留空+诊断（不再恒空兜底）。
+   * 未注入模块轴 deps 时退回原行为（显式透传、否则留空）—— 加性、向后兼容。
+   */
+  #deriveModuleName(item: CreateRecipeItem, metadata: Record<string, unknown>): string {
+    const explicit = item.moduleName || this.#readString(metadata.moduleName) || '';
+    if (explicit) {
+      if (this.#knownModuleNames && !this.#knownModuleNames.has(explicit)) {
+        this.#logger?.warn(
+          `[Gateway] moduleName "${explicit}" 不属 canonical 模块轴 → 留空（CG ②a required-or-derivable）`
+        );
+        return '';
+      }
+      return explicit;
+    }
+    const derived = this.#resolveModuleFromSourceRefs?.(item.sourceRefs ?? []);
+    if (derived) {
+      return derived;
+    }
+    if ((item.sourceRefs ?? []).length > 0) {
+      this.#logger?.info(
+        '[Gateway] moduleName 无法从 sourceRefs 派生（落点不在 canonical 模块轴）→ 留空+诊断'
+      );
+    }
+    return '';
   }
 
   /**
@@ -752,7 +788,7 @@ export class RecipeProductionGateway {
       reasoning,
       headers: item.headers || [],
       headerPaths: item.headerPaths || this.#readStringArray(metadata.headerPaths),
-      moduleName: item.moduleName || this.#readString(metadata.moduleName) || '',
+      moduleName: this.#deriveModuleName(item, metadata),
       includeHeaders: item.includeHeaders ?? this.#readBoolean(metadata.includeHeaders) ?? false,
       usageGuide: item.usageGuide || '',
       scope: item.scope || '',

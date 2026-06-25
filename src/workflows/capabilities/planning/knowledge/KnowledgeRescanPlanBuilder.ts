@@ -5,6 +5,65 @@ import type { RelevanceAuditResult, RelevanceAuditSummary } from './KnowledgeRes
 
 export const TARGET_RECIPES_PER_DIMENSION = 5;
 
+/**
+ * U1 / D2 通用默认表（CG-2）：perCellTarget 规模自适应回退默认（per-(模块×维度) cell 目标 recipe 数）。
+ * per-cell ≠ legacy per-dimension：单模块项目 per-cell≈per-dim，故 S 取 5 是「不传 moduleBindings 零回归」锚点；
+ * 网格细化后降档防总预算爆炸（M=3 / L=2，L 首扫取代表性 2、deepMining 多轮填至覆盖）。
+ * 优先级一律 `binding.targetRecipes ?? D2[tier]`（plan 显式值优先，本表只回退，不绕过 plan）。
+ */
+const D2_PER_CELL_TARGET_DEFAULT = { S: 5, M: 3, L: 2 } as const;
+
+export type ModuleTier = 'S' | 'M' | 'L';
+
+/** tier 主信号 = canonical ProjectMap.modules.length（S ≤3 / M 4-12 / L ≥13）。 */
+export function resolveModuleTier(moduleCount: number): ModuleTier {
+  if (moduleCount <= 3) {
+    return 'S';
+  }
+  if (moduleCount <= 12) {
+    return 'M';
+  }
+  return 'L';
+}
+
+/**
+ * perCellTarget 回退默认：默认常量 + env 覆盖 + guard（仿 staging-access-sweep cap 形态）。
+ * env `ALEMBIC_PER_CELL_TARGET_{S|M|L}` 覆盖；非有限 / <1 → 回退默认（guard）。
+ */
+export function resolvePerCellTargetDefault(tier: ModuleTier): number {
+  const fallback = D2_PER_CELL_TARGET_DEFAULT[tier];
+  const raw = Number(process.env[`ALEMBIC_PER_CELL_TARGET_${tier}`]);
+  if (!Number.isFinite(raw) || raw < 1) {
+    return fallback;
+  }
+  return Math.floor(raw);
+}
+
+/**
+ * U1 #3：moduleMining per-(模块×维度) cell 绑定。caller（U1-Plugin/U2a）提供 perCellCoverage 快照；
+ * 本阶段 Core 不在 buildCoverageByDimension 升 per-cell 覆盖统计（=U2a），只把模块轴接进 gap 计算签名。
+ */
+export interface ModuleCellBinding {
+  moduleId?: string;
+  moduleName?: string;
+  dimensionId: string;
+  /** 该 cell 当前已覆盖 recipe 数（caller 提供；缺省 0）。 */
+  perCellCoverage?: number;
+  /** plan 显式 per-cell 目标。A.U1：运行时不保证非空（normalizePlanSelection 只校验 dimensions）→ 必 `?? D2[tier]`。 */
+  targetRecipes?: number;
+}
+
+/** U1 #3：per-cell 计划（gap/createBudget per 模块×维度）。 */
+export interface ModuleCellPlan {
+  moduleId?: string;
+  moduleName?: string;
+  dimensionId: string;
+  perCellTarget: number;
+  perCellCoverage: number;
+  gap: number;
+  createBudget: number;
+}
+
 export type AuditVerdict = RelevanceAuditResult['verdict'];
 
 export type RescanExecutionReasonKind =
@@ -68,6 +127,8 @@ export interface KnowledgeRescanPlan {
   executionReasons: Record<string, RescanExecutionReason[]>;
   occupiedTriggers: string[];
   decayingRecipeIds: string[];
+  /** U1 #3：moduleBindings 提供时的 per-cell 计划（gap/createBudget per 模块×维度）；未提供为 undefined。 */
+  cellPlans?: ModuleCellPlan[];
 }
 
 export interface BuildKnowledgeRescanPlanOptions {
@@ -80,6 +141,10 @@ export interface BuildKnowledgeRescanPlanOptions {
     affectedDimensionIds?: string[];
     changedFiles?: string[];
   } | null;
+  /** U1 #3：仅当提供时启用 per-cell gap；未提供 → 逐字段退回 per-dimension（deepMining 零回归）。 */
+  moduleBindings?: ModuleCellBinding[];
+  /** U1/D2：canonical ProjectMap.modules.length，用于 perCellTarget tier 回退（缺省=本批 moduleBindings 去重模块数）。 */
+  moduleCount?: number;
 }
 
 export function buildKnowledgeRescanPlan({
@@ -89,6 +154,8 @@ export function buildKnowledgeRescanPlan({
   requestedDimensionIds,
   targetPerDimension = TARGET_RECIPES_PER_DIMENSION,
   fileDiff,
+  moduleBindings,
+  moduleCount,
 }: BuildKnowledgeRescanPlanOptions): KnowledgeRescanPlan {
   const requestedIds = requestedDimensionIds?.length ? new Set(requestedDimensionIds) : null;
   const requestedDimensions = requestedIds
@@ -176,6 +243,11 @@ export function buildKnowledgeRescanPlan({
   const decayingRecipeIds = dimensionPlans.flatMap((dimensionPlan) =>
     dimensionPlan.decayingRecipes.map((recipe) => recipe.id)
   );
+  // U1 #3：仅当提供 moduleBindings 时产出 per-cell 计划（旁路，不污染上面的 per-dimension 路径）。
+  const cellPlans =
+    moduleBindings && moduleBindings.length > 0
+      ? buildModuleCellPlans(moduleBindings, moduleCount)
+      : undefined;
 
   return {
     recipeEntries,
@@ -195,7 +267,39 @@ export function buildKnowledgeRescanPlan({
     executionReasons,
     occupiedTriggers,
     decayingRecipeIds,
+    cellPlans,
   };
+}
+
+/**
+ * U1 #3：把 moduleBindings 接进 gap 计算 —— per-cell gap = max(0, perCellTarget − perCellCoverage)，createBudget=gap。
+ * perCellTarget 优先级 binding.targetRecipes ?? D2[tier]（tier 主信号 = modules.length，缺省回退本批去重模块数）。
+ * 本阶段不读 per-cell 覆盖统计（caller 提供 perCellCoverage；覆盖账本 per-cell 升级=U2a）；与维护游标坐标系（D3）严格分坐标。
+ * floor 正交：per-cell gap 不判维度 "covered"（per-维度 floor 由 critic/U2a 判）。
+ */
+function buildModuleCellPlans(
+  moduleBindings: ModuleCellBinding[],
+  moduleCount?: number
+): ModuleCellPlan[] {
+  const resolvedModuleCount =
+    moduleCount ??
+    new Set(moduleBindings.map((binding) => binding.moduleId ?? binding.moduleName ?? '')).size;
+  const tier = resolveModuleTier(resolvedModuleCount);
+  const defaultTarget = resolvePerCellTargetDefault(tier);
+  return moduleBindings.map((binding) => {
+    const perCellTarget = binding.targetRecipes ?? defaultTarget;
+    const perCellCoverage = binding.perCellCoverage ?? 0;
+    const gap = Math.max(0, perCellTarget - perCellCoverage);
+    return {
+      moduleId: binding.moduleId,
+      moduleName: binding.moduleName,
+      dimensionId: binding.dimensionId,
+      perCellTarget,
+      perCellCoverage,
+      gap,
+      createBudget: gap,
+    };
+  });
 }
 
 function buildKnowledgeRescanExecutionDecision({
