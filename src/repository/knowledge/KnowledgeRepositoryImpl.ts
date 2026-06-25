@@ -1087,7 +1087,7 @@ export class KnowledgeRepositoryImpl {
       updatedAt: e.updatedAt || now,
       publishedAt: e.publishedAt || null,
       publishedBy: e.publishedBy || null,
-      staging_deadline: e.stagingDeadline || null,
+      stagingDeadline: e.stagingDeadline || null,
     };
   }
 

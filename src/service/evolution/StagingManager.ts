@@ -16,6 +16,7 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import { unixNow } from '../../shared/utils/common.js';
+import type { TransitionRequest, TransitionResult } from '../../types/evolution.js';
 
 /* ────────────────────── Types ────────────────────── */
 
@@ -24,6 +25,7 @@ export interface StagingEntry {
   title: string;
   stagingDeadline: number;
   confidence: number;
+  autoApprovable?: boolean;
 }
 
 export interface StagingCheckResult {
@@ -32,16 +34,27 @@ export interface StagingCheckResult {
   waiting: StagingEntry[];
 }
 
+export interface LifecycleTransitionExecutor {
+  transition(request: TransitionRequest): Promise<TransitionResult>;
+}
+
+export interface StagingManagerOptions {
+  signalBus?: SignalBus;
+  lifecycle?: LifecycleTransitionExecutor;
+}
+
 /* ────────────────────── Class ────────────────────── */
 
 export class StagingManager {
   #knowledgeRepo: KnowledgeRepositoryImpl;
   #signalBus: SignalBus | null;
+  #lifecycle: LifecycleTransitionExecutor | null;
   #logger = Logger.getInstance();
 
-  constructor(knowledgeRepo: KnowledgeRepositoryImpl, options: { signalBus?: SignalBus } = {}) {
+  constructor(knowledgeRepo: KnowledgeRepositoryImpl, options: StagingManagerOptions = {}) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#signalBus = options.signalBus ?? null;
+    this.#lifecycle = options.lifecycle ?? null;
   }
 
   /**
@@ -103,6 +116,7 @@ export class StagingManager {
         title: e.title,
         stagingDeadline: deadline,
         confidence: 0,
+        autoApprovable: e.autoApprovable,
       };
 
       if (deadline === 0) {
@@ -115,8 +129,17 @@ export class StagingManager {
         continue;
       }
 
-      await this.#promote(entry, now);
-      result.promoted.push(entry);
+      if (!entry.autoApprovable) {
+        result.waiting.push(entry);
+        continue;
+      }
+
+      const promoted = await this.#promote(entry);
+      if (promoted) {
+        result.promoted.push(entry);
+      } else {
+        result.waiting.push(entry);
+      }
     }
 
     if (result.promoted.length > 0) {
@@ -167,28 +190,44 @@ export class StagingManager {
       title: e.title,
       stagingDeadline: e.stagingDeadline || 0,
       confidence: 0,
+      autoApprovable: e.autoApprovable,
     }));
   }
 
   /* ── Private ── */
 
-  async #promote(entry: StagingEntry, now: number): Promise<void> {
+  async #promote(entry: StagingEntry): Promise<boolean> {
+    if (!this.#lifecycle) {
+      this.#logger.warn(
+        `StagingManager: cannot promote ${entry.id}; lifecycle state machine is not configured`
+      );
+      return false;
+    }
+
+    const transition = await this.#lifecycle.transition({
+      recipeId: entry.id,
+      targetState: 'active',
+      trigger: 'grace-period-expire',
+      evidence: {
+        reason: 'staging deadline expired and recipe is auto-approvable',
+      },
+      operatorId: 'StagingManager',
+    });
+
+    if (!transition.success) {
+      this.#logger.warn(
+        `StagingManager: failed to promote ${entry.id} — ${transition.error ?? 'unknown error'}`
+      );
+      return false;
+    }
+
     const nowS = unixNow();
     await this.#knowledgeRepo.update(entry.id, {
-      lifecycle: 'active',
       publishedAt: nowS,
+      publishedBy: 'StagingManager',
       stagingDeadline: null,
     } as unknown as Record<string, unknown>);
 
-    if (this.#signalBus) {
-      this.#signalBus.send('lifecycle', 'StagingManager.promote', 1.0, {
-        target: entry.id,
-        metadata: {
-          action: 'auto_publish',
-          title: entry.title,
-          confidence: entry.confidence,
-        },
-      });
-    }
+    return true;
   }
 }
