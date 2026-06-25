@@ -102,6 +102,7 @@ export interface KnowledgeEntryWire {
   lifecycle: string;
   lifecycleHistory: Array<{ from: string; to: string; at: number; by?: string }>;
   autoApprovable: boolean;
+  stagingDeadline: number | null;
 
   // ── 分类 ──
   language: string;

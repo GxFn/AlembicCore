@@ -166,6 +166,21 @@ describe('KnowledgeFileWriter', () => {
       expect(md).toContain('reviewedBy: reviewer-001');
     });
 
+    it('should persist staging deadline for auto-approvable staging entries', () => {
+      const entry = makeEntry({
+        lifecycle: Lifecycle.STAGING,
+        autoApprovable: true,
+        stagingDeadline: 1739800000000,
+      });
+      const md = writer.serialize(entry);
+      const parsed = parseKnowledgeMarkdown(md);
+
+      expect(md).toContain('lifecycle: staging');
+      expect(md).toContain('autoApprovable: true');
+      expect(md).toContain('stagingDeadline: 1739800000000');
+      expect(parsed.stagingDeadline).toBe(1739800000000);
+    });
+
     it('should include array fields as inline JSON', () => {
       const entry = makeEntry();
       const md = writer.serialize(entry);
@@ -610,6 +625,7 @@ describe('KnowledgeSyncService', () => {
         description: 'A test entry',
         lifecycle: 'active',
         lifecycleHistory: [{ from: 'pending', to: 'active', at: 123 }],
+        stagingDeadline: 1739800000000,
         probation: true,
         language: 'swift',
         category: 'View',
@@ -650,6 +666,7 @@ describe('KnowledgeSyncService', () => {
       expect(row.title).toBe('Test Entry');
       expect(row.trigger).toBe('@test');
       expect(row.lifecycle).toBe('active');
+      expect(row.staging_deadline).toBe(1739800000000);
       expect(row.language).toBe('swift');
       expect(row.category).toBe('View');
       expect(JSON.parse(row.tags)).toEqual(['test']);

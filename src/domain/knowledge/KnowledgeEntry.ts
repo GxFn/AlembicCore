@@ -368,6 +368,7 @@ export class KnowledgeEntry {
       lifecycle: this.lifecycle,
       lifecycleHistory: this.lifecycleHistory,
       autoApprovable: this.autoApprovable,
+      stagingDeadline: this.stagingDeadline,
       language: this.language,
       dimensionId: this.dimensionId,
       category: this.category,

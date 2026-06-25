@@ -45,6 +45,7 @@ const SCALAR_FIELDS = [
   'title',
   'trigger',
   'lifecycle',
+  'stagingDeadline',
   'language',
   'dimensionId',
   'category',
