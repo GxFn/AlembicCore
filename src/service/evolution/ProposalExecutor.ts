@@ -263,7 +263,7 @@ export class ProposalExecutor {
    * 不再被定时调用，仅在 Dashboard 启动时 / CLI evolve-check 时调用。
    * 主要流程已由 subscribeToSignals() 接管。
    */
-  async checkAndExecute(): Promise<ProposalExecutionResult> {
+  async checkAndExecute(cap?: number): Promise<ProposalExecutionResult> {
     const result: ProposalExecutionResult = {
       executed: [],
       rejected: [],
@@ -272,7 +272,16 @@ export class ProposalExecutor {
     };
 
     // 兜底：对长期处于 observing 但信号始终未满足的 Proposal 做一次评估
-    const observing = this.#repo.find({ status: 'observing' });
+    // P3 有界化（2026-06-26，daemon-less 自动化补全）：cap 给定时对 observing proposal 有界处理。
+    // 关键：ProposalRepository.find 默认 desc(proposedAt)（最新优先），capped 取最新 N 会饿死「最久未处理」的
+    // observing proposal；故 capped 走 oldestFirst（proposedAt 升序）+ LIMIT，单 tick 处理 ≤cap、跨多次 tick
+    // 最旧优先排空不饿死。cap===undefined → 现行无界 + 默认 desc 排序（字节一致契约）。
+    // cap 只限「处理多少条」，绝不改判定门禁：evaluateUpdate/evaluateDeprecate/§9.1/transition Guard 全保留。
+    // 注：#expireOldPending 是独立的 pending GC，不在本次 cap 有界范围内（任务范围限定 observing 查询）。
+    const observing =
+      cap === undefined
+        ? this.#repo.find({ status: 'observing' })
+        : this.#repo.find({ status: 'observing', limit: cap, oldestFirst: true });
     for (const proposal of observing) {
       await this.#processExpiredProposal(proposal, result);
     }

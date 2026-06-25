@@ -15,7 +15,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { and, count, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, lte } from 'drizzle-orm';
 import { EvolutionPolicy } from '../../domain/evolution/EvolutionPolicy.js';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { evolutionProposals } from '../../infrastructure/database/drizzle/schema.js';
@@ -106,10 +106,16 @@ export interface ProposalFilter {
   expiredBefore?: number;
   /**
    * P1 有界化（2026-06-26）：可选查询上限。
-   * 未传 → 无界（现行行为，SQL 字节一致）；传入 → 追加 SQL `LIMIT`，按既有 desc(proposedAt) 取前 N 条。
+   * 未传 → 无界（现行行为，SQL 字节一致）；传入 → 追加 SQL `LIMIT`，按 proposedAt 排序取前 N 条。
    * 作为 P3 checkAndExecute 复用的共享基础设施，按 design「P1 先于一切驱动」在此一并落地。
    */
   limit?: number;
+  /**
+   * P3 有界化（2026-06-26）：可选最旧优先排序。
+   * true → `asc(proposedAt)`（最旧优先）；默认/false → 现行 `desc(proposedAt)`（最新优先，其他调用方排序字节不变）。
+   * 供 capped checkAndExecute 取「最久未处理」的 observing proposal，跨 tick 排空不饿死。
+   */
+  oldestFirst?: boolean;
 }
 
 /* ────────────────────── Constants ────────────────────── */
@@ -247,12 +253,12 @@ export class ProposalRepository {
     const condition = conditions.length > 0 ? and(...conditions) : undefined;
 
     // P1 有界化：仅在显式传入 filter.limit 时追加 `.limit()`，未传则与今日无界查询字节一致。
-    // 保持既有 desc(proposedAt) 排序语义（P1 不改判定/排序，只叠加可选上限）。
-    const query = this.#drizzle
-      .select()
-      .from(evolutionProposals)
-      .where(condition)
-      .orderBy(desc(evolutionProposals.proposedAt));
+    // P3 有界化：filter.oldestFirst=true → asc(proposedAt)（最旧优先，供 capped checkAndExecute 排空防饿死）；
+    // 默认/false → 现行 desc(proposedAt)（最新优先），其他调用方排序字节不变。
+    const orderBy = filter.oldestFirst
+      ? asc(evolutionProposals.proposedAt)
+      : desc(evolutionProposals.proposedAt);
+    const query = this.#drizzle.select().from(evolutionProposals).where(condition).orderBy(orderBy);
 
     const rows = filter.limit === undefined ? query.all() : query.limit(filter.limit).all();
 

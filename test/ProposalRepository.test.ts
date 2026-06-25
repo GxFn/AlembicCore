@@ -246,6 +246,67 @@ describe('ProposalRepository', () => {
     });
   });
 
+  describe('find oldestFirst (P3 有界化)', () => {
+    function seedAt(id: string, proposedAt: number) {
+      sqlite
+        .prepare(
+          `INSERT INTO evolution_proposals (
+            id, type, target_recipe_id, related_recipe_ids, confidence, source, description,
+            evidence, status, proposed_at, expires_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          id,
+          'update',
+          `r-${id}`,
+          '[]',
+          0.8,
+          'host-agent',
+          'p',
+          '[]',
+          'observing',
+          proposedAt,
+          proposedAt + 1_000_000
+        );
+    }
+
+    it('oldestFirst=true → asc(proposedAt)；默认 desc 不变；与 limit 组合取最旧 N', () => {
+      // 乱序插入，proposed_at 决定排序
+      seedAt('ep-300', 300);
+      seedAt('ep-100', 100);
+      seedAt('ep-500', 500);
+      seedAt('ep-200', 200);
+      seedAt('ep-400', 400);
+
+      // 默认 desc（最新优先）—— 其他调用方排序不变
+      expect(repo.find({}).map((p) => p.id)).toEqual([
+        'ep-500',
+        'ep-400',
+        'ep-300',
+        'ep-200',
+        'ep-100',
+      ]);
+
+      // oldestFirst=true → asc（最旧优先）
+      expect(repo.find({ oldestFirst: true }).map((p) => p.id)).toEqual([
+        'ep-100',
+        'ep-200',
+        'ep-300',
+        'ep-400',
+        'ep-500',
+      ]);
+
+      // oldestFirst + limit → 取最旧 N（capped checkAndExecute 防饿死排空）
+      expect(repo.find({ oldestFirst: true, limit: 2 }).map((p) => p.id)).toEqual([
+        'ep-100',
+        'ep-200',
+      ]);
+
+      // 默认 desc + limit → 取最新 N（证明默认排序未变）
+      expect(repo.find({ limit: 2 }).map((p) => p.id)).toEqual(['ep-500', 'ep-400']);
+    });
+  });
+
   describe('findExpiredObserving', () => {
     it('queries observing proposals expired before now', () => {
       // Create a proposal that auto-observes and has an already-expired expiresAt
