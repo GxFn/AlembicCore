@@ -23,6 +23,7 @@ import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type { KnowledgeEdgeRepositoryImpl } from '../../repository/knowledge/KnowledgeEdgeRepository.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
+import type { LifecycleStateMachine } from './LifecycleStateMachine.js';
 
 export interface DecaySignal {
   recipeId: string;
@@ -103,6 +104,8 @@ export class DecayDetector {
   #edgeRepo: KnowledgeEdgeRepositoryImpl | null;
   #sourceRefRepo: RecipeSourceRefRepositoryImpl | null;
   #signalBus: SignalBus | null;
+  /** U4：可选生命周期状态机；注入后 scanAll 直接驱动 active→decaying 迁移（B1：不依赖信号订阅）。 */
+  #lifecycleStateMachine: LifecycleStateMachine | null;
   #logger = Logger.getInstance();
 
   constructor(
@@ -111,6 +114,8 @@ export class DecayDetector {
       signalBus?: SignalBus;
       knowledgeEdgeRepo?: KnowledgeEdgeRepositoryImpl;
       sourceRefRepo?: RecipeSourceRefRepositoryImpl;
+      /** U4：可选生命周期状态机，注入后 scanAll 驱动衰减迁移；不传则仅评估 + 发信号（向后兼容）。 */
+      lifecycleStateMachine?: LifecycleStateMachine;
       /** 旧调用方可继续传入；DecayDetector 不再读取 audit log。 */
       drizzle?: unknown;
     } = {}
@@ -119,13 +124,14 @@ export class DecayDetector {
     this.#edgeRepo = options.knowledgeEdgeRepo ?? null;
     this.#sourceRefRepo = options.sourceRefRepo ?? null;
     this.#signalBus = options.signalBus ?? null;
+    this.#lifecycleStateMachine = options.lifecycleStateMachine ?? null;
   }
 
   /**
    * 扫描所有 active 条目的衰退状态
    */
-  async scanAll(): Promise<DecayScoreResult[]> {
-    const recipes = await this.#loadActiveRecipes();
+  async scanAll(cap?: number): Promise<DecayScoreResult[]> {
+    const recipes = await this.#loadActiveRecipes(cap);
     const results: DecayScoreResult[] = [];
 
     for (const recipe of recipes) {
@@ -133,7 +139,27 @@ export class DecayDetector {
       results.push(result);
     }
 
-    // 发射衰退信号
+    // U4 衰减触发器恢复：对 level∈{decaying,severe,dead} 的 active recipe 直接驱动 active→decaying 迁移。
+    // B1：不依赖 ProposalExecutor 信号订阅（#onSignal 需预存 observing proposal，decay 无预建 → 落空），
+    // 故 tick 直走注入的 lifecycleStateMachine.transition；isValidTransition guard 保证 decaying→decaying 幂等 no-op。
+    // decaying→deprecated 仍由现役 checkTimeouts 30d 接管（不在本任务）。下方 signalBus.send('decay') 保留作可观测。
+    if (this.#lifecycleStateMachine) {
+      for (const r of results) {
+        if (r.level === 'decaying' || r.level === 'severe' || r.level === 'dead') {
+          await this.#lifecycleStateMachine.transition({
+            recipeId: r.recipeId,
+            targetState: 'decaying',
+            trigger: 'decay-detection',
+            evidence: {
+              reason: `decay level=${r.level} score=${r.decayScore}`,
+              decayScore: r.decayScore,
+            },
+          });
+        }
+      }
+    }
+
+    // 发射衰退信号（可观测，保留）
     if (this.#signalBus) {
       for (const r of results) {
         if (r.level !== 'healthy') {
@@ -247,9 +273,11 @@ export class DecayDetector {
 
   /* ── Internal ── */
 
-  async #loadActiveRecipes(): Promise<RecipeForDecay[]> {
+  async #loadActiveRecipes(cap?: number): Promise<RecipeForDecay[]> {
     try {
-      const entries = await this.#knowledgeRepo.findAllByLifecycles(['active']);
+      // U4 有界化：cap 给定时透传给 findAllByLifecycles（已支持 limit + 最旧优先 createdAt 升序）；
+      // undefined 保持无界全表（字节兼容，无 cap 调用方不变）。Core 不设默认（由 Plugin sweep 定）。
+      const entries = await this.#knowledgeRepo.findAllByLifecycles(['active'], cap);
       return entries.map((e) => {
         const qualityObj =
           typeof e.quality === 'object'
@@ -306,9 +334,13 @@ export class DecayDetector {
   ): { freshness: number; usage: number; quality: number; authority: number } {
     const now = Date.now();
 
-    // freshness: days since last hit → 0-1 (0 = 365+ days, 1 = today)
+    // freshness: days since last hit → 0-1（0 = 365+ 天，1 = 今天）
+    // cold-start grace（U4，CG-4）：缺 lastHitAt 时回落 createdAt 作新鲜度锚点（镜像策略1 :177-188 的 created_at 路径），
+    // 使健康新 recipe（lastHitAt=null/createdAt=now）首 tick freshness≈1、不被误判 severe/dead；createdAt 亦缺则回落 now。
+    // 仅给「新创建」豁免：createdAt 早于 365 天的从未使用条目仍随龄衰减——未放松衰减门禁，仅补冷启动 grace。
     const lastHit = (stats.lastHitAt as number) ?? 0;
-    const daysSinceHit = lastHit > 0 ? (now - toMs(lastHit)) / DAY_MS : 365;
+    const freshnessAnchorMs = lastHit > 0 ? toMs(lastHit) : toMs(recipe.created_at ?? now);
+    const daysSinceHit = (now - freshnessAnchorMs) / DAY_MS;
     const freshness = Math.max(0, 1 - daysSinceHit / 365);
 
     // usage: hitsLast90d 归一化 (0 = 0 hits, 1 = 50+ hits)
@@ -321,9 +353,12 @@ export class DecayDetector {
     const staleRatio = context.staleRatio ?? 0;
     const quality = baseQuality * (1 - staleRatio * 0.3);
 
-    // authority: from stats.authority 归一化 (0-100 → 0-1)
-    const authorityRaw = (stats.authority as number) ?? 50;
-    const authority = Math.min(1, authorityRaw / 100);
+    // authority: from stats.authority 归一化（0-5 域 → 0-1）。
+    // 量纲来源：KnowledgeService.ts:768 写入 authority = Math.round(qualityScore * 5)，故 authority ∈ [0,5]。
+    // 旧实现误用 /100（当 0-100 域）→ 高 authority(如 4) 被压成 ~0.04、掩盖衰减；缺 key 时旧默认 50(0-100 中性)同样掩盖。
+    // 修正：/5 归一 + Math.max(0,...) 兜底；缺 stats.authority 时取 0-5 域中性默认 2.5（→0.5）。
+    const authorityRaw = (stats.authority as number) ?? 2.5;
+    const authority = Math.min(1, Math.max(0, authorityRaw / 5));
 
     return { freshness, usage, quality, authority };
   }
