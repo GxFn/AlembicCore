@@ -277,16 +277,23 @@ export class ProposalExecutor {
     // observing proposal；故 capped 走 oldestFirst（proposedAt 升序）+ LIMIT，单 tick 处理 ≤cap、跨多次 tick
     // 最旧优先排空不饿死。cap===undefined → 现行无界 + 默认 desc 排序（字节一致契约）。
     // cap 只限「处理多少条」，绝不改判定门禁：evaluateUpdate/evaluateDeprecate/§9.1/transition Guard 全保留。
-    // 注：#expireOldPending 是独立的 pending GC，不在本次 cap 有界范围内（任务范围限定 observing 查询）。
+    // P3-Core-2（2026-06-26，用户裁断 Option A）：cap 模式下跨 observing + pending GC 共享单一 remaining 预算
+    // （与 P2-Core checkTimeouts 的 total-budget 一致），使整个 capped checkAndExecute 单 tick 扫描+写 ≤cap、
+    // 跨 tick 排空不饿死。observing 按实际扫描行数递减 remaining，剩余预算透传给 #expireOldPending。
+    let remaining = cap;
     const observing =
-      cap === undefined
+      remaining === undefined
         ? this.#repo.find({ status: 'observing' })
-        : this.#repo.find({ status: 'observing', limit: cap, oldestFirst: true });
+        : this.#repo.find({ status: 'observing', limit: remaining, oldestFirst: true });
     for (const proposal of observing) {
       await this.#processExpiredProposal(proposal, result);
     }
+    // 共享预算按 observing 实际扫描（返回）行数递减；cap===undefined 时保持 undefined（无界）
+    if (remaining !== undefined) {
+      remaining -= observing.length;
+    }
 
-    this.#expireOldPending(result);
+    this.#expireOldPending(result, remaining);
 
     if (result.executed.length > 0 || result.rejected.length > 0 || result.expired.length > 0) {
       this.#logger.info(
@@ -475,9 +482,15 @@ export class ProposalExecutor {
 
   /* ── expired pending cleanup ── */
 
-  #expireOldPending(result: ProposalExecutionResult): void {
+  #expireOldPending(result: ProposalExecutionResult, limit?: number): void {
     const now = Date.now();
-    const oldPending = this.#repo.find({ status: 'pending' });
+    // P3-Core-2：cap 模式下接收跨 observing+pending 的剩余 remaining 预算作 limit（最旧优先 proposedAt 升序），
+    // 使整个 capped checkAndExecute tick 严格有界、跨 tick 排空；limit===undefined（无 cap）→ 现行无界全扫（字节一致）。
+    // shouldExpirePending 判定/markExpired 写法不动：limit 只限「扫描多少条」，不改「是否过期」。
+    const oldPending =
+      limit === undefined
+        ? this.#repo.find({ status: 'pending' })
+        : this.#repo.find({ status: 'pending', limit, oldestFirst: true });
 
     for (const proposal of oldPending) {
       if (EvolutionPolicy.shouldExpirePending(proposal.proposedAt, now)) {

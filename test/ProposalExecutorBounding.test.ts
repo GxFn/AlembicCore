@@ -154,6 +154,111 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     expect(proposalRepo.find({ status: 'observing' })).toHaveLength(0);
   });
 
+  // ───────────────── P3-Core-2: #expireOldPending 有界化（Option A 共享预算）─────────────────
+
+  it('P3-Core-2 cap：pending GC 单 tick 仅 markExpired ≤budget（最旧优先），多 tick 排空', async () => {
+    const sink = await createRecipe('r-sink-pend', 'active', { guardHits: 0, searchHits: 0 });
+    // 5 条到期 pending（proposedAt 极小 → 远超过期阈值），乱序插入
+    seedPending('pp-300', 300, sink.id);
+    seedPending('pp-100', 100, sink.id);
+    seedPending('pp-500', 500, sink.id);
+    seedPending('pp-200', 200, sink.id);
+    seedPending('pp-400', 400, sink.id);
+
+    // 无 observing → 整 cap 预算给 pending GC
+    const t1 = await executor.checkAndExecute(2);
+    expect(t1.expired.map((e) => e.id)).toEqual(['pp-100', 'pp-200']);
+
+    const t2 = await executor.checkAndExecute(2);
+    expect(t2.expired.map((e) => e.id)).toEqual(['pp-300', 'pp-400']);
+
+    const t3 = await executor.checkAndExecute(2);
+    expect(t3.expired.map((e) => e.id)).toEqual(['pp-500']);
+
+    expect(proposalRepo.find({ status: 'pending' })).toHaveLength(0);
+  });
+
+  it('P3-Core-2 cap：observing + pending 共享单一 remaining 预算，整 tick 总处理 ≤cap', async () => {
+    const sink = await createRecipe('r-sink-shared', 'active', { guardHits: 0, searchHits: 0 });
+    // 2 条 observing（no-usage → reject）+ 3 条到期 pending；cap=3
+    seedObserving('so-1', 10, { targetRecipeId: sink.id });
+    seedObserving('so-2', 20, { targetRecipeId: sink.id });
+    seedPending('sp-1', 30, sink.id);
+    seedPending('sp-2', 40, sink.id);
+    seedPending('sp-3', 50, sink.id);
+
+    const t = await executor.checkAndExecute(3);
+
+    // observing 先吃 2（remaining 3-2=1）→ pending GC 仅最旧 1 条（sp-1）
+    expect(t.rejected).toHaveLength(2);
+    expect(t.expired.map((e) => e.id)).toEqual(['sp-1']);
+    // 整 tick 总处理 = 2 reject + 1 expire = 3 = cap
+    expect(t.rejected.length + t.expired.length).toBe(3);
+    // 预算耗尽：剩 2 条 pending 未扫
+    expect(proposalRepo.find({ status: 'pending' })).toHaveLength(2);
+  });
+
+  it('P3-Core-2 spy seam：cap 模式 pending GC 透传 {limit:remaining, oldestFirst}；无 cap 不传', async () => {
+    const spy = vi.spyOn(proposalRepo, 'find');
+
+    // 空 DB：observing 返回 0 → remaining 3-0=3 → pending GC 收 limit 3
+    await executor.checkAndExecute(3);
+    expect(spy).toHaveBeenCalledWith({ status: 'observing', limit: 3, oldestFirst: true });
+    expect(spy).toHaveBeenCalledWith({ status: 'pending', limit: 3, oldestFirst: true });
+
+    spy.mockClear();
+
+    await executor.checkAndExecute();
+    expect(spy).toHaveBeenCalledWith({ status: 'observing' });
+    expect(spy).toHaveBeenCalledWith({ status: 'pending' });
+
+    spy.mockRestore();
+  });
+
+  it('P3-Core-2 无 cap 时 pending GC 仍无界（字节一致）', async () => {
+    const sink = await createRecipe('r-sink-unb-p', 'active', { guardHits: 0, searchHits: 0 });
+    for (let i = 0; i < 5; i++) {
+      seedPending(`up-${i}`, (i + 1) * 100, sink.id);
+    }
+
+    const result = await executor.checkAndExecute();
+
+    expect(result.expired).toHaveLength(5);
+    expect(proposalRepo.find({ status: 'pending' })).toHaveLength(0);
+  });
+
+  it('P3-Core-2 cap 不绕过过期判定：未到期 pending 不被 markExpired', async () => {
+    const sink = await createRecipe('r-sink-fresh', 'active', { guardHits: 0, searchHits: 0 });
+    seedPending('pp-expired', 100, sink.id); // proposedAt 极小 → 到期
+    seedPending('pp-fresh', Date.now(), sink.id); // 刚创建 → 未到期
+
+    const result = await executor.checkAndExecute(5);
+
+    // 仅到期者被 markExpired；shouldExpirePending 门禁未被绕过
+    expect(result.expired.map((e) => e.id)).toEqual(['pp-expired']);
+    expect(proposalRepo.findById('pp-fresh')?.status).toBe('pending');
+  });
+
+  /** 直接插入一条 pending proposal，控制 proposedAt（极小=到期；now=未到期） */
+  function seedPending(id: string, proposedAt: number, targetRecipeId: string): void {
+    drizzle
+      .insert(evolutionProposals)
+      .values({
+        id,
+        type: 'update',
+        targetRecipeId,
+        relatedRecipeIds: JSON.stringify([]),
+        confidence: 0.8,
+        source: 'host-agent',
+        description: `pending ${id}`,
+        evidence: JSON.stringify([]),
+        status: 'pending',
+        proposedAt,
+        expiresAt: proposedAt + 1_000_000_000,
+      })
+      .run();
+  }
+
   /** 直接插入一条 observing proposal，控制 proposedAt 以验证最旧优先排序 */
   function seedObserving(
     id: string,
