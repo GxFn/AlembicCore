@@ -61,6 +61,12 @@ export class ProposalExecutor {
   readonly #edgeRepo: KnowledgeEdgeRepositoryImpl;
   readonly #logger = Logger.getInstance();
   #unsubscribe: (() => void) | null = null;
+  /**
+   * P3-Core-Fix（F-A re-entrancy）：正在执行中的 proposalId 集合。
+   * 某 proposal 执行时其 transition 会发 lifecycle 信号；订阅者据此跳过对「同一进行中 proposal」的二次执行，
+   * 避免 active→evolving 后再次 active→evolving 触发 'evolving→evolving' invalid 而把已执行的 proposal 误标 rejected。
+   */
+  readonly #inFlight = new Set<string>();
 
   constructor(
     knowledgeRepo: KnowledgeRepositoryImpl,
@@ -128,7 +134,10 @@ export class ProposalExecutor {
     try {
       // 查找该 Recipe 的 observing Proposals
       const proposals = this.#repo.findByTarget(recipeId);
-      const activeProposals = proposals.filter((p) => p.status === 'observing');
+      // P3-Core-Fix（F-A re-entrancy）：跳过正在执行中的同一 proposal，避免其执行触发的 lifecycle 信号二次进入
+      const activeProposals = proposals.filter(
+        (p) => p.status === 'observing' && !this.#inFlight.has(p.id)
+      );
 
       if (activeProposals.length === 0) {
         return;
@@ -162,7 +171,9 @@ export class ProposalExecutor {
         const verdict = EvolutionPolicy.evaluateUpdate(metrics);
         if (verdict.pass) {
           const result = this.#emptyResult();
-          await this.#executeUpdate(proposal, metrics, result);
+          await this.#runWithReentrancyGuard(proposal.id, () =>
+            this.#executeUpdate(proposal, metrics, result)
+          );
           if (result.executed.length > 0) {
             this.#logger.info(
               `[ProposalExecutor] Signal-driven update executed: ${proposal.id} (signal=${signal.type})`
@@ -192,7 +203,9 @@ export class ProposalExecutor {
         );
         if (verdict.action !== 'reject') {
           const result = this.#emptyResult();
-          await this.#executeDeprecate(proposal, metrics, snapshot, result);
+          await this.#runWithReentrancyGuard(proposal.id, () =>
+            this.#executeDeprecate(proposal, metrics, snapshot, result)
+          );
           if (result.executed.length > 0) {
             this.#logger.info(
               `[ProposalExecutor] Signal-driven deprecate executed: ${proposal.id} (signal=${signal.type})`
@@ -286,6 +299,10 @@ export class ProposalExecutor {
         ? this.#repo.find({ status: 'observing' })
         : this.#repo.find({ status: 'observing', limit: remaining, oldestFirst: true });
     for (const proposal of observing) {
+      // P3-Core-Fix（F-A re-entrancy）：跳过正在执行中的同一 proposal（与 status 过滤并列）
+      if (this.#inFlight.has(proposal.id)) {
+        continue;
+      }
       await this.#processExpiredProposal(proposal, result);
     }
     // 共享预算按 observing 实际扫描（返回）行数递减；cap===undefined 时保持 undefined（无界）
@@ -307,6 +324,21 @@ export class ProposalExecutor {
 
   /* ═══════════════════ Internal ═══════════════════ */
 
+  /**
+   * P3-Core-Fix（F-A re-entrancy）：以 in-flight 守卫执行单条 proposal。
+   * 进入即标记 proposalId，finally 移除；执行期间该 proposal 触发的 lifecycle 信号
+   * 会被 #onSignal / checkAndExecute 的 #inFlight 跳过，从而不会 re-enter 二次执行。
+   * 仅做并发再入保护，不改判定门禁 / transition Guard / proposal 状态语义。
+   */
+  async #runWithReentrancyGuard(proposalId: string, run: () => Promise<void>): Promise<void> {
+    this.#inFlight.add(proposalId);
+    try {
+      await run();
+    } finally {
+      this.#inFlight.delete(proposalId);
+    }
+  }
+
   async #processExpiredProposal(
     proposal: ProposalRecord,
     result: ProposalExecutionResult
@@ -316,10 +348,14 @@ export class ProposalExecutor {
 
     switch (proposal.type) {
       case 'update':
-        await this.#executeUpdate(proposal, metrics, result);
+        await this.#runWithReentrancyGuard(proposal.id, () =>
+          this.#executeUpdate(proposal, metrics, result)
+        );
         break;
       case 'deprecate':
-        await this.#executeDeprecate(proposal, metrics, snapshot, result);
+        await this.#runWithReentrancyGuard(proposal.id, () =>
+          this.#executeDeprecate(proposal, metrics, snapshot, result)
+        );
         break;
       default:
         result.skipped.push({

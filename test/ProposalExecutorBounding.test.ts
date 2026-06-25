@@ -36,6 +36,7 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
   let knowledgeRepo: KnowledgeRepositoryImpl;
   let proposalRepo: ProposalRepository;
   let executor: ProposalExecutor;
+  let signalBus: SignalBus;
   let oldQuiet: string | undefined;
 
   beforeEach(async () => {
@@ -52,7 +53,7 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     knowledgeRepo = new KnowledgeRepositoryImpl(connection);
     proposalRepo = new ProposalRepository(drizzle);
     const eventRepo = new LifecycleEventRepository(drizzle);
-    const signalBus = new SignalBus();
+    signalBus = new SignalBus();
     const lifecycle = new LifecycleStateMachine(knowledgeRepo, eventRepo, signalBus, proposalRepo);
     const sourceRefRepo = new RecipeSourceRefRepositoryImpl(drizzle);
     const contentPatcher = new ContentPatcher(knowledgeRepo, sourceRefRepo);
@@ -238,6 +239,59 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     expect(result.expired.map((e) => e.id)).toEqual(['pp-expired']);
     expect(proposalRepo.findById('pp-fresh')?.status).toBe('pending');
   });
+
+  // ───────────────── P3-Core-Fix: dual-track re-entrancy 守卫（F-A）─────────────────
+
+  it('F-A：dual-track 下合格 UPDATE 不被自身 lifecycle 信号 re-entrancy 误标 rejected', async () => {
+    // 启用信号驱动轨道（与 sweep 形成双轨）；lifecycle transition 经同一 signalBus 发信号
+    executor.subscribeToSignals(signalBus);
+    const rejectSpy = vi.spyOn(proposalRepo, 'markRejected');
+
+    const recipe = await createRecipe('r-reentry', 'active', {
+      guardHits: 5,
+      searchHits: 3,
+      ruleFalsePositiveRate: 0,
+    });
+    seedObserving('ep-reentry', 100, { targetRecipeId: recipe.id });
+
+    // sweep 触发执行：执行中的 active→evolving transition 会发 lifecycle 信号；修复前会被 init 订阅者
+    // re-enter、对 still-observing 的同一 proposal 再执行 → 'evolving→evolving' invalid → 误标 rejected
+    await executor.checkAndExecute(5);
+    await flushAsync();
+
+    // 修复后：proposal 终态 executed（非 rejected），且从未对其调用 markRejected
+    expect(proposalRepo.findById('ep-reentry')?.status).toBe('executed');
+    expect(rejectSpy).not.toHaveBeenCalledWith('ep-reentry', expect.anything());
+    // entry 完成一次流转：active→evolving→active/staging
+    expect(['active', 'staging']).toContain((await knowledgeRepo.findById(recipe.id))?.lifecycle);
+
+    rejectSpy.mockRestore();
+    executor.unsubscribe();
+  });
+
+  it('F-A：守卫不误伤——合法 usage 信号仍能驱动 not-in-flight 的合格 UPDATE 执行', async () => {
+    executor.subscribeToSignals(signalBus);
+
+    const recipe = await createRecipe('r-signal-drive', 'active', {
+      guardHits: 4,
+      searchHits: 2,
+      ruleFalsePositiveRate: 0,
+    });
+    seedObserving('ep-signal', 100, { targetRecipeId: recipe.id });
+
+    // 直接发一个 usage 信号（针对非执行中的 proposal）→ 信号驱动评估并执行
+    signalBus.send('usage', 'test', 0.9, { target: recipe.id });
+    await flushAsync();
+
+    expect(proposalRepo.findById('ep-signal')?.status).toBe('executed');
+
+    executor.unsubscribe();
+  });
+
+  /** 排空信号订阅者（void #onSignal）产生的挂起异步链（一个宏任务跑在所有微任务之后） */
+  function flushAsync(): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, 0));
+  }
 
   /** 直接插入一条 pending proposal，控制 proposedAt（极小=到期；now=未到期） */
   function seedPending(id: string, proposedAt: number, targetRecipeId: string): void {
