@@ -101,12 +101,19 @@ export class StagingManager {
 
   /**
    * 检查所有 staging 条目，执行自动发布或回滚
+   *
+   * P1 有界化（2026-06-26，daemon-less 自动化补全）：新增可选 per-call `cap`。
+   * - `cap===undefined`：无界（透传 undefined，查询保持今日全表读取，行为字节不变）。
+   * - `cap` 为数值：把 cap 作为 limit 透传给查询，按 createdAt「最旧优先」取 ≤cap 条 staging，
+   *   故晋级数 ≤cap；跨多次 tick(sweep) 排空积压且不饿死。
+   * cap 默认值不在 Core 设——由 Plugin sweep(P1-Plugin) 决定；Core 仅在 cap 给定时执行有界读取。
    */
-  async checkAndPromote(): Promise<StagingCheckResult> {
+  async checkAndPromote(cap?: number): Promise<StagingCheckResult> {
     const now = Date.now();
     const result: StagingCheckResult = { promoted: [], rolledBack: [], waiting: [] };
 
-    const entries = await this.#knowledgeRepo.findAllByLifecycles(['staging']);
+    // 透传 cap 给仓储查询：undefined → 无界；数值 → 最旧优先 + LIMIT，capped 路径不做全表 .all()。
+    const entries = await this.#knowledgeRepo.findAllByLifecycles(['staging'], cap);
 
     for (const e of entries) {
       const deadline = e.stagingDeadline || 0;

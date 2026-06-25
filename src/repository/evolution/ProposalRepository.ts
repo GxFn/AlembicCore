@@ -104,6 +104,12 @@ export interface ProposalFilter {
   targetRecipeId?: string;
   source?: ProposalSource;
   expiredBefore?: number;
+  /**
+   * P1 有界化（2026-06-26）：可选查询上限。
+   * 未传 → 无界（现行行为，SQL 字节一致）；传入 → 追加 SQL `LIMIT`，按既有 desc(proposedAt) 取前 N 条。
+   * 作为 P3 checkAndExecute 复用的共享基础设施，按 design「P1 先于一切驱动」在此一并落地。
+   */
+  limit?: number;
 }
 
 /* ────────────────────── Constants ────────────────────── */
@@ -240,12 +246,15 @@ export class ProposalRepository {
 
     const condition = conditions.length > 0 ? and(...conditions) : undefined;
 
-    const rows = this.#drizzle
+    // P1 有界化：仅在显式传入 filter.limit 时追加 `.limit()`，未传则与今日无界查询字节一致。
+    // 保持既有 desc(proposedAt) 排序语义（P1 不改判定/排序，只叠加可选上限）。
+    const query = this.#drizzle
       .select()
       .from(evolutionProposals)
       .where(condition)
-      .orderBy(desc(evolutionProposals.proposedAt))
-      .all();
+      .orderBy(desc(evolutionProposals.proposedAt));
+
+    const rows = filter.limit === undefined ? query.all() : query.limit(filter.limit).all();
 
     return rows.map((r) => ProposalRepository.#mapRow(r));
   }

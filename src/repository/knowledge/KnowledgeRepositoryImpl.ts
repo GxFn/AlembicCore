@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import { and, count, desc, eq, gt, inArray, isNotNull, like, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, like, ne, or, sql } from 'drizzle-orm';
 import type { Logger as WinstonLogger } from 'winston';
 import { inferKind, KnowledgeEntry } from '../../domain/knowledge/index.js';
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
@@ -402,15 +402,35 @@ export class KnowledgeRepositoryImpl {
   }
 
   /**
-   * 查询指定 lifecycle 集合中的所有条目（不分页）
+   * 查询指定 lifecycle 集合中的条目
    * ★ Phase 5c: supply Evolution domain services (ContradictionDetector, RedundancyAnalyzer, etc.)
+   *
+   * P1 有界化（2026-06-26，daemon-less 自动化补全）：新增可选 `limit`。
+   * - 未传 `limit`：保留今日「无界全表读取」行为，SQL 与既有字节一致，现有调用方零影响。
+   * - 传入 `limit`：确定性「最旧优先」(createdAt 升序) + `.limit(limit)`，capped 读取最积压的
+   *   条目，让 StagingManager.checkAndPromote(cap) 等驱动方跨多次 tick(sweep) 排空积压且不饿死。
+   * 排序列选 createdAt：它对所有 lifecycle 通用且 NOT NULL；staging 条目 createdAt 越早 →
+   *   进入 staging 越早 → deadline 越早到期，故 createdAt 升序 ≈ 到期顺序，契合「最旧优先排空」。
    */
-  async findAllByLifecycles(lifecycles: readonly string[]): Promise<KnowledgeEntry[]> {
-    const rows = this.#drizzle
-      .select()
-      .from(knowledgeEntries)
-      .where(inArray(knowledgeEntries.lifecycle, lifecycles as string[]))
-      .all();
+  async findAllByLifecycles(
+    lifecycles: readonly string[],
+    limit?: number
+  ): Promise<KnowledgeEntry[]> {
+    // 分支保持无界路径字节一致：仅在显式传入 limit 时才追加 orderBy(asc) + limit。
+    const rows =
+      limit === undefined
+        ? this.#drizzle
+            .select()
+            .from(knowledgeEntries)
+            .where(inArray(knowledgeEntries.lifecycle, lifecycles as string[]))
+            .all()
+        : this.#drizzle
+            .select()
+            .from(knowledgeEntries)
+            .where(inArray(knowledgeEntries.lifecycle, lifecycles as string[]))
+            .orderBy(asc(knowledgeEntries.createdAt))
+            .limit(limit)
+            .all();
     return rows
       .map((row) => this._rowToEntity(row as Record<string, unknown>))
       .filter(Boolean) as KnowledgeEntry[];

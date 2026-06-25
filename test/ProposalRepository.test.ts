@@ -219,6 +219,33 @@ describe('ProposalRepository', () => {
     });
   });
 
+  describe('find with limit (P1 有界化)', () => {
+    it('caps results to filter.limit when provided; unbounded when omitted', () => {
+      // 5 个不同 target，避免去重；默认 confidence=0.85 → observing
+      for (let i = 1; i <= 5; i++) {
+        expect(repo.create(makeInput({ targetRecipeId: `r-lim-${i}` }))).not.toBeNull();
+      }
+
+      // 传入 limit → SQL LIMIT，结果被截到 N 条
+      expect(repo.find({ limit: 2 })).toHaveLength(2);
+
+      // 不传 limit → 现行无界行为，返回全部 5 条
+      expect(repo.find()).toHaveLength(5);
+    });
+
+    it('combines limit with other filters', () => {
+      for (let i = 1; i <= 4; i++) {
+        expect(
+          repo.create(makeInput({ confidence: 0.8, targetRecipeId: `r-obs-${i}` }))
+        ).not.toBeNull();
+      }
+
+      const limited = repo.find({ status: 'observing', limit: 3 });
+      expect(limited).toHaveLength(3);
+      expect(limited.every((p) => p.status === 'observing')).toBe(true);
+    });
+  });
+
   describe('findExpiredObserving', () => {
     it('queries observing proposals expired before now', () => {
       // Create a proposal that auto-observes and has an already-expired expiresAt
