@@ -122,6 +122,32 @@ export class EvolutionPolicy {
     return { pass: true, reason: 'observation passed' };
   }
 
+  /**
+   * U5 #3：merge / consolidation 提案到期评估。
+   * 与 evaluateUpdate 的关键区别：合并并入的是「新内容」、无观察期使用历史，故 **不要求 hasUsage**
+   * （此前误用 hasUsage 闸把所有 consolidation 提案卡死）。仍保留 FP 护栏（与 update 同阈值），
+   * 并可选校验「有可应用 StructuredPatch」；空补丁不在此 fail，而由 ProposalExecutor 执行层退伪成功兜底。
+   */
+  static evaluateMerge(metrics: {
+    ruleFalsePositiveRate: number;
+    hasStructuredPatch?: boolean;
+  }): UpdateVerdict {
+    const fpOk = metrics.ruleFalsePositiveRate < UPDATE_FP_THRESHOLD;
+    if (!fpOk) {
+      return {
+        pass: false,
+        reason: `FP rate too high: ${(metrics.ruleFalsePositiveRate * 100).toFixed(0)}%`,
+      };
+    }
+    if (metrics.hasStructuredPatch === false) {
+      return { pass: false, reason: 'no applicable merge patch (empty suggestedChanges)' };
+    }
+    return {
+      pass: true,
+      reason: 'merge eligible (patch present, FP within guard, usage not required)',
+    };
+  }
+
   /** Deprecate Proposal 到期评估 */
   static evaluateDeprecate(currentDecay: number, snapshotDecay: number): DeprecateVerdict {
     if (currentDecay > snapshotDecay + DECAY_RECOVERY_DELTA) {

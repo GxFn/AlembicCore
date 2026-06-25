@@ -130,8 +130,8 @@ export class RecipeSimilarity {
   /**
    * 计算两条 Recipe（或候选）之间的 5 维加权相似度 (0-1)
    */
-  static compute(a: RecipeLike, b: RecipeLike): number {
-    const dims = RecipeSimilarity.computeDimensions(a, b);
+  static compute(a: RecipeLike, b: RecipeLike, embeddingSim?: number): number {
+    const dims = RecipeSimilarity.computeDimensions(a, b, embeddingSim);
     return (
       WEIGHTS.title * dims.title +
       WEIGHTS.clause * dims.clause +
@@ -144,7 +144,16 @@ export class RecipeSimilarity {
   /**
    * 计算各维度分解得分（不加权），供 RedundancyResult 等展示用
    */
-  static computeDimensions(a: RecipeLike, b: RecipeLike): SimilarityDimensions {
+  static computeDimensions(
+    a: RecipeLike,
+    b: RecipeLike,
+    embeddingSim?: number
+  ): SimilarityDimensions {
+    // U5 #6：content 维度可选融合注入的 embeddingSim（domain 不发起 embed，保纯度/确定性）。
+    // 注入时取 max(tokenJaccard, embeddingSim)——近义改写 embedding 高于纯 Jaccard；不可用回退 Jaccard（同入同出确定）。
+    const tokenContent = RecipeSimilarity.contentTokenSimilarity(a, b);
+    const content =
+      embeddingSim !== undefined ? Math.max(tokenContent, embeddingSim) : tokenContent;
     return {
       title: RecipeSimilarity.titleJaccard(a.title, b.title),
       clause: RecipeSimilarity.clauseJaccard(
@@ -152,7 +161,7 @@ export class RecipeSimilarity {
         [b.doClause, b.dontClause]
       ),
       code: RecipeSimilarity.codeSimilarity(a.coreCode ?? null, b.coreCode ?? null),
-      content: RecipeSimilarity.contentTokenSimilarity(a, b),
+      content,
       guard: RecipeSimilarity.guardMatch(a.guardPattern ?? null, b.guardPattern ?? null),
     };
   }

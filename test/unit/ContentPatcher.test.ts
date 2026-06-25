@@ -279,8 +279,8 @@ describe('ContentPatcher', () => {
     });
   });
 
-  describe('applyProposal — fallback text patch', () => {
-    it('falls back to content.markdown replacement for non-JSON text', async () => {
+  describe('applyProposal — unstructured text is skipped (U5 #5)', () => {
+    it('does NOT replace markdown with non-JSON natural-language text (retired destructive fallback)', async () => {
       const proposal = {
         id: 'ep-fallback',
         type: 'enhance',
@@ -295,8 +295,11 @@ describe('ContentPatcher', () => {
 
       const result = await patcher.applyProposal(proposal, 'agent-suggestion');
 
-      expect(result.success).toBe(true);
-      expect(result.fieldsPatched).toContain('content.markdown');
+      // U5 #5：退役「≥20 字符纯文本→content.markdown 全量替换」破坏式降级 → 跳过、不写库、内容不变。
+      expect(result.success).toBe(false);
+      expect(result.skipped).toBe(true);
+      expect(result.skipReason).toContain('unstructured');
+      expect(result.fieldsPatched).toHaveLength(0);
     });
   });
 

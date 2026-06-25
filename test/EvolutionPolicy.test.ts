@@ -215,4 +215,28 @@ describe('EvolutionPolicy', () => {
       expect(EvolutionPolicy.shouldExpirePending(exactlyFourteenDays, now)).toBe(false);
     });
   });
+
+  describe('evaluateMerge (U5 #3 — 门禁分流)', () => {
+    it('passes with low FP even when usage=0 (merge 不要求 hasUsage)', () => {
+      expect(EvolutionPolicy.evaluateMerge({ ruleFalsePositiveRate: 0.1 }).pass).toBe(true);
+    });
+
+    it('fails when FP rate is too high (复用 0.4 FP 护栏)', () => {
+      expect(EvolutionPolicy.evaluateMerge({ ruleFalsePositiveRate: 0.5 }).pass).toBe(false);
+    });
+
+    it('fails when explicitly no structured patch is present', () => {
+      expect(
+        EvolutionPolicy.evaluateMerge({ ruleFalsePositiveRate: 0.1, hasStructuredPatch: false })
+          .pass
+      ).toBe(false);
+    });
+
+    it('contrast: evaluateUpdate 仍因 usage=0 fail（aging 门禁未放松）', () => {
+      expect(
+        EvolutionPolicy.evaluateUpdate({ ruleFalsePositiveRate: 0.1, guardHits: 0, searchHits: 0 })
+          .pass
+      ).toBe(false);
+    });
+  });
 });

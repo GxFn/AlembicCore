@@ -17,7 +17,8 @@
  * @module service/evolution/ProposalExecutor
  */
 
-import { EvolutionPolicy } from '../../domain/evolution/EvolutionPolicy.js';
+import { EvolutionPolicy, type UpdateVerdict } from '../../domain/evolution/EvolutionPolicy.js';
+import { type RecipeLike, RecipeSimilarity } from '../../domain/evolution/RecipeSimilarity.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { Signal, SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type {
@@ -168,7 +169,8 @@ export class ProposalExecutor {
 
     switch (proposal.type) {
       case 'update': {
-        const verdict = EvolutionPolicy.evaluateUpdate(metrics);
+        // U5 #8：信号入口与 checkAndExecute 兜底入口共用同一门禁分流（#gateUpdate）。
+        const verdict = this.#gateUpdate(proposal, metrics);
         if (verdict.pass) {
           const result = this.#emptyResult();
           await this.#runWithReentrancyGuard(proposal.id, () =>
@@ -368,12 +370,26 @@ export class ProposalExecutor {
 
   /* ── update ── */
 
+  /**
+   * U5 #8：update 臂单一门禁分流（#executeUpdate 与 #evaluateOnSignal 两入口共用，避免门禁分叉）。
+   * source==='consolidation'（merge = action:update + source:consolidation）→ evaluateMerge（不要求 hasUsage、保留 FP 护栏）；
+   * 其余（aging / 常规 update）→ evaluateUpdate（仍要求 hasUsage）。空 mergePatch 由执行层 #4 退伪成功兜底。
+   */
+  #gateUpdate(proposal: ProposalRecord, metrics: RecipeMetrics): UpdateVerdict {
+    if (proposal.source === 'consolidation') {
+      return EvolutionPolicy.evaluateMerge({
+        ruleFalsePositiveRate: metrics.ruleFalsePositiveRate,
+      });
+    }
+    return EvolutionPolicy.evaluateUpdate(metrics);
+  }
+
   async #executeUpdate(
     proposal: ProposalRecord,
     metrics: RecipeMetrics,
     result: ProposalExecutionResult
   ): Promise<void> {
-    const verdict = EvolutionPolicy.evaluateUpdate(metrics);
+    const verdict = this.#gateUpdate(proposal, metrics);
 
     if (!verdict.pass) {
       this.#repo.markRejected(proposal.id, verdict.reason);
@@ -405,7 +421,10 @@ export class ProposalExecutor {
     }
 
     try {
-      const patchResult = await this.#tryApplyPatch(proposal, 'agent-suggestion');
+      const patchResult = await this.#tryApplyPatch(
+        proposal,
+        proposal.source === 'consolidation' ? 'merge' : 'agent-suggestion'
+      );
       const nextState = patchResult?.success ? 'staging' : 'active';
 
       const nextResult = await this.#lifecycle.transition({
@@ -429,15 +448,38 @@ export class ProposalExecutor {
         return;
       }
 
-      const resolution = patchResult?.success
-        ? `patched=[${patchResult.fieldsPatched.join(',')}]`
-        : 'patch skipped, reverted to active';
-      this.#repo.markExecuted(proposal.id, resolution);
-      result.executed.push({
-        id: proposal.id,
-        type: proposal.type,
-        targetRecipeId: proposal.targetRecipeId,
-      });
+      if (patchResult?.success) {
+        // 真实补丁已应用 → 正常 executed
+        this.#repo.markExecuted(proposal.id, `patched=[${patchResult.fieldsPatched.join(',')}]`);
+        result.executed.push({
+          id: proposal.id,
+          type: proposal.type,
+          targetRecipeId: proposal.targetRecipeId,
+        });
+      } else if (proposal.source === 'consolidation') {
+        // U5 #4 退伪成功：merge(consolidation) 应有可应用补丁却空转（patchResult.success=false、非抛错）。
+        // recipe 已在上面 evolving→active 回落（内容未变更）；此处改 markRejected，不再静默 markExecuted+'reverted to active'。
+        this.#repo.markRejected(
+          proposal.id,
+          'no applicable merge patch (empty/unstructured suggestedChanges)'
+        );
+        result.rejected.push({
+          id: proposal.id,
+          type: proposal.type,
+          reason: 'no applicable merge patch',
+        });
+        this.#logger.info(
+          `[ProposalExecutor] merge proposal ${proposal.id} produced no content change → rejected (reverted to active, content unchanged)`
+        );
+      } else {
+        // 非 merge update：保留现行 no-op valid 语义（aging 提案的状态机周期即执行，内容可不变）。
+        this.#repo.markExecuted(proposal.id, 'patch skipped, reverted to active');
+        result.executed.push({
+          id: proposal.id,
+          type: proposal.type,
+          targetRecipeId: proposal.targetRecipeId,
+        });
+      }
     } catch (err: unknown) {
       this.#logger.warn(
         `[ProposalExecutor] #executeUpdate failed for ${proposal.targetRecipeId}: ${err instanceof Error ? err.message : String(err)}`
@@ -509,11 +551,68 @@ export class ProposalExecutor {
       targetRecipeId: proposal.targetRecipeId,
     });
 
-    // supersede edge
-    const replacedBy = proposal.relatedRecipeIds[0];
+    // supersede edge — U5 #7：选与被替代 Recipe 相似度最高的新建项（非首个）作为 deprecated_by 目标
+    const replacedBy = await this.#selectMostSimilarReplacement(
+      proposal.targetRecipeId,
+      proposal.relatedRecipeIds
+    );
     if (replacedBy) {
       await this.#createDeprecatedByEdge(replacedBy, proposal.targetRecipeId);
     }
+  }
+
+  /**
+   * U5 #7：supersede 时从 relatedRecipeIds 中选与被替代 Recipe 相似度最高者（复用 RecipeSimilarity 加权 5 维）。
+   * <2 候选 / 加载失败 → 回退首个（与旧 relatedRecipeIds[0] 行为兼容）。
+   */
+  async #selectMostSimilarReplacement(
+    supersededId: string,
+    relatedRecipeIds: string[]
+  ): Promise<string | undefined> {
+    if (relatedRecipeIds.length <= 1) {
+      return relatedRecipeIds[0];
+    }
+    try {
+      const superseded = await this.#knowledgeRepo.findById(supersededId);
+      if (!superseded) {
+        return relatedRecipeIds[0];
+      }
+      const supersededLike = ProposalExecutor.#toRecipeLike(superseded);
+      let bestId = relatedRecipeIds[0];
+      let bestSim = -1;
+      for (const id of relatedRecipeIds) {
+        const cand = await this.#knowledgeRepo.findById(id);
+        if (!cand) {
+          continue;
+        }
+        const sim = RecipeSimilarity.compute(supersededLike, ProposalExecutor.#toRecipeLike(cand));
+        if (sim > bestSim) {
+          bestSim = sim;
+          bestId = id;
+        }
+      }
+      return bestId;
+    } catch {
+      return relatedRecipeIds[0];
+    }
+  }
+
+  static #toRecipeLike(e: {
+    title: string;
+    doClause?: string;
+    dontClause?: string;
+    coreCode?: string;
+    trigger?: string;
+    content?: unknown;
+  }): RecipeLike {
+    return {
+      title: e.title,
+      doClause: e.doClause ?? null,
+      dontClause: e.dontClause ?? null,
+      coreCode: e.coreCode ?? null,
+      trigger: e.trigger ?? null,
+      content: (e.content as RecipeLike['content']) ?? null,
+    };
   }
 
   /* ── expired pending cleanup ── */

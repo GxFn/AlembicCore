@@ -20,6 +20,7 @@ import {
   getGatewaySourceLabel,
   getGatewaySourceUserId,
 } from '../../shared/sourceContracts.js';
+import type { StructuredPatch } from '../../types/evolution.js';
 import type { BootstrapDedup, CandidateSummary } from '../bootstrap/BootstrapDedup.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
@@ -203,6 +204,7 @@ interface GatewayConsolidationAdvisor {
         reorganizeTargets?: { id: string; title: string; similarity: number }[];
         coveredBy?: { id: string; title: string; similarity: number }[];
         mergeDirection?: { addedDimensions: string[]; summary: string };
+        mergePatch?: StructuredPatch;
         pendingSemanticReview?: boolean;
       };
     }>;
@@ -956,6 +958,7 @@ export class RecipeProductionGateway {
       reorganizeTargets?: { id: string; title: string; similarity: number }[];
       coveredBy?: { id: string; title: string; similarity: number }[];
       mergeDirection?: { addedDimensions: string[]; summary: string };
+      mergePatch?: StructuredPatch;
     },
     item: CreateRecipeItem
   ): Promise<{
@@ -978,6 +981,8 @@ export class RecipeProductionGateway {
         candidateCategory: item.category,
         analysisReason: advice.reason,
         mergeDirection: advice.mergeDirection,
+        // U5 #2: 把 mergePatch 升级为 suggestedChanges（JSON），供 ContentPatcher 真实应用、退伪成功。
+        suggestedChanges: advice.mergePatch ? JSON.stringify(advice.mergePatch) : undefined,
       },
     ];
 

@@ -313,11 +313,35 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
       .run();
   }
 
+  it('U5 #3 退伪成功：consolidation 提案空 suggestedChanges → rejected（非 executed+reverted）', async () => {
+    // merge(consolidation) 走 evaluateMerge（不要求 usage、FP 护栏）→ 进 patch；evidence 无 suggestedChanges
+    // → ContentPatcher skip（success=false、非抛错）→ #4 退伪成功：markRejected，非 markExecuted+'reverted to active'。
+    const recipe = await createRecipe('r-merge-empty', 'active', { guardHits: 0, searchHits: 0 });
+    seedObserving('ep-merge-empty', 100, {
+      targetRecipeId: recipe.id,
+      source: 'consolidation',
+      evidence: [{ snapshotAt: 1 }],
+    });
+
+    const result = await executor.checkAndExecute(5);
+
+    expect(result.executed.map((e) => e.id)).not.toContain('ep-merge-empty');
+    expect(result.rejected.map((r) => r.id)).toContain('ep-merge-empty');
+    expect(proposalRepo.findById('ep-merge-empty')?.status).toBe('rejected');
+    // recipe 回落 active（内容未变更）
+    expect((await knowledgeRepo.findById(recipe.id))?.lifecycle).toBe('active');
+  });
+
   /** 直接插入一条 observing proposal，控制 proposedAt 以验证最旧优先排序 */
   function seedObserving(
     id: string,
     proposedAt: number,
-    opts: { type?: 'update' | 'deprecate'; targetRecipeId?: string } = {}
+    opts: {
+      type?: 'update' | 'deprecate';
+      targetRecipeId?: string;
+      source?: string;
+      evidence?: unknown[];
+    } = {}
   ): void {
     drizzle
       .insert(evolutionProposals)
@@ -327,9 +351,9 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
         targetRecipeId: opts.targetRecipeId ?? `missing-${id}`,
         relatedRecipeIds: JSON.stringify([]),
         confidence: 0.8,
-        source: 'host-agent',
+        source: opts.source ?? 'host-agent',
         description: `proposal ${id}`,
-        evidence: JSON.stringify([]),
+        evidence: JSON.stringify(opts.evidence ?? []),
         status: 'observing',
         proposedAt,
         expiresAt: proposedAt + 1_000_000_000,

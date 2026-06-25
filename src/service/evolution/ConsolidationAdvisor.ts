@@ -23,6 +23,7 @@ import {
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
+import type { PatchChange, StructuredPatch } from '../../types/evolution.js';
 
 /* ────────────────────── Types ────────────────────── */
 
@@ -60,6 +61,8 @@ export interface ConsolidationAdvice {
   targetRecipe?: { id: string; title: string; similarity: number };
   /** action=merge 时，候选能为目标 Recipe 补充的新维度 */
   mergeDirection?: MergeDirection;
+  /** U5 #1: action=merge 时，把"补充维度"升级为可应用补丁（供 evidence.suggestedChanges 与 ContentPatcher 消费）。 */
+  mergePatch?: StructuredPatch;
   /** action=reorganize 时，需要重新组织的 Recipe 列表 */
   reorganizeTargets?: { id: string; title: string; similarity: number }[];
   /** action=insufficient 时，已覆盖该领域的 Recipe */
@@ -231,6 +234,7 @@ export class ConsolidationAdvisor {
           similarity: Math.round(top.similarity * 100) / 100,
         },
         mergeDirection: direction,
+        mergePatch: this.#buildMergePatch(candidate, top.recipe),
         relatedRecipes: scored.slice(0, 5).map((s) => ({
           id: s.recipe.id,
           title: s.recipe.title,
@@ -262,6 +266,7 @@ export class ConsolidationAdvisor {
             similarity: Math.round(top.similarity * 100) / 100,
           },
           mergeDirection: direction,
+          mergePatch: this.#buildMergePatch(candidate, top.recipe),
           fieldAnalysis: fields,
           relatedRecipes: scored.slice(0, 5).map((s) => ({
             id: s.recipe.id,
@@ -659,6 +664,59 @@ export class ConsolidationAdvisor {
   /**
    * 从文本中提取关键术语（过滤掉小词和常见停用词）
    */
+  /**
+   * U5 #1：把 #computeMergeDirection 识别的"候选可补充维度"升级为可应用 StructuredPatch。
+   * 判定条件与 #computeMergeDirection 完全一致（标签→补丁，不放宽相似度阈值）：
+   * coreCode 仅在目标空/短时 replace；dontClause/whenClause 目标空→replace；新 doClause 关键词→content append。
+   * 无可补充维度 → 返回 undefined（merge 无内容变更，由执行层 #4 退伪成功，不静默 markExecuted）。
+   */
+  #buildMergePatch(
+    candidate: CandidateForConsolidation,
+    target: RecipeSummary
+  ): StructuredPatch | undefined {
+    const changes: PatchChange[] = [];
+
+    const candidateCodeLen = (candidate.coreCode || '').trim().length;
+    const targetCodeLen = (target.coreCode || '').trim().length;
+    if (candidateCodeLen > 30 && targetCodeLen < 30 && candidate.coreCode) {
+      changes.push({ field: 'coreCode', action: 'replace', newValue: candidate.coreCode });
+    }
+
+    if (
+      (candidate.dontClause || '').length > 20 &&
+      !(target.dontClause || '').trim() &&
+      candidate.dontClause
+    ) {
+      changes.push({ field: 'dontClause', action: 'replace', newValue: candidate.dontClause });
+    }
+
+    if (
+      (candidate.whenClause || '').length > 30 &&
+      (target.whenClause || '').length < 15 &&
+      candidate.whenClause
+    ) {
+      changes.push({ field: 'whenClause', action: 'replace', newValue: candidate.whenClause });
+    }
+
+    const candidateKeywords = ConsolidationAdvisor.#extractKeyTerms(candidate.doClause || '');
+    const targetKeywords = ConsolidationAdvisor.#extractKeyTerms(
+      [target.doClause, target.dontClause].filter(Boolean).join(' ')
+    );
+    const newTerms = [...candidateKeywords].filter((t) => !targetKeywords.has(t));
+    if (newTerms.length >= 3 && candidate.doClause) {
+      changes.push({ field: 'content.markdown', action: 'append', newValue: candidate.doClause });
+    }
+
+    if (changes.length === 0) {
+      return undefined;
+    }
+    return {
+      patchVersion: 1,
+      changes,
+      reasoning: `merge: 候选为目标补充 ${changes.map((c) => c.field).join('、')}`,
+    };
+  }
+
   static #extractKeyTerms(text: string): Set<string> {
     const words = RecipeSimilarity.extractTopicWords(text);
     const STOP = new Set([

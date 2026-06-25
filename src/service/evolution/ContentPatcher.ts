@@ -114,7 +114,7 @@ export class ContentPatcher {
       return this.#skipResult(
         recipeId,
         patchSource,
-        'suggestedChanges could not be parsed or empty'
+        'unstructured or empty suggestedChanges (requires StructuredPatch JSON)'
       );
     }
 
@@ -191,21 +191,9 @@ export class ContentPatcher {
       }
     }
 
-    // 降级：纯文本视为 content.markdown 全量替换（适用于旧格式 Agent 输出）
-    if (trimmed.length >= 20) {
-      return {
-        patchVersion: 1,
-        changes: [
-          {
-            field: 'content.markdown',
-            action: 'replace',
-            newValue: trimmed,
-          },
-        ],
-        reasoning: 'Fallback: raw text treated as content.markdown replacement',
-      };
-    }
-
+    // U5 #5：退役「纯文本≥20→content.markdown 全量替换」破坏式降级。
+    // 非结构化 suggestedChanges（非合法 StructuredPatch JSON）一律返回 null → applyProposal 跳过、不写库，
+    // 保留 recipe 内容字节不变（避免用自然语言整段覆盖 markdown 造成破坏式降级）。
     return null;
   }
 
@@ -252,7 +240,13 @@ export class ContentPatcher {
       return true;
     }
     if (action === 'append' && change.newValue !== undefined) {
-      recipe[key] = `${recipe[key]}\n${change.newValue}`;
+      // U5 #5：去重 + 段落边界保护——已包含则不重复追加；非空时以段落（空行）分隔追加。
+      const current = (recipe[key] as string) || '';
+      const addition = change.newValue.trim();
+      if (!addition || current.includes(addition)) {
+        return false;
+      }
+      recipe[key] = current ? `${current.replace(/\s+$/, '')}\n\n${addition}` : addition;
       return true;
     }
 
@@ -284,8 +278,13 @@ export class ContentPatcher {
     }
 
     if (change.action === 'append' && change.newValue !== undefined) {
+      // U5 #5：去重 + 段落边界保护——已包含则不重复追加；非空时以段落（空行）分隔追加。
       const current = (contentObj[subField] as string) ?? '';
-      contentObj[subField] = `${current}\n${change.newValue}`;
+      const addition = change.newValue.trim();
+      if (!addition || current.includes(addition)) {
+        return false;
+      }
+      contentObj[subField] = current ? `${current.replace(/\s+$/, '')}\n\n${addition}` : addition;
       recipe.content = JSON.stringify(contentObj);
       return true;
     }

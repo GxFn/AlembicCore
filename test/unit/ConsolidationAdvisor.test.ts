@@ -139,6 +139,41 @@ describe('ConsolidationAdvisor', () => {
     });
   });
 
+  describe('U5 #2 — merge advice carries a non-empty applicable mergePatch', () => {
+    it('upgrades the added-dimension label into a StructuredPatch (dontClause)', async () => {
+      // 目标缺 dontClause（空），其余与候选高度重叠 → merge + mergePatch 补 dontClause（标签→可应用补丁）
+      const sharedDo =
+        'Use BDFoundation category methods bd_stringForKey for safe collection dictionary access from network responses';
+      const sharedCode = '[dict bd_stringForKey:@"key"]; [dict bd_objectForKeyCheck:@"data"];';
+      const existingRow = makeDbRow({
+        title: 'BDFoundation Safe Dictionary Access',
+        doClause: sharedDo,
+        dontClause: '',
+        coreCode: sharedCode,
+        whenClause: 'When accessing dictionary values from network responses',
+      });
+      const advisor = new ConsolidationAdvisor(mockRepo([existingRow]));
+      const advice = await advisor.analyze(
+        makeCandidate({
+          title: 'BDFoundation Safe Dictionary Access',
+          doClause: sharedDo,
+          dontClause:
+            'Do not use raw objectForKey without null checking or NSNull filtering safety checks',
+          coreCode: sharedCode,
+          whenClause: 'When accessing dictionary values from network responses',
+        })
+      );
+
+      expect(advice.action).toBe('merge');
+      expect(advice.mergePatch).toBeDefined();
+      expect(advice.mergePatch!.changes.length).toBeGreaterThan(0);
+      const dontChange = advice.mergePatch!.changes.find((c) => c.field === 'dontClause');
+      expect(dontChange).toBeDefined();
+      expect(dontChange!.action).toBe('replace');
+      expect(dontChange!.newValue).toContain('null checking');
+    });
+  });
+
   describe('reorganize — high overlap with multiple recipes', () => {
     it('should advise merge or reorganize when candidate overlaps with 2+ recipes', async () => {
       // Use nearly-identical text across all three to guarantee high similarity
