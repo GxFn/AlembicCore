@@ -171,19 +171,37 @@ export class LifecycleStateMachine {
 
   /* ═══════════════════ Timeout Check ═══════════════════ */
 
-  async checkTimeouts(): Promise<TimeoutCheckResult> {
+  async checkTimeouts(cap?: number): Promise<TimeoutCheckResult> {
     const result: TimeoutCheckResult = { timedOut: [], checked: 0 };
     const now = Date.now();
 
+    // P2 有界化（2026-06-26，daemon-less 自动化补全）：可选 cap 用「跨 timeout 状态共享 remaining 预算」。
+    // - cap===undefined：remaining 保持 undefined → 每 state 透传 undefined limit = 现行无界全表（字节一致契约）。
+    // - cap 为数值：remaining=cap，按 TIMEOUT_MS 顺序每个 state 以 findAllByLifecycles([state], remaining)
+    //   最旧优先(P1 createdAt 升序)+LIMIT 查询，处理后按"本 state 实际扫描(返回)行数"递减 remaining，
+    //   remaining<=0 即停后续 state → 单 tick 扫描行数 + 迁移数 ≤ cap、最旧/最积压优先、跨多次 tick 排空。
+    // staging 仍因不在 TIMEOUT_TARGET 而被跳过（与 checkAndPromote 不相交，务必保持）；迁移仍全部经 transition()。
+    let remaining = cap;
+
     for (const [state, timeoutMs] of Object.entries(TIMEOUT_MS)) {
       if (!(state in TIMEOUT_TARGET)) {
-        continue;
+        continue; // staging 等无目标态的中间态：天然不被 checkTimeouts 触碰
+      }
+
+      // cap 模式下预算耗尽：停止后续 state，不再发起查询（避免无谓扫描）
+      if (remaining !== undefined && remaining <= 0) {
+        break;
       }
 
       const targetState = TIMEOUT_TARGET[state as keyof typeof TIMEOUT_TARGET];
-      const entries = await this.#knowledgeRepo.findAllByLifecycles([state]);
+      // cap 模式把剩余预算作为 limit 透传（P1 最旧优先 + LIMIT）；无 cap 透传 undefined = 无界全表
+      const entries = await this.#knowledgeRepo.findAllByLifecycles([state], remaining);
 
       result.checked += entries.length;
+      // 共享预算按本 state 实际扫描行数递减，保证跨状态扫描总行数 ≤ cap
+      if (remaining !== undefined) {
+        remaining -= entries.length;
+      }
 
       for (const entry of entries) {
         const stats = (entry.stats ?? {}) as unknown as Record<string, unknown>;
