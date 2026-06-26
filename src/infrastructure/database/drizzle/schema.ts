@@ -412,6 +412,9 @@ export const recipeSourceRefs = sqliteTable(
     status: text('status').notNull().default('active'),
     newPath: text('new_path'),
     verifiedAt: integer('verified_at').notNull(),
+    // U6 内容级保鲜：源文件 region 内容指纹（独立于 .md 的 computeKnowledgeHash）。
+    // 可空：migration 后全 NULL，由 SourceRefReconciler 首轮 reconcile 回填（CG⑥a：首填只回填不改 status）。
+    contentFp: text('content_fp'),
   },
   (table) => [index('idx_rsr_path').on(table.sourcePath), index('idx_rsr_status').on(table.status)]
 );

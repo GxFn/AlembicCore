@@ -19,6 +19,8 @@ export interface RecipeSourceRefEntity {
   status: string;
   newPath: string | null;
   verifiedAt: number;
+  /** U6 内容级保鲜：源 region 内容指纹（可空；首次迁移/插入为 null，由 reconcile 回填）。 */
+  contentFp: string | null;
 }
 
 export interface RecipeSourceRefInsert {
@@ -27,6 +29,12 @@ export interface RecipeSourceRefInsert {
   status?: string;
   newPath?: string | null;
   verifiedAt: number;
+  /**
+   * U6 内容级保鲜指纹。仅在显式提供时写入：
+   *   - 插入：缺省 → null；
+   *   - upsert 冲突更新：undefined → 保留旧指纹（不被 stale/renamed 等无指纹路径误清空）。
+   */
+  contentFp?: string | null;
 }
 
 /* ═══ Repository 实现 ═══ */
@@ -90,6 +98,11 @@ export class RecipeSourceRefRepositoryImpl {
     return this.findByStatus('stale');
   }
 
+  /** 查询所有 drifted 引用（U6：内容指纹漂移，文件在但 region 内容变；下游 P3 gate 消费）。 */
+  findDrifted(): RecipeSourceRefEntity[] {
+    return this.findByStatus('drifted');
+  }
+
   /** 统计条数 */
   count(): number {
     const row = this.#drizzle.select({ cnt: sql<number>`count(*)` }).from(recipeSourceRefs).get();
@@ -108,6 +121,7 @@ export class RecipeSourceRefRepositoryImpl {
         status: data.status ?? 'active',
         newPath: data.newPath ?? null,
         verifiedAt: data.verifiedAt,
+        contentFp: data.contentFp ?? null,
       })
       .onConflictDoUpdate({
         target: [recipeSourceRefs.recipeId, recipeSourceRefs.sourcePath],
@@ -115,6 +129,9 @@ export class RecipeSourceRefRepositoryImpl {
           status: data.status ?? 'active',
           newPath: data.newPath ?? null,
           verifiedAt: data.verifiedAt,
+          // content_fp 只在显式提供时更新：undefined → 不写该列，保留旧指纹
+          // （stale/renamed 等无指纹路径的 upsert 不会误清空已回填指纹）。
+          ...(data.contentFp !== undefined ? { contentFp: data.contentFp } : {}),
         },
       })
       .run();
