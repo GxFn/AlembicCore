@@ -97,6 +97,14 @@ export interface RecipeLike {
   } | null;
 }
 
+/**
+ * U5 #6 conduit：embedding 相似度注入器（同步）。
+ * 由消费服务 ctor 注入，给 compute/computeDimensions 第 3 参喂入「预计算好的」相似度
+ * （domain/service 不发起 embed，只接收算好的 sim）；返回 undefined 或未注入 → compute 回退纯 Jaccard。
+ * 入参与 compute 同源（RecipeLike→RecipeLike），保证三处消费站点签名一致。
+ */
+export type EmbeddingSimProvider = (a: RecipeLike, b: RecipeLike) => number | undefined;
+
 /** 5 维分解得分 */
 export interface SimilarityDimensions {
   title: number;

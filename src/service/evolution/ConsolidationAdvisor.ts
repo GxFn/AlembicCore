@@ -16,6 +16,7 @@
  */
 
 import {
+  type EmbeddingSimProvider,
   type FieldAnalysis,
   type RecipeLike,
   RecipeSimilarity,
@@ -121,10 +122,13 @@ const CROSS_DOMAIN_THRESHOLD = 20;
 
 export class ConsolidationAdvisor {
   readonly #knowledgeRepo: KnowledgeRepositoryImpl;
+  // U5 #6 conduit：可选 embedding 相似度注入器（缺省→纯 Jaccard，字节级向后兼容）。
+  readonly #embeddingSimProvider?: EmbeddingSimProvider;
   readonly #logger = Logger.getInstance();
 
-  constructor(knowledgeRepo: KnowledgeRepositoryImpl) {
+  constructor(knowledgeRepo: KnowledgeRepositoryImpl, embeddingSimProvider?: EmbeddingSimProvider) {
     this.#knowledgeRepo = knowledgeRepo;
+    this.#embeddingSimProvider = embeddingSimProvider;
   }
 
   /**
@@ -564,21 +568,25 @@ export class ConsolidationAdvisor {
    * 委托 RecipeSimilarity 统一算法。
    */
   #computeSimilarity(candidate: CandidateForConsolidation, recipe: RecipeSummary): number {
+    const candidateLike: RecipeLike = {
+      title: candidate.title,
+      doClause: candidate.doClause,
+      dontClause: candidate.dontClause,
+      coreCode: candidate.coreCode,
+      guardPattern: candidate.content?.pattern ?? null,
+      content: candidate.content
+        ? {
+            markdown: candidate.content.markdown,
+            pattern: candidate.content.pattern,
+          }
+        : null,
+    };
+    const recipeLike = recipe as RecipeLike;
+    // U5 #6 conduit：注入预计算 embedding 相似度（缺省→第 3 参 undefined→compute 走纯 Jaccard）。
     return RecipeSimilarity.compute(
-      {
-        title: candidate.title,
-        doClause: candidate.doClause,
-        dontClause: candidate.dontClause,
-        coreCode: candidate.coreCode,
-        guardPattern: candidate.content?.pattern ?? null,
-        content: candidate.content
-          ? {
-              markdown: candidate.content.markdown,
-              pattern: candidate.content.pattern,
-            }
-          : null,
-      },
-      recipe as RecipeLike
+      candidateLike,
+      recipeLike,
+      this.#embeddingSimProvider?.(candidateLike, recipeLike)
     );
   }
 

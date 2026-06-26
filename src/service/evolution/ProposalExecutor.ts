@@ -18,7 +18,11 @@
  */
 
 import { EvolutionPolicy, type UpdateVerdict } from '../../domain/evolution/EvolutionPolicy.js';
-import { type RecipeLike, RecipeSimilarity } from '../../domain/evolution/RecipeSimilarity.js';
+import {
+  type EmbeddingSimProvider,
+  type RecipeLike,
+  RecipeSimilarity,
+} from '../../domain/evolution/RecipeSimilarity.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { Signal, SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type {
@@ -60,6 +64,8 @@ export class ProposalExecutor {
   readonly #lifecycle: LifecycleStateMachine;
   readonly #contentPatcher: ContentPatcher;
   readonly #edgeRepo: KnowledgeEdgeRepositoryImpl;
+  // U5 #6 conduit：可选 embedding 相似度注入器（supersede 站点；缺省→纯 Jaccard，字节级向后兼容）。
+  readonly #embeddingSimProvider?: EmbeddingSimProvider;
   readonly #logger = Logger.getInstance();
   #unsubscribe: (() => void) | null = null;
   /**
@@ -74,13 +80,15 @@ export class ProposalExecutor {
     repo: ProposalRepository,
     lifecycle: LifecycleStateMachine,
     contentPatcher: ContentPatcher,
-    edgeRepo: KnowledgeEdgeRepositoryImpl
+    edgeRepo: KnowledgeEdgeRepositoryImpl,
+    embeddingSimProvider?: EmbeddingSimProvider
   ) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#repo = repo;
     this.#lifecycle = lifecycle;
     this.#contentPatcher = contentPatcher;
     this.#edgeRepo = edgeRepo;
+    this.#embeddingSimProvider = embeddingSimProvider;
   }
 
   /* ═══════════════════ Signal Subscription ═══════════════════ */
@@ -585,7 +593,13 @@ export class ProposalExecutor {
         if (!cand) {
           continue;
         }
-        const sim = RecipeSimilarity.compute(supersededLike, ProposalExecutor.#toRecipeLike(cand));
+        const candLike = ProposalExecutor.#toRecipeLike(cand);
+        // U5 #6 conduit：注入预计算 embedding 相似度（缺省→第 3 参 undefined→compute 走纯 Jaccard）。
+        const sim = RecipeSimilarity.compute(
+          supersededLike,
+          candLike,
+          this.#embeddingSimProvider?.(supersededLike, candLike)
+        );
         if (sim > bestSim) {
           bestSim = sim;
           bestId = id;

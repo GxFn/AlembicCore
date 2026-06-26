@@ -10,7 +10,11 @@
  * 综合: weighted_sum(0.2*d1 + 0.3*d2 + 0.3*d3 + 0.2*d4) ≥ 0.65
  */
 
-import { type RecipeLike, RecipeSimilarity } from '../../domain/evolution/RecipeSimilarity.js';
+import {
+  type EmbeddingSimProvider,
+  type RecipeLike,
+  RecipeSimilarity,
+} from '../../domain/evolution/RecipeSimilarity.js';
 import { CONSUMABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { ReportStore } from '../../infrastructure/report/ReportStore.js';
@@ -56,15 +60,22 @@ export class RedundancyAnalyzer {
   #knowledgeRepo: KnowledgeRepositoryImpl;
   #signalBus: SignalBus | null;
   #reportStore: ReportStore | null;
+  // U5 #6 conduit：可选 embedding 相似度注入器（缺省→纯 Jaccard，字节级向后兼容）。
+  #embeddingSimProvider: EmbeddingSimProvider | null;
   #logger = Logger.getInstance();
 
   constructor(
     knowledgeRepo: KnowledgeRepositoryImpl,
-    options: { signalBus?: SignalBus; reportStore?: ReportStore } = {}
+    options: {
+      signalBus?: SignalBus;
+      reportStore?: ReportStore;
+      embeddingSimProvider?: EmbeddingSimProvider;
+    } = {}
   ) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#signalBus = options.signalBus ?? null;
     this.#reportStore = options.reportStore ?? null;
+    this.#embeddingSimProvider = options.embeddingSimProvider ?? null;
   }
 
   /**
@@ -114,7 +125,14 @@ export class RedundancyAnalyzer {
    * 分析两条 Recipe 的冗余度（委托 RecipeSimilarity 统一算法）
    */
   analyzePair(a: RecipeForRedundancy, b: RecipeForRedundancy): RedundancyResult | null {
-    const dims = RecipeSimilarity.computeDimensions(a as RecipeLike, b as RecipeLike);
+    const aLike = a as RecipeLike;
+    const bLike = b as RecipeLike;
+    // U5 #6 conduit：注入预计算 embedding 相似度（缺省→第 3 参 undefined→computeDimensions 走纯 Jaccard）。
+    const dims = RecipeSimilarity.computeDimensions(
+      aLike,
+      bLike,
+      this.#embeddingSimProvider?.(aLike, bLike)
+    );
 
     const similarity =
       WEIGHTS.title * dims.title +
