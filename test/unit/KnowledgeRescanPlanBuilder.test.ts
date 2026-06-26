@@ -97,3 +97,32 @@ describe('KnowledgeRescanPlanBuilder — U1 per-cell gap + D2 tier', () => {
     expect(p.coverageByDimension).toEqual({});
   });
 });
+
+describe('KnowledgeRescanPlanBuilder — U2b gap 消费 Agent 目标 + 账本优先', () => {
+  const dimGap = (opts: Record<string, unknown>) =>
+    plan({ dimensions: [{ id: 'dimX' }], ...opts }).dimensionPlans.find(
+      (d: { dimension: { id: string } }) => d.dimension.id === 'dimX'
+    );
+
+  it('U2b #4 perDimensionTargets 真实驱动 gap（非硬编码 5）；缺省回退 TARGET_RECIPES_PER_DIMENSION=5', () => {
+    // 空 recipeEntries → coverageByDimension['dimX']=0
+    expect(dimGap({}).gap).toBe(5); // 默认 fallback 5
+    expect(dimGap({ perDimensionTargets: { dimX: 8 } }).gap).toBe(8); // Agent 目标驱动，非 5
+    expect(dimGap({ perDimensionTargets: { dimX: 0 } }).gap).toBe(0); // 目标 0 → gap 0（证非硬 5）
+  });
+
+  it('U2b #4 existingCount 优先读账本（ledgerCoverageByDimension），无账本回退现算', () => {
+    // 账本提供 existingCount=10 → gap=max(0,5-10)=0（覆盖现算的 0）
+    const withLedger = dimGap({ ledgerCoverageByDimension: { dimX: 10 } });
+    expect(withLedger.existingCount).toBe(10);
+    expect(withLedger.gap).toBe(0);
+    // 无账本 → 回退现算 coverageByDimension（空 → 0）
+    expect(dimGap({}).existingCount).toBe(0);
+    // 账本 + Agent 目标组合：existing=3, target=8 → gap=5
+    const combined = dimGap({
+      perDimensionTargets: { dimX: 8 },
+      ledgerCoverageByDimension: { dimX: 3 },
+    });
+    expect(combined).toMatchObject({ existingCount: 3, gap: 5 });
+  });
+});

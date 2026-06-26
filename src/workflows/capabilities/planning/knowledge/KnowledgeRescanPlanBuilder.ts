@@ -145,6 +145,10 @@ export interface BuildKnowledgeRescanPlanOptions {
   moduleBindings?: ModuleCellBinding[];
   /** U1/D2：canonical ProjectMap.modules.length，用于 perCellTarget tier 回退（缺省=本批 moduleBindings 去重模块数）。 */
   moduleCount?: number;
+  /** U2b：Agent confirm 的 per-dimension 目标（优先于 targetPerDimension；缺省→回退 targetPerDimension）。 */
+  perDimensionTargets?: Record<string, number>;
+  /** U2b：覆盖账本提供的 per-dimension existingCount（优先于现算 buildCoverageByDimension；缺省→回退现算）。 */
+  ledgerCoverageByDimension?: Record<string, number>;
 }
 
 export function buildKnowledgeRescanPlan({
@@ -156,6 +160,8 @@ export function buildKnowledgeRescanPlan({
   fileDiff,
   moduleBindings,
   moduleCount,
+  perDimensionTargets,
+  ledgerCoverageByDimension,
 }: BuildKnowledgeRescanPlanOptions): KnowledgeRescanPlan {
   const requestedIds = requestedDimensionIds?.length ? new Set(requestedDimensionIds) : null;
   const requestedDimensions = requestedIds
@@ -187,8 +193,13 @@ export function buildKnowledgeRescanPlan({
     const decayingRecipes = existingRecipes.filter((entry) =>
       isRecipeDecaying(entry, auditResultByRecipeId.get(entry.id), auditVerdictMap.get(entry.id))
     );
-    const existingCount = coverageByDimension[dimension.id] || 0;
-    const gap = Math.max(0, targetPerDimension - existingCount);
+    // U2b：existingCount 优先读覆盖账本（ledgerCoverageByDimension），无账本回退现算 buildCoverageByDimension。
+    const existingCount =
+      ledgerCoverageByDimension?.[dimension.id] ?? (coverageByDimension[dimension.id] || 0);
+    // U2b：per-dimension 目标优先 Agent confirm（perDimensionTargets），否则回退 targetPerDimension
+    //（TARGET_RECIPES_PER_DIMENSION=5 仅作最终 fallback，deepMining 正常路径不再被硬 5 锁死）。
+    const dimensionTarget = perDimensionTargets?.[dimension.id] ?? targetPerDimension;
+    const gap = Math.max(0, dimensionTarget - existingCount);
     const executionReasons = buildDimensionExecutionReasons({
       dimension,
       requestedIds,
@@ -196,7 +207,7 @@ export function buildKnowledgeRescanPlan({
       changedFiles,
       decayingRecipes,
       existingCount,
-      targetPerDimension,
+      targetPerDimension: dimensionTarget,
       gap,
     });
     const execution = buildKnowledgeRescanExecutionDecision({

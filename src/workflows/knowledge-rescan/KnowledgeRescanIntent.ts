@@ -32,6 +32,18 @@ export interface InternalKnowledgeRescanExecutionIntent {
   skipAsyncFill: boolean;
 }
 
+/**
+ * U2b：Agent confirm 的 per-(module×dimension) 目标 recipe 数。
+ * 激活 KnowledgeRescanPlanBuilder 的 moduleBindings.targetRecipes（per-cell gap target），
+ * 替代 deepMining 硬编码 5/维。Plugin 透传层把它映射为 moduleBindings。
+ */
+export interface ModuleDimensionTarget {
+  moduleId?: string;
+  moduleName?: string;
+  dimensionId: string;
+  targetRecipes: number;
+}
+
 export interface KnowledgeRescanWorkflowIntent {
   kind: 'knowledge-rescan';
   executor: KnowledgeRescanExecutor;
@@ -42,6 +54,10 @@ export interface KnowledgeRescanWorkflowIntent {
   dimensionIds?: string[];
   reason?: string | null;
   internalExecution?: InternalKnowledgeRescanExecutionIntent;
+  /** U2b：Agent confirm 的 per-dimension 目标 recipe 数（plan 喂账本替代硬编码 5/维）。 */
+  perDimensionTargets?: Record<string, number>;
+  /** U2b：Agent confirm 的 per-(module×dimension) 目标（激活死字段 moduleBindings.targetRecipes）。 */
+  moduleDimensionTargets?: ModuleDimensionTarget[];
 }
 
 export function createInternalKnowledgeRescanIntent(
