@@ -612,6 +612,7 @@ export class ProposalExecutor {
   }
 
   static #toRecipeLike(e: {
+    id?: string;
     title: string;
     doClause?: string;
     dontClause?: string;
@@ -620,6 +621,8 @@ export class ProposalExecutor {
     content?: unknown;
   }): RecipeLike {
     return {
+      // U5 #7：保留 recipe id 流通到 embeddingSimProvider（supersede 两侧均为 findById 实体、运行时带 id）。
+      id: e.id,
       title: e.title,
       doClause: e.doClause ?? null,
       dontClause: e.dontClause ?? null,

@@ -30,6 +30,9 @@ import type { PatchChange, StructuredPatch } from '../../types/evolution.js';
 
 /** 提交候选的必要字段 */
 export interface CandidateForConsolidation {
+  // U5 #6/#7：可选候选 recipe id。已持久化/再合并场景带 id → embeddingSimProvider 可查预计算向量；
+  // 全新未持久化候选无 id → provider 回退纯 Jaccard（不发起 on-the-fly embed）。additive。
+  id?: string;
   title: string;
   description?: string;
   doClause?: string;
@@ -569,6 +572,8 @@ export class ConsolidationAdvisor {
    */
   #computeSimilarity(candidate: CandidateForConsolidation, recipe: RecipeSummary): number {
     const candidateLike: RecipeLike = {
+      // U5 #7：候选 id 流通到 provider（无 id 时 provider 回退 Jaccard）。
+      id: candidate.id,
       title: candidate.title,
       doClause: candidate.doClause,
       dontClause: candidate.dontClause,
@@ -581,6 +586,7 @@ export class ConsolidationAdvisor {
           }
         : null,
     };
+    // recipeLike 经 cast 自带 RecipeSummary.id（RecipeLike.id? 后可见），无需重建。
     const recipeLike = recipe as RecipeLike;
     // U5 #6 conduit：注入预计算 embedding 相似度（缺省→第 3 参 undefined→compute 走纯 Jaccard）。
     return RecipeSimilarity.compute(

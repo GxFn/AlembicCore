@@ -83,6 +83,9 @@ const STOP_WORDS = new Set([
 
 /** 参与相似度计算的最小字段集 */
 export interface RecipeLike {
+  // U5 #6/#7：可选 recipe id。embeddingSimProvider 据此运行时查预计算向量（不参与 Jaccard 相似度计算本身；
+  // 无 id → provider 无法定位向量 → 回退纯 Jaccard）。additive，不影响既有相似度语义。
+  id?: string;
   title: string;
   doClause?: string | null;
   dontClause?: string | null;
