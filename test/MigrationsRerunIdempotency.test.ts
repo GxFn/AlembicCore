@@ -25,6 +25,7 @@ const EXPECTED_VERSIONS = [
   '010_source_graph',
   '011_guard_violations_attribution',
   '013_git_diff_checkpoints',
+  '014_recipe_source_refs_content_fp',
 ];
 
 describe('Migrations re-run / idempotency (fresh DB)', () => {
