@@ -17,7 +17,11 @@ import { promisify } from 'node:util';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
-import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
+import type {
+  RecipeSourceRefEntity,
+  RecipeSourceRefRepositoryImpl,
+} from '../../repository/sourceref/RecipeSourceRefRepository.js';
+import { computeContentHash } from '../../shared/contentHash.js';
 import {
   buildProjectScopeSourceRefIndex,
   type CanonicalSourceIdentity,
@@ -43,6 +47,8 @@ export interface ReconcileReport {
   cleaned?: number;
   /** 解析失败或缺失来源字段的 recipe 数 */
   failed?: number;
+  /** U6：内容指纹漂移（文件在、region 内容变）标记为 drifted 的条目数 */
+  drifted?: number;
   /** 阻止 source_ref 更新的可审计原因 */
   blockers?: string[];
 }
@@ -156,6 +162,7 @@ export class SourceRefReconciler {
       inserted: report.inserted,
       active: report.active,
       stale: report.stale,
+      drifted: report.drifted ?? 0,
       skipped: report.skipped,
       recipesProcessed: report.recipesProcessed,
     });
@@ -313,7 +320,7 @@ export class SourceRefReconciler {
 
     const exists = this.#sourcePathExists(sourcePath);
     if (existing) {
-      this.#updateExistingSourceRef(recipeId, sourcePath, exists, opts.now, opts.report);
+      this.#updateExistingSourceRef(recipeId, sourcePath, exists, opts.now, opts.report, existing);
       return;
     }
 
@@ -326,17 +333,51 @@ export class SourceRefReconciler {
       report.active++;
     } else if (status === 'stale') {
       report.stale++;
+    } else if (status === 'drifted') {
+      report.drifted = (report.drifted ?? 0) + 1;
     }
   }
 
-  #sourcePathExists(sourcePath: string): boolean {
+  /**
+   * P6：唯一的「源路径 → 存在的绝对路径」解析出口。
+   * 走 #resolveSourcePath（ProjectScope-aware）+ sourcePathFilesystemCandidates（行号/片段后缀剥离），
+   * 供 #sourcePathExists（reconcile/repair）与 #sourceContentFingerprint（指纹读文件）共用，三处口径一致。
+   */
+  #resolveExistingSourceFile(sourcePath: string): string | null {
     for (const candidatePath of sourcePathFilesystemCandidates(sourcePath)) {
       const resolvedSource = this.#resolveSourcePath(candidatePath);
       if (resolvedSource.status === 'resolved' && fs.existsSync(resolvedSource.absolutePath)) {
-        return true;
+        return resolvedSource.absolutePath;
       }
     }
-    return false;
+    return null;
+  }
+
+  #sourcePathExists(sourcePath: string): boolean {
+    return this.#resolveExistingSourceFile(sourcePath) !== null;
+  }
+
+  /**
+   * U6：计算 sourcePath 指向 region 的内容指纹（独立于 computeKnowledgeHash）。
+   * 复用同一 #resolveExistingSourceFile 出口定位文件，按 sourcePath 的行号后缀截 region。
+   * 返回 null 表示文件解析不到或读失败（调用方据此保守续期、不误报 drift）。
+   */
+  #sourceContentFingerprint(sourcePath: string): string | null {
+    const absPath = this.#resolveExistingSourceFile(sourcePath);
+    if (!absPath) {
+      return null;
+    }
+    try {
+      const content = fs.readFileSync(absPath, 'utf8');
+      return computeSourceRegionFingerprint(content, parseSourceLineRange(sourcePath));
+    } catch (error) {
+      // 读文件失败（权限/竞态）→ 安静降级 null：上层按 active 续期、不写指纹、不误报 drift。
+      this.#logger.debug('SourceRefReconciler: content fingerprint read failed', {
+        sourcePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   #updateExistingSourceRef(
@@ -344,9 +385,26 @@ export class SourceRefReconciler {
     sourcePath: string,
     exists: boolean,
     verifiedAt: number,
-    report: ReconcileReport
+    report: ReconcileReport,
+    existing: RecipeSourceRefEntity
   ): void {
-    if (exists) {
+    if (!exists) {
+      // 文件不存在 → stale；不写 content_fp，保留旧指纹以便文件复活后比对。
+      this.#sourceRefRepo.upsert({
+        recipeId,
+        sourcePath,
+        status: 'stale',
+        verifiedAt,
+      });
+      report.stale++;
+      return;
+    }
+
+    // 文件存在 → 算当前 region 指纹，比对 content_fp 决定 active 续期 / drifted。
+    const currentFp = this.#sourceContentFingerprint(sourcePath);
+
+    if (currentFp === null) {
+      // 文件在但指纹算不出（读失败等）→ 保守 active 续期，不写指纹、不误报 drift。
       this.#sourceRefRepo.upsert({
         recipeId,
         sourcePath,
@@ -358,13 +416,55 @@ export class SourceRefReconciler {
       return;
     }
 
+    if (existing.contentFp === null) {
+      // CG⑥a：首轮 content_fp 为 null（迁移后/老行首填）→ 只回填指纹、不改 status，
+      // 否则首次升级会把全量 active 误判 drifted。
+      this.#sourceRefRepo.upsert({
+        recipeId,
+        sourcePath,
+        status: 'active',
+        newPath: null,
+        verifiedAt,
+        contentFp: currentFp,
+      });
+      report.active++;
+      this.#logger.debug('SourceRefReconciler: content_fp first-fill, status unchanged (CG-6a)', {
+        recipeId,
+        sourcePath,
+      });
+      return;
+    }
+
+    if (existing.contentFp === currentFp) {
+      // 指纹不变 → active 续期。
+      this.#sourceRefRepo.upsert({
+        recipeId,
+        sourcePath,
+        status: 'active',
+        newPath: null,
+        verifiedAt,
+        contentFp: currentFp,
+      });
+      report.active++;
+      return;
+    }
+
+    // 指纹变化 → drifted（文件在、region 内容变）；下游 P3 gate 决 update/deprecate。
     this.#sourceRefRepo.upsert({
       recipeId,
       sourcePath,
-      status: 'stale',
+      status: 'drifted',
+      newPath: null,
       verifiedAt,
+      contentFp: currentFp,
     });
-    report.stale++;
+    report.drifted = (report.drifted ?? 0) + 1;
+    this.#logger.info('SourceRefReconciler: source region content drift → drifted', {
+      recipeId,
+      sourcePath,
+      previousFp: existing.contentFp,
+      currentFp,
+    });
   }
 
   #insertSourceRef(
@@ -374,11 +474,14 @@ export class SourceRefReconciler {
     verifiedAt: number,
     report: ReconcileReport
   ): void {
+    // 新行存在 → 立即算 region 指纹作基线（下次 reconcile 即可检 drift）；不存在 → stale 无指纹。
+    const contentFp = exists ? this.#sourceContentFingerprint(sourcePath) : null;
     this.#sourceRefRepo.upsert({
       recipeId,
       sourcePath,
       status: exists ? 'active' : 'stale',
       verifiedAt,
+      ...(contentFp ? { contentFp } : {}),
     });
     report.inserted++;
     if (exists) {
@@ -436,9 +539,9 @@ export class SourceRefReconciler {
     for (const row of staleRows) {
       const newPath = renameMap.get(row.sourcePath);
       if (newPath) {
-        // 验证 newPath 存在
-        const absNewPath = path.resolve(this.#projectRoot, newPath);
-        if (fs.existsSync(absNewPath)) {
+        // P6：验证 newPath 存在 — 走 #sourcePathExists 同一 ProjectScope-aware resolve 出口，
+        // 与 reconcile/fingerprint 口径一致（替换原裸 path.resolve + existsSync）。
+        if (this.#sourcePathExists(newPath)) {
           this.#sourceRefRepo.upsert({
             recipeId: row.recipeId,
             sourcePath: row.sourcePath,
@@ -605,6 +708,53 @@ export class SourceRefReconciler {
       status: 'resolved',
     };
   }
+}
+
+/**
+ * U6 内容指纹域分隔标签：保证源 region 指纹与 .md 的 computeKnowledgeHash 即使输入相同也不撞，
+ * 二者语义不同、互不调用（验收①「指纹独立」）。版本前缀便于未来口径升级时区分。
+ */
+const SOURCE_REGION_FP_TAG = 'alembic:source-region-fp:v1\n';
+
+/**
+ * 计算源文件 region 的内容指纹（U6 内容级保鲜）。
+ *
+ * 与 computeKnowledgeHash（KnowledgeFileWriter，.md 全文剥 _contentHash 行的 SHA-256）严格独立：
+ * 输入是「源码文件指定行区间」、normalize（统一行尾 + trim）后加域标签再 SHA-256，二者输入与语义均不同、互不调用。
+ * 复用底层 computeContentHash（shared/contentHash）做 16-hex SHA-256 原语。
+ *
+ * @param content 源文件全文
+ * @param range 1-based 行区间（含端点）；缺省/无行号 → 全文
+ * @returns 16 hex 指纹
+ */
+export function computeSourceRegionFingerprint(
+  content: string,
+  range?: { start?: number; end?: number }
+): string {
+  const lines = content.split(/\r\n|\n|\r/);
+  const region =
+    range?.start != null
+      ? lines.slice(range.start - 1, range.end ?? range.start).join('\n')
+      : content;
+  return computeContentHash(`${SOURCE_REGION_FP_TAG}${region.trim()}`);
+}
+
+/**
+ * 从 sourcePath 后缀解析 1-based 行区间，与 sourcePathFilesystemCandidates 的剥离正则配套：
+ *   `:N` / `:N-M`（可带 `:col`） 或 `#LN` / `#LN-LM` / `#LN-M`；无后缀 → 空区间（全文）。
+ */
+export function parseSourceLineRange(sourcePath: string): { start?: number; end?: number } {
+  const colon = sourcePath.match(/:(\d+)(?:-(\d+))?(?::\d+)?$/);
+  if (colon) {
+    const start = Number(colon[1]);
+    return { start, end: colon[2] ? Number(colon[2]) : start };
+  }
+  const fragment = sourcePath.match(/#L(\d+)(?:-L?(\d+))?$/i);
+  if (fragment) {
+    const start = Number(fragment[1]);
+    return { start, end: fragment[2] ? Number(fragment[2]) : start };
+  }
+  return {};
 }
 
 function sourcePathFilesystemCandidates(sourcePath: string): string[] {
