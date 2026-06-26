@@ -1,11 +1,11 @@
 /**
  * CoverageLedgerRepository — deepMining 多轮覆盖账本 CRUD（U2a）。
  *
- * 复刻 GitDiffCheckpointRepository 的 upsert/onConflictDoUpdate/listByProjectRoot/#mapRow 语义，
+ * 复刻 git-diff checkpoint 仓的 upsert/onConflictDoUpdate/listByProjectRoot/#mapRow 语义，
  * 键由 (project_root, scope_id, folder_id) 改为 **(project_root, module_id, dimension_id)** cell 键，
  * 并加 listByModule。同管理 deep_mining_rounds（轮次边际产出）。
  *
- * 红线：本仓只持久化「覆盖状态」，不含 plan/session 字段。
+ * 红线：本仓只持久化「覆盖状态」，不含计划/会话字段。
  */
 import { and, asc, eq } from 'drizzle-orm';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';

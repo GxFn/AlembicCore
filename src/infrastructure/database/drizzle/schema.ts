@@ -664,7 +664,7 @@ export const gitDiffCheckpoints = sqliteTable(
 
 // ═══════════════════════════════════════════════════════════════
 // 21. coverage_ledger — deepMining 多轮覆盖账本 (migration 015)
-//     per module×dimension cell 覆盖状态持久化；刻意不含 plan/session 字段（U2 红线）。
+//     per module×dimension cell 覆盖状态持久化；刻意不含计划/会话字段（U2 红线）。
 // ═══════════════════════════════════════════════════════════════
 
 export const coverageLedger = sqliteTable(
@@ -701,7 +701,7 @@ export const coverageLedger = sqliteTable(
 
 // ═══════════════════════════════════════════════════════════════
 // 22. deep_mining_rounds — deepMining 轮次边际产出 (migration 015)
-//     供 CoverageLedgerAdvisor 判收益递减/轮次上限；同样无 plan/session 字段。
+//     供 CoverageLedgerAdvisor 判收益递减/轮次上限；同样无计划/会话字段。
 // ═══════════════════════════════════════════════════════════════
 
 export const deepMiningRounds = sqliteTable(

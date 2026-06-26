@@ -3,8 +3,8 @@
  *
  * coverage_ledger 持久化「覆盖状态」（per module×dimension cell 的 grade/exhausted/价值/覆盖证据），
  * 是 deepMining（长广度）与 evolution（保准确）的唯一协作接口。
- * **红线：这是覆盖状态持久化、不是 plan/session 持久化**——plan 仍每轮无状态 draft→confirm；
- * 本表刻意不含任何 plan/session 字段。
+ * **红线：本表只持久化覆盖状态，不持久化计划或会话**——计划仍每轮无状态 draft→confirm；
+ * 刻意不含任何计划/会话字段。
  *
  * deep_mining_rounds 记每轮边际产出（new_recipes_this_round / last round），
  * 供 CoverageLedgerAdvisor 判「收益递减（<K）/ 轮次上限（≥maxRounds）」停止。
