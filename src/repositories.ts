@@ -13,6 +13,15 @@ import {
   CodeEntityRepositoryImpl,
 } from './repository/code/CodeEntityRepository.js';
 import {
+  type CoverageGrade,
+  type CoverageLedgerRecord,
+  CoverageLedgerRepository,
+  type CoverageLedgerScope,
+  type DeepMiningRoundRecord,
+  type UpsertCoverageLedgerInput,
+  type UpsertDeepMiningRoundInput,
+} from './repository/evolution/CoverageLedgerRepository.js';
+import {
   type GitDiffCheckpointRecord,
   GitDiffCheckpointRepository,
   type GitDiffCheckpointRouteStatus,
@@ -98,8 +107,12 @@ export type {
   BootstrapSnapshotInsert,
   CodeEntity,
   CodeEntityInsert,
+  CoverageGrade,
+  CoverageLedgerRecord,
+  CoverageLedgerScope,
   CreateProposalInput,
   CreateWarningInput,
+  DeepMiningRoundRecord,
   DimFileEntry,
   DimFileInsert,
   DimensionStatMeta,
@@ -138,6 +151,8 @@ export type {
   SourceGraphSymbolSearchOptions,
   SyncRepo,
   TransitionEventRow,
+  UpsertCoverageLedgerInput,
+  UpsertDeepMiningRoundInput,
   UpsertGitDiffCheckpointInput,
   ViolationRecord,
   ViolationStatByRule,
@@ -161,10 +176,12 @@ export type EvolutionProposalRepository = ProposalRepository;
 export type EvolutionWarningRepository = WarningRepository;
 export type EvolutionLifecycleEventRepository = LifecycleEventRepository;
 export type EvolutionGitDiffCheckpointRepository = GitDiffCheckpointRepository;
+export type EvolutionCoverageLedgerRepository = CoverageLedgerRepository;
 
 export {
   BootstrapRepositoryImpl,
   CodeEntityRepositoryImpl,
+  CoverageLedgerRepository,
   GuardViolationRepositoryImpl,
   GitDiffCheckpointRepository,
   KnowledgeEdgeRepositoryImpl,
@@ -201,6 +218,7 @@ export interface AlembicRepositoryBundle {
   warningRepository: EvolutionWarningRepository;
   lifecycleEventRepository: EvolutionLifecycleEventRepository;
   gitDiffCheckpointRepository: EvolutionGitDiffCheckpointRepository;
+  coverageLedgerRepository: EvolutionCoverageLedgerRepository;
   recipeSourceRefRepository: SourceRefRepository;
 }
 
@@ -217,6 +235,7 @@ export const ALEMBIC_REPOSITORY_KEYS = [
   'warningRepository',
   'lifecycleEventRepository',
   'gitDiffCheckpointRepository',
+  'coverageLedgerRepository',
   'recipeSourceRefRepository',
 ] as const;
 
@@ -240,6 +259,7 @@ export function createAlembicRepositories(
     warningRepository: new WarningRepository(drizzle),
     lifecycleEventRepository: new LifecycleEventRepository(drizzle),
     gitDiffCheckpointRepository: new GitDiffCheckpointRepository(drizzle),
+    coverageLedgerRepository: new CoverageLedgerRepository(drizzle),
     recipeSourceRefRepository: new RecipeSourceRefRepositoryImpl(drizzle),
   };
 }

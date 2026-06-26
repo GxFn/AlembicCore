@@ -54,6 +54,7 @@ describe('DatabaseConnection and repository migration integration', () => {
       '011_guard_violations_attribution',
       '013_git_diff_checkpoints',
       '014_recipe_source_refs_content_fp',
+      '015_coverage_ledger',
     ]);
 
     const tables = db

@@ -661,3 +661,64 @@ export const gitDiffCheckpoints = sqliteTable(
     index('idx_git_diff_checkpoints_updated_at').on(table.updatedAt),
   ]
 );
+
+// ═══════════════════════════════════════════════════════════════
+// 21. coverage_ledger — deepMining 多轮覆盖账本 (migration 015)
+//     per module×dimension cell 覆盖状态持久化；刻意不含 plan/session 字段（U2 红线）。
+// ═══════════════════════════════════════════════════════════════
+
+export const coverageLedger = sqliteTable(
+  'coverage_ledger',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    projectRoot: text('project_root').notNull(),
+    moduleId: text('module_id').notNull(),
+    dimensionId: text('dimension_id').notNull(),
+    coveredCount: integer('covered_count').notNull().default(0),
+    totalCandidateCount: integer('total_candidate_count').notNull().default(0),
+    grade: text('grade').notNull().default('empty'),
+    exhausted: integer('exhausted', { mode: 'boolean' }).notNull().default(false),
+    exhaustedReason: text('exhausted_reason'),
+    exhaustedSource: text('exhausted_source'),
+    coveredSourceRefs: text('covered_source_refs', { mode: 'json' }).$type<string[]>(),
+    uncoveredHints: text('uncovered_hints', { mode: 'json' }).$type<string[]>(),
+    valueScore: real('value_score'),
+    lastRound: integer('last_round'),
+    deferred: integer('deferred', { mode: 'boolean' }).notNull().default(false),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('coverage_ledger_cell_unique').on(
+      table.projectRoot,
+      table.moduleId,
+      table.dimensionId
+    ),
+    index('idx_coverage_ledger_project').on(table.projectRoot),
+    index('idx_coverage_ledger_module').on(table.projectRoot, table.moduleId),
+  ]
+);
+
+// ═══════════════════════════════════════════════════════════════
+// 22. deep_mining_rounds — deepMining 轮次边际产出 (migration 015)
+//     供 CoverageLedgerAdvisor 判收益递减/轮次上限；同样无 plan/session 字段。
+// ═══════════════════════════════════════════════════════════════
+
+export const deepMiningRounds = sqliteTable(
+  'deep_mining_rounds',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    projectRoot: text('project_root').notNull(),
+    roundIndex: integer('round_index').notNull(),
+    startedAt: integer('started_at'),
+    completedAt: integer('completed_at'),
+    newRecipesThisRound: integer('new_recipes_this_round').notNull().default(0),
+    triggerActor: text('trigger_actor'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('deep_mining_rounds_unique').on(table.projectRoot, table.roundIndex),
+    index('idx_deep_mining_rounds_project').on(table.projectRoot),
+  ]
+);
