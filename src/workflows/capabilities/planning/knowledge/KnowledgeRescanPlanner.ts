@@ -2,7 +2,10 @@ import path from 'node:path';
 import { EvolutionPolicy } from '../../../../domain/evolution/EvolutionPolicy.js';
 import type { ProposalRepository } from '../../../../repository/evolution/ProposalRepository.js';
 import type KnowledgeRepositoryImpl from '../../../../repository/knowledge/KnowledgeRepositoryImpl.js';
-import type { RecipeSourceRefRepositoryImpl } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
+import type {
+  RecipeSourceRefEntity,
+  RecipeSourceRefRepositoryImpl,
+} from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
 import { EvolutionGateway } from '../../../../service/evolution/EvolutionGateway.js';
 import type { LifecycleStateMachine } from '../../../../service/evolution/LifecycleStateMachine.js';
 import type { EvolutionCandidatePlan } from '../../../../service/evolution/RecipeImpactPlanner.js';
@@ -216,7 +219,8 @@ export async function auditRecipesForRescan(
     logger.info('[CoverageClassifier] recipeSourceRefRepository not available, using fallback');
   }
 
-  const staleByRecipe = sourceRefRepo ? buildStaleMap(sourceRefRepo) : null;
+  const driftedByRecipe = sourceRefRepo ? buildDriftedSourceRefMap(sourceRefRepo, logger) : null;
+  const staleByRecipe = sourceRefRepo ? buildStaleMap(sourceRefRepo, driftedByRecipe) : null;
 
   const results: RelevanceAuditResult[] = [];
   const counters = { healthy: 0, watch: 0, decay: 0, severe: 0, dead: 0 };
@@ -226,20 +230,29 @@ export async function auditRecipesForRescan(
       impactMap,
       staleByRecipe,
       sourceRefRepo,
+      driftedByRecipe,
       filePathSet,
     });
     counters[result.verdict]++;
     results.push(result);
   }
 
-  // U6：dead recipe → deprecate 提案（替换硬编码 proposalsCreated:0 / immediateDeprecated:counters.dead 占位）。
+  // U6：content drift → update 提案；dead recipe → deprecate 提案
+  // （替换硬编码 proposalsCreated:0 / immediateDeprecated:counters.dead 占位）。
   // CG⑥b：source='metabolism' → EvolutionGateway 走 observation-window（shouldImmediateExecute 对 metabolism 恒 false），
   // 即「进观察窗口、非立即执行」；proposalsCreated/immediateDeprecated 反映真实 Gateway 结果而非占位数。
   let proposalsCreated = 0;
   let immediateDeprecated = 0;
-  const deadResults = results.filter((r) => r.verdict === 'dead');
-  const gateway = deadResults.length > 0 ? resolveEvolutionGateway(container, logger) : null;
+  const deadResults = results.filter(
+    (r) => r.verdict === 'dead' && !driftedByRecipe?.has(r.recipeId)
+  );
+  const hasDriftedUpdates = Boolean(driftedByRecipe && driftedByRecipe.size > 0);
+  const gateway =
+    deadResults.length > 0 || hasDriftedUpdates ? resolveEvolutionGateway(container, logger) : null;
   if (gateway) {
+    if (driftedByRecipe && driftedByRecipe.size > 0) {
+      proposalsCreated += await submitDriftedUpdates(gateway, driftedByRecipe, logger);
+    }
     for (const dead of deadResults) {
       try {
         const outcome = await gateway.submit({
@@ -370,9 +383,34 @@ interface RefHealth {
   active: number;
   stale: number;
   total: number;
+  drifted: boolean;
 }
 
-function buildStaleMap(repo: RecipeSourceRefRepositoryImpl): Map<string, RefHealth> {
+function buildDriftedSourceRefMap(
+  repo: RecipeSourceRefRepositoryImpl,
+  logger: RescanLogger
+): Map<string, RecipeSourceRefEntity[]> {
+  const map = new Map<string, RecipeSourceRefEntity[]>();
+  try {
+    for (const ref of repo.findDrifted()) {
+      const refs = map.get(ref.recipeId) ?? [];
+      refs.push(ref);
+      map.set(ref.recipeId, refs);
+    }
+  } catch (err: unknown) {
+    logger.warn(
+      `[CoverageClassifier] findDrifted failed, drifted→update skipped: ${
+        err instanceof Error ? err.message : String(err)
+      }`
+    );
+  }
+  return map;
+}
+
+function buildStaleMap(
+  repo: RecipeSourceRefRepositoryImpl,
+  driftedByRecipe: Map<string, RecipeSourceRefEntity[]> | null
+): Map<string, RefHealth> {
   const map = new Map<string, RefHealth>();
   try {
     const staleCounts = repo.getStaleCountsByRecipe();
@@ -381,6 +419,7 @@ function buildStaleMap(repo: RecipeSourceRefRepositoryImpl): Map<string, RefHeal
         active: row.totalCount - row.staleCount,
         stale: row.staleCount,
         total: row.totalCount,
+        drifted: driftedByRecipe?.has(row.recipeId) ?? false,
       });
     }
   } catch {
@@ -397,6 +436,7 @@ function classifyRecipe(
     impactMap: Map<string, ImpactEntry>;
     staleByRecipe: Map<string, RefHealth> | null;
     sourceRefRepo: RecipeSourceRefRepositoryImpl | null;
+    driftedByRecipe: Map<string, RecipeSourceRefEntity[]> | null;
     filePathSet: ComparableFilePathIndex;
   }
 ): RelevanceAuditResult {
@@ -429,7 +469,8 @@ function classifyRecipe(
       if (refs.length > 0) {
         const activeCount = refs.filter((r) => r.status === 'active').length;
         const ratio = activeCount / refs.length;
-        const score = Math.round(ratio * 100);
+        const hasDriftedRefs = ctx.driftedByRecipe?.has(entry.id) ?? false;
+        const score = hasDriftedRefs && activeCount === 0 ? 45 : Math.round(ratio * 100);
         if (ratio < 1) {
           decayReasons.push(`SourceRef ${activeCount}/${refs.length} active`);
         }
@@ -479,6 +520,14 @@ function refHealthToScore(health: RefHealth): { score: number; reasons: string[]
     return { score: 70, reasons };
   }
   const ratio = health.active / health.total;
+  if (health.drifted && health.active === 0) {
+    reasons.push(`all ${health.total} SourceRefs require content update (drifted)`);
+    return { score: 45, reasons };
+  }
+  if (health.drifted && ratio < 0.5) {
+    reasons.push(`SourceRef ${health.active}/${health.total} active; drifted refs require update`);
+    return { score: Math.max(40, Math.round(30 + ratio * 40)), reasons };
+  }
   if (health.active === 0) {
     reasons.push(`all ${health.total} SourceRefs stale`);
     return { score: 15, reasons };
@@ -491,6 +540,46 @@ function refHealthToScore(health: RefHealth): { score: number; reasons: string[]
   }
   reasons.push(`SourceRef ${health.active}/${health.total} active`);
   return { score: Math.round(50 + ratio * 30), reasons };
+}
+
+async function submitDriftedUpdates(
+  gateway: EvolutionGatewayLike,
+  driftedByRecipe: Map<string, RecipeSourceRefEntity[]>,
+  logger: RescanLogger
+): Promise<number> {
+  let proposalsCreated = 0;
+  for (const [recipeId, refs] of driftedByRecipe) {
+    try {
+      const sourcePaths = refs.map((ref) => ref.sourcePath).join(', ');
+      const outcome = await gateway.submit({
+        recipeId,
+        action: 'update',
+        source: 'metabolism',
+        confidence: 0.8,
+        reason: `SourceRef content drift detected: ${sourcePaths}`,
+        evidence: refs.map((ref) => ({
+          sourceStatus: 'drifted',
+          sourcePath: ref.sourcePath,
+          verifiedAt: ref.verifiedAt,
+          contentFp: ref.contentFp,
+          updateReason: 'source-region-content-drift',
+        })),
+      });
+      if (outcome.outcome === 'proposal-created' || outcome.outcome === 'proposal-upgraded') {
+        proposalsCreated++;
+      }
+    } catch (err: unknown) {
+      logger.warn(
+        `[CoverageClassifier] drifted→update submit failed for ${recipeId}: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+    }
+  }
+  logger.info(
+    `[CoverageClassifier] drifted→update: ${proposalsCreated} proposal(s) from ${driftedByRecipe.size} drifted recipe(s)`
+  );
+  return proposalsCreated;
 }
 
 // ── Lifecycle 兜底 Score ────────────────────────────────

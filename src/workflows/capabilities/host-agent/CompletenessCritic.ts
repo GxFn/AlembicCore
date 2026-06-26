@@ -637,7 +637,29 @@ function refsOverlap(left: CompletenessSourceRef, right: CompletenessSourceRef):
 }
 
 function pathsOverlap(left: string, right: string): boolean {
-  return left === right || left.endsWith(`/${right}`) || right.endsWith(`/${left}`);
+  const leftPath = normalizePathSegment(left);
+  const rightPath = normalizePathSegment(right);
+  if (!leftPath || !rightPath) {
+    return false;
+  }
+  return (
+    leftPath === rightPath ||
+    pathContains(leftPath, rightPath) ||
+    pathContains(rightPath, leftPath) ||
+    pathSuffixMatches(leftPath, rightPath)
+  );
+}
+
+function normalizePathSegment(value: string): string {
+  return normalizePath(value).replace(/^\/+/, '').replace(/\/+$/, '');
+}
+
+function pathContains(candidatePath: string, ownedPath: string): boolean {
+  return candidatePath.startsWith(`${ownedPath}/`);
+}
+
+function pathSuffixMatches(left: string, right: string): boolean {
+  return left.endsWith(`/${right}`) || right.endsWith(`/${left}`);
 }
 
 /* ════════════════════ U2a buildCoverageLedger（聚合层，不改单候选） ════════════════════ */

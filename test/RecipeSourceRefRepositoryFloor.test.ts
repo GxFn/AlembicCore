@@ -100,6 +100,15 @@ describe('RecipeSourceRefRepository floor', () => {
     expect(counts).toEqual([{ recipeId: 'r1', staleCount: 1, totalCount: 2 }]);
   });
 
+  test('getStaleCountsByRecipe treats drifted refs as stale work', () => {
+    repo.upsert({ recipeId: 'r1', sourcePath: 'src/a.ts', status: 'drifted', verifiedAt: 1 });
+    repo.upsert({ recipeId: 'r1', sourcePath: 'src/b.ts', status: 'stale', verifiedAt: 1 });
+    repo.upsert({ recipeId: 'r1', sourcePath: 'src/c.ts', verifiedAt: 1 });
+
+    const counts = repo.getStaleCountsByRecipe();
+    expect(counts).toEqual([{ recipeId: 'r1', staleCount: 2, totalCount: 3 }]);
+  });
+
   test('findActiveByRecipeIds excludes stale refs and handles empty input', () => {
     repo.upsert({ recipeId: 'r1', sourcePath: 'src/a.ts', verifiedAt: 1 });
     repo.upsert({ recipeId: 'r1', sourcePath: 'src/b.ts', status: 'stale', verifiedAt: 1 });

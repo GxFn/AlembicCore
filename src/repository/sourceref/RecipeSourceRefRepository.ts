@@ -204,7 +204,7 @@ export class RecipeSourceRefRepositoryImpl {
         staleCount: sql<number>`count(*)`,
       })
       .from(recipeSourceRefs)
-      .where(eq(recipeSourceRefs.status, 'stale'))
+      .where(inArray(recipeSourceRefs.status, ['stale', 'drifted']))
       .groupBy(recipeSourceRefs.recipeId)
       .all();
     const totalRows = this.#drizzle

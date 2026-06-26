@@ -99,4 +99,29 @@ describe('buildCoverageLedger (U2a)', () => {
     // 'login.ts' 后缀匹配 owned 'src/auth/login.ts' → 归属 auth
     expect(cellOf(cells2, 'auth', 'arch')?.totalCandidateCount).toBe(1);
   });
+
+  it('RF-9：目录 ownedPath 精确拥有子文件，同时拒绝非 segment 伪前缀', () => {
+    const cells2 = buildCoverageLedger({
+      candidates: [
+        { dimensionIds: ['arch'], sourceRefPaths: ['src/auth/login.ts'], importance: 10 },
+        {
+          dimensionIds: ['arch'],
+          sourceRefPaths: ['src/authentication/session.ts'],
+          importance: 10,
+        },
+      ],
+      coveredPaths: ['src/auth/login.ts'],
+      modules: [{ moduleId: 'auth-dir', moduleName: 'AuthDir', ownedPaths: ['src/auth'] }],
+      dimensionIds: ['arch'],
+      perCellTarget: 1,
+    });
+
+    const authArch = cellOf(cells2, 'auth-dir', 'arch');
+    expect(authArch).toMatchObject({
+      coveredCount: 1,
+      totalCandidateCount: 1,
+      grade: 'covered',
+    });
+    expect(authArch?.coveredSourceRefs).toEqual(['src/auth/login.ts']);
+  });
 });

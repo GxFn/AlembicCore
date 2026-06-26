@@ -37,6 +37,84 @@ const DEAD_PLAN = {
 const noopLogger = { info: () => {}, warn: () => {} };
 
 describe('U6 ⑤ audit dead→deprecate', () => {
+  it('drifted source refs → submit update(source=metabolism)，并不误走 dead→deprecate', async () => {
+    const driftedRef = {
+      recipeId: 'drift-r',
+      sourcePath: 'src/live.ts:2-4',
+      status: 'drifted',
+      newPath: null,
+      verifiedAt: 2000,
+      contentFp: 'abc123',
+    };
+    const submitted: Array<Record<string, unknown>> = [];
+    const fakeGateway = {
+      submit: async (decision: Record<string, unknown>) => {
+        submitted.push(decision);
+        return {
+          recipeId: decision.recipeId,
+          action: decision.action,
+          outcome: 'proposal-created',
+          proposalId: 'p-update',
+        };
+      },
+    };
+    let findDriftedCalled = false;
+    const sourceRefRepo = {
+      findDrifted: () => {
+        findDriftedCalled = true;
+        return [driftedRef];
+      },
+      getStaleCountsByRecipe: () => [{ recipeId: 'drift-r', staleCount: 1, totalCount: 1 }],
+      findByRecipeId: () => [driftedRef],
+    };
+    const container = {
+      get: (name: string): unknown => {
+        if (name === 'evolutionGateway') {
+          return fakeGateway;
+        }
+        if (name === 'recipeSourceRefRepository') {
+          return sourceRefRepo;
+        }
+        return undefined;
+      },
+    };
+
+    const summary = await auditRecipesForRescan({
+      container,
+      logger: noopLogger,
+      recipeEntries: [
+        {
+          ...DEAD_ENTRY,
+          id: 'drift-r',
+          title: 'Drift Recipe',
+          trigger: '@drift',
+          sourceRefs: ['src/live.ts:2-4'],
+        },
+      ],
+      allFiles: [{ name: 'live.ts', relativePath: 'src/live.ts' }],
+      projectRoot: '/tmp/x',
+      candidatePlan: null,
+    });
+
+    expect(findDriftedCalled).toBe(true);
+    expect(summary.decay).toBe(1);
+    expect(summary.dead).toBe(0);
+    expect(summary.proposalsCreated).toBe(1);
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]).toMatchObject({
+      action: 'update',
+      source: 'metabolism',
+      recipeId: 'drift-r',
+    });
+    expect(submitted[0]?.evidence).toEqual([
+      expect.objectContaining({
+        sourceStatus: 'drifted',
+        sourcePath: 'src/live.ts:2-4',
+        updateReason: 'source-region-content-drift',
+      }),
+    ]);
+  });
+
   it('dead → submit deprecate(source=metabolism→观察窗口)，proposalsCreated 反映真实数', async () => {
     const submitted: Array<Record<string, unknown>> = [];
     const fakeGateway = {
