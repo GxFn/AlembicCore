@@ -1,6 +1,10 @@
 import path from 'node:path';
 import { EvolutionPolicy } from '../../../../domain/evolution/EvolutionPolicy.js';
+import type { ProposalRepository } from '../../../../repository/evolution/ProposalRepository.js';
+import type KnowledgeRepositoryImpl from '../../../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
+import { EvolutionGateway } from '../../../../service/evolution/EvolutionGateway.js';
+import type { LifecycleStateMachine } from '../../../../service/evolution/LifecycleStateMachine.js';
 import type { EvolutionCandidatePlan } from '../../../../service/evolution/RecipeImpactPlanner.js';
 import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
 import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
@@ -140,6 +144,45 @@ export function syncKnowledgeStoreForRescan(opts: KnowledgeSyncOptions): void {
   }
 }
 
+/** auditRecipesForRescan 消费的最小 Gateway 契约（仅 submit）。 */
+type EvolutionGatewayLike = Pick<EvolutionGateway, 'submit'>;
+
+/**
+ * U6：解析可用的 EvolutionGateway（dead→deprecate 提案生产者）。
+ * 与既有 container.get 防御式取法一致：优先取已注册 evolutionGateway，
+ * 否则从 proposalRepository + lifecycleStateMachine + knowledgeRepository 组装既有 EvolutionGateway（复用既有类，不新建服务）；
+ * 都不可用 → 返回 null，dead→deprecate 跳过、proposalsCreated 计 0（降级安全；真机生产由 Plugin 注入这些服务）。
+ */
+function resolveEvolutionGateway(
+  container: RescanServiceContainer,
+  logger: RescanLogger
+): EvolutionGatewayLike | null {
+  const tryGet = (name: string): unknown => {
+    try {
+      return container.get(name);
+    } catch {
+      return null;
+    }
+  };
+
+  const direct = tryGet('evolutionGateway');
+  if (direct && typeof (direct as { submit?: unknown }).submit === 'function') {
+    return direct as EvolutionGatewayLike;
+  }
+
+  const proposalRepo = tryGet('proposalRepository') as ProposalRepository | null;
+  const lifecycle = tryGet('lifecycleStateMachine') as LifecycleStateMachine | null;
+  const knowledgeRepo = tryGet('knowledgeRepository') as KnowledgeRepositoryImpl | null;
+  if (proposalRepo && lifecycle && knowledgeRepo) {
+    return new EvolutionGateway(proposalRepo, lifecycle, knowledgeRepo);
+  }
+
+  logger.info(
+    '[CoverageClassifier] evolutionGateway/deps unavailable, dead→deprecate skipped (proposalsCreated=0)'
+  );
+  return null;
+}
+
 /**
  * 对保留的 Recipe 进行覆盖分类，为 gap analysis 和 EvolutionPrescreen 提供数据。
  *
@@ -189,12 +232,54 @@ export async function auditRecipesForRescan(
     results.push(result);
   }
 
+  // U6：dead recipe → deprecate 提案（替换硬编码 proposalsCreated:0 / immediateDeprecated:counters.dead 占位）。
+  // CG⑥b：source='metabolism' → EvolutionGateway 走 observation-window（shouldImmediateExecute 对 metabolism 恒 false），
+  // 即「进观察窗口、非立即执行」；proposalsCreated/immediateDeprecated 反映真实 Gateway 结果而非占位数。
+  let proposalsCreated = 0;
+  let immediateDeprecated = 0;
+  const deadResults = results.filter((r) => r.verdict === 'dead');
+  const gateway = deadResults.length > 0 ? resolveEvolutionGateway(container, logger) : null;
+  if (gateway) {
+    for (const dead of deadResults) {
+      try {
+        const outcome = await gateway.submit({
+          recipeId: dead.recipeId,
+          action: 'deprecate',
+          source: 'metabolism',
+          confidence: EvolutionPolicy.classifyRelevance(dead.relevanceScore).confidence,
+          reason: dead.decayReasons.join('; ') || `relevanceScore=${dead.relevanceScore}, dead`,
+          evidence: [
+            {
+              relevanceScore: dead.relevanceScore,
+              verdict: dead.verdict,
+              evidence: dead.evidence,
+            },
+          ],
+        });
+        if (outcome.outcome === 'proposal-created' || outcome.outcome === 'proposal-upgraded') {
+          proposalsCreated++;
+        } else if (outcome.outcome === 'immediately-executed') {
+          immediateDeprecated++;
+        }
+      } catch (err: unknown) {
+        logger.warn(
+          `[CoverageClassifier] dead→deprecate submit failed for ${dead.recipeId}: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
+    }
+    logger.info(
+      `[CoverageClassifier] dead→deprecate: ${proposalsCreated} observing proposal(s), ${immediateDeprecated} immediate of ${deadResults.length} dead`
+    );
+  }
+
   return {
     totalAudited: recipeEntries.length,
     ...counters,
     results,
-    proposalsCreated: 0,
-    immediateDeprecated: counters.dead,
+    proposalsCreated,
+    immediateDeprecated,
   };
 }
 
