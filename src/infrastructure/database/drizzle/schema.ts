@@ -700,8 +700,8 @@ export const coverageLedger = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 22. deep_mining_rounds — deepMining 轮次边际产出 (migration 015)
-//     供 CoverageLedgerAdvisor 判收益递减/轮次上限；同样无计划/会话字段。
+// 22. deep_mining_rounds — deepMining 轮次边际产出 (migration 015/016)
+//     供 CoverageLedgerAdvisor 判收益递减/轮次上限；rescan_id 只做运行对账/幂等键。
 // ═══════════════════════════════════════════════════════════════
 
 export const deepMiningRounds = sqliteTable(
@@ -709,6 +709,7 @@ export const deepMiningRounds = sqliteTable(
   {
     id: integer('id').primaryKey({ autoIncrement: true }),
     projectRoot: text('project_root').notNull(),
+    rescanId: text('rescan_id'),
     roundIndex: integer('round_index').notNull(),
     startedAt: integer('started_at'),
     completedAt: integer('completed_at'),

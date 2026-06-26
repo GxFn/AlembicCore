@@ -54,6 +54,7 @@ export interface UpsertCoverageLedgerInput extends CoverageLedgerScope {
 
 export interface DeepMiningRoundRecord {
   projectRoot: string;
+  rescanId: string | null;
   roundIndex: number;
   startedAt: number | null;
   completedAt: number | null;
@@ -65,6 +66,7 @@ export interface DeepMiningRoundRecord {
 
 export interface UpsertDeepMiningRoundInput {
   projectRoot: string;
+  rescanId?: string | null;
   roundIndex: number;
   startedAt?: number | null;
   completedAt?: number | null;
@@ -180,6 +182,18 @@ export class CoverageLedgerRepository {
     return row ? CoverageLedgerRepository.#mapRound(row) : null;
   }
 
+  getRoundByRescanId(projectRoot: string, rescanId: string): DeepMiningRoundRecord | null {
+    const row = this.#drizzle
+      .select()
+      .from(deepMiningRounds)
+      .where(
+        and(eq(deepMiningRounds.projectRoot, projectRoot), eq(deepMiningRounds.rescanId, rescanId))
+      )
+      .limit(1)
+      .get();
+    return row ? CoverageLedgerRepository.#mapRound(row) : null;
+  }
+
   listRoundsByProjectRoot(projectRoot: string): DeepMiningRoundRecord[] {
     const rows = this.#drizzle
       .select()
@@ -191,11 +205,17 @@ export class CoverageLedgerRepository {
   }
 
   upsertRound(input: UpsertDeepMiningRoundInput): DeepMiningRoundRecord {
-    const existing = this.getRound(input.projectRoot, input.roundIndex);
+    const existing =
+      input.rescanId !== undefined && input.rescanId !== null
+        ? (this.getRoundByRescanId(input.projectRoot, input.rescanId) ??
+          this.getRound(input.projectRoot, input.roundIndex))
+        : this.getRound(input.projectRoot, input.roundIndex);
     const now = input.updatedAt ?? Date.now();
     const createdAt = input.createdAt ?? existing?.createdAt ?? now;
+    const roundIndex = existing?.roundIndex ?? input.roundIndex;
 
     const mutable = {
+      rescanId: input.rescanId ?? existing?.rescanId ?? null,
       startedAt: input.startedAt ?? existing?.startedAt ?? null,
       completedAt: input.completedAt ?? existing?.completedAt ?? null,
       newRecipesThisRound: input.newRecipesThisRound ?? existing?.newRecipesThisRound ?? 0,
@@ -207,7 +227,7 @@ export class CoverageLedgerRepository {
       .insert(deepMiningRounds)
       .values({
         projectRoot: input.projectRoot,
-        roundIndex: input.roundIndex,
+        roundIndex,
         createdAt,
         ...mutable,
       })
@@ -217,10 +237,14 @@ export class CoverageLedgerRepository {
       })
       .run();
 
-    const saved = this.getRound(input.projectRoot, input.roundIndex);
+    const saved =
+      input.rescanId !== undefined && input.rescanId !== null
+        ? (this.getRoundByRescanId(input.projectRoot, input.rescanId) ??
+          this.getRound(input.projectRoot, roundIndex))
+        : this.getRound(input.projectRoot, roundIndex);
     if (!saved) {
       throw new Error(
-        `Deep mining round was not persisted: ${input.projectRoot}/round-${input.roundIndex}`
+        `Deep mining round was not persisted: ${input.projectRoot}/round-${roundIndex}`
       );
     }
     return saved;
@@ -260,6 +284,7 @@ export class CoverageLedgerRepository {
   static #mapRound(row: DeepMiningRoundRow): DeepMiningRoundRecord {
     return {
       projectRoot: row.projectRoot,
+      rescanId: row.rescanId ?? null,
       roundIndex: row.roundIndex,
       startedAt: row.startedAt ?? null,
       completedAt: row.completedAt ?? null,
