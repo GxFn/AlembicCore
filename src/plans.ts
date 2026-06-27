@@ -1,4 +1,5 @@
 export type {
+  ApplyPlanSelectionOptions,
   PlanDraftSource,
   PlanEvidenceRef,
   PlanIntent,
@@ -7,9 +8,13 @@ export type {
   PlanProjectProfile,
   PlanScaleDecision,
   PlanSelection,
+  PlanSelectionProjection,
+  PlanSelectionScaleOverride,
   PlanStageId,
 } from './service/planIntent/index.js';
 export {
+  applyPlanSelection,
+  assertPlanSelectionShape,
   hasPositiveStageBudget,
   normalizeConfirmedPlanIntent,
   unique,
