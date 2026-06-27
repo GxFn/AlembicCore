@@ -1,12 +1,8 @@
 import { getTestModeConfig } from '../../../../shared/testMode.js';
 
-export type BootstrapTerminalToolset =
-  | 'baseline'
-  | 'terminal-run'
-  | 'terminal-shell'
-  | 'terminal-pty';
+export type BootstrapTerminalToolset = 'baseline' | 'terminal-run';
 
-export type BootstrapTerminalMode = 'run' | 'shell' | 'pty';
+export type BootstrapTerminalMode = 'run';
 
 export interface BootstrapTerminalToolsetConfig {
   enabled: boolean;
@@ -17,19 +13,14 @@ export interface BootstrapTerminalToolsetConfig {
 const TOOLSET_MODES: Record<BootstrapTerminalToolset, BootstrapTerminalMode[]> = {
   baseline: [],
   'terminal-run': ['run'],
-  'terminal-shell': ['run', 'shell'],
-  'terminal-pty': ['run', 'shell', 'pty'],
 };
 
 const ANALYZE_TOOLS: Record<BootstrapTerminalMode, string> = {
   run: 'terminal',
-  shell: 'terminal_shell',
-  pty: 'terminal_pty',
 };
 
-const EVOLUTION_TOOLS: Partial<Record<BootstrapTerminalMode, string>> = {
+const EVOLUTION_TOOLS: Record<BootstrapTerminalMode, string> = {
   run: 'terminal',
-  shell: 'terminal_shell',
 };
 
 export function resolveBootstrapTerminalToolset(): BootstrapTerminalToolsetConfig {
@@ -61,9 +52,7 @@ export function getBootstrapStageTerminalTools(
   }
 
   if (stageName === 'evolve' || stageName === 'evolution') {
-    return config.modes
-      .map((mode) => EVOLUTION_TOOLS[mode])
-      .filter((tool): tool is string => typeof tool === 'string');
+    return config.modes.map((mode) => EVOLUTION_TOOLS[mode]).filter(Boolean);
   }
 
   return [];
@@ -79,18 +68,18 @@ export function buildBootstrapTerminalPolicyHints(config: BootstrapTerminalTools
     },
     constraints: [
       'Terminal tools are optional code-analysis evidence tools for analyze/evolve only.',
-      'Prefer terminal({ action: "exec" }). Use terminal_shell only for pipes/redirection/substitution.',
-      'Use terminal_pty only when a TTY transcript is required.',
+      'Use terminal({ action: "exec" }) for approved read-only evidence commands.',
       'No installs, network operations, project writes, deletions, chmod/chown, sudo, or daemons.',
     ],
   };
 }
 
 function normalizeToolset(value: unknown): BootstrapTerminalToolset | null {
-  return value === 'baseline' ||
-    value === 'terminal-run' ||
-    value === 'terminal-shell' ||
-    value === 'terminal-pty'
-    ? value
-    : null;
+  if (value === 'baseline' || value === 'terminal-run') {
+    return value;
+  }
+  if (value === 'terminal-shell' || value === 'terminal-pty') {
+    return 'terminal-run';
+  }
+  return null;
 }

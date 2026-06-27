@@ -8,7 +8,7 @@
  *   ALEMBIC_TEST_MODE=1                                    启用测试模式
  *   ALEMBIC_TEST_BOOTSTRAP_DIMS=arch,coding                冷启动阶段维度 (逗号分隔 ID)
  *   ALEMBIC_TEST_RESCAN_DIMS=design-patterns               增量扫描阶段维度 (逗号分隔 ID)
- *   ALEMBIC_TERMINAL_TOOLSET=terminal-run                   终端工具集 (baseline|terminal-run|terminal-shell|terminal-pty)
+ *   ALEMBIC_TERMINAL_TOOLSET=terminal-run                   终端工具集 (baseline|terminal-run)
  *
  * 当 ALEMBIC_TEST_MODE 未设置或为 falsy 时，所有 API 透明返回原始数据。
  */
@@ -72,7 +72,8 @@ export interface TestModeConfig {
  * 不再读取旧测试开关；测试模式只负责维度过滤。
  */
 function resolveTerminalConfig(): TerminalConfig {
-  const toolset = envStr('ALEMBIC_TERMINAL_TOOLSET') || 'terminal-run';
+  const requestedToolset = envStr('ALEMBIC_TERMINAL_TOOLSET');
+  const toolset = requestedToolset === 'baseline' ? 'baseline' : 'terminal-run';
   return { enabled: toolset !== 'baseline', toolset };
 }
 

@@ -20,6 +20,8 @@ import type {
 } from './WorkflowReportTypes.js';
 
 const logger = Logger.getInstance();
+const LIVE_TERMINAL_TOOL_IDS = new Set(['terminal', 'terminal.exec']);
+const RETIRED_TERMINAL_TOOL_IDS = new Set(['terminal_shell', 'terminal_pty']);
 
 export async function writeWorkflowReport({
   ctx,
@@ -212,17 +214,18 @@ function summarizeReportStageToolsets(dimensionStats: Record<string, DimensionSt
       | null
       | undefined;
     for (const toolset of diagnostics?.stageToolsets || []) {
+      const sanitizedToolset = sanitizeReportStageToolset(toolset);
       const key = JSON.stringify([
         dimensionId,
-        toolset.stage,
-        toolset.source,
-        toolset.allowedToolIds,
+        sanitizedToolset.stage,
+        sanitizedToolset.source,
+        sanitizedToolset.allowedToolIds,
       ]);
       if (seen.has(key)) {
         continue;
       }
       seen.add(key);
-      result.push({ dimensionId, ...toolset });
+      result.push({ dimensionId, ...sanitizedToolset });
     }
   }
   return result;
@@ -284,7 +287,6 @@ function summarizeReportToolUsage(dimensionStats: Record<string, DimensionStat>)
 function summarizeReportTerminalUsage(dimensionStats: Record<string, DimensionStat>) {
   const commands: Array<Record<string, unknown>> = [];
   let blocked = 0;
-  let ptyRuns = 0;
   let success = 0;
   let total = 0;
 
@@ -294,7 +296,7 @@ function summarizeReportTerminalUsage(dimensionStats: Record<string, DimensionSt
       | null
       | undefined;
     for (const call of diagnostics?.toolCalls || []) {
-      if (call.tool !== 'terminal' && !call.tool.startsWith('terminal_')) {
+      if (!isLiveTerminalTool(call.tool)) {
         continue;
       }
       total++;
@@ -303,9 +305,6 @@ function summarizeReportTerminalUsage(dimensionStats: Record<string, DimensionSt
       }
       if (call.status === 'blocked' || call.status === 'needs-confirmation') {
         blocked++;
-      }
-      if (call.tool === 'terminal_pty') {
-        ptyRuns++;
       }
       commands.push({
         dimensionId,
@@ -320,7 +319,6 @@ function summarizeReportTerminalUsage(dimensionStats: Record<string, DimensionSt
   return {
     enabled: total > 0,
     commands,
-    ptyRuns,
     blocked,
     transcriptRefs: [],
     successRate: total > 0 ? success / total : 0,
@@ -335,16 +333,26 @@ function inferTerminalCapability(stageToolsets: Array<Record<string, unknown>>) 
         : []
     )
   );
-  if (tools.has('terminal_pty')) {
-    return 'terminal-pty';
-  }
-  if (tools.has('terminal_shell')) {
-    return 'terminal-shell';
-  }
-  if (tools.has('terminal')) {
+  if ([...tools].some((tool) => isLiveTerminalTool(tool))) {
     return 'terminal-run';
   }
   return 'baseline';
+}
+
+function sanitizeReportStageToolset(toolset: Record<string, unknown>): Record<string, unknown> {
+  if (!Array.isArray(toolset.allowedToolIds)) {
+    return toolset;
+  }
+  return {
+    ...toolset,
+    allowedToolIds: toolset.allowedToolIds.filter(
+      (tool) => typeof tool !== 'string' || !RETIRED_TERMINAL_TOOL_IDS.has(tool)
+    ),
+  };
+}
+
+function isLiveTerminalTool(tool: string): boolean {
+  return LIVE_TERMINAL_TOOL_IDS.has(tool);
 }
 
 async function writeWorkflowReportFile({
