@@ -1,6 +1,7 @@
 export * from './BootstrapSession.js';
 export * from './CompletenessCritic.js';
 export * from './CoverageLedgerAdvisor.js';
+export * from './CoverageLedgerWrite.js';
 export * from './EvidenceStarterBuilder.js';
 export {
   type HostAgentDimensionCompleteArgs,
