@@ -10,7 +10,7 @@ import {
   buildCoverageLedger,
   type CoverageLedgerCandidate,
   type CoverageLedgerModuleAxis,
-} from '../../src/workflows/capabilities/host-agent/CompletenessCritic.js';
+} from '../../src/host-agent-workflows.js';
 
 const MODULES: CoverageLedgerModuleAxis[] = [
   { moduleId: 'auth', moduleName: 'Auth', ownedPaths: ['src/auth/login.ts', 'src/auth/token.ts'] },
@@ -123,5 +123,46 @@ describe('buildCoverageLedger (U2a)', () => {
       grade: 'covered',
     });
     expect(authArch?.coveredSourceRefs).toEqual(['src/auth/login.ts']);
+  });
+
+  it('P4 characterization：固定输入经 public facade 输出保持精确形状', () => {
+    expect(
+      buildCoverageLedger({
+        candidates: CANDIDATES,
+        coveredPaths: ['src/auth/login.ts'],
+        modules: MODULES,
+        dimensionIds: ['arch'],
+        perCellTarget: 2,
+      })
+    ).toEqual([
+      {
+        moduleId: 'auth',
+        moduleName: 'Auth',
+        dimensionId: 'arch',
+        coveredCount: 1,
+        totalCandidateCount: 2,
+        grade: 'partial',
+        coveredSourceRefs: ['src/auth/login.ts'],
+        uncoveredHints: ['src/auth/token.ts'],
+        valueScore: 0.4,
+        exhausted: false,
+        exhaustedReason: null,
+        exhaustedSource: null,
+      },
+      {
+        moduleId: 'pay',
+        moduleName: 'Pay',
+        dimensionId: 'arch',
+        coveredCount: 0,
+        totalCandidateCount: 0,
+        grade: 'empty',
+        coveredSourceRefs: [],
+        uncoveredHints: [],
+        valueScore: 0,
+        exhausted: false,
+        exhaustedReason: null,
+        exhaustedSource: null,
+      },
+    ]);
   });
 });

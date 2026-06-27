@@ -18,7 +18,7 @@ import {
   type CoverageLedgerCell,
   type CoverageLedgerExhaustedDeclaration,
   type CoverageLedgerModuleAxis,
-} from './CompletenessCritic.js';
+} from '../coverage/CoverageLedgerBuilder.js';
 
 /** 最小日志接口：与外层 dimension-completion / plan-tool 现有 logger 结构兼容（debug 可选）。 */
 export interface CoverageLedgerWriteLogger {

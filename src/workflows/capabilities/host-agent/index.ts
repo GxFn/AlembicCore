@@ -1,3 +1,4 @@
+export * from '../coverage/CoverageLedgerBuilder.js';
 export * from './BootstrapSession.js';
 export * from './CompletenessCritic.js';
 export * from './CoverageLedgerAdvisor.js';
