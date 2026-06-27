@@ -1,10 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
-import { applyPlanSelection, assertPlanSelectionShape, type PlanSelection } from '../src/plans.js';
+import {
+  applyPlanSelection,
+  assertPlanSelectionShape,
+  assertPlanSelectionStageRequirements,
+  type PlanSelection,
+  planSelectionRequiresModuleTargets,
+} from '../src/plans.js';
 
 describe('PlanSelection projection foundation', () => {
   it('accepts a single-dimension selection and rejects empty or malformed selections', () => {
     expect(() => assertPlanSelectionShape(basePlanSelection())).not.toThrow();
+    // Generic shape intentionally stays stage-agnostic so coldStart/legacy callers can parse first.
+    expect(() =>
+      assertPlanSelectionShape({ ...basePlanSelection(), moduleBindings: [] })
+    ).not.toThrow();
 
     expect(() => assertPlanSelectionShape({ ...basePlanSelection(), dimensions: [] })).toThrow(
       /dimensions must be non-empty/
@@ -18,6 +28,75 @@ describe('PlanSelection projection foundation', () => {
         scale: { totalRecipeBudget: 0 },
       })
     ).toThrow(/scale\.totalRecipeBudget must be > 0/);
+  });
+
+  it('enforces module×dimension targets only for deepMining and moduleMining selections', () => {
+    expect(planSelectionRequiresModuleTargets('coldStart')).toBe(false);
+    expect(planSelectionRequiresModuleTargets('deepMining')).toBe(true);
+    expect(planSelectionRequiresModuleTargets('moduleMining')).toBe(true);
+
+    expect(() =>
+      assertPlanSelectionStageRequirements({ ...basePlanSelection(), moduleBindings: [] })
+    ).toThrow(/deepMining requires moduleBindings with module×dimension targets/);
+    expect(() =>
+      assertPlanSelectionStageRequirements({
+        ...basePlanSelection(),
+        generationStage: 'moduleMining',
+        moduleBindings: [],
+      })
+    ).toThrow(/moduleMining requires moduleBindings with module×dimension targets/);
+    expect(() =>
+      assertPlanSelectionStageRequirements({
+        ...basePlanSelection(),
+        generationStage: 'coldStart',
+        moduleBindings: [],
+      })
+    ).not.toThrow();
+  });
+
+  it('rejects stage-required bindings that cannot produce valid module×dimension targets', () => {
+    expect(() =>
+      assertPlanSelectionStageRequirements({
+        ...basePlanSelection(),
+        moduleBindings: [planModuleBinding('', ['architecture'])],
+      })
+    ).toThrow(/moduleBinding\[0\]\.modulePath is required/);
+
+    expect(() =>
+      assertPlanSelectionStageRequirements({
+        ...basePlanSelection(),
+        moduleBindings: [planModuleBinding('src/service/planIntent', [])],
+      })
+    ).toThrow(/moduleBinding\[0\]\.dimensions must be non-empty/);
+
+    expect(() =>
+      assertPlanSelectionStageRequirements({
+        ...basePlanSelection(),
+        moduleBindings: [planModuleBinding('src/service/planIntent', ['unknown-dimension'])],
+      })
+    ).toThrow(/moduleBinding\[0\] references unknown dimension unknown-dimension/);
+
+    expect(() =>
+      assertPlanSelectionStageRequirements({
+        ...basePlanSelection(),
+        moduleBindings: [
+          { ...planModuleBinding('src/service/planIntent', ['architecture']), targetRecipes: 0 },
+        ],
+      })
+    ).toThrow(/moduleBinding\[0\]\.targetRecipes must be > 0/);
+  });
+
+  it('accepts valid stage-required module bindings and can assert an expected stage', () => {
+    expect(() => assertPlanSelectionStageRequirements(basePlanSelection())).not.toThrow();
+    expect(() =>
+      assertPlanSelectionStageRequirements(
+        { ...basePlanSelection(), generationStage: 'moduleMining' },
+        { expectedStage: 'moduleMining' }
+      )
+    ).not.toThrow();
+    expect(() =>
+      assertPlanSelectionStageRequirements(basePlanSelection(), { expectedStage: 'moduleMining' })
+    ).toThrow(/generationStage must be moduleMining/);
   });
 
   it('projects execution dimensions, module scope, budgets, and unknown ids without throwing', () => {
@@ -82,6 +161,8 @@ describe('PlanSelection projection foundation', () => {
   it('exposes the projection primitives from the plans surface', () => {
     expect(typeof applyPlanSelection).toBe('function');
     expect(typeof assertPlanSelectionShape).toBe('function');
+    expect(typeof assertPlanSelectionStageRequirements).toBe('function');
+    expect(typeof planSelectionRequiresModuleTargets).toBe('function');
   });
 });
 

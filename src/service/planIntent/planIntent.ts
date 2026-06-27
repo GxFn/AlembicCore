@@ -6,6 +6,10 @@ const VALID_PLAN_STAGES: ReadonlySet<PlanStageId> = new Set([
   'deepMining',
   'moduleMining',
 ]);
+const MODULE_TARGET_REQUIRED_STAGES: ReadonlySet<PlanStageId> = new Set([
+  'deepMining',
+  'moduleMining',
+]);
 const TEST_MODE_DEFAULT_MAX_FILES = 80;
 const TEST_MODE_DEFAULT_CONTENT_MAX_LINES = 80;
 const DEFAULT_MAX_FILES = 500;
@@ -24,6 +28,13 @@ export interface PlanSelectionScaleOverride {
   readonly totalRecipeBudget?: number;
   readonly maxFiles?: number;
   readonly contentMaxLines?: number;
+}
+
+export interface PlanSelectionStageRequirementsOptions {
+  /**
+   * 外层 plan gate 已知的目标阶段。传入时既校验 Agent 返回 stage 一致，也按目标阶段执行阶段约束。
+   */
+  readonly expectedStage?: PlanStageId;
 }
 
 export interface PlanSelectionProjection {
@@ -69,6 +80,31 @@ export function assertPlanSelectionShape(selection: unknown): asserts selection 
 
   if (issues.length > 0) {
     throw new Error(`Invalid PlanSelection: ${unique(issues).join('; ')}`);
+  }
+}
+
+export function planSelectionRequiresModuleTargets(stage: PlanStageId): boolean {
+  return MODULE_TARGET_REQUIRED_STAGES.has(stage);
+}
+
+export function assertPlanSelectionStageRequirements(
+  selection: unknown,
+  options: PlanSelectionStageRequirementsOptions = {}
+): asserts selection is PlanSelection {
+  assertPlanSelectionShape(selection);
+
+  const issues: string[] = [];
+  const stage = options.expectedStage ?? selection.generationStage;
+  if (options.expectedStage && selection.generationStage !== options.expectedStage) {
+    issues.push(`generationStage must be ${options.expectedStage}`);
+  }
+
+  if (planSelectionRequiresModuleTargets(stage)) {
+    issues.push(...validatePlanSelectionModuleTargets(selection, stage));
+  }
+
+  if (issues.length > 0) {
+    throw new Error(`Invalid PlanSelection stage requirements: ${unique(issues).join('; ')}`);
   }
 }
 
@@ -253,6 +289,59 @@ function readPlanModuleBindings(
     : [];
 }
 
+function validatePlanSelectionModuleTargets(
+  selection: PlanSelection,
+  stage: PlanStageId
+): string[] {
+  const issues: string[] = [];
+  const bindings = readPlanModuleBindingRecords(selection);
+  const selectedDimensions = new Set(uniqueStrings(selection.dimensions));
+  let moduleDimensionTargetCount = 0;
+
+  if (bindings.length === 0) {
+    issues.push(`${stage} requires moduleBindings with module×dimension targets`);
+  }
+
+  bindings.forEach((binding, index) => {
+    const bindingLabel = `moduleBinding[${index}]`;
+    const modulePath = readTrimmedString(binding.modulePath);
+    if (!modulePath) {
+      issues.push(`${bindingLabel}.modulePath is required for ${stage}`);
+    }
+
+    const dimensions = normalizeStringArray(binding.dimensions);
+    if (dimensions.length === 0) {
+      issues.push(`${bindingLabel}.dimensions must be non-empty for ${stage}`);
+    }
+    const knownDimensions = dimensions.filter((dimensionId) => selectedDimensions.has(dimensionId));
+    for (const dimensionId of dimensions) {
+      if (!selectedDimensions.has(dimensionId)) {
+        issues.push(`${bindingLabel} references unknown dimension ${dimensionId}`);
+      }
+    }
+
+    const targetRecipes = readPositiveInteger(binding.targetRecipes);
+    if (targetRecipes === null) {
+      issues.push(`${bindingLabel}.targetRecipes must be > 0 for ${stage}`);
+    }
+
+    if (modulePath && knownDimensions.length > 0 && targetRecipes !== null) {
+      moduleDimensionTargetCount += knownDimensions.length;
+    }
+  });
+
+  if (moduleDimensionTargetCount === 0) {
+    issues.push(`${stage} requires at least one module×dimension target`);
+  }
+
+  return issues;
+}
+
+function readPlanModuleBindingRecords(selection: PlanSelection): Record<string, unknown>[] {
+  const record = readRecord(selection);
+  return Array.isArray(record.moduleBindings) ? record.moduleBindings.map(readRecord) : [];
+}
+
 function readRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
@@ -269,6 +358,17 @@ function normalizeStringArray(value: unknown): string[] {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+}
+
+function readTrimmedString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readPositiveInteger(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return Math.floor(value);
 }
 
 function clampPositiveInteger(value: number, fallback: number, max: number): number {

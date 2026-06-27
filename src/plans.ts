@@ -10,13 +10,16 @@ export type {
   PlanSelection,
   PlanSelectionProjection,
   PlanSelectionScaleOverride,
+  PlanSelectionStageRequirementsOptions,
   PlanStageId,
 } from './service/planIntent/index.js';
 export {
   applyPlanSelection,
   assertPlanSelectionShape,
+  assertPlanSelectionStageRequirements,
   hasPositiveStageBudget,
   normalizeConfirmedPlanIntent,
+  planSelectionRequiresModuleTargets,
   unique,
   validateCompletePlanIntent,
 } from './service/planIntent/index.js';
