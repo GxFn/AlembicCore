@@ -56,9 +56,22 @@ export type {
 export * from './workflows/capabilities/persistence/index.js';
 export * from './workflows/capabilities/planning/dimensions/index.js';
 export * from './workflows/capabilities/planning/knowledge/index.js';
+export { buildKnowledgeRescanPlan as buildProjectIndexGapPlan } from './workflows/capabilities/planning/knowledge/index.js';
 export * from './workflows/capabilities/presentation/index.js';
 export * from './workflows/capabilities/RecipeSnapshotTypes.js';
 export * from './workflows/capabilities/WorkflowCleanupPolicies.js';
 export * from './workflows/cold-start/index.js';
+export {
+  buildColdStartWorkflowPlan as buildProjectIndexFullPlan,
+  type ColdStartWorkflowIntent as ProjectIndexFullWorkflowIntent,
+  createHostAgentColdStartIntent as createProjectIndexIntentFullHostAgent,
+  createInternalColdStartIntent as createProjectIndexIntentFullInternal,
+} from './workflows/cold-start/index.js';
 export * from './workflows/knowledge-rescan/index.js';
+export {
+  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
+  createHostAgentKnowledgeRescanIntent as createProjectIndexIntentIncrementalHostAgent,
+  createInternalKnowledgeRescanIntent as createProjectIndexIntentIncrementalInternal,
+  type KnowledgeRescanWorkflowIntent as ProjectIndexIncrementalWorkflowIntent,
+} from './workflows/knowledge-rescan/index.js';
 export * from './workflows/shared/index.js';

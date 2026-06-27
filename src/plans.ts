@@ -42,3 +42,16 @@ export {
   projectPlanGenerationState,
   projectPlanGenerationStateFromRecords,
 } from './service/recipeStatus/index.js';
+export { buildKnowledgeRescanPlan as buildProjectIndexGapPlan } from './workflows/capabilities/planning/knowledge/index.js';
+export {
+  buildColdStartWorkflowPlan as buildProjectIndexFullPlan,
+  type ColdStartWorkflowIntent as ProjectIndexFullWorkflowIntent,
+  createHostAgentColdStartIntent as createProjectIndexIntentFullHostAgent,
+  createInternalColdStartIntent as createProjectIndexIntentFullInternal,
+} from './workflows/cold-start/index.js';
+export {
+  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
+  createHostAgentKnowledgeRescanIntent as createProjectIndexIntentIncrementalHostAgent,
+  createInternalKnowledgeRescanIntent as createProjectIndexIntentIncrementalInternal,
+  type KnowledgeRescanWorkflowIntent as ProjectIndexIncrementalWorkflowIntent,
+} from './workflows/knowledge-rescan/index.js';

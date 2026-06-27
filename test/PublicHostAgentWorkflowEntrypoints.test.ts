@@ -7,15 +7,35 @@ import {
   BootstrapSession,
   buildColdStartWorkflowPlan,
   buildHostAgentMissionBriefing,
+  buildKnowledgeRescanPlan,
+  buildKnowledgeRescanWorkflowPlan,
+  buildProjectIndexFullPlan,
+  buildProjectIndexGapPlan,
+  buildProjectIndexIncrementalPlan,
   clearDimensionCheckpoints,
   createHostAgentColdStartIntent,
   createHostAgentKnowledgeRescanIntent,
+  createInternalColdStartIntent,
+  createInternalKnowledgeRescanIntent,
+  createProjectIndexIntentFullHostAgent,
+  createProjectIndexIntentFullInternal,
+  createProjectIndexIntentIncrementalHostAgent,
+  createProjectIndexIntentIncrementalInternal,
   type DimensionDef,
   HostAgentSubmissionTracker,
   loadDimensionCheckpoints,
   runHostAgentDimensionCompletionWorkflow,
   saveDimensionCheckpoint,
 } from '../src/host-agent-workflows.js';
+import {
+  buildProjectIndexFullPlan as buildProjectIndexFullPlanFromPlans,
+  buildProjectIndexGapPlan as buildProjectIndexGapPlanFromPlans,
+  buildProjectIndexIncrementalPlan as buildProjectIndexIncrementalPlanFromPlans,
+  createProjectIndexIntentFullHostAgent as createProjectIndexIntentFullHostAgentFromPlans,
+  createProjectIndexIntentFullInternal as createProjectIndexIntentFullInternalFromPlans,
+  createProjectIndexIntentIncrementalHostAgent as createProjectIndexIntentIncrementalHostAgentFromPlans,
+  createProjectIndexIntentIncrementalInternal as createProjectIndexIntentIncrementalInternalFromPlans,
+} from '../src/plans.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Map architecture decisions' },
@@ -61,6 +81,28 @@ describe('stable host-agent workflow entrypoint', () => {
     expect(coldStartPlan.response.tool).toBe('alembic_bootstrap');
     expect(coldStartPlan.projectAnalysis.materialize).toMatchObject({ sourceGraph: true });
     expect(coldStartPlan.projectAnalysis.scan.generateAstContext).toBe(false);
+  });
+
+  it('exposes additive ProjectIndex aliases beside existing workflow names', () => {
+    expect(buildProjectIndexFullPlan).toBe(buildColdStartWorkflowPlan);
+    expect(buildProjectIndexIncrementalPlan).toBe(buildKnowledgeRescanWorkflowPlan);
+    expect(buildProjectIndexGapPlan).toBe(buildKnowledgeRescanPlan);
+    expect(createProjectIndexIntentFullInternal).toBe(createInternalColdStartIntent);
+    expect(createProjectIndexIntentFullHostAgent).toBe(createHostAgentColdStartIntent);
+    expect(createProjectIndexIntentIncrementalInternal).toBe(createInternalKnowledgeRescanIntent);
+    expect(createProjectIndexIntentIncrementalHostAgent).toBe(createHostAgentKnowledgeRescanIntent);
+
+    expect(buildProjectIndexFullPlanFromPlans).toBe(buildColdStartWorkflowPlan);
+    expect(buildProjectIndexIncrementalPlanFromPlans).toBe(buildKnowledgeRescanWorkflowPlan);
+    expect(buildProjectIndexGapPlanFromPlans).toBe(buildKnowledgeRescanPlan);
+    expect(createProjectIndexIntentFullInternalFromPlans).toBe(createInternalColdStartIntent);
+    expect(createProjectIndexIntentFullHostAgentFromPlans).toBe(createHostAgentColdStartIntent);
+    expect(createProjectIndexIntentIncrementalInternalFromPlans).toBe(
+      createInternalKnowledgeRescanIntent
+    );
+    expect(createProjectIndexIntentIncrementalHostAgentFromPlans).toBe(
+      createHostAgentKnowledgeRescanIntent
+    );
   });
 
   it('builds host-agent mission briefing with session and submission contracts', () => {
