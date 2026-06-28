@@ -2,14 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import {
   BootstrapSession,
+  buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
   buildMissionBriefing,
   buildProjectContextMissionBriefing,
+  createHostAgentAnalysisUnitKey,
   createIDEAgentAnalysisProgressSeed,
   createIDEAgentAnalysisUnitKey,
   type DimensionDef,
 } from '../src/host-agent-workflows.js';
 import {
+  buildHostAgentAnalysisPacketFromProjectContext as buildHostAgentPacketFromRoot,
   buildProjectContextMissionBriefing as buildProjectContextMissionBriefingFromRoot,
   buildIDEAgentAnalysisPacketFromProjectContext as buildProjectContextPacketFromRoot,
 } from '../src/index.js';
@@ -22,9 +25,11 @@ import {
 } from '../src/project-context.js';
 import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
 import {
+  buildHostAgentAnalysisPacket,
+  buildHostAgentAnalysisPacketFromSnapshot,
   buildIDEAgentAnalysisPacket,
-  buildIDEAgentAnalysisPacketFromSnapshot,
-} from '../src/workflows/capabilities/host-agent/IDEAgentAnalysisPacketBuilder.js';
+} from '../src/workflows/capabilities/host-agent/HostAgentAnalysisPacketBuilder.js';
+import { buildIDEAgentAnalysisPacketFromSnapshot } from '../src/workflows/capabilities/host-agent/IDEAgentAnalysisPacketBuilder.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Find architectural boundaries' },
@@ -382,31 +387,42 @@ function makeProjectContextTargetFileCountFixture(): ProjectContextPresenterInpu
   };
 }
 
-describe('IDEAgentAnalysisPacketBuilder', () => {
-  it('keeps snapshot packet builders internal while exposing ProjectContext public entrypoints', async () => {
+describe('HostAgentAnalysisPacketBuilder', () => {
+  it('keeps snapshot packet builders internal while exposing new and legacy ProjectContext public entrypoints', async () => {
     const rootModule = (await import('../src/index.js')) as Record<string, unknown>;
     const hostAgentModule = (await import('../src/host-agent-workflows.js')) as Record<
       string,
       unknown
     >;
 
-    expect(buildIDEAgentAnalysisPacket).toBeInstanceOf(Function);
-    expect(buildIDEAgentAnalysisPacketFromSnapshot).toBeInstanceOf(Function);
+    expect(buildHostAgentAnalysisPacket).toBeInstanceOf(Function);
+    expect(buildIDEAgentAnalysisPacket).toBe(buildHostAgentAnalysisPacket);
+    expect(buildHostAgentAnalysisPacketFromSnapshot).toBeInstanceOf(Function);
+    expect(buildIDEAgentAnalysisPacketFromSnapshot).toBe(buildHostAgentAnalysisPacketFromSnapshot);
+    expect(buildHostAgentAnalysisPacketFromProjectContext).toBe(
+      buildIDEAgentAnalysisPacketFromProjectContext
+    );
+    expect(buildHostAgentPacketFromRoot).toBe(buildProjectContextPacketFromRoot);
     expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'buildHostAgentAnalysisPacket')).toBe(false);
     expect(Object.hasOwn(rootModule, 'buildIDEAgentAnalysisPacketFromSnapshot')).toBe(false);
+    expect(Object.hasOwn(rootModule, 'buildHostAgentAnalysisPacketFromSnapshot')).toBe(false);
     expect(Object.hasOwn(hostAgentModule, 'buildIDEAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(hostAgentModule, 'buildHostAgentAnalysisPacket')).toBe(false);
     expect(Object.hasOwn(hostAgentModule, 'buildIDEAgentAnalysisPacketFromSnapshot')).toBe(false);
+    expect(Object.hasOwn(hostAgentModule, 'buildHostAgentAnalysisPacketFromSnapshot')).toBe(false);
+    expect(buildHostAgentPacketFromRoot).toBeInstanceOf(Function);
     expect(buildProjectContextPacketFromRoot).toBeInstanceOf(Function);
     expect(buildProjectContextMissionBriefingFromRoot).toBeInstanceOf(Function);
   });
 
   it('builds deterministic packet units without leaking source bodies', () => {
     const snapshot = makeSnapshot();
-    const first = buildIDEAgentAnalysisPacketFromSnapshot(snapshot, {
+    const first = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
       generatedAt: '2026-05-31T00:00:00.000Z',
       maxUnits: 2,
     });
-    const second = buildIDEAgentAnalysisPacketFromSnapshot(snapshot, {
+    const second = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
       generatedAt: '2026-05-31T00:00:00.000Z',
       maxUnits: 2,
     });
@@ -414,7 +430,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
     expect(first).toStrictEqual(second);
     expect(first.meta).toMatchObject({
       compressionIndependent: true,
-      builder: 'IDEAgentAnalysisPacketBuilder',
+      builder: 'HostAgentAnalysisPacketBuilder',
       source: 'project-snapshot',
     });
     expect(first.units).toHaveLength(2);
@@ -465,7 +481,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
       isEmpty: snapshot.isEmpty,
     };
 
-    const packet = buildIDEAgentAnalysisPacket({
+    const packet = buildHostAgentAnalysisPacket({
       result,
       options: { generatedAt: '2026-05-31T00:00:00.000Z', projectRoot: snapshot.projectRoot },
     });
@@ -476,7 +492,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
 
   it('builds ProjectContext-backed packet units without ProjectSnapshot or source body leakage', () => {
     const presenterInput = buildProjectContextPresenterInput(makeProjectContextEnvelopes());
-    const packet = buildIDEAgentAnalysisPacketFromProjectContext({
+    const packet = buildHostAgentAnalysisPacketFromProjectContext({
       projectContext: presenterInput,
       dimensions,
       options: { generatedAt: '2026-06-15T00:00:00.000Z', maxUnits: 2 },
@@ -580,7 +596,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
         })),
       },
     });
-    const packet = buildIDEAgentAnalysisPacketFromSnapshot(snapshot, {
+    const packet = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
       generatedAt: '2026-05-31T00:00:00.000Z',
       maxUnits: 3,
     });
@@ -619,7 +635,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
   });
 
   it('handles legacy raw panorama shape with layers.levels, modules Map, and cycles', () => {
-    const packet = buildIDEAgentAnalysisPacketFromSnapshot(
+    const packet = buildHostAgentAnalysisPacketFromSnapshot(
       makeSnapshot({
         panoramaResult: {
           layers: {
@@ -648,7 +664,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
   });
 
   it('uses sourceRef/fqn/entity/line for stable keys and keeps short aliases display-only', () => {
-    const first = createIDEAgentAnalysisUnitKey({
+    const first = createHostAgentAnalysisUnitKey({
       sourceRef: 'src/a/UserService.ts:12',
       fqn: 'src/a/UserService.ts::UserService.load',
       entityType: 'method',
@@ -712,11 +728,11 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
       guardAudit: null,
     });
 
-    const packet = buildIDEAgentAnalysisPacketFromSnapshot(snapshot, {
+    const packet = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
       generatedAt: '2026-06-01T00:00:00.000Z',
       maxUnits: 1,
     });
-    const coreKey = createIDEAgentAnalysisUnitKey({
+    const coreKey = createHostAgentAnalysisUnitKey({
       sourceRef: 'lib/index.ts',
       qualifiedPath: 'AlembicCore/lib/index.ts',
       folderId: 'folder-core',
@@ -746,7 +762,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
       warnings: ['AST analysis partially failed', 'Call Graph failed on unsupported syntax'],
     });
 
-    const packet = buildIDEAgentAnalysisPacketFromSnapshot(snapshot, {
+    const packet = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
       generatedAt: '2026-05-31T00:00:00.000Z',
     });
 
@@ -764,7 +780,7 @@ describe('IDEAgentAnalysisPacketBuilder', () => {
   });
 
   it('seeds unit progress with checkpoint linkage without choosing persistence', () => {
-    const packet = buildIDEAgentAnalysisPacketFromSnapshot(makeSnapshot(), {
+    const packet = buildHostAgentAnalysisPacketFromSnapshot(makeSnapshot(), {
       generatedAt: '2026-05-31T00:00:00.000Z',
     });
     const progress = createIDEAgentAnalysisProgressSeed({

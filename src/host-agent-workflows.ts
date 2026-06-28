@@ -11,10 +11,33 @@ export type {
   MissionBriefingResult,
 } from './types/ProjectSnapshot.js';
 export {
+  buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
+  createHostAgentAnalysisProgressSeed,
+  createHostAgentAnalysisUnitKey,
+  createHostAgentAnalysisUnitProgress,
   createIDEAgentAnalysisProgressSeed,
   createIDEAgentAnalysisUnitKey,
   createIDEAgentAnalysisUnitProgress,
+  type HostAgentAnalysisDegradedReason,
+  type HostAgentAnalysisPacket,
+  type HostAgentAnalysisPacketBuilderOptions,
+  type HostAgentAnalysisPacketProfile,
+  type HostAgentAnalysisProgressSeed,
+  type HostAgentAnalysisUnit,
+  type HostAgentAnalysisUnitCheckpointLink,
+  type HostAgentAnalysisUnitProgress,
+  type HostAgentAnalysisUnitStatus,
+  type HostAgentCompletionContract,
+  type HostAgentDependencyHint,
+  type HostAgentProjectContextPacketInput,
+  type HostAgentSourceRef,
+  type HostAgentSourceRefRole,
+  type HostAgentStableUnitKey,
+  type HostAgentStableUnitKeyInput,
+  type HostAgentStructuralEvidenceKind,
+  type HostAgentStructuralEvidenceRef,
+  type HostAgentStructuralHints,
   type IDEAgentAnalysisDegradedReason,
   type IDEAgentAnalysisPacket,
   type IDEAgentAnalysisPacketBuilderOptions,
@@ -34,7 +57,7 @@ export {
   type IDEAgentStructuralEvidenceKind,
   type IDEAgentStructuralEvidenceRef,
   type IDEAgentStructuralHints,
-} from './workflows/capabilities/host-agent/IDEAgentAnalysisPacketBuilder.js';
+} from './workflows/capabilities/host-agent/HostAgentAnalysisPacketBuilder.js';
 export * from './workflows/capabilities/host-agent/index.js';
 export type {
   ProjectSkillAssetKind,
