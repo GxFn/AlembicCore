@@ -7,10 +7,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
+  buildCanonicalCoverageLedgerModuleId,
   buildCoverageLedger,
   buildCoverageLedgerModuleAxisFromSummaries,
   type CoverageLedgerCandidate,
   type CoverageLedgerModuleAxis,
+  isTargetScopedCoverageModuleId,
 } from '../../src/host-agent-workflows.js';
 import { buildCoverageLedgerModuleAxisFromSummaries as buildCoverageLedgerModuleAxisFromCoverage } from '../../src/workflows/capabilities/coverage/index.js';
 
@@ -168,6 +170,124 @@ describe('buildCoverageLedger (U2a)', () => {
     ]);
   });
 
+  it('R-1 builds canonical target module ids for ProjectMap-like module summaries', () => {
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'module-auth',
+        moduleName: 'Auth',
+        modulePath: 'src/auth',
+      })
+    ).toBe('target:Auth:src/auth');
+    expect(isTargetScopedCoverageModuleId('target:Auth:src/auth')).toBe(true);
+
+    expect(
+      buildCoverageLedgerModuleAxisFromSummaries({
+        modules: [
+          {
+            moduleId: 'module-auth',
+            moduleName: 'Auth',
+            modulePath: 'src/auth',
+            ownedFiles: ['src/auth/login.ts', 'src/auth/token.ts'],
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        moduleId: 'target:Auth:src/auth',
+        moduleName: 'Auth',
+        ownedPaths: ['src/auth/login.ts', 'src/auth/token.ts'],
+      },
+    ]);
+  });
+
+  it('R-1 preserves already target-scoped ids', () => {
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'target:Auth:src/auth',
+        moduleName: 'Auth',
+        modulePath: 'src/auth',
+      })
+    ).toBe('target:Auth:src/auth');
+    expect(
+      buildCoverageLedgerModuleAxisFromSummaries({
+        modules: [
+          {
+            moduleId: 'target:Auth:src/auth',
+            moduleName: 'Auth',
+            modulePath: 'src/auth',
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        moduleId: 'target:Auth:src/auth',
+        moduleName: 'Auth',
+        ownedPaths: ['src/auth'],
+      },
+    ]);
+  });
+
+  it('R-1 keeps explicit fallback ids for modules without usable paths', () => {
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'legacy-module',
+        moduleName: 'Legacy',
+      })
+    ).toBe('legacy-module');
+    expect(
+      buildCoverageLedgerModuleAxisFromSummaries({
+        modules: [{ id: 'legacy-module', name: 'Legacy' }],
+      })
+    ).toEqual([
+      {
+        moduleId: 'legacy-module',
+        moduleName: 'Legacy',
+        ownedPaths: [],
+      },
+    ]);
+  });
+
+  it('R-1 filters aggregate/root modules instead of polluting target coverage axes', () => {
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'module:root:BiliDili:BiliDili',
+        moduleName: 'BiliDili',
+        modulePath: 'BiliDili',
+        projectRoot: '/project/BiliDili',
+      })
+    ).toBeUndefined();
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'root',
+        moduleName: 'root',
+        modulePath: '.',
+      })
+    ).toBeUndefined();
+    expect(
+      buildCoverageLedgerModuleAxisFromSummaries({
+        modules: [
+          {
+            moduleId: 'module:root:BiliDili:BiliDili',
+            moduleName: 'BiliDili',
+            modulePath: 'BiliDili',
+            projectRoot: '/project/BiliDili',
+          },
+          {
+            moduleId: 'target:Networking:Sources/Networking',
+            moduleName: 'Networking',
+            modulePath: 'Sources/Networking',
+          },
+        ],
+      })
+    ).toEqual([
+      {
+        moduleId: 'target:Networking:Sources/Networking',
+        moduleName: 'Networking',
+        ownedPaths: ['Sources/Networking'],
+      },
+    ]);
+  });
+
   it('P9 module-summary axis builder keeps ownedFiles-first fallback semantics', () => {
     expect(buildCoverageLedgerModuleAxisFromSummaries).toBe(
       buildCoverageLedgerModuleAxisFromCoverage
@@ -187,12 +307,12 @@ describe('buildCoverageLedger (U2a)', () => {
       })
     ).toEqual([
       {
-        moduleId: 'auth',
+        moduleId: 'target:Auth:src/auth',
         moduleName: 'Auth',
         ownedPaths: ['src/auth/login.ts', 'src/auth/token.ts'],
       },
       {
-        moduleId: 'pay',
+        moduleId: 'target:Pay:src/pay',
         moduleName: 'Pay',
         ownedPaths: ['src/pay'],
       },

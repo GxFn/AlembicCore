@@ -29,6 +29,14 @@ export interface CoverageLedgerModuleSummary {
   ownedFiles?: readonly (string | { filePath?: string })[];
   ownedPaths?: readonly string[];
   path?: string;
+  projectRoot?: string;
+}
+
+export interface CoverageLedgerCanonicalModuleIdInput {
+  moduleId?: string;
+  moduleName?: string;
+  modulePath?: string;
+  projectRoot?: string;
 }
 
 /** Agent 主观「已尽」声明（落库 exhausted_source='agent-declared'，依赖 noPadding + reason）。 */
@@ -64,6 +72,54 @@ export interface CoverageLedgerCell {
   exhaustedSource: 'agent-declared' | null;
 }
 
+export function isTargetScopedCoverageModuleId(moduleId: unknown): moduleId is string {
+  return (
+    typeof moduleId === 'string' &&
+    normalizeCoverageLedgerString(moduleId)?.startsWith('target:') === true
+  );
+}
+
+export function buildCanonicalCoverageLedgerModuleId(
+  input: CoverageLedgerCanonicalModuleIdInput
+): string | undefined {
+  const existingId = normalizeCoverageLedgerString(input.moduleId) ?? undefined;
+  if (isTargetScopedCoverageModuleId(existingId)) {
+    return existingId;
+  }
+
+  const modulePath = input.modulePath
+    ? (normalizeCoverageSourcePath(input.modulePath) ?? undefined)
+    : undefined;
+  const moduleName =
+    normalizeCoverageLedgerString(input.moduleName) ?? basenameFromCoveragePath(modulePath);
+  if (moduleName && modulePath) {
+    if (
+      isAggregateCoverageLedgerModule({
+        moduleId: existingId,
+        moduleName,
+        modulePath,
+        projectRoot: input.projectRoot,
+      })
+    ) {
+      return undefined;
+    }
+    return `target:${moduleName}:${modulePath}`;
+  }
+
+  if (
+    isAggregateCoverageLedgerModule({
+      moduleId: existingId,
+      moduleName,
+      modulePath,
+      projectRoot: input.projectRoot,
+    })
+  ) {
+    return undefined;
+  }
+
+  return existingId ?? moduleName ?? modulePath ?? undefined;
+}
+
 export function buildCoverageLedgerModuleAxisFromSummaries(input: {
   modules: readonly CoverageLedgerModuleSummary[];
 }): CoverageLedgerModuleAxis[] {
@@ -74,13 +130,22 @@ export function buildCoverageLedgerModuleAxisFromSummaries(input: {
       normalizeCoverageLedgerString(module.moduleId) ??
       normalizeCoverageLedgerString(module.id) ??
       normalizeCoverageLedgerString(module.modulePath) ??
-      normalizeCoverageLedgerString(module.path);
-    const moduleId =
+      normalizeCoverageLedgerString(module.path) ??
+      undefined;
+    const rawModuleId =
       normalizeCoverageLedgerString(module.moduleId) ??
       normalizeCoverageLedgerString(module.id) ??
       normalizeCoverageLedgerString(module.modulePath) ??
       normalizeCoverageLedgerString(module.path) ??
-      moduleName;
+      moduleName ??
+      undefined;
+    const modulePath = normalizeCoverageLedgerString(module.modulePath ?? module.path) ?? undefined;
+    const moduleId = buildCanonicalCoverageLedgerModuleId({
+      moduleId: rawModuleId,
+      moduleName,
+      modulePath,
+      projectRoot: module.projectRoot,
+    });
     const ownedFilePaths = (module.ownedFiles ?? []).flatMap((file) =>
       typeof file === 'string'
         ? (normalizeCoverageLedgerString(file) ?? [])
@@ -184,6 +249,39 @@ function normalizeCoverageLedgerString(value: unknown): string | null {
   }
   const normalized = value.trim();
   return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeCoverageSourcePath(value: string): string | null {
+  const normalized = value
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/:\d+(?:-\d+)?$/, '')
+    .replace(/^\.\//, '');
+  return normalized.length > 0 ? normalized : null;
+}
+
+function basenameFromCoveragePath(value: string | null | undefined): string | undefined {
+  return value?.split('/').filter(Boolean).at(-1);
+}
+
+function isAggregateCoverageLedgerModule(input: CoverageLedgerCanonicalModuleIdInput): boolean {
+  const moduleId = normalizeCoverageLedgerString(input.moduleId);
+  const moduleName = normalizeCoverageLedgerString(input.moduleName);
+  const modulePath = input.modulePath ? normalizeCoverageSourcePath(input.modulePath) : null;
+  if (moduleId === 'root' || moduleId?.startsWith('module:root')) {
+    return true;
+  }
+  if (moduleName === 'root' || modulePath === 'root' || modulePath === '.') {
+    return true;
+  }
+  const projectRootName = basenameFromCoveragePath(
+    input.projectRoot ? normalizeCoverageSourcePath(input.projectRoot) : null
+  );
+  return Boolean(
+    projectRootName &&
+      moduleName === projectRootName &&
+      (modulePath === projectRootName || modulePath === '.')
+  );
 }
 
 /** grade 阈值（advisory 覆盖信号，非生产/阻断门）。 */
