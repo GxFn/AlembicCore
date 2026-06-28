@@ -1,9 +1,12 @@
 # Core Semantic Glossary
 
-Status: CO2 (B5 + D4), 2026-06-12. Names below are NOT renamed in code — the
-CO1-frozen public surface keeps every existing type name; this glossary plus
-clarifying doc comments are the disambiguation layer. Public-API renames would
-require a CO0-style confirmed scope.
+Status: R-3 doc sync, 2026-06-29. Current shipped names use `AppRuntime` for
+the Alembic bootstrap runtime and `HostAgent*` for the Core host-agent facade.
+Compatibility aliases remain public where already shipped: Alembic keeps
+`Bootstrap` as an `AppRuntime` alias, and Core keeps `IDEAgent*` aliases over
+`HostAgent*` analysis-packet contracts. This glossary records the current names
+without changing frozen public values, persistence formats, or compatibility
+exports.
 
 ## Knowledge lifecycle nouns
 
