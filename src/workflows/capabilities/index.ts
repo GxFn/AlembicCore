@@ -1,3 +1,4 @@
+export * from './coverage/index.js';
 export * from './host-agent/index.js';
 export * from './persistence/index.js';
 export * from './planning/dimensions/index.js';

@@ -1,3 +1,3 @@
-export * from './KnowledgeRescanIntent.js';
-export * from './KnowledgeRescanPresenters.js';
-export * from './KnowledgeRescanWorkflowPlan.js';
+export * from '../project-index/KnowledgeRescanIntent.js';
+export * from '../project-index/KnowledgeRescanPresenters.js';
+export * from '../project-index/KnowledgeRescanWorkflowPlan.js';

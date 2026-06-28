@@ -45,13 +45,12 @@ export {
 export { buildKnowledgeRescanPlan as buildProjectIndexGapPlan } from './workflows/capabilities/planning/knowledge/index.js';
 export {
   buildColdStartWorkflowPlan as buildProjectIndexFullPlan,
+  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
   type ColdStartWorkflowIntent as ProjectIndexFullWorkflowIntent,
   createHostAgentColdStartIntent as createProjectIndexIntentFullHostAgent,
-  createInternalColdStartIntent as createProjectIndexIntentFullInternal,
-} from './workflows/cold-start/index.js';
-export {
-  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
   createHostAgentKnowledgeRescanIntent as createProjectIndexIntentIncrementalHostAgent,
+  createInternalColdStartIntent as createProjectIndexIntentFullInternal,
   createInternalKnowledgeRescanIntent as createProjectIndexIntentIncrementalInternal,
   type KnowledgeRescanWorkflowIntent as ProjectIndexIncrementalWorkflowIntent,
-} from './workflows/knowledge-rescan/index.js';
+  type ProjectIndexMode,
+} from './workflows/project-index/index.js';

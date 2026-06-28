@@ -60,18 +60,16 @@ export { buildKnowledgeRescanPlan as buildProjectIndexGapPlan } from './workflow
 export * from './workflows/capabilities/presentation/index.js';
 export * from './workflows/capabilities/RecipeSnapshotTypes.js';
 export * from './workflows/capabilities/WorkflowCleanupPolicies.js';
-export * from './workflows/cold-start/index.js';
+export * from './workflows/project-index/index.js';
 export {
   buildColdStartWorkflowPlan as buildProjectIndexFullPlan,
+  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
   type ColdStartWorkflowIntent as ProjectIndexFullWorkflowIntent,
   createHostAgentColdStartIntent as createProjectIndexIntentFullHostAgent,
-  createInternalColdStartIntent as createProjectIndexIntentFullInternal,
-} from './workflows/cold-start/index.js';
-export * from './workflows/knowledge-rescan/index.js';
-export {
-  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
   createHostAgentKnowledgeRescanIntent as createProjectIndexIntentIncrementalHostAgent,
+  createInternalColdStartIntent as createProjectIndexIntentFullInternal,
   createInternalKnowledgeRescanIntent as createProjectIndexIntentIncrementalInternal,
   type KnowledgeRescanWorkflowIntent as ProjectIndexIncrementalWorkflowIntent,
-} from './workflows/knowledge-rescan/index.js';
+  type ProjectIndexMode,
+} from './workflows/project-index/index.js';
 export * from './workflows/shared/index.js';

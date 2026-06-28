@@ -20,6 +20,17 @@ export interface CoverageLedgerModuleAxis {
   ownedPaths: readonly string[];
 }
 
+export interface CoverageLedgerModuleSummary {
+  id?: string;
+  moduleId?: string;
+  moduleName?: string;
+  modulePath?: string;
+  name?: string;
+  ownedFiles?: readonly (string | { filePath?: string })[];
+  ownedPaths?: readonly string[];
+  path?: string;
+}
+
 /** Agent 主观「已尽」声明（落库 exhausted_source='agent-declared'，依赖 noPadding + reason）。 */
 export interface CoverageLedgerExhaustedDeclaration {
   moduleId: string;
@@ -51,6 +62,54 @@ export interface CoverageLedgerCell {
   exhausted: boolean;
   exhaustedReason: string | null;
   exhaustedSource: 'agent-declared' | null;
+}
+
+export function buildCoverageLedgerModuleAxisFromSummaries(input: {
+  modules: readonly CoverageLedgerModuleSummary[];
+}): CoverageLedgerModuleAxis[] {
+  return input.modules.flatMap((module) => {
+    const moduleName =
+      normalizeCoverageLedgerString(module.moduleName) ??
+      normalizeCoverageLedgerString(module.name) ??
+      normalizeCoverageLedgerString(module.moduleId) ??
+      normalizeCoverageLedgerString(module.id) ??
+      normalizeCoverageLedgerString(module.modulePath) ??
+      normalizeCoverageLedgerString(module.path);
+    const moduleId =
+      normalizeCoverageLedgerString(module.moduleId) ??
+      normalizeCoverageLedgerString(module.id) ??
+      normalizeCoverageLedgerString(module.modulePath) ??
+      normalizeCoverageLedgerString(module.path) ??
+      moduleName;
+    const ownedFilePaths = (module.ownedFiles ?? []).flatMap((file) =>
+      typeof file === 'string'
+        ? (normalizeCoverageLedgerString(file) ?? [])
+        : (normalizeCoverageLedgerString(file.filePath) ?? [])
+    );
+    const explicitOwnedPaths = [
+      ...ownedFilePaths,
+      ...(module.ownedPaths ?? []).flatMap((path) => normalizeCoverageLedgerString(path) ?? []),
+    ];
+    const fallbackOwnedPaths =
+      explicitOwnedPaths.length > 0
+        ? []
+        : [module.modulePath, module.path].flatMap(
+            (path) => normalizeCoverageLedgerString(path) ?? []
+          );
+    const ownedPaths = sortUnique([...explicitOwnedPaths, ...fallbackOwnedPaths]);
+
+    if (!moduleId) {
+      return [];
+    }
+
+    return [
+      {
+        moduleId,
+        ...(moduleName ? { moduleName } : {}),
+        ownedPaths,
+      },
+    ];
+  });
 }
 
 /**
@@ -117,6 +176,14 @@ export function buildCoverageLedger(input: BuildCoverageLedgerInput): CoverageLe
     }
   }
   return cells;
+}
+
+function normalizeCoverageLedgerString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 /** grade 阈值（advisory 覆盖信号，非生产/阻断门）。 */

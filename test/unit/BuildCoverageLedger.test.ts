@@ -8,9 +8,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildCoverageLedger,
+  buildCoverageLedgerModuleAxisFromSummaries,
   type CoverageLedgerCandidate,
   type CoverageLedgerModuleAxis,
 } from '../../src/host-agent-workflows.js';
+import { buildCoverageLedgerModuleAxisFromSummaries as buildCoverageLedgerModuleAxisFromCoverage } from '../../src/workflows/capabilities/coverage/index.js';
 
 const MODULES: CoverageLedgerModuleAxis[] = [
   { moduleId: 'auth', moduleName: 'Auth', ownedPaths: ['src/auth/login.ts', 'src/auth/token.ts'] },
@@ -162,6 +164,42 @@ describe('buildCoverageLedger (U2a)', () => {
         exhausted: false,
         exhaustedReason: null,
         exhaustedSource: null,
+      },
+    ]);
+  });
+
+  it('P9 module-summary axis builder keeps ownedFiles-first fallback semantics', () => {
+    expect(buildCoverageLedgerModuleAxisFromSummaries).toBe(
+      buildCoverageLedgerModuleAxisFromCoverage
+    );
+    expect(
+      buildCoverageLedgerModuleAxisFromSummaries({
+        modules: [
+          {
+            moduleId: 'auth',
+            moduleName: 'Auth',
+            modulePath: 'src/auth',
+            ownedFiles: ['src/auth/login.ts', 'src/auth/token.ts'],
+          },
+          { id: 'pay', name: 'Pay', path: 'src/pay' },
+          { id: 'blank', name: 'Blank' },
+        ],
+      })
+    ).toEqual([
+      {
+        moduleId: 'auth',
+        moduleName: 'Auth',
+        ownedPaths: ['src/auth/login.ts', 'src/auth/token.ts'],
+      },
+      {
+        moduleId: 'pay',
+        moduleName: 'Pay',
+        ownedPaths: ['src/pay'],
+      },
+      {
+        moduleId: 'blank',
+        moduleName: 'Blank',
+        ownedPaths: [],
       },
     ]);
   });
