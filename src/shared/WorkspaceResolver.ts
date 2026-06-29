@@ -23,6 +23,7 @@ import {
   type WorkspaceMode,
 } from './ProjectRegistry.js';
 import {
+  loadProjectScopeForFolder,
   type ProjectDescriptor,
   type ProjectScopeSummary,
   resolveProjectScopeForFolder,
@@ -151,6 +152,26 @@ export class WorkspaceResolver {
       projectId: inspection.projectId ?? undefined,
       projectScope: opts.projectScope,
       currentFolderId: opts.currentFolderId,
+      folderNames: opts.folderNames,
+    });
+  }
+
+  static fromProjectScopeRegistry(
+    projectRoot: string,
+    opts: {
+      singleRoot?: boolean;
+      folderNames?: PartialAlembicFolderNames;
+      registryPath?: string;
+    } = {}
+  ): WorkspaceResolver {
+    if (opts.singleRoot === true) {
+      return WorkspaceResolver.fromProject(projectRoot, { folderNames: opts.folderNames });
+    }
+    const projectScope = loadProjectScopeForFolder(projectRoot, {
+      registryPath: opts.registryPath,
+    });
+    return WorkspaceResolver.fromProject(projectRoot, {
+      projectScope,
       folderNames: opts.folderNames,
     });
   }

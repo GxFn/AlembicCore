@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { getProjectRegistryDir } from './ProjectRegistry.js';
 
 export const PROJECT_SCOPE_CONTRACT_VERSION = 1;
 
@@ -769,6 +770,60 @@ export function resolveProjectScopeRegistryFolder(
     )[0]?.scope;
 
   return scope ? resolveProjectScopeForFolder(scope, normalizedPath) : null;
+}
+
+export const PROJECT_SCOPE_REGISTRY_FILENAME = 'project-scopes.json';
+
+export function resolveProjectScopeRegistryPath(): string {
+  return path.join(getProjectRegistryDir(), PROJECT_SCOPE_REGISTRY_FILENAME);
+}
+
+export function readProjectScopeRegistryDocument(
+  registryPath: string = resolveProjectScopeRegistryPath()
+): ProjectScopeRegistryDocument {
+  try {
+    if (!existsSync(registryPath)) {
+      return createProjectScopeRegistryDocument();
+    }
+
+    const parsed = JSON.parse(readFileSync(registryPath, 'utf8')) as Partial<{
+      folderIndex: unknown;
+      scopes: unknown;
+      version: unknown;
+    }>;
+
+    if (
+      parsed.version !== PROJECT_SCOPE_CONTRACT_VERSION ||
+      !parsed.scopes ||
+      typeof parsed.scopes !== 'object' ||
+      Array.isArray(parsed.scopes) ||
+      !parsed.folderIndex ||
+      typeof parsed.folderIndex !== 'object' ||
+      Array.isArray(parsed.folderIndex)
+    ) {
+      return createProjectScopeRegistryDocument();
+    }
+
+    return parsed as ProjectScopeRegistryDocument;
+  } catch {
+    return createProjectScopeRegistryDocument();
+  }
+}
+
+export function loadProjectScopeForFolder(
+  folderPath: string,
+  options: { registryPath?: string } = {}
+): ProjectDescriptor | null {
+  try {
+    return (
+      resolveProjectScopeRegistryFolder(
+        readProjectScopeRegistryDocument(options.registryPath),
+        folderPath
+      )?.projectScope ?? null
+    );
+  } catch {
+    return null;
+  }
 }
 
 function normalizeProjectScopeStorage(input: CreateProjectDescriptorInput): ProjectScopeStorage {
