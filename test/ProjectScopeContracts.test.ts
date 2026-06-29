@@ -15,16 +15,11 @@ import {
   PROJECT_SCOPE_CONTRACT_VERSION,
   PROJECT_SCOPE_OPERATIONS,
   PROJECT_SCOPE_STORAGE_KINDS,
-  readProjectScopeFromWorkspaceConfig,
   resolveProjectScopeForFolder,
   resolveProjectScopeRegistryFolder,
   resolveProjectScopeSourceRef,
   summarizeProjectScopeDescriptor,
 } from '../src/shared/index.js';
-import {
-  createProjectScopeFromWorkspaceConfig,
-  resolveWorkspaceConfigProjectFolders,
-} from '../src/shared/ProjectScope.js';
 import { auditRecipesForRescan } from '../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
 
 describe('ProjectScope multi-root contracts', () => {
@@ -123,37 +118,41 @@ describe('ProjectScope multi-root contracts', () => {
     });
   });
 
-  it('derives default source folders from workspace repoNames without internal surfaces', () => {
+  it('keeps native registry source folders without internal surfaces', () => {
     const controlRoot = path.join('/workspace', 'AlembicWorkspace');
-    const config = {
-      repoNames: ['Alembic', 'AlembicCore', 'AlembicPlugin'],
-      repositories: [
-        { name: 'Alembic', mode: 'external', path: 'Alembic' },
-        { name: 'AlembicCore', mode: 'external', path: 'AlembicCore' },
-        { name: 'AlembicPlugin', mode: 'external', path: 'AlembicPlugin' },
-        { name: 'Test', mode: 'internal', path: 'Test' },
-      ],
-    };
-
-    const folders = resolveWorkspaceConfigProjectFolders(controlRoot, config);
-    const scope = createProjectScopeFromWorkspaceConfig(controlRoot, config, {
+    const scope = createProjectDescriptor({
+      controlRoot,
       dataRoot: path.join('/ghost', 'scope-config'),
+      folders: [
+        { displayName: 'Alembic', path: path.join(controlRoot, 'Alembic'), role: 'primary-source' },
+        { displayName: 'AlembicCore', path: path.join(controlRoot, 'AlembicCore') },
+        { displayName: 'AlembicPlugin', path: path.join(controlRoot, 'AlembicPlugin') },
+      ],
       projectScopeId: 'scope-config',
     });
+    const registry = createProjectScopeRegistryDocument([scope]);
 
-    expect(folders.map((folder) => folder.displayName)).toEqual([
+    expect(listProjectScopeFolders(scope).map((folder) => folder.displayName)).toEqual([
       'Alembic',
       'AlembicCore',
       'AlembicPlugin',
     ]);
-    expect(folders.map((folder) => folder.displayName)).not.toContain('Test');
-    expect(scope?.folders.map((folder) => folder.path)).toEqual([
+    expect(listProjectScopeFolders(scope).map((folder) => folder.displayName)).not.toContain(
+      'Test'
+    );
+    expect(scope.folders.map((folder) => folder.path)).toEqual([
       path.join(controlRoot, 'Alembic'),
       path.join(controlRoot, 'AlembicCore'),
       path.join(controlRoot, 'AlembicPlugin'),
     ]);
-    expect(scope?.controlRoot.includedInFolders).toBe(false);
-    expect(readProjectScopeFromWorkspaceConfig).toBeInstanceOf(Function);
+    expect(scope.controlRoot.includedInFolders).toBe(false);
+    expect(
+      resolveProjectScopeRegistryFolder(registry, path.join(controlRoot, 'AlembicCore'))
+    ).toMatchObject({
+      currentFolderId: scope.folders[1]?.id,
+      matched: true,
+      projectScopeId: 'scope-config',
+    });
   });
 
   it('rejects controlRoot as a source folder and bans standard/project-root storage for new entries', () => {

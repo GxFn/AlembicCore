@@ -23,7 +23,6 @@ import {
   listProjectScopeFolders,
   type ProjectDescriptor,
   type ProjectFolderDescriptor,
-  readProjectScopeFromWorkspaceConfig,
 } from '../../shared/ProjectScope.js';
 
 export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v1';
@@ -33,7 +32,6 @@ export interface SourceGraphIndexOptions {
   repoId?: string;
   projectScope?: string;
   projectScopeDescriptor?: ProjectDescriptor | null;
-  workspaceConfigProjectScope?: boolean;
   generationId?: string;
   extractorVersion?: string;
   now?: number;
@@ -442,17 +440,6 @@ function resolveSourceGraphSourceRoots(
       graphRoots: explicitFolders.map((folder) => folder.path),
       projectScope: input.projectScopeDescriptor?.projectScopeId,
     };
-  }
-
-  if (input.workspaceConfigProjectScope !== false) {
-    const workspaceScope = readProjectScopeFromWorkspaceConfig(projectRoot);
-    const workspaceFolders = activeProjectScopeFolders(workspaceScope);
-    if (workspaceFolders.length > 0) {
-      return {
-        graphRoots: workspaceFolders.map((folder) => folder.path),
-        projectScope: workspaceScope?.projectScopeId,
-      };
-    }
   }
 
   return { graphRoots: [projectRoot], projectScope: undefined };

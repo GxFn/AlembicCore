@@ -16,11 +16,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { LanguageService } from '../../shared/LanguageService.js';
-import {
-  listProjectScopeFolders,
-  type ProjectDescriptor,
-  readProjectScopeFromWorkspaceConfig,
-} from '../../shared/ProjectScope.js';
+import { listProjectScopeFolders, type ProjectDescriptor } from '../../shared/ProjectScope.js';
 import { analyzeFile, isAvailable } from '../AstAnalyzer.js';
 
 // ──────────────────────────────────────────────────────────────────
@@ -57,7 +53,6 @@ export interface ProjectGraphBuildOptions {
   extensionToLang?: Record<string, string>;
   excludePatterns?: string[];
   projectScope?: ProjectDescriptor | string | null;
-  workspaceConfigProjectScope?: boolean;
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -801,12 +796,6 @@ function resolveProjectGraphSourceRoots(
     );
     if (folders.length > 0) {
       return folders.map((folder) => folder.path);
-    }
-  }
-  if (options.workspaceConfigProjectScope !== false) {
-    const workspaceScope = readProjectScopeFromWorkspaceConfig(normalizedProjectRoot);
-    if (workspaceScope?.folders.length) {
-      return listProjectScopeFolders(workspaceScope).map((folder) => folder.path);
     }
   }
   return [normalizedProjectRoot];

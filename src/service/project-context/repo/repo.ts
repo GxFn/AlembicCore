@@ -31,7 +31,9 @@ import type {
 } from '../../../domain/project-context/index.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import {
-  readProjectScopeFromWorkspaceConfig,
+  loadProjectScopeForFolder,
+  type ProjectDescriptor,
+  readProjectScopeRegistryDocument,
   resolveProjectScopeForFolder,
 } from '../../../shared/ProjectScope.js';
 import type {
@@ -420,7 +422,8 @@ async function resolveRepoIdentity(input: {
     return { error, errors: [], ok: false };
   }
 
-  const projectScope = readProjectScopeFromWorkspaceConfig(projectRoot);
+  const projectScope =
+    loadProjectScopeForFolder(absoluteRoot) ?? loadProjectScopeForControlRoot(projectRoot);
   const scopeResolution = projectScope
     ? resolveProjectScopeForFolder(projectScope, absoluteRoot, { folderRealpath: rootRealpath })
     : null;
@@ -476,6 +479,15 @@ async function resolveRepoIdentity(input: {
     },
     ok: true,
   };
+}
+
+function loadProjectScopeForControlRoot(projectRoot: string): ProjectDescriptor | null {
+  const normalizedProjectRoot = path.resolve(projectRoot);
+  return (
+    Object.values(readProjectScopeRegistryDocument().scopes).find(
+      (scope) => path.resolve(scope.controlRoot.path) === normalizedProjectRoot
+    ) ?? null
+  );
 }
 
 async function readRepoManifestFacts(repo: RepoIdentity): Promise<RepoManifestFacts> {

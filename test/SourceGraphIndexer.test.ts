@@ -11,6 +11,7 @@ import {
   SourceGraphIndexer,
   SourceGraphService,
 } from '../src/service/source-graph/index.js';
+import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 
 describe('SourceGraphIndexer', () => {
   let tmpDir: string;
@@ -76,23 +77,7 @@ describe('SourceGraphIndexer', () => {
     });
   });
 
-  it('uses workspace.config repoNames as the default source graph boundary', async () => {
-    writeFixture(
-      'workspace.config.json',
-      JSON.stringify(
-        {
-          repoNames: ['Alembic', 'AlembicCore', 'AlembicPlugin'],
-          repositories: [
-            { name: 'Alembic', mode: 'external', path: 'Alembic' },
-            { name: 'AlembicCore', mode: 'external', path: 'AlembicCore' },
-            { name: 'AlembicPlugin', mode: 'external', path: 'AlembicPlugin' },
-            { name: 'Test', mode: 'internal', path: 'Test' },
-          ],
-        },
-        null,
-        2
-      )
-    );
+  it('uses a projectScopeDescriptor as the default source graph boundary', async () => {
     writeFixture('Alembic/src/index.ts', 'export const alembic = 1;\n');
     writeFixture('AlembicCore/src/index.ts', 'export const core = 1;\n');
     writeFixture('AlembicPlugin/src/index.ts', 'export const plugin = 1;\n');
@@ -104,6 +89,7 @@ describe('SourceGraphIndexer', () => {
     const result = await indexer.buildFull({
       projectRoot: tmpDir,
       repoId: 'fixture',
+      projectScopeDescriptor: createSourceGraphProjectScope(tmpDir),
       generationId: 'gen-workspace-config',
       now: 1500,
       includeExtensions: ['.ts'],
@@ -243,5 +229,34 @@ describe('SourceGraphIndexer', () => {
     const absolutePath = path.join(tmpDir, repoRelativePath);
     fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
     fs.writeFileSync(absolutePath, content);
+  }
+
+  function createSourceGraphProjectScope(projectRoot: string) {
+    return createProjectDescriptor({
+      controlRoot: projectRoot,
+      dataRoot: path.join(projectRoot, '.asd', 'workspaces', 'source-graph-fixture'),
+      folders: [
+        {
+          displayName: 'Alembic',
+          path: path.join(projectRoot, 'Alembic'),
+          repositoryId: 'alembic',
+          role: 'primary-source',
+        },
+        {
+          displayName: 'AlembicCore',
+          path: path.join(projectRoot, 'AlembicCore'),
+          repositoryId: 'alembic-core',
+          role: 'source',
+        },
+        {
+          displayName: 'AlembicPlugin',
+          path: path.join(projectRoot, 'AlembicPlugin'),
+          repositoryId: 'alembic-plugin',
+          role: 'source',
+        },
+      ],
+      projectId: 'source-graph-fixture',
+      projectScopeId: 'project-scope-source-graph-fixture',
+    });
   }
 });

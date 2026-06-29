@@ -20,6 +20,11 @@ import {
   type SpaceContext,
 } from '../src/domain/project-context/index.js';
 import { ProjectContext } from '../src/project-context.js';
+import {
+  createProjectDescriptor,
+  createProjectScopeRegistryDocument,
+  PROJECT_SCOPE_REGISTRY_FILENAME,
+} from '../src/shared/ProjectScope.js';
 
 const FEATURE_MODULE_SEED = {
   moduleName: 'feature',
@@ -778,7 +783,6 @@ function createProjectSpaceFixture(): Record<string, string> {
     'Docs/src/index.ts': 'export const docs = true;\n',
     'HiddenProject/package.json': JSON.stringify({ name: 'secretProject' }, null, 2),
     'HiddenProject/src/secret.ts': 'export const secretProject = true;\n',
-    'workspace.config.json': workspaceConfig(['App', 'Docs']),
   };
 }
 
@@ -796,37 +800,62 @@ function createNodeNextProjectSpaceFixture(): Record<string, string> {
   };
 }
 
-function workspaceConfig(names: readonly string[]): string {
-  return JSON.stringify(
-    {
-      repoNames: names,
-      repositories: names.map((name) => ({
-        name,
-        path: name,
-        repositoryId: `repo-${name.toLowerCase()}`,
-      })),
-      workspaceName: 'PCQ9FixtureSpace',
-    },
-    null,
-    2
-  );
-}
-
 async function withFixture(
   files: Record<string, string>,
   callback: (projectRoot: string) => Promise<void>
 ): Promise<void> {
   const projectRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'project-context-e2e-'));
+  const previousAlembicHome = process.env.ALEMBIC_HOME;
   try {
     for (const [filePath, content] of Object.entries(files)) {
       const absolutePath = path.join(projectRoot, filePath);
       await fs.mkdir(path.dirname(absolutePath), { recursive: true });
       await fs.writeFile(absolutePath, content, 'utf8');
     }
+    await writeNativeProjectScope(projectRoot);
     await callback(projectRoot);
   } finally {
+    if (previousAlembicHome === undefined) {
+      delete process.env.ALEMBIC_HOME;
+    } else {
+      process.env.ALEMBIC_HOME = previousAlembicHome;
+    }
     await fs.rm(projectRoot, { force: true, recursive: true });
   }
+}
+
+async function writeNativeProjectScope(projectRoot: string): Promise<void> {
+  process.env.ALEMBIC_HOME = projectRoot;
+  const registryDir = path.join(projectRoot, '.asd');
+  await fs.mkdir(registryDir, { recursive: true });
+  const projectScope = createProjectDescriptor({
+    controlRoot: projectRoot,
+    dataRoot: path.join(projectRoot, '.asd', 'workspaces', 'pcq9-fixture'),
+    displayName: 'PCQ9FixtureSpace',
+    folders: [
+      {
+        displayName: 'App',
+        id: 'folder-app',
+        path: path.join(projectRoot, 'App'),
+        repositoryId: 'repo-app',
+        role: 'primary-source',
+      },
+      {
+        displayName: 'Docs',
+        id: 'folder-docs',
+        path: path.join(projectRoot, 'Docs'),
+        repositoryId: 'repo-docs',
+        role: 'source',
+      },
+    ],
+    projectId: 'pcq9-fixture',
+    projectScopeId: 'scope-pcq9-fixture',
+  });
+  await fs.writeFile(
+    path.join(registryDir, PROJECT_SCOPE_REGISTRY_FILENAME),
+    JSON.stringify(createProjectScopeRegistryDocument([projectScope]), null, 2),
+    'utf8'
+  );
 }
 
 async function pathExists(filePath: string): Promise<boolean> {

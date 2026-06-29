@@ -18,8 +18,9 @@ import type {
 } from '../../../domain/project-context/index.js';
 import type { ProjectFolderDescriptor } from '../../../shared/ProjectScope.js';
 import {
+  loadProjectScopeForFolder,
   type ProjectDescriptor,
-  readProjectScopeFromWorkspaceConfig,
+  readProjectScopeRegistryDocument,
 } from '../../../shared/ProjectScope.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
 import {
@@ -209,20 +210,7 @@ async function resolveSpace(input: {
 
   const errors: ProjectContextQueryError[] = [];
   const hasExplicitFolders = (input.payload.sourceFolders?.length ?? 0) > 0;
-  const workspaceConfigPath = path.join(projectRoot, 'workspace.config.json');
-  const workspaceConfigExists = await pathExists(workspaceConfigPath);
-  const projectScope = hasExplicitFolders ? null : readProjectScopeFromWorkspaceConfig(projectRoot);
-  if (workspaceConfigExists && !projectScope && !hasExplicitFolders) {
-    errors.push(
-      createQueryError({
-        code: 'query-unavailable',
-        message:
-          'space workspace.config.json was unreadable or did not contain project source folders; using single-folder fallback.',
-        path: 'workspace.config.json',
-        retryable: true,
-      })
-    );
-  }
+  const projectScope = hasExplicitFolders ? null : loadProjectScopeForSpaceRoot(projectRoot);
 
   const folderInputs = hasExplicitFolders
     ? readExplicitFolderInputs(projectRoot, input.payload.sourceFolders ?? [])
@@ -283,6 +271,19 @@ async function resolveSpace(input: {
       rootRealpath,
     },
   };
+}
+
+function loadProjectScopeForSpaceRoot(projectRoot: string): ProjectDescriptor | null {
+  const matchedFolderScope = loadProjectScopeForFolder(projectRoot);
+  if (matchedFolderScope) {
+    return matchedFolderScope;
+  }
+  const normalizedProjectRoot = path.resolve(projectRoot);
+  return (
+    Object.values(readProjectScopeRegistryDocument().scopes).find(
+      (scope) => path.resolve(scope.controlRoot.path) === normalizedProjectRoot
+    ) ?? null
+  );
 }
 
 function projectFolderToInput(
