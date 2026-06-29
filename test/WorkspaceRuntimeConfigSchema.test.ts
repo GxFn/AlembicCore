@@ -2,8 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
-
-import { WorkspaceRuntimeConfigSchema } from '../src/config.js';
+import { WorkspaceRuntimeConfigSchema } from '../src/shared/index.js';
 import {
   DEFAULT_SUB_REPO_DIR,
   RUNTIME_DIR,
@@ -59,7 +58,7 @@ describe('WorkspaceRuntimeConfigSchema', () => {
     }
   });
 
-  test('exports the same runtime schema from shared and config facades', () => {
+  test('exports the same runtime schema from the shared facade', () => {
     expect(WorkspaceRuntimeConfigSchema).toBe(SharedWorkspaceRuntimeConfigSchema);
   });
 
