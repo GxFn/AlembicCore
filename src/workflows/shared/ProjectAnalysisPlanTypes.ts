@@ -6,6 +6,7 @@ export interface ProjectAnalysisPreparationOptions {
 export interface ProjectAnalysisScanOptions {
   maxFiles?: number;
   contentMaxLines?: number;
+  sourceFolders?: string[];
   skipGuard?: boolean;
   sourceTag?: string;
   summaryPrefix?: string;

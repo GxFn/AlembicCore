@@ -14,6 +14,7 @@
  * 触发器=CKG1 冷启动区域重建或允许 keep-provisional 类型形状变化的表面波）。
  * 本文件类型形状保持不变。
  */
+import path from 'node:path';
 import { normalizeDimensionIds, type WorkflowExecutor } from '../shared/WorkflowTypes.js';
 
 export type ColdStartExecutor = WorkflowExecutor;
@@ -27,7 +28,12 @@ export interface InternalColdStartArgs {
   skipTargetDelivery?: boolean;
   loadSkills?: boolean;
   dimensions?: string[];
+  sourceFolders?: readonly string[];
   [key: string]: unknown;
+}
+
+export interface HostAgentColdStartArgs {
+  sourceFolders?: readonly string[];
 }
 
 export interface ColdStartProjectAnalysisIntent {
@@ -37,6 +43,7 @@ export interface ColdStartProjectAnalysisIntent {
   sourceTag: 'bootstrap' | 'bootstrap-host-agent';
   summaryPrefix?: string;
   generateAstContext: boolean;
+  sourceFolders?: string[];
 }
 
 export interface InternalColdStartExecutionIntent {
@@ -59,6 +66,7 @@ export interface ColdStartWorkflowIntent {
 export function createInternalColdStartIntent(
   args: InternalColdStartArgs = {}
 ): ColdStartWorkflowIntent {
+  const sourceFolders = normalizeColdStartSourceFolders(args.sourceFolders);
   return {
     kind: 'cold-start',
     executor: 'internal-agent',
@@ -71,6 +79,7 @@ export function createInternalColdStartIntent(
       skipGuard: args.skipGuard ?? false,
       sourceTag: 'bootstrap',
       generateAstContext: true,
+      ...(sourceFolders ? { sourceFolders } : {}),
     },
     dimensionIds: normalizeDimensionIds(args.dimensions),
     internalExecution: {
@@ -81,7 +90,10 @@ export function createInternalColdStartIntent(
   };
 }
 
-export function createHostAgentColdStartIntent(): ColdStartWorkflowIntent {
+export function createHostAgentColdStartIntent(
+  args: HostAgentColdStartArgs = {}
+): ColdStartWorkflowIntent {
+  const sourceFolders = normalizeColdStartSourceFolders(args.sourceFolders);
   return {
     kind: 'cold-start',
     executor: 'host-agent',
@@ -95,9 +107,44 @@ export function createHostAgentColdStartIntent(): ColdStartWorkflowIntent {
       sourceTag: 'bootstrap-host-agent',
       summaryPrefix: 'Bootstrap host-agent scan',
       generateAstContext: false,
+      ...(sourceFolders ? { sourceFolders } : {}),
     },
     ignoredFileDiffIncremental: false,
   };
+}
+
+function normalizeColdStartSourceFolders(
+  sourceFolders: readonly string[] | undefined
+): string[] | undefined {
+  if (!sourceFolders?.length) {
+    return undefined;
+  }
+  const normalized: string[] = [];
+  const seen = new Set<string>();
+  for (const value of sourceFolders) {
+    if (typeof value !== 'string') {
+      continue;
+    }
+    const candidate = normalizeSourceFolder(value);
+    if (!candidate || seen.has(candidate)) {
+      continue;
+    }
+    seen.add(candidate);
+    normalized.push(candidate);
+  }
+  return normalized.length ? normalized : undefined;
+}
+
+function normalizeSourceFolder(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed || path.isAbsolute(trimmed)) {
+    return null;
+  }
+  const normalized = path.posix.normalize(trimmed.replaceAll('\\', '/'));
+  if (normalized === '.' || normalized.startsWith('../') || normalized === '..') {
+    return null;
+  }
+  return normalized;
 }
 
 // normalizeDimensionIds, normalizeStringArray → imported from WorkflowTypes

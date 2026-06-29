@@ -57,12 +57,29 @@ export function buildColdStartWorkflowPlan({
     projectRoot,
     dataRoot,
   });
+  const planIntent = withPlanSourceFolders(intent, parts.projectAnalysis.scan.sourceFolders);
 
   return {
-    intent,
+    intent: planIntent,
     cleanup: parts.cleanup,
     projectAnalysis: parts.projectAnalysis,
     response: { tool: 'alembic_bootstrap' },
+  };
+}
+
+function withPlanSourceFolders(
+  intent: ColdStartWorkflowIntent,
+  sourceFolders: string[] | undefined
+): ColdStartWorkflowIntent {
+  if (!sourceFolders?.length) {
+    return intent;
+  }
+  return {
+    ...intent,
+    projectAnalysis: {
+      ...intent.projectAnalysis,
+      sourceFolders: [...sourceFolders],
+    },
   };
 }
 
