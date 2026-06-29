@@ -1,0 +1,318 @@
+{
+  "_meta": {
+    "purpose": "P0.0 frozen enforcement matrix — the authoritative 'what reject fires, in which stage, on which submit paths' oracle. Resolves the layered-not-duplicated finding: stage 1 (Plugin, always) owns verb/marker, stage 2 (Plugin, cold-start-only) owns evidence/snippet/graph, stage 3 (Core, all paths) owns field/markdown-floor/uniqueness.",
+    "groundedOn": "state-root evidence/p0-gate-truth-matrix-2026-06-30.md (controller-verified) + first-hand source on 2026-06-30",
+    "paths": {
+      "host-agent": "alembic_submit_knowledge via tool-router routeSubmitKnowledgeTool",
+      "in-process": "AlembicAgent knowledge.ts + main-body GatewayActionRegistry → gateway.create (stage 3 only)",
+      "dimension-complete": "dimension_complete tool via validateDimensionCompletionEvidenceGate (NOT submit-knowledge)"
+    },
+    "lineNote": "sourceLine values are live as of 2026-06-30 (line drift confirmed vs design doc; oracle is authoritative)."
+  },
+  "stage1": {
+    "_file": "AlembicPlugin/lib/runtime/mcp/handlers/recipe-content-quality-gate.ts",
+    "_unionType": "RecipeContentQualityViolationCode",
+    "_runs": "always (tool-router.ts:163)",
+    "codes": {
+      "DO_CLAUSE_REQUIRED": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 113,
+        "paths": ["host-agent"],
+        "rule": "doClause missing/empty"
+      },
+      "DONT_CLAUSE_REQUIRED": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 113,
+        "paths": ["host-agent"],
+        "rule": "dontClause missing/empty"
+      },
+      "DO_CLAUSE_NON_ENGLISH": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 128,
+        "paths": ["host-agent"],
+        "rule": "doClause matches NON_ENGLISH_SCRIPT_RE"
+      },
+      "DONT_CLAUSE_NON_ENGLISH": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 128,
+        "paths": ["host-agent"],
+        "rule": "dontClause matches NON_ENGLISH_SCRIPT_RE"
+      },
+      "DO_CLAUSE_NON_IMPERATIVE": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 143,
+        "paths": ["host-agent"],
+        "rule": "doClause first word not in POSITIVE imperative set (45)"
+      },
+      "DONT_CLAUSE_NON_IMPERATIVE": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 143,
+        "paths": ["host-agent"],
+        "rule": "dontClause first word not in NEGATIVE imperative set (12) and not 'do not'"
+      },
+      "CONTENT_MARKDOWN_REQUIRED": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 180,
+        "paths": ["host-agent"],
+        "rule": "content.markdown missing/empty"
+      },
+      "CONTENT_CONTRAST_MISSING": {
+        "stage": 1,
+        "alwaysOrConditional": "always",
+        "sourceLine": 192,
+        "paths": ["host-agent"],
+        "rule": "markdown lacks both a marker example with >=4 trailing non-space chars"
+      }
+    }
+  },
+  "stage2": {
+    "_file": "AlembicPlugin/lib/recipe-generation/host-agent-workflows/recipe-evidence-gate.ts",
+    "_unionType": "RecipeEvidenceViolationCode",
+    "_runs": "cold-start only (tool-router.ts:172-181, gated by shouldRunRecipeEvidenceGate); DIMENSION_*/QUALITY_GATE_FAILED serve dimension_complete, not submit",
+    "codes": {
+      "SESSION_NOT_FOUND": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 163,
+        "paths": ["host-agent"],
+        "pure": false,
+        "rule": "no bootstrap session (RUNTIME session)"
+      },
+      "WRONG_SCOPE": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 170,
+        "paths": ["host-agent"],
+        "pure": false,
+        "rule": "projectRoot!=root or dimensionId not in session.dimensions (RUNTIME session)"
+      },
+      "SOURCE_REFS_MISSING": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 207,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "zero sourceRefs/reasoning.sources"
+      },
+      "SOURCE_REF_BARE": {
+        "stage": 2,
+        "alwaysOrConditional": "dead",
+        "sourceLine": 9,
+        "paths": [],
+        "pure": null,
+        "rule": "declared in union but NEVER emitted (dead code)"
+      },
+      "SOURCE_REF_INVALID": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 531,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "isAbsolute / '..' / outside root (path math)"
+      },
+      "SOURCE_REF_NOT_FOUND": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 558,
+        "paths": ["host-agent"],
+        "pure": false,
+        "rule": "fs.existsSync/statSync (RUNTIME fs)"
+      },
+      "SOURCE_REF_LINE_MISSING": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 514,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "ref fails ^(.+?):(\\d+)(?:-(\\d+))?$ regex"
+      },
+      "SOURCE_REF_LINE_OUT_OF_RANGE": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 572,
+        "paths": ["host-agent"],
+        "pure": false,
+        "rule": "fs.readFileSync range exceeds file (RUNTIME fs)"
+      },
+      "SNIPPET_MISMATCH": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 272,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "snippetMatchesSourceRange fails (pure logic on fs-fed rangeText)"
+      },
+      "PLACEHOLDER_EVIDENCE": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 259,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "looksLikePlaceholder hit"
+      },
+      "INSUFFICIENT_EVIDENCE": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 298,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "distinct FILES <3 (rule/pattern) / <1 (fact)"
+      },
+      "GRAPH_REF_INVALID": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 628,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "relationship claim, no graphRefs"
+      },
+      "STALE_GRAPH": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 635,
+        "paths": ["host-agent"],
+        "pure": true,
+        "rule": "graphRef matches /stale|partial|pending/i"
+      },
+      "QUALITY_GATE_FAILED": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 344,
+        "paths": ["dimension-complete"],
+        "pure": true,
+        "rule": "validateDimensionCompletionEvidenceGate — dimension_complete only"
+      },
+      "DIMENSION_CANDIDATE_COUNT_INSUFFICIENT": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 344,
+        "paths": ["dimension-complete"],
+        "pure": true,
+        "rule": "dimension_complete only"
+      },
+      "DIMENSION_REFERENCED_FILES_MISSING": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 344,
+        "paths": ["dimension-complete"],
+        "pure": true,
+        "rule": "dimension_complete only"
+      },
+      "DIMENSION_KEY_FINDINGS_INSUFFICIENT": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 344,
+        "paths": ["dimension-complete"],
+        "pure": true,
+        "rule": "dimension_complete only"
+      },
+      "DIMENSION_ANALYSIS_TEXT_INSUFFICIENT": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 344,
+        "paths": ["dimension-complete"],
+        "pure": true,
+        "rule": "dimension_complete only"
+      },
+      "DIMENSION_RECIPE_ID_NOT_BOUND": {
+        "stage": 2,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 344,
+        "paths": ["dimension-complete"],
+        "pure": true,
+        "rule": "dimension_complete only"
+      }
+    }
+  },
+  "stage3": {
+    "_file": "AlembicCore/src/domain/knowledge/UnifiedValidator.ts",
+    "_runs": "always — RecipeProductionGateway.create -> UnifiedValidator.validate (host-agent + in-process)",
+    "_note": "Stage-3 blocking errors are Chinese message strings (not reject codes); pass = errors.length===0. Keyed by stable rule id; the round-trip asserts the entry count equals the live errors.push count, never a hardcoded literal.",
+    "rules": {
+      "STAGE3_MISSING_REQUIRED_FIELD": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 125,
+        "paths": ["host-agent", "in-process"],
+        "rule": "any V3_FIELD_SPEC REQUIRED field absent"
+      },
+      "STAGE3_CONTENT_NOT_OBJECT": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 136,
+        "paths": ["host-agent", "in-process"],
+        "rule": "content present but not object"
+      },
+      "STAGE3_REASONING_NOT_OBJECT": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 143,
+        "paths": ["host-agent", "in-process"],
+        "rule": "reasoning present but not object"
+      },
+      "STAGE3_KIND_INVALID": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 150,
+        "paths": ["host-agent", "in-process"],
+        "rule": "kind not in rule/pattern/fact"
+      },
+      "STAGE3_MARKDOWN_TOO_SHORT": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 186,
+        "paths": ["host-agent", "in-process"],
+        "rule": "markdown present and length<200"
+      },
+      "STAGE3_MARKDOWN_NEEDS_CODE_OR_FILEREF": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 198,
+        "paths": ["host-agent", "in-process"],
+        "rule": "markdown>=200 but no code block and no .ext ref"
+      },
+      "STAGE3_CORECODE_INCOMPLETE": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 228,
+        "paths": ["host-agent", "in-process"],
+        "rule": "coreCode first char in } ) ] only"
+      },
+      "STAGE3_TITLE_TOO_GENERIC": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 239,
+        "paths": ["host-agent", "in-process"],
+        "rule": "title matches generic Singleton/Factory/Observer/MVC/MVVM pattern regex"
+      },
+      "STAGE3_TITLE_DUPLICATE": {
+        "stage": 3,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 270,
+        "paths": ["host-agent", "in-process"],
+        "rule": "title uniqueness (skippable via skipUniqueness)"
+      },
+      "STAGE3_TRIGGER_DUPLICATE": {
+        "stage": 3,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 275,
+        "paths": ["host-agent", "in-process"],
+        "rule": "trigger uniqueness (skippable)"
+      },
+      "STAGE3_CODE_DUPLICATE": {
+        "stage": 3,
+        "alwaysOrConditional": "conditional",
+        "sourceLine": 284,
+        "paths": ["host-agent", "in-process"],
+        "rule": "code-fingerprint uniqueness (skippable)"
+      }
+    }
+  }
+}
