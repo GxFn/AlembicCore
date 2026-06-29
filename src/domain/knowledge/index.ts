@@ -26,6 +26,8 @@ export {
   normalizeLifecycle,
   PUBLISHED_LIFECYCLES,
 } from './Lifecycle.js';
+// RecipeAuthoringSpec — Recipe 创作权威规范模块（门禁 validateAgainst 与指南 renderGuidance 共享同一 gateRules 表）
+export * from './recipe-authoring-spec/index.js';
 export { Constraints } from './values/Constraints.js';
 // 值对象
 export { Content } from './values/Content.js';

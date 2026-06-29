@@ -8,27 +8,13 @@
  */
 
 import { FieldLevel, V3_FIELD_SPEC } from './FieldSpec.js';
-
 // ── 「项目特写」写作指南全文 ────────────────────────────────
+// 指南全文已迁移到同层的 recipe-authoring-spec/content-contract.ts，作为 RecipeAuthoringSpec 内容契约的
+// 唯一来源（domain 同层边，合法）。这里 import 回来供本文件 buildProducerStyleGuide 使用，并原样 re-export，
+// 保证外层历史 import 路径（MissionBriefingBuilder / DimensionCatalogPayload 从 StyleGuide.js 取常量）字节级不变。
+import { PROJECT_SNAPSHOT_STYLE_GUIDE } from './recipe-authoring-spec/contentContract.js';
 
-export const PROJECT_SNAPSHOT_STYLE_GUIDE = `# 「项目特写」写作要求
-
-knowledge({ action: "submit" }) 的 content.markdown 字段必须是「项目特写」。
-
-## 什么是「项目特写」
-将一种技术的**基本用法**与**本项目的具体特征**融合为一体。
-
-## 四大核心内容
-1. **项目选择了什么** — 采用了哪种写法/模式/约定
-2. **为什么这样选** — 统计分布、占比、历史决策
-3. **项目禁止什么** — 反模式、已废弃写法
-4. **新代码怎么写** — 可直接复制使用的代码模板 + 来源标注 (来源: FileName.ext:行号)
-
-## 格式要求
-- 标题使用项目真实类名/前缀，不用占位名，不以项目名开头
-- 代码来源标注: (来源: FileName.ext:行号)
-- 不要纯代码罗列，必须有项目上下文
-- 标题和正文中不得出现 "Agent" 字样`;
+export { PROJECT_SNAPSHOT_STYLE_GUIDE };
 
 // ── 插件适配字段规范（从 FieldSpec 自动生成） ────────────
 

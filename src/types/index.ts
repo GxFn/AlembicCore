@@ -26,6 +26,14 @@ export type {
   SnapshotTarget,
 } from './ProjectSnapshot.js';
 export * from './ReactiveEvolution.js';
+// RecipeAuthoringSpec §C.11 注入端口与违规类型（domain 模块保持纯净，fs/session 通过这些端口注入）
+export type {
+  RecipeAuthoringSubmitPath,
+  RecipeAuthoringViolation,
+  RecipeSessionScope,
+  RecipeSourceRefEvidence,
+  RecipeSourceRefResolver,
+} from './recipeAuthoringSpec.js';
 export type {
   BootstrapFile,
   DimensionCheckpointResult,

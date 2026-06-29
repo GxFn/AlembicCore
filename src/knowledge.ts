@@ -45,6 +45,39 @@ export {
   STANDARD_CATEGORIES as READINESS_STANDARD_CATEGORIES,
   WHITELISTED_CATEGORIES as READINESS_WHITELISTED_CATEGORIES,
 } from './domain/knowledge/RecipeReadinessChecker.js';
+export type {
+  DocScoreTargets,
+  FailureMode,
+  GateRule,
+  GuidanceBlock,
+  RecipeAuthoringSubmitPath,
+  RecipeAuthoringViolation,
+  RecipeSessionScope,
+  RecipeSourceRefEvidence,
+  RecipeSourceRefResolver,
+  SubmissionSpec,
+  SubmitContract,
+  ValidateAgainstOptions,
+  WorkedExample,
+} from './domain/knowledge/recipe-authoring-spec/index.js';
+// RecipeAuthoringSpec — Recipe 创作权威规范的 A.3 公共 API。
+// 门禁 validateAgainst 与指南 renderGuidance 读取同一 gateRules() 表（guidance==gate 的结构性保证）。
+// 仅在此导出 NEW 符号；V3_FIELD_SPEC 等 FieldSpec getters 已由上方 FieldSpec 块导出，避免同名重复导出。
+export {
+  buildPreSubmitChecklist,
+  buildSubmissionSpec,
+  buildSubmitKnowledgeContract,
+  contentContract,
+  describeSubmitToolFields,
+  example,
+  failureModes,
+  gateRule,
+  gateRules,
+  getEvidenceFloorPolicy,
+  getImperativeVerbAllowlist,
+  renderGuidance,
+  validateAgainst,
+} from './domain/knowledge/recipe-authoring-spec/index.js';
 export {
   buildProducerStyleGuide,
   SUBMIT_REQUIREMENTS,
