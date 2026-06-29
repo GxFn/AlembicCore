@@ -1091,8 +1091,8 @@
     },
     "narrowness": {
       "schemaVersion": 1,
-      "measuredAt": "2026-06-12",
-      "note": "Shrink-only runtime-symbol budgets for provisional facades: a provisional facade may not re-export more runtime symbols than its frozen baseline (narrowness vs its transitional predecessors as of the CO1 freeze). Lower a baseline when a facade narrows; raising one requires a controller decision recorded in this file.",
+      "measuredAt": "2026-06-29",
+      "note": "Shrink-only runtime-symbol budgets for provisional facades: a provisional facade may not re-export more runtime symbols than its frozen baseline (narrowness vs its transitional predecessors as of the CO1 freeze). Lower a baseline when a facade narrows; raising one requires a controller decision recorded in this file. The ./shared baseline was raised 189 -> 190 for the controller-authorized native ProjectScope registry loader surface in alembic-plan-space-membership-scoping-2026-06-29 P0/P1.",
       "baselines": {
         "./config": 47,
         "./infrastructure/report": 1,
@@ -1100,7 +1100,7 @@
         "./service/candidate": 2,
         "./service/quality": 2,
         "./service/recipe": 2,
-        "./shared": 189,
+        "./shared": 190,
         "./types": 6
       }
     },

@@ -52,7 +52,7 @@ export function resolveDataRoot(container?: ContainerLike | null): string {
 
   // fallback: 即使没有 container，也尝试根据 projectRoot 自动恢复 Ghost 模式 dataRoot
   try {
-    return WorkspaceResolver.fromProject(resolveProjectRoot(container)).dataRoot;
+    return WorkspaceResolver.fromProjectScopeRegistry(resolveProjectRoot(container)).dataRoot;
   } catch {
     return resolveProjectRoot(container);
   }
@@ -72,7 +72,7 @@ export function resolveKnowledgeScanDirs(container?: ContainerLike | null): stri
     (container?.singletons?._workspaceResolver as WorkspaceResolver | undefined) ??
     (() => {
       try {
-        return WorkspaceResolver.fromProject(resolveProjectRoot(container));
+        return WorkspaceResolver.fromProjectScopeRegistry(resolveProjectRoot(container));
       } catch {
         return null;
       }

@@ -47,6 +47,7 @@ export function getPackageVersion(): string {
 }
 
 export function resolveDaemonPaths(projectRoot: string): DaemonPaths {
+  // @scope-singleroot(permanent) — daemon state is per-runtime-instance, not project-space data.
   const resolver = WorkspaceResolver.fromProject(projectRoot);
   return {
     projectRoot: resolver.projectRoot,

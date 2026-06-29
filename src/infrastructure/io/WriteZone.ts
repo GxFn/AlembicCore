@@ -69,7 +69,7 @@ export class WriteZone {
   /** 从项目根路径创建（异步）— 脚本等一次性场景 */
   static async fromProjectRoot(projectRoot: string): Promise<WriteZone> {
     const { WorkspaceResolver: WR } = await import('../../shared/WorkspaceResolver.js');
-    return new WriteZone(WR.fromProject(projectRoot));
+    return new WriteZone(WR.fromProjectScopeRegistry(projectRoot));
   }
 
   // ─── 路径解析 ─────────────────────────────────────

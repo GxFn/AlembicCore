@@ -88,6 +88,7 @@ export class WorkspaceSettingsStore {
   }
 
   static fromProject(projectRoot: string): WorkspaceSettingsStore {
+    // @scope-singleroot(permanent) — AI/env settings are per selected folder identity.
     return new WorkspaceSettingsStore(WorkspaceResolver.fromProject(resolve(projectRoot)));
   }
 

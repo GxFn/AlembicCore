@@ -73,6 +73,14 @@ export class DatabaseConnection {
     // 包括：Alembic 源码仓库、生态项目（alembic-book 等）、.asd-skip 标记项目
     const effectiveRoot = projectRoot || path.resolve('.');
     const exclusion = isExcludedProject(effectiveRoot);
+    if (exclusion.excluded && this.#workspaceResolver?.projectScope) {
+      throw new Error(
+        `[DatabaseConnection] member '${effectiveRoot}' is in project-scope ` +
+          `${this.#workspaceResolver.projectScope.projectScopeId} but resolved to an excluded root ` +
+          `(would write ${path.join(os.tmpdir(), 'alembic-dev', 'alembic.db')}). ` +
+          'Space dataRoot lost upstream.'
+      );
+    }
     if (exclusion.excluded) {
       const devDbDir = path.join(os.tmpdir(), 'alembic-dev');
       if (!fs.existsSync(devDbDir)) {

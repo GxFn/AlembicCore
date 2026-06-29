@@ -73,7 +73,7 @@ export class DiscovererRegistry {
       .sort((a, b) => b.result.confidence - a.result.confidence)
       .map((r) => ({ discoverer: r.discoverer, confidence: r.result.confidence }));
 
-    const dataRoot = WorkspaceResolver.fromProject(projectRoot).dataRoot;
+    const dataRoot = WorkspaceResolver.fromProjectScopeRegistry(projectRoot).dataRoot;
     const preference = loadPreference(dataRoot);
     if (preference?.userConfirmed) {
       const prefIdx = matched.findIndex((m) => m.discoverer.id === preference.selectedDiscoverer);
@@ -109,7 +109,7 @@ export class DiscovererRegistry {
         confidence: r.result.confidence,
       }));
 
-    const dataRoot = WorkspaceResolver.fromProject(projectRoot).dataRoot;
+    const dataRoot = WorkspaceResolver.fromProjectScopeRegistry(projectRoot).dataRoot;
     const preference = loadPreference(dataRoot);
     if (preference?.userConfirmed) {
       return { ambiguous: false, matches, recommended: matches[0] };
