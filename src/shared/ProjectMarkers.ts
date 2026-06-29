@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_FOLDER_NAMES } from './folderNames.js';
 import { ProjectRegistry } from './ProjectRegistry.js';
+import { type WorkspaceRuntimeConfig, WorkspaceRuntimeConfigSchema } from './schemas/config.js';
 
 // ─── 目录名常量 ──────────────────────────────────────────────
 
@@ -86,17 +87,7 @@ export function detectKnowledgeBaseDir(
  * @returns 子仓库相对路径（相对于 projectRoot），如 'Alembic/recipes'
  */
 export function readSubRepoDirFromConfig(projectRoot: string): string | null {
-  try {
-    const configPath = path.join(projectRoot, RUNTIME_DIR, 'config.json');
-    if (!fs.existsSync(configPath)) {
-      return null;
-    }
-    const raw = fs.readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(raw) as { core?: { subRepoDir?: string } };
-    return config.core?.subRepoDir || null;
-  } catch {
-    return null;
-  }
+  return readWorkspaceRuntimeConfig(projectRoot)?.core.subRepoDir ?? null;
 }
 
 /**
@@ -104,14 +95,18 @@ export function readSubRepoDirFromConfig(projectRoot: string): string | null {
  * @returns 远程仓库 URL，如 'https://github.com/team/recipes.git'；未配置则返回 null
  */
 export function readSubRepoUrlFromConfig(projectRoot: string): string | null {
+  return readWorkspaceRuntimeConfig(projectRoot)?.core.subRepoUrl ?? null;
+}
+
+function readWorkspaceRuntimeConfig(projectRoot: string): WorkspaceRuntimeConfig | null {
   try {
     const configPath = path.join(projectRoot, RUNTIME_DIR, 'config.json');
     if (!fs.existsSync(configPath)) {
       return null;
     }
     const raw = fs.readFileSync(configPath, 'utf-8');
-    const config = JSON.parse(raw) as { core?: { subRepoUrl?: string } };
-    return config.core?.subRepoUrl || null;
+    const parsed = WorkspaceRuntimeConfigSchema.safeParse(JSON.parse(raw) as unknown);
+    return parsed.success ? parsed.data : null;
   } catch {
     return null;
   }

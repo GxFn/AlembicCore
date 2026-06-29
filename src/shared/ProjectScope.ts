@@ -243,15 +243,6 @@ export interface CreateProjectDescriptorInput {
   updatedAt?: string | null;
 }
 
-export interface WorkspaceConfigProjectScopeOptions {
-  configFileName?: string;
-  dataRoot?: string | null;
-  displayName?: string | null;
-  includeInternal?: boolean;
-  projectId?: string | null;
-  projectScopeId?: string | null;
-}
-
 export function normalizeProjectScopePath(value: string, label = 'path'): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(`[ProjectScope] ${label} must be a non-empty string`);
@@ -266,113 +257,6 @@ export function createProjectControlRoot(input: ProjectControlRoot | string): Pr
     kind: 'workspace-control-root',
     path: normalizeProjectScopePath(rootPath, 'controlRoot.path'),
   };
-}
-
-export function readProjectScopeFromWorkspaceConfig(
-  controlRoot: string,
-  options: WorkspaceConfigProjectScopeOptions = {}
-): ProjectDescriptor | null {
-  const normalizedControlRoot = normalizeProjectScopePath(controlRoot, 'controlRoot');
-  const configPath = path.join(
-    normalizedControlRoot,
-    options.configFileName ?? 'workspace.config.json'
-  );
-  if (!existsSync(configPath)) {
-    return null;
-  }
-
-  try {
-    return createProjectScopeFromWorkspaceConfig(
-      normalizedControlRoot,
-      JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
-      options
-    );
-  } catch {
-    return null;
-  }
-}
-
-export function createProjectScopeFromWorkspaceConfig(
-  controlRoot: string,
-  config: unknown,
-  options: WorkspaceConfigProjectScopeOptions = {}
-): ProjectDescriptor | null {
-  const normalizedControlRoot = normalizeProjectScopePath(controlRoot, 'controlRoot');
-  const folders = resolveWorkspaceConfigProjectFolders(normalizedControlRoot, config, options);
-  if (folders.length === 0) {
-    return null;
-  }
-
-  const dataRoot =
-    normalizeNullableString(options.dataRoot) ??
-    path.join(normalizedControlRoot, '.asd', 'project-scope');
-  const configRecord = asRecord(config);
-
-  return createProjectDescriptor({
-    controlRoot: normalizedControlRoot,
-    dataRoot,
-    displayName:
-      normalizeNullableString(options.displayName) ??
-      normalizeNullableString(configRecord?.workspaceName ?? configRecord?.name) ??
-      path.basename(normalizedControlRoot),
-    folders,
-    metadata: {
-      includeInternal: options.includeInternal === true,
-      source: 'workspace.config.json',
-    },
-    projectId: options.projectId,
-    projectScopeId: options.projectScopeId,
-  });
-}
-
-export function resolveWorkspaceConfigProjectFolders(
-  controlRoot: string,
-  config: unknown,
-  options: WorkspaceConfigProjectScopeOptions = {}
-): CreateProjectFolderDescriptorInput[] {
-  const normalizedControlRoot = normalizeProjectScopePath(controlRoot, 'controlRoot');
-  const configRecord = asRecord(config);
-  if (!configRecord) {
-    return [];
-  }
-
-  const repositories = normalizeWorkspaceConfigRepositories(configRecord.repositories);
-  const configuredRepoNames = normalizeStringArray(configRecord.repoNames);
-  const namedRepositories =
-    configuredRepoNames.length > 0
-      ? configuredRepoNames.map((name) => ({ name, record: repositories.get(name) ?? null }))
-      : [...repositories.entries()]
-          .filter(([, record]) => options.includeInternal === true || !isInternalRepository(record))
-          .map(([name, record]) => ({ name, record }));
-
-  const seen = new Set<string>();
-  return namedRepositories.flatMap(({ name, record }, index) => {
-    const repositoryPath = normalizeNullableString(record?.path ?? record?.root ?? record?.dir);
-    const folderPath = resolveWorkspaceConfigFolderPath(
-      normalizedControlRoot,
-      repositoryPath ?? name
-    );
-    const key = folderPath.toLowerCase();
-    if (seen.has(key)) {
-      return [];
-    }
-    seen.add(key);
-    return [
-      {
-        displayName: normalizeNullableString(record?.displayName) ?? name,
-        id:
-          normalizeNullableString(record?.id) ??
-          stableProjectScopeId('folder', `${normalizedControlRoot}:${name}`),
-        metadata: {
-          mode: normalizeNullableString(record?.mode),
-          source: configuredRepoNames.length > 0 ? 'repoNames' : 'repositories',
-        },
-        path: folderPath,
-        repositoryId: normalizeNullableString(record?.repositoryId ?? record?.id) ?? name,
-        role: index === 0 ? 'primary-source' : 'source',
-      } satisfies CreateProjectFolderDescriptorInput,
-    ];
-  });
 }
 
 export function createProjectFolderDescriptor(
@@ -941,49 +825,6 @@ function normalizeProjectScopeFolderRole(value: unknown): ProjectScopeFolderRole
   return PROJECT_SCOPE_FOLDER_ROLES.includes(value as never)
     ? (value as ProjectScopeFolderRole)
     : 'source';
-}
-
-function normalizeWorkspaceConfigRepositories(
-  value: unknown
-): Map<string, Record<string, unknown>> {
-  const repositories = new Map<string, Record<string, unknown>>();
-  if (!Array.isArray(value)) {
-    return repositories;
-  }
-
-  for (const item of value) {
-    const record =
-      typeof item === 'string'
-        ? { name: item }
-        : (asRecord(item) as Record<string, unknown> | null);
-    const name = normalizeNullableString(record?.name ?? record?.id ?? record?.windowName);
-    if (!record || !name) {
-      continue;
-    }
-    repositories.set(name, record);
-  }
-
-  return repositories;
-}
-
-function isInternalRepository(record: Record<string, unknown>): boolean {
-  const mode = normalizeNullableString(record.mode)?.toLowerCase();
-  const type = normalizeNullableString(record.type)?.toLowerCase();
-  return mode === 'internal' || type === 'internal';
-}
-
-function normalizeStringArray(value: unknown): string[] {
-  return Array.isArray(value)
-    ? value
-        .map((item) => normalizeNullableString(item))
-        .filter((item): item is string => item !== null)
-    : [];
-}
-
-function resolveWorkspaceConfigFolderPath(controlRoot: string, folderPath: string): string {
-  return path.isAbsolute(folderPath)
-    ? normalizeProjectScopePath(folderPath, 'folder.path')
-    : normalizeProjectScopePath(path.join(controlRoot, folderPath), 'folder.path');
 }
 
 function stableProjectScopeId(prefix: string, value: string): string {

@@ -42,3 +42,7 @@ export {
   getSnippetsPath,
 } from './infrastructure/config/Paths.js';
 export * from './infrastructure/config/TriggerSymbol.js';
+export {
+  type WorkspaceRuntimeConfig,
+  WorkspaceRuntimeConfigSchema,
+} from './shared/schemas/config.js';

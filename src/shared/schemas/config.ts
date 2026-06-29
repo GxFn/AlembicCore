@@ -146,6 +146,68 @@ export const AppConfigSchema = z
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;
 
+// ═══ .asd/config.json (Workspace Runtime Config) ════════════
+
+const WorkspaceRuntimeCoreConfigSchema = z
+  .object({
+    subRepoDir: z.string().min(1),
+    subRepoUrl: z.string().min(1).optional(),
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if ('dir' in value) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'core.dir is stale; use core.subRepoDir',
+        path: ['dir'],
+      });
+    }
+    if ('constitution' in value) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'core.constitution is stale',
+        path: ['constitution'],
+      });
+    }
+  });
+
+/**
+ * Runtime workspace config schema for `.asd/config.json` v2.
+ *
+ * This is intentionally separate from AppConfigSchema. The runtime config owns
+ * project membership and sub-repository coordinates, while AppConfigSchema
+ * still describes package/default application config.
+ */
+export const WorkspaceRuntimeConfigSchema = z
+  .object({
+    version: z.literal(2),
+    projectName: z.string().min(1),
+    database: z.string().min(1),
+    core: WorkspaceRuntimeCoreConfigSchema,
+    ai: AiConfig.optional(),
+    cache: CacheConfig.optional(),
+    features: z.record(z.string(), z.boolean()).optional(),
+    guard: GuardConfig.optional(),
+    logging: LoggingConfig.optional(),
+    monitoring: MonitoringConfig.optional(),
+    qualityGate: QualityGateConfig.optional(),
+    server: ServerConfig.optional(),
+    taskGraph: TaskGraphConfig.optional(),
+    vector: VectorConfig.optional(),
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if ('watch' in value) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'watch.* is stale and unsupported in workspace runtime config v2',
+        path: ['watch'],
+      });
+    }
+  });
+
+export type WorkspaceRuntimeConfig = z.infer<typeof WorkspaceRuntimeConfigSchema>;
+
 // ═══ constitution.yaml ═══════════════════════════
 
 const ConstitutionCapability = z
