@@ -17,7 +17,10 @@ import { describe, expect, it } from 'vitest';
 import { getImperativeVerbAllowlist } from '../src/knowledge.js';
 import matrix from './fixtures/recipe-gate-enforcement-matrix.json' with { type: 'json' };
 
-// cwd = AlembicCore when vitest runs; AlembicPlugin is its sibling under the workspace.
+// cwd = AlembicCore when vitest runs. In the full local workspace AlembicPlugin
+// is a sibling; in the standalone GitHub Actions checkout it is intentionally
+// absent, so Plugin live-source round-trips are skipped but Core-only matrix
+// checks still run.
 const PLUGIN_ROOT = path.resolve(process.cwd(), '../AlembicPlugin');
 const STAGE1_FILE = path.join(
   PLUGIN_ROOT,
@@ -28,6 +31,11 @@ const STAGE2_FILE = path.join(
   'lib/recipe-generation/host-agent-workflows/recipe-evidence-gate.ts'
 );
 const STAGE3_FILE = path.resolve(process.cwd(), 'src/domain/knowledge/UnifiedValidator.ts');
+const PLUGIN_LIVE_SOURCE_FILES = [STAGE1_FILE, STAGE2_FILE] as const;
+const MISSING_PLUGIN_LIVE_SOURCE_FILES = PLUGIN_LIVE_SOURCE_FILES.filter(
+  (file) => !fs.existsSync(file)
+);
+const pluginLiveSourceIt = MISSING_PLUGIN_LIVE_SOURCE_FILES.length === 0 ? it : it.skip;
 
 function read(file: string): string {
   if (!fs.existsSync(file)) {
@@ -48,38 +56,52 @@ function unionCodes(src: string, typeName: string): Set<string> {
 }
 
 describe('P0.0 recipe gate enforcement matrix — round-trips against live sources', () => {
-  const stage1Src = read(STAGE1_FILE);
-  const stage2Src = read(STAGE2_FILE);
-  const stage3Src = read(STAGE3_FILE);
+  if (MISSING_PLUGIN_LIVE_SOURCE_FILES.length > 0) {
+    it('documents Plugin live-source assertions skipped in standalone Core checkout', () => {
+      expect(MISSING_PLUGIN_LIVE_SOURCE_FILES.length).toBeGreaterThan(0);
+      for (const file of MISSING_PLUGIN_LIVE_SOURCE_FILES) {
+        expect(path.isAbsolute(file)).toBe(true);
+      }
+    });
+  }
 
-  it('stage 1 matrix codes == RecipeContentQualityViolationCode union (no drift)', () => {
-    const liveCodes = unionCodes(stage1Src, 'RecipeContentQualityViolationCode');
-    const matrixCodes = new Set(Object.keys(matrix.stage1.codes));
-    expect([...matrixCodes].sort()).toEqual([...liveCodes].sort());
-    // every entry tagged stage 1, always-run, host-agent path
-    for (const entry of Object.values(matrix.stage1.codes)) {
-      expect(entry.stage).toBe(1);
-      expect(entry.alwaysOrConditional).toBe('always');
-      expect(entry.paths).toContain('host-agent');
-    }
-  });
-
-  it('stage 2 matrix codes == RecipeEvidenceViolationCode union (incl. dead SOURCE_REF_BARE)', () => {
-    const liveCodes = unionCodes(stage2Src, 'RecipeEvidenceViolationCode');
-    const matrixCodes = new Set(Object.keys(matrix.stage2.codes));
-    expect([...matrixCodes].sort()).toEqual([...liveCodes].sort());
-    // dead code recorded honestly: never-emitted, no path
-    expect(matrix.stage2.codes.SOURCE_REF_BARE.alwaysOrConditional).toBe('dead');
-    expect(matrix.stage2.codes.SOURCE_REF_BARE.paths).toEqual([]);
-    // layered finding: DIMENSION_*/QUALITY_GATE_FAILED serve dimension_complete, not submit
-    for (const [code, entry] of Object.entries(matrix.stage2.codes)) {
-      if (entry.paths.includes('dimension-complete')) {
-        expect(code === 'QUALITY_GATE_FAILED' || code.startsWith('DIMENSION_')).toBe(true);
+  pluginLiveSourceIt(
+    'stage 1 matrix codes == RecipeContentQualityViolationCode union (no drift)',
+    () => {
+      const stage1Src = read(STAGE1_FILE);
+      const liveCodes = unionCodes(stage1Src, 'RecipeContentQualityViolationCode');
+      const matrixCodes = new Set(Object.keys(matrix.stage1.codes));
+      expect([...matrixCodes].sort()).toEqual([...liveCodes].sort());
+      // every entry tagged stage 1, always-run, host-agent path
+      for (const entry of Object.values(matrix.stage1.codes)) {
+        expect(entry.stage).toBe(1);
+        expect(entry.alwaysOrConditional).toBe('always');
+        expect(entry.paths).toContain('host-agent');
       }
     }
-  });
+  );
+
+  pluginLiveSourceIt(
+    'stage 2 matrix codes == RecipeEvidenceViolationCode union (incl. dead SOURCE_REF_BARE)',
+    () => {
+      const stage2Src = read(STAGE2_FILE);
+      const liveCodes = unionCodes(stage2Src, 'RecipeEvidenceViolationCode');
+      const matrixCodes = new Set(Object.keys(matrix.stage2.codes));
+      expect([...matrixCodes].sort()).toEqual([...liveCodes].sort());
+      // dead code recorded honestly: never-emitted, no path
+      expect(matrix.stage2.codes.SOURCE_REF_BARE.alwaysOrConditional).toBe('dead');
+      expect(matrix.stage2.codes.SOURCE_REF_BARE.paths).toEqual([]);
+      // layered finding: DIMENSION_*/QUALITY_GATE_FAILED serve dimension_complete, not submit
+      for (const [code, entry] of Object.entries(matrix.stage2.codes)) {
+        if (entry.paths.includes('dimension-complete')) {
+          expect(code === 'QUALITY_GATE_FAILED' || code.startsWith('DIMENSION_')).toBe(true);
+        }
+      }
+    }
+  );
 
   it('stage 3 entry count == live UnifiedValidator errors.push count (derived, not hardcoded)', () => {
+    const stage3Src = read(STAGE3_FILE);
     const livePushCount = (stage3Src.match(/errors\.push\(/g) ?? []).length;
     expect(Object.keys(matrix.stage3.rules).length).toBe(livePushCount);
     for (const entry of Object.values(matrix.stage3.rules)) {
