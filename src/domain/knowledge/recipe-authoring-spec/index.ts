@@ -59,6 +59,8 @@ export {
   gateRules,
   getEvidenceFloorPolicy,
   getImperativeVerbAllowlist,
+  getStage3FieldPolicy,
+  type Stage3FieldPolicy,
   type ValidateAgainstOptions,
   validateAgainst,
 } from './gateRules.js';

@@ -55,6 +55,7 @@ export type {
   RecipeSessionScope,
   RecipeSourceRefEvidence,
   RecipeSourceRefResolver,
+  Stage3FieldPolicy,
   SubmissionSpec,
   SubmitContract,
   ValidateAgainstOptions,
@@ -75,6 +76,7 @@ export {
   gateRules,
   getEvidenceFloorPolicy,
   getImperativeVerbAllowlist,
+  getStage3FieldPolicy,
   renderGuidance,
   validateAgainst,
 } from './domain/knowledge/recipe-authoring-spec/index.js';

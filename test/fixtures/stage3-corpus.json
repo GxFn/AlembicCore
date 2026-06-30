@@ -1,0 +1,312 @@
+[
+  {
+    "name": "valid-base",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": null
+  },
+  {
+    "name": "missing-required",
+    "candidate": {},
+    "expectedContains": "缺少必填字段: title — 中文 ≤20 字，引用项目真实类名（不以项目名开头）"
+  },
+  {
+    "name": "content-not-object",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": "不是对象",
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "⚠️ content 必须是 JSON 对象（不是字符串！）。正确格式: { \"markdown\": \"...\", \"rationale\": \"...\" }"
+  },
+  {
+    "name": "reasoning-not-object",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": "不是对象",
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "⚠️ reasoning 必须是 JSON 对象（不是字符串！）。正确格式: { \"whyStandard\": \"...\", \"sources\": [...], \"confidence\": 0.85 }"
+  },
+  {
+    "name": "kind-invalid",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "best-practice",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "kind 值无效: \"best-practice\" — 取值 rule/pattern/fact"
+  },
+  {
+    "name": "markdown-too-short",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "太短了",
+        "rationale": "r"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "content.markdown 过短 (3 字符, 最少 200)。请包含代码片段和项目上下文描述。"
+  },
+  {
+    "name": "markdown-needs-code-or-ref",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "本项目所有订单删除统一走软删除入口，把删除标记置为当前时间而不是物理删除整行数据，以保留审计与对账所需要的全部历史数据，避免级联删除引发的数据丢失风险，同时方便后续回溯订单状态变化，这是订单领域里所有服务路径都必须遵守的强制约定，任何直接物理删除的写法都属于反模式，需要在评审阶段拦截下来重新修改实现方式，新增代码必须复用统一的软删除入口并补充充分的中文说明，解释为什么要保留历史数据以及如何在对账流程里读取这些被标记为已删除的订单记录，同时要在变更说明里写清楚迁移边界与回滚方案，确保任何维护者都能理解这条强制约定背后的业务语义与持久化影响",
+        "rationale": "r"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "content.markdown 中必须包含至少一个代码块或文件引用"
+  },
+  {
+    "name": "corecode-incomplete",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "} return x;",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "coreCode 以 \"}\" 开头 — 代码片段不完整，请包含完整的函数/方法/表达式"
+  },
+  {
+    "name": "title-too-generic",
+    "candidate": {
+      "title": "Singleton pattern",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "expectedContains": "标题过于通用: \"Singleton pattern\" — 请加上项目特定的上下文"
+  },
+  {
+    "name": "title-duplicate",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "existingTitles": ["订单仓库软删除约定"],
+    "expectedContains": "标题重复: \"订单仓库软删除约定\""
+  },
+  {
+    "name": "trigger-duplicate",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "软删除保留审计痕迹并支持对账回溯，物理删除会破坏历史数据完整性。"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "existingTriggers": ["@order-soft-delete"],
+    "expectedContains": "trigger 重复: \"@order-soft-delete\""
+  },
+  {
+    "name": "code-pattern-duplicate",
+    "candidate": {
+      "title": "订单仓库软删除约定",
+      "content": {
+        "markdown": "# OrderRepository 软删除约定\n\n本项目所有订单删除统一走 OrderRepository 的软删除入口，把 deleted_at 置为当前时间而不是物理删除行，\n以保留审计与对账所需的历史数据，避免级联删除带来的数据丢失风险，这是订单域的强制约定 (来源: src/repository/order/OrderRepository.ts:42-58)。\n\n```ts\nawait orderRepository.softDelete(orderId);\n```",
+        "rationale": "r",
+        "pattern": "function softDeleteOrder(id) { return repo.softDelete(id); }"
+      },
+      "description": "订单删除统一走软删除，保留审计痕迹与对账历史。",
+      "trigger": "@order-soft-delete",
+      "kind": "rule",
+      "doClause": "Use orderRepository.softDelete so deleted_at is set instead of removing the row",
+      "dontClause": "Do not call db.delete directly on the orders table",
+      "whenClause": "When removing an order through any service path",
+      "coreCode": "await orderRepository.softDelete(orderId);",
+      "headers": [],
+      "reasoning": {
+        "whyStandard": "订单是核心审计对象，必须保留删除痕迹以满足对账与合规。",
+        "sources": ["src/repository/order/OrderRepository.ts"],
+        "confidence": 0.85
+      },
+      "category": "Service",
+      "knowledgeType": "best-practice",
+      "language": "typescript",
+      "usageGuide": "### 用法\n在任何订单删除路径调用 orderRepository.softDelete(orderId) 完成软删除。"
+    },
+    "existingFingerprints": ["functionsoftdeleteorder(id){returnrepo.softdelete(id);}"],
+    "expectedContains": "代码模式重复 — 已存在相同核心代码的候选。请提交不同的代码片段。"
+  }
+]

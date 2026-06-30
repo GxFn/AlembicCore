@@ -271,6 +271,9 @@ const CODE_BLOCK_RE = /```[\s\S]*?```/;
 const FILE_REF_RE = /\.\w{1,10}(:\d+)?/;
 const GENERIC_TITLE_RE = /^(Singleton|Factory|Observer|MVC|MVVM) (pattern|模式)$/i;
 const INCOMPLETE_CORECODE_FIRST_CHARS = new Set(['}', ')', ']']);
+// 唯一性下限 — 来自 UnifiedValidator#checkUniqueness / recordSubmission 的内联字面量（字节级保持）。
+const PATTERN_FLOOR = 30;
+const CODE_FINGERPRINT_FLOOR = 20;
 
 /** UnifiedValidator#codeFingerprint — strip comments+whitespace, first 200 chars, lowercase. */
 function codeFingerprint(code: string): string {
@@ -420,7 +423,7 @@ const GATE_RULES: GateRule[] = [
     id: 'uniqueness',
     stage: 3,
     rejectCodes: ['STAGE3_TITLE_DUPLICATE', 'STAGE3_TRIGGER_DUPLICATE', 'STAGE3_CODE_DUPLICATE'],
-    params: { codeFingerprintFloor: 20, patternFloor: 30 },
+    params: { codeFingerprintFloor: CODE_FINGERPRINT_FLOOR, patternFloor: PATTERN_FLOOR },
     guidanceText:
       'Title, trigger, and code-fingerprint must be unique against already-submitted recipes (skippable).',
     failureModeKey: 'STAGE3_CODE_DUPLICATE',
@@ -459,6 +462,41 @@ export function getEvidenceFloorPolicy(): {
     ruleFiles: EVIDENCE_FLOOR.ruleFiles,
     factFiles: EVIDENCE_FLOOR.factFiles,
     scopeEscape: new RegExp(SCOPE_ESCAPE_RE.source, SCOPE_ESCAPE_RE.flags),
+  };
+}
+
+/**
+ * Stage-3 field-gate policy — the UnifiedValidator content/uniqueness constants, exposed so the
+ * Core stage-3 gate reads these EXACT values from the spec instead of inline literals (P0.3 lift
+ * completed for P1.3 re-point). Regexes are fresh instances rebuilt from the same source+flags;
+ * all are stateless (no `g` flag), so callers get byte-identical behavior to the lifted originals.
+ */
+export interface Stage3FieldPolicy {
+  /** content.markdown 最小长度，过短即拒绝。 */
+  markdownFloor: number;
+  /** markdown“代码块”探测正则。 */
+  codeBlockRe: RegExp;
+  /** markdown“文件引用”探测正则。 */
+  fileRefRe: RegExp;
+  /** 通用标题正则，命中即过于通用。 */
+  genericTitleRe: RegExp;
+  /** coreCode 不完整的起始字符集合（以闭合括号开头）。 */
+  incompleteCoreCodeFirstChars: ReadonlySet<string>;
+  /** 唯一性：代码指纹最小长度。 */
+  codeFingerprintFloor: number;
+  /** 唯一性：pattern 最小长度。 */
+  patternFloor: number;
+}
+
+export function getStage3FieldPolicy(): Stage3FieldPolicy {
+  return {
+    markdownFloor: MARKDOWN_FLOOR,
+    codeBlockRe: new RegExp(CODE_BLOCK_RE.source, CODE_BLOCK_RE.flags),
+    fileRefRe: new RegExp(FILE_REF_RE.source, FILE_REF_RE.flags),
+    genericTitleRe: new RegExp(GENERIC_TITLE_RE.source, GENERIC_TITLE_RE.flags),
+    incompleteCoreCodeFirstChars: new Set(INCOMPLETE_CORECODE_FIRST_CHARS),
+    codeFingerprintFloor: CODE_FINGERPRINT_FLOOR,
+    patternFloor: PATTERN_FLOOR,
   };
 }
 

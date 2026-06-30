@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { getImperativeVerbAllowlist } from '../src/knowledge.js';
 import matrix from './fixtures/recipe-gate-enforcement-matrix.json' with { type: 'json' };
 
 // cwd = AlembicCore when vitest runs; AlembicPlugin is its sibling under the workspace.
@@ -44,15 +45,6 @@ function unionCodes(src: string, typeName: string): Set<string> {
     throw new Error(`reject-code union ${typeName} not found in source`);
   }
   return new Set([...block[1].matchAll(/'([A-Z][A-Z_]+)'/g)].map((m) => m[1]));
-}
-
-/** Extract the lowercase string members of `const <name> = new Set([ ... ])`. */
-function setMembers(src: string, constName: string): string[] {
-  const block = src.match(new RegExp(`const ${constName} = new Set\\(\\[([\\s\\S]*?)\\]\\)`));
-  if (!block) {
-    throw new Error(`Set ${constName} not found in source`);
-  }
-  return [...block[1].matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
 }
 
 describe('P0.0 recipe gate enforcement matrix — round-trips against live sources', () => {
@@ -97,10 +89,11 @@ describe('P0.0 recipe gate enforcement matrix — round-trips against live sourc
     }
   });
 
-  it('imperative verb counts derived from the live Set (never hardcoded)', () => {
-    const positive = setMembers(stage1Src, 'POSITIVE_IMPERATIVE_VERBS');
-    const negative = setMembers(stage1Src, 'NEGATIVE_IMPERATIVE_VERBS');
-    // structural assertions only — counts come from source, no literal 45/12 in this test
+  it('imperative verb counts derived from the live allowlist (module is the source post-P1 re-point)', () => {
+    // P1 re-pointed the Plugin stage-1 gate to import the verb allowlist from the RecipeAuthoringSpec
+    // module (@alembic/core/knowledge); the live source for the Sets is now the module, not an inline
+    // Plugin Set. Counts still come from the live source — derived, never hardcoded (§C.10).
+    const { positive, negative } = getImperativeVerbAllowlist();
     expect(new Set(positive).size).toBe(positive.length); // no dup
     expect(positive.length).toBeGreaterThan(negative.length);
     expect(negative.length).toBeGreaterThan(0);

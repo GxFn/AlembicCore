@@ -1,0 +1,142 @@
+[
+  {
+    "name": "valid-base",
+    "pass": true,
+    "errors": [],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "missing-required",
+    "pass": false,
+    "errors": [
+      "缺少必填字段: title — 中文 ≤20 字，引用项目真实类名（不以项目名开头）",
+      "缺少必填字段: content — JSON 对象 { markdown, pattern?, rationale }",
+      "缺少必填字段: content.markdown — ≥200 字符的「项目特写」，含代码块+来源标注",
+      "缺少必填字段: content.rationale — 设计原理说明",
+      "缺少必填字段: description — 中文简述 ≤80 字",
+      "缺少必填字段: trigger — @前缀 kebab-case 唯一标识符",
+      "缺少必填字段: kind — rule | pattern | fact",
+      "缺少必填字段: doClause — 英文祈使句 ≤60 tokens，以动词开头",
+      "缺少必填字段: dontClause — 英文反向约束（描述禁止的做法）",
+      "缺少必填字段: whenClause — 英文触发场景描述",
+      "缺少必填字段: coreCode — 3-8 行纯代码骨架，语法完整可复制",
+      "缺少必填字段: category — View/Service/Tool/Model/Network/Storage/UI/Utility",
+      "缺少必填字段: headers — import 语句数组，无 import 时传 []",
+      "缺少必填字段: reasoning — { whyStandard: string, sources: string[], confidence: number }",
+      "缺少必填字段: reasoning.whyStandard — 为什么这是标准做法",
+      "缺少必填字段: reasoning.sources — 非空文件路径数组",
+      "缺少必填字段: knowledgeType — code-pattern / architecture / best-practice 等",
+      "缺少必填字段: language — 编程语言标识 (swift/typescript/python/...)",
+      "缺少必填字段: usageGuide — ### 章节格式使用指南"
+    ],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "content-not-object",
+    "pass": false,
+    "errors": [
+      "缺少必填字段: content — JSON 对象 { markdown, pattern?, rationale }",
+      "缺少必填字段: content.markdown — ≥200 字符的「项目特写」，含代码块+来源标注",
+      "缺少必填字段: content.rationale — 设计原理说明",
+      "⚠️ content 必须是 JSON 对象（不是字符串！）。正确格式: { \"markdown\": \"...\", \"rationale\": \"...\" }"
+    ],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "reasoning-not-object",
+    "pass": false,
+    "errors": [
+      "缺少必填字段: reasoning — { whyStandard: string, sources: string[], confidence: number }",
+      "缺少必填字段: reasoning.whyStandard — 为什么这是标准做法",
+      "缺少必填字段: reasoning.sources — 非空文件路径数组",
+      "⚠️ reasoning 必须是 JSON 对象（不是字符串！）。正确格式: { \"whyStandard\": \"...\", \"sources\": [...], \"confidence\": 0.85 }"
+    ],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "kind-invalid",
+    "pass": false,
+    "errors": ["kind 值无效: \"best-practice\" — 取值 rule/pattern/fact"],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "markdown-too-short",
+    "pass": false,
+    "errors": ["content.markdown 过短 (3 字符, 最少 200)。请包含代码片段和项目上下文描述。"],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "markdown-needs-code-or-ref",
+    "pass": false,
+    "errors": ["content.markdown 中必须包含至少一个代码块或文件引用"],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions",
+      "建议在内容中标注代码来源 (来源: FileName.ext:行号)",
+      "内容仅 1 行 — 建议包含更多代码片段和设计意图描述"
+    ]
+  },
+  {
+    "name": "corecode-incomplete",
+    "pass": false,
+    "errors": ["coreCode 以 \"}\" 开头 — 代码片段不完整，请包含完整的函数/方法/表达式"],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "title-too-generic",
+    "pass": false,
+    "errors": ["标题过于通用: \"Singleton pattern\" — 请加上项目特定的上下文"],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "title-duplicate",
+    "pass": false,
+    "errors": ["标题重复: \"订单仓库软删除约定\""],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "trigger-duplicate",
+    "pass": false,
+    "errors": ["trigger 重复: \"@order-soft-delete\""],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  },
+  {
+    "name": "code-pattern-duplicate",
+    "pass": false,
+    "errors": ["代码模式重复 — 已存在相同核心代码的候选。请提交不同的代码片段。"],
+    "warnings": [
+      "建议填写: dimensionId — architecture / testing-quality / error-resilience 等维度 ID",
+      "建议填写: topicHint — networking / ui / data / architecture / conventions"
+    ]
+  }
+]
