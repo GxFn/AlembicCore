@@ -14,9 +14,8 @@
  * @module bootstrap/MissionBriefingBuilder
  */
 
-import { getDimensionSOP, PRE_SUBMIT_CHECKLIST } from '../../../domain/dimension/DimensionSop.js';
-import { getCursorDeliverySpec } from '../../../domain/knowledge/FieldSpec.js';
-import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../../../domain/knowledge/StyleGuide.js';
+import { buildDimensionSubmissionSpec } from '../../../domain/dimension/DimensionCatalogPayload.js';
+import { getDimensionSOP } from '../../../domain/dimension/DimensionSop.js';
 import {
   buildProjectContextPresenterInput,
   type ProjectContextEnvelope,
@@ -307,28 +306,10 @@ function enrichDimensionTask(dim: DimensionDef, tier: number): DimensionTask {
     };
   }
 
-  // ── submissionSpec: 嵌入 Quality Checklist ──
-  const submissionSpec = {
-    knowledgeTypes: dim.knowledgeTypes || [],
-    targetCandidateCount:
-      '每维度最少 3 条，目标 5 条（1-2 条不合格）。将不同关注点（如命名规范 vs 文件组织 vs 注释风格）拆分为独立候选，不要合并到一条中。',
-    contentStyle: PROJECT_SNAPSHOT_STYLE_GUIDE.split('\n')
-      .filter((l) => !l.startsWith('#') || l.startsWith('##'))
-      .filter((l) => l.trim())
-      .slice(0, 12)
-      .join('\n'),
-    contentQuality:
-      'content.markdown 必须 ≥200 字符，包含: (1) ## 标题 (2) 正文说明 (3) 至少一个 ```代码块``` (4) 来源标注「(来源: Full/Relative/Path/FileName.ext:行号)」。\n【最高优先级 — 源码位置】每个候选必须包含完整相对路径（从项目根目录开始）+ 行号。禁止只写文件名（如 NetworkClient.swift:42），必须写完整路径（如 Packages/AOXNetworkKit/Sources/AOXNetworkKit/Client/NetworkClient.swift:42）。reasoning.sources 中也必须是完整相对路径。\n【模块归属】每个候选必须标注所属模块（如「所属模块: AOXNetworkKit」）。\n短于 200 字符的提交会被拒绝。\n【禁止】标题和正文中不得出现 "Agent" 字样 — 所有候选必须以项目规范/开发规范的视角撰写，描述的是项目规则而非 AI Agent 指南。',
-    crossDimensionDedup:
-      '【跨维度去重 — 系统强制拒绝】每条候选必须属于且仅属于当前维度的视角。禁止将同一知识点换个角度/换个说法重复提交到多个维度。' +
-      '例如: BaseViewController 的继承规则只应出现在 code-pattern（设计模式）中，不应同时出现在 architecture（分层架构）和 code-standard（命名规范）中。' +
-      '如果某个发现与多个维度相关，只在最核心的维度提交，其他维度用不同的独立知识点填充。' +
-      '宁可少提交也不要重复充数 — 与前序维度标题相同的候选会被系统自动拒绝（硬去重）。',
-    cursorFields: getCursorDeliverySpec(),
-    dimensionCompleteGuide:
-      '调用 dimension_complete 时必须传递: referencedFiles=[本维度分析过的全部文件路径], keyFindings=[3-5条关键发现摘要], analysisText=详细分析报告(≥500字符,含##标题+列表+代码块)',
-    preSubmitChecklist: PRE_SUBMIT_CHECKLIST,
-  };
+  // ── submissionSpec: 唯一真源（P2.1 collapse）──
+  // 与 DimensionCatalogPayload 共用同一个由 RecipeAuthoringSpec 模块喂入的构建器：候选下限统一为 >=3、
+  // 并显式列出真实祈使动词白名单与 >=3 distinct-files 证据下限，使指引==门禁（guidance==gate）。
+  const submissionSpec = buildDimensionSubmissionSpec(dim.knowledgeTypes || []);
 
   // ── skillMeta ──
   const sm = dim.skillMeta as { name?: string; description?: string } | null | undefined;
@@ -347,7 +328,9 @@ function enrichDimensionTask(dim: DimensionDef, tier: number): DimensionTask {
     outputType: dim.dualOutput ? 'dual' : dim.skillWorthy ? 'skill' : 'candidate',
     status: 'pending',
     analysisGuide,
-    submissionSpec,
+    // fresh-literal spread bridges the strict DimensionSubmissionSpec to the loose, mutable
+    // briefing-task shape the compaction view (CompressibleDimensionTask) needs.
+    submissionSpec: { ...submissionSpec },
     skillMeta,
   };
 }

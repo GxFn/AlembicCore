@@ -51,7 +51,9 @@ export interface FullSop {
 
 /** Phase 4 共享质量检查项（与 PRE_SUBMIT_CHECKLIST 互补，非重复） */
 const SHARED_SUBMIT_CHECKLIST: readonly string[] = [
-  '**数量由证据决定** — 有几条扎实证据就提交几条，不凑数；若本维度在项目中无实质内容则跳过，提交 0 条',
+  // 决策 D-B：候选下限统一为 rule/pattern 每维度最少 3 条（与 submissionSpec / 模块 minCandidates 一致），
+  // 不再保留「提交 0 条」的旧措辞；仍禁止为凑数合并不同关注点或编造候选。
+  '**候选数量** — rule/pattern 每维度最少 3 条、目标 5 条；将不同关注点拆分为独立候选，不为凑数合并或编造',
   'content 包含 ✅ 正确写法 和 ❌ 禁止写法（如适用）',
   'coreCode 是可复制的完整代码骨架',
   'doClause 英文祈使句，以动词开头',

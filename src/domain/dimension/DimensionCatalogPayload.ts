@@ -1,4 +1,9 @@
 import { getCursorDeliverySpec } from '../knowledge/FieldSpec.js';
+import {
+  buildSubmissionSpec as buildModuleSubmissionSpec,
+  getEvidenceFloorPolicy,
+  getImperativeVerbAllowlist,
+} from '../knowledge/recipe-authoring-spec/index.js';
 import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../knowledge/StyleGuide.js';
 import { DIMENSION_REGISTRY } from './DimensionRegistry.js';
 import { type FullSop, getDimensionSOP, PRE_SUBMIT_CHECKLIST } from './DimensionSop.js';
@@ -129,7 +134,7 @@ export function buildDimensionCatalogPayload(
           timeEstimate: clonedSop.timeEstimate,
           commonMistakes: clonedSop.commonMistakes,
         }),
-        submissionSpec: buildSubmissionSpec(dimension),
+        submissionSpec: buildDimensionSubmissionSpec(dimension.allowedKnowledgeTypes),
       });
     })
   );
@@ -175,22 +180,35 @@ export function resolveDimensionLanguageApplicability(
   });
 }
 
-function buildSubmissionSpec(dimension: UnifiedDimension): DimensionSubmissionSpec {
+/**
+ * 提交规范的唯一真源（P2.1 collapse）。两个历史平行构建器（本文件 + MissionBriefingBuilder 的内联对象）
+ * 合并到此函数，由 RecipeAuthoringSpec 模块喂入候选下限（minCandidates>=3）、祈使动词白名单与证据下限，
+ * 使渲染的指引文本与门禁（gateRules）逐字一致（guidance==gate）。按控制器决策 D-B，候选数矛盾统一为
+ * 「最少 minCandidates 条」（不再出现「可以提交 0 条」）——这是 alembic_plan 唯一有意的可见指引变化。
+ */
+export function buildDimensionSubmissionSpec(
+  knowledgeTypes: readonly string[]
+): DimensionSubmissionSpec {
+  const moduleSpec = buildModuleSubmissionSpec('');
+  const verbs = getImperativeVerbAllowlist();
+  const floor = getEvidenceFloorPolicy();
   return Object.freeze({
-    knowledgeTypes: Object.freeze([...dimension.allowedKnowledgeTypes]),
-    targetCandidateCount:
-      '每维度按实际证据提交；没有实质内容可以提交 0 条。不要为了凑数合并不同关注点或编造候选。',
+    knowledgeTypes: Object.freeze([...knowledgeTypes]),
+    targetCandidateCount: `每维度最少 ${moduleSpec.minCandidates} 条，目标 5 条（1-2 条不合格）。将不同关注点（如命名规范 vs 文件组织 vs 注释风格）拆分为独立候选，不要合并到一条中。`,
     contentStyle: PROJECT_SNAPSHOT_STYLE_GUIDE.split('\n')
       .filter((line) => !line.startsWith('#') || line.startsWith('##'))
       .filter((line) => line.trim())
       .slice(0, 12)
       .join('\n'),
     contentQuality:
-      'content.markdown 必须包含项目真实源码证据、完整相对路径和行号；短文本、泛化结论或无来源候选应被拒绝。',
-    crossDimensionDedup: '同一知识点只提交到最核心的维度。不要把同一规则换角度重复提交到多个维度。',
+      'content.markdown 必须 ≥200 字符，含 ## 标题 + 正文说明 + 至少一个代码块 + 来源标注 (来源: Full/Relative/Path/FileName.ext:行号)；短文本、泛化结论或无来源候选会被拒绝。' +
+      `\ndoClause 必须以下列英文祈使动词之一开头（共 ${verbs.positive.length} 个）: ${verbs.positive.join(', ')}。` +
+      `\nrule/pattern 候选需要 ≥${floor.ruleFiles} 个不同来源文件（除非 scope 标记为 ${floor.scopeEscape.source}）；fact 候选需要 ≥${floor.factFiles} 个来源文件。`,
+    crossDimensionDedup:
+      '【跨维度去重 — 系统强制拒绝】每条候选必须属于且仅属于当前维度的视角。禁止将同一知识点换个角度/换个说法重复提交到多个维度。如果某个发现与多个维度相关，只在最核心的维度提交。宁可少提交也不要重复充数 — 与前序维度标题相同的候选会被系统自动拒绝（硬去重）。',
     cursorFields: getCursorDeliverySpec(),
     dimensionCompleteGuide:
-      'dimension_complete 需要 referencedFiles、keyFindings 和含源码证据的 analysisText；数量由真实分析结果决定。',
+      '调用 dimension_complete 时必须传递: referencedFiles=[本维度分析过的全部文件路径], keyFindings=[3-5条关键发现摘要], analysisText=详细分析报告(≥500字符,含##标题+列表+代码块)',
     preSubmitChecklist: PRE_SUBMIT_CHECKLIST,
   });
 }
