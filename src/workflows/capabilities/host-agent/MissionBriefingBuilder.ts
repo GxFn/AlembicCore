@@ -16,6 +16,9 @@
 
 import { buildDimensionSubmissionSpec } from '../../../domain/dimension/DimensionCatalogPayload.js';
 import { getDimensionSOP } from '../../../domain/dimension/DimensionSop.js';
+// P3 §C.9: the worked examples moved DOWN into the RecipeAuthoringSpec module; consume them via
+// example(lang) from the knowledge module (NOT EXAMPLE_TEMPLATES through the host-agent facade).
+import { example as recipeExample } from '../../../domain/knowledge/recipe-authoring-spec/index.js';
 import {
   buildProjectContextPresenterInput,
   type ProjectContextEnvelope,
@@ -42,7 +45,6 @@ import {
   type BriefingProfile,
   buildExecutionInstructions,
   createBriefingPlan,
-  EXAMPLE_TEMPLATES,
   projectRescanEvidenceHints,
   type RescanBriefingInput,
   type ResponseBudget,
@@ -1113,12 +1115,9 @@ export function buildMissionBriefing({
     return task;
   });
 
-  // ── 选择语言自适应的 example ──
+  // ── 选择语言自适应的 example（gate-clean，来自 RecipeAuthoringSpec 模块）──
   const lang = String(projectMeta.primaryLanguage || 'text');
-  const example =
-    (EXAMPLE_TEMPLATES as Record<string, unknown>)[lang] ||
-    (EXAMPLE_TEMPLATES as Record<string, unknown>)[lang.toLowerCase()] ||
-    EXAMPLE_TEMPLATES._default;
+  const example = recipeExample(lang).candidate;
 
   // ── 组装 ──
 
