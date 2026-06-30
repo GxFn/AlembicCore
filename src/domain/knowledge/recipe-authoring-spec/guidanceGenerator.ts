@@ -8,7 +8,10 @@
  *
  * Pure data assembly only — no fs, no host imports.
  */
-import type { RecipeAuthoringSubmitPath } from '../../../types/recipeAuthoringSpec.js';
+import type {
+  RecipeAuthoringProfile,
+  RecipeAuthoringSubmitPath,
+} from '../../../types/recipeAuthoringSpec.js';
 import { contentContract, type DocScoreTargets } from './contentContract.js';
 import { example, type WorkedExample } from './examples/index.js';
 import { getAllRequiredFieldNames, getRequiredFieldsDescription, V3_FIELD_SPEC } from './fields.js';
@@ -22,6 +25,8 @@ import {
 /** One rendered guidance bundle for a submission path. */
 export interface GuidanceBlock {
   path: RecipeAuthoringSubmitPath;
+  /** §12.3 profile this guidance was rendered for. */
+  profile: RecipeAuthoringProfile;
   stage?: 1 | 2 | 3;
   requiredFields: string[];
   rules: Array<{ id: string; stage: 1 | 2 | 3; rejectCodes: string[]; guidance: string }>;
@@ -46,15 +51,29 @@ function ruleRows(
 }
 
 /**
- * Assemble the guidance for one submission path. Reads gateRules() (the same table the gate reads),
- * the verb allowlist, the evidence floor, the required-field set, the content contract, and the
- * worked example into a single block.
+ * Gate rules the opportunistic profile does NOT enforce, so the guidance for it must not claim them:
+ * the 3-distinct-files evidence floor and the bootstrap session-scope. cold-start renders every rule.
  */
-export function renderGuidance(path: RecipeAuthoringSubmitPath, stage?: 1 | 2 | 3): GuidanceBlock {
+const OPPORTUNISTIC_DROPPED_RULE_IDS = new Set(['evidence-floor', 'session-scope']);
+
+/**
+ * Assemble the guidance for one submission path + profile. Reads gateRules() (the same table the
+ * gate reads), the verb allowlist, the evidence floor, the required-field set, the content contract,
+ * and the worked example into a single block. cold-start (default) renders every rule + the evidence
+ * floor — byte-identical to before; opportunistic drops exactly the rules the opportunistic gate
+ * skips, so guidance == gate per profile.
+ */
+export function renderGuidance(
+  path: RecipeAuthoringSubmitPath,
+  stage?: 1 | 2 | 3,
+  profile: RecipeAuthoringProfile = 'cold-start'
+): GuidanceBlock {
   const verbs = getImperativeVerbAllowlist();
   const floor = getEvidenceFloorPolicy();
   const contract = contentContract();
-  const rows = ruleRows(stage);
+  const rows = ruleRows(stage).filter(
+    (row) => profile === 'cold-start' || !OPPORTUNISTIC_DROPPED_RULE_IDS.has(row.id)
+  );
   const requiredFields = getAllRequiredFieldNames();
   const worked = example('typescript');
 
@@ -68,14 +87,20 @@ export function renderGuidance(path: RecipeAuthoringSubmitPath, stage?: 1 | 2 | 
     verbs.positive.join(', '),
     `## dontClause 否定动词（共 ${verbs.negative.length} 个）`,
     verbs.negative.join(', '),
-    '',
-    `## 证据下限`,
-    `- rule/pattern 候选需要 ≥${floor.ruleFiles} 个不同来源文件（除非 scope 标记为 ${floor.scopeEscape.source}）`,
-    `- fact 候选需要 ≥${floor.factFiles} 个来源文件`,
+    // 证据下限只属于 cold-start；opportunistic 声明不强制 3-file floor，指引同步省略，保持 guidance==gate。
+    ...(profile === 'cold-start'
+      ? [
+          '',
+          `## 证据下限`,
+          `- rule/pattern 候选需要 ≥${floor.ruleFiles} 个不同来源文件（除非 scope 标记为 ${floor.scopeEscape.source}）`,
+          `- fact 候选需要 ≥${floor.factFiles} 个来源文件`,
+        ]
+      : []),
   ].join('\n');
 
   return {
     path,
+    profile,
     stage,
     requiredFields,
     rules: rows,

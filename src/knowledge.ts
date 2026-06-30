@@ -50,6 +50,7 @@ export type {
   FailureMode,
   GateRule,
   GuidanceBlock,
+  RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
   RecipeAuthoringViolation,
   RecipeSessionScope,
@@ -78,6 +79,7 @@ export {
   getImperativeVerbAllowlist,
   getStage3FieldPolicy,
   renderGuidance,
+  resolveAuthoringProfile,
   validateAgainst,
 } from './domain/knowledge/recipe-authoring-spec/index.js';
 export {

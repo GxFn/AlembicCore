@@ -18,6 +18,16 @@ export type RecipeAuthoringSubmitPath =
   | 'in-process';
 
 /**
+ * §12.3 context-profile axis. `cold-start` is the full gate and the DEFAULT — byte-identical to
+ * today (all content gates + the full stage-2 evidence incl. the 3-distinct-files floor and the
+ * host-injected session-scope). `opportunistic` is the DECLARED lighter bar for in-process
+ * authoring: it keeps every content gate and the cheap grounding (source-ref line format, snippet
+ * match) but skips ONLY the 3-distinct-files evidence floor and the session-scope — a declared
+ * profile, NOT a relaxation of cold-start.
+ */
+export type RecipeAuthoringProfile = 'cold-start' | 'opportunistic';
+
+/**
  * A single authoring violation — the union of the stage-1 content-quality and stage-2 evidence
  * violation shapes the live gates emit (so `validateAgainst` can return the identical objects).
  */

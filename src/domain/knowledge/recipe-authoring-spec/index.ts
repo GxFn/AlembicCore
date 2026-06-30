@@ -16,6 +16,7 @@
 
 // ── §C.11 typed ports + shared violation types (re-exported from the types layer) ──
 export type {
+  RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
   RecipeAuthoringViolation,
   RecipeSessionScope,
@@ -60,6 +61,7 @@ export {
   getEvidenceFloorPolicy,
   getImperativeVerbAllowlist,
   getStage3FieldPolicy,
+  resolveAuthoringProfile,
   type Stage3FieldPolicy,
   type ValidateAgainstOptions,
   validateAgainst,

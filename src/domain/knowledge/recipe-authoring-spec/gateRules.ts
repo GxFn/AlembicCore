@@ -17,6 +17,7 @@
  * to import these back. Moving the function bodies (not retyping) is what guarantees byte-identity.
  */
 import type {
+  RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
   RecipeAuthoringViolation,
   RecipeSessionScope,
@@ -512,6 +513,49 @@ export interface ValidateAgainstOptions {
   /** stage-2 cold-start project root for source-ref resolution. */
   projectRoot?: string;
   dimensionId?: string;
+  /**
+   * §12.3 context profile. Defaults to 'cold-start' (the full gate, byte-identical to today), so
+   * existing callers that omit it are unaffected. 'opportunistic' skips ONLY the 3-distinct-files
+   * evidence floor and the session-scope; all content gates + cheap grounding still run.
+   */
+  profile?: RecipeAuthoringProfile;
+}
+
+/**
+ * Resolve the authoring profile from the host submit context. Mirrors the live
+ * shouldRunRecipeEvidenceGate decision (recipe-evidence-gate.ts): a resolved bootstrap session, a
+ * string sessionId/bootstrapSessionRef, requireProductionSession===true, a string args.dimensionId,
+ * or any item carrying a string dimensionId means a production/cold-start submission; otherwise the
+ * submission is opportunistic in-process authoring. The host resolves the session, then passes the
+ * resulting profile to validateAgainst / renderGuidance.
+ */
+export function resolveAuthoringProfile(input: {
+  session?: unknown;
+  args?: {
+    sessionId?: unknown;
+    bootstrapSessionRef?: unknown;
+    requireProductionSession?: unknown;
+    dimensionId?: unknown;
+  };
+  items?: ReadonlyArray<{ dimensionId?: unknown }>;
+}): RecipeAuthoringProfile {
+  const args = input.args ?? {};
+  if (input.session) {
+    return 'cold-start';
+  }
+  if (typeof args.sessionId === 'string' || typeof args.bootstrapSessionRef === 'string') {
+    return 'cold-start';
+  }
+  if (args.requireProductionSession === true) {
+    return 'cold-start';
+  }
+  if (typeof args.dimensionId === 'string') {
+    return 'cold-start';
+  }
+  if ((input.items ?? []).some((item) => typeof item?.dimensionId === 'string')) {
+    return 'cold-start';
+  }
+  return 'opportunistic';
 }
 
 /**
@@ -644,9 +688,12 @@ function validateStage2(
 ): RecipeAuthoringViolation[] {
   const violations: RecipeAuthoringViolation[] = [];
   const title = stringValue(item.title) || '(untitled)';
+  // §12.3 profile: cold-start (default) runs the full stage-2 gate; opportunistic skips ONLY the
+  // 3-distinct-files evidence floor and the session-scope, keeping content + cheap grounding.
+  const profile = opts.profile ?? 'cold-start';
 
-  // Session scope (runtime port) — only when injected.
-  if (opts.sessionScope) {
+  // Session scope (runtime port) — cold-start only; opportunistic declares no session. Only when injected.
+  if (profile === 'cold-start' && opts.sessionScope) {
     const scope = opts.sessionScope({
       projectRoot: opts.projectRoot,
       dimensionId: opts.dimensionId ?? stringValue(item.dimensionId),
@@ -732,8 +779,9 @@ function validateStage2(
     }
   }
 
-  // Evidence floor (pure, distinct sourcePaths) — only meaningful once refs are resolved.
-  if (opts.sourceRefResolver && opts.projectRoot) {
+  // Evidence floor (3-distinct-files, pure) — cold-start only; opportunistic declares this off.
+  // Only meaningful once refs are resolved.
+  if (profile === 'cold-start' && opts.sourceRefResolver && opts.projectRoot) {
     const distinctFiles = new Set(validSourcePaths);
     if (requiresMultiFileEvidence(item) && distinctFiles.size < EVIDENCE_FLOOR.ruleFiles) {
       violations.push({
