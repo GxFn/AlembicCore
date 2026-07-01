@@ -3,6 +3,12 @@
 // collectModuleSnapshots + 全 ProjectInfo tree 类型 + PlanProjectContextAnalysis 契约，双宿主
 // (host-agent + 主体 in-process)共用。U1a.3 纯提取，行为字节不变；Core 内部相对路径引依赖。
 // 注：budget 从 MCP 入参解析(resolveProjectInfoTreeBudgetBytes)仍在 host 交付层，Core 只收 budgetBytes 纯数。
+
+import {
+  buildDimensionCatalogPayload,
+  type DimensionCatalogPayloadItem,
+  type ProjectLanguageFrameworkFacts,
+} from '../../dimensions.js';
 import type {
   ProjectContextEnvelope,
   ProjectContextPresenterInput,
@@ -946,4 +952,42 @@ function dedupeBy<T>(values: readonly T[], keyFn: (value: T) => string): T[] {
 
 function isPresent<T>(value: T | null | undefined | ''): value is T {
   return value !== null && value !== undefined && value !== '';
+}
+
+// ===== U1b.1：候选维度投影（buildCandidateDimensions；从 host 交付层下沉，双宿主共用）=====
+export interface CandidateDimension {
+  id: string;
+  label: string;
+  languageApplicable: boolean;
+  layer: DimensionCatalogPayloadItem['layer'];
+  miningGuidance: string;
+}
+
+export function buildCandidateDimensions(
+  analysis: PlanProjectContextAnalysis
+): CandidateDimension[] {
+  const facts = buildProjectLanguageFrameworkFacts(analysis);
+  return buildDimensionCatalogPayload(facts).map((dimension) => ({
+    id: dimension.id,
+    label: dimension.label,
+    languageApplicable: dimension.languageApplicable,
+    layer: dimension.layer,
+    miningGuidance: dimension.extractionGuide,
+  }));
+}
+
+function buildProjectLanguageFrameworkFacts(
+  analysis: PlanProjectContextAnalysis
+): ProjectLanguageFrameworkFacts {
+  const sourceLanguages = analysis.sourceFileFacts.map((file) => file.language);
+  const languages = uniqueStrings([
+    analysis.primaryLanguage,
+    ...analysis.secondaryLanguages,
+    ...sourceLanguages,
+  ]);
+  return {
+    frameworks: analysis.frameworks,
+    languages,
+    primaryLanguage: analysis.primaryLanguage,
+  };
 }
