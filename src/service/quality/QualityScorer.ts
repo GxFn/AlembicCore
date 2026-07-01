@@ -17,6 +17,7 @@
  * - SonarQube: 多维度渐进评级，非二元判断
  */
 
+import { reviewRecipeDepth } from '../../domain/knowledge/recipe-authoring-spec/index.js';
 import { QUALITY_GRADES, QUALITY_WEIGHTS } from '../../shared/constants.js';
 import { LanguageProfiles } from '../../shared/LanguageProfiles.js';
 
@@ -46,6 +47,17 @@ export interface RecipeInput {
   reasoningSources?: string[];
   reasoningConfidence?: number;
   source?: string;
+
+  // P5/C8 深度接地评分输入（由 KnowledgeService._adaptForScorer 经 C7 接线透传）。
+  // groundingAvailable=false（宿主未注入接地 port）时评分走 legacy 公式，字节不变、零回归；
+  // =true 时启用深度加权公式：长度降为及格线、depthCoverage 只认接地维度。
+  groundingAvailable?: boolean;
+  groundedSourcePaths?: string[];
+  constraintsBoundaries?: string[];
+  constraintsPreconditions?: string[];
+  constraintsSideEffects?: string[];
+  contentVerification?: { method?: string; expected_result?: string; test_code?: string } | null;
+  reasoningAlternatives?: string[];
 
   // Metadata
   headers?: string[];
@@ -145,10 +157,23 @@ export class QualityScorer {
   }
 
   /**
-   * 内容深度 (0-1)
-   * markdown 丰富度 + 结构化标记 + 设计原理 + 来源引用
+   * 内容深度 (0-1) — P5/C8 分流。
+   *
+   * 关键安全设计：只有当宿主注入了接地 port(groundingAvailable=true，见 C7)时才启用深度加权公式；否则
+   * 走 legacy 公式，与历史评分【字节不变】——因为生产宿主接线落地前 groundedSourcePaths 恒空，若此时削长度
+   * 权重会让全量历史 recipe 评分雪崩(违反主指标不回归)。深度公式随接线+真机快照验证(P6)一并激活。
    */
   #scoreContentDepth(r: RecipeInput) {
+    if (r.groundingAvailable) {
+      return this.#scoreContentDepthGrounded(r);
+    }
+    return this.#scoreContentDepthLegacy(r);
+  }
+
+  /**
+   * legacy 内容深度公式 —— 与 C8 之前逐字一致。宿主未注入接地 port 时的默认路径，保证零回归。
+   */
+  #scoreContentDepthLegacy(r: RecipeInput) {
     let s = 0;
     const md = r.contentMarkdown || r.usageGuide || '';
 
@@ -183,6 +208,68 @@ export class QualityScorer {
     if (r.usageGuide && r.usageGuide !== md) {
       s += textScore(r.usageGuide, 20, 200, 0.1);
     }
+
+    return Math.min(1, s);
+  }
+
+  /**
+   * P5/C8 深度加权内容深度公式（接地 port 就位后启用）。
+   *
+   * 口径转变(直击「800 字 + ## 刷满 contentDepth」失败模式)：
+   *   - 长度从满分杠杆(0.3 斜坡到 800 字)降为**及格线**(0.12 斜坡到 400 字，400 字足够容纳深度分节)。
+   *   - 结构标记/rationale/whyStandard/sources 保留但**降权**——非接地内容合计封顶约 0.56。
+   *   - 新增 depthCoverage(权重 0.44)：调 Core `reviewRecipeDepth`(与契约/裁判/retry/host depthGaps 字节同源)，
+   *     **只认在 groundedSourcePaths 上的 file:line**——编造边界/凑字数拿不到分；接地覆盖 ≥3 个深度维度给满。
+   * 唯一冲上 contentDepth 高分的路径 = 真接地覆盖更多深度维度，此时涨分即价值(直击用户红线)。
+   */
+  #scoreContentDepthGrounded(r: RecipeInput) {
+    let s = 0;
+    const md = r.contentMarkdown || r.usageGuide || '';
+
+    // 长度降为及格线：满权 0.12，最优 400 字（足够写下四个深度分节）。
+    s += textScore(md || undefined, 50, 400, 0.12);
+
+    // 结构化标记降权（不再是刷分杠杆）。
+    if (md) {
+      if (/^#{1,4}\s/m.test(md)) {
+        s += 0.05;
+      }
+      if (/```[\s\S]*?```|`[^`]+`/.test(md)) {
+        s += 0.05;
+      }
+      if (/^[\s]*[-*+]\s/m.test(md)) {
+        s += 0.03;
+      }
+    }
+
+    // rationale / whyStandard / sources / usageGuide 保留但降权。
+    s += textScore(r.contentRationale, 10, 100, 0.1);
+    s += textScore(r.reasoningWhyStandard, 10, 100, 0.1);
+    if (r.reasoningSources && r.reasoningSources.length > 0) {
+      s += Math.min(0.06, r.reasoningSources.length * 0.02);
+    }
+    if (r.usageGuide && r.usageGuide !== md) {
+      s += textScore(r.usageGuide, 20, 200, 0.05);
+    }
+
+    // depthCoverage：只认接地的深度维度（权重 0.44，覆盖 ≥3 维给满）。
+    const verificationText = r.contentVerification
+      ? [r.contentVerification.method, r.contentVerification.expected_result]
+          .filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          .join('\n')
+      : undefined;
+    const review = reviewRecipeDepth(
+      {
+        markdown: md,
+        boundaries: r.constraintsBoundaries,
+        preconditions: r.constraintsPreconditions,
+        sideEffects: r.constraintsSideEffects,
+        verification: verificationText,
+        alternatives: r.reasoningAlternatives,
+      },
+      { validSourcePaths: r.groundedSourcePaths ?? [] }
+    );
+    s += Math.min(1, review.grounded.length / 3) * 0.44;
 
     return Math.min(1, s);
   }

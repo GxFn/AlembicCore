@@ -763,12 +763,15 @@ export class KnowledgeService {
 
       // P0/C7: 若宿主注入了接地 port，重算该 entry 的真接地集(与门禁字节同源)喂给 scorer 做深度覆盖判定；
       // 未注入则空集 → depthCoverage 退化为 0，旧评分路径不变(additive/向后兼容)。
+      // P5/C8: groundingAvailable 标记「接地 port 是否就位」——scorer 据此决定走深度加权公式还是 legacy
+      // 公式(未就位时字节不变、零回归)，区别于「port 就位但本条 recipe 恰好零接地」。
+      const groundingAvailable = Boolean(this._groundedSourcePaths);
       const grounding = this._groundedSourcePaths
         ? this._groundedSourcePaths(this._groundingItemFromEntry(entry))
         : { validSourcePaths: [], validRanges: [] };
 
       // 为 QualityScorer 适配输入字段
-      const scorerInput = this._adaptForScorer(entry, grounding);
+      const scorerInput = this._adaptForScorer(entry, grounding, groundingAvailable);
       const result = this._qualityScorer.score(scorerInput);
 
       // 更新 Quality 值对象；同步计算 authority（0‑5）
@@ -971,7 +974,8 @@ export class KnowledgeService {
     grounding: { validSourcePaths: string[]; validRanges: string[] } = {
       validSourcePaths: [],
       validRanges: [],
-    }
+    },
+    groundingAvailable = false
   ): Record<string, unknown> {
     // 从 Stats 值对象提取 engagement 指标
     const stats =
@@ -1026,6 +1030,8 @@ export class KnowledgeService {
       reasoningAlternatives: (reasoning.alternatives as string[]) ?? [],
       groundedSourcePaths: grounding.validSourcePaths,
       groundedRanges: grounding.validRanges,
+      // P5/C8: 接地 port 是否就位——scorer 据此在深度加权 / legacy 公式间分流。
+      groundingAvailable,
     };
   }
 
