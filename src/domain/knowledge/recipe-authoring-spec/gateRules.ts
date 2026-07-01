@@ -620,18 +620,24 @@ export function resolveGroundedSourcePaths(
     if (!match) {
       continue;
     }
-    const resolved = opts.sourceRefResolver({
-      projectRoot: opts.projectRoot,
-      sourcePath: match[1] ?? '',
-      startLine: Number(match[2]),
-      endLine: match[3] ? Number(match[3]) : Number(match[2]),
-      sourceRef,
-      itemIndex,
-      title,
-    });
-    if (!('violation' in resolved)) {
-      validRanges.push(resolved.evidence.rangeText);
-      validSourcePaths.push(resolved.evidence.sourcePath);
+    // 逐 ref 隔离：fs-backed resolver 可能对单个不可读/竞态文件抛错，不能让一处坏 ref 令整条 recipe 的
+    // 接地集归零(真机健壮性)。抛错的 ref 视为未接地跳过，其余照常解析。
+    try {
+      const resolved = opts.sourceRefResolver({
+        projectRoot: opts.projectRoot,
+        sourcePath: match[1] ?? '',
+        startLine: Number(match[2]),
+        endLine: match[3] ? Number(match[3]) : Number(match[2]),
+        sourceRef,
+        itemIndex,
+        title,
+      });
+      if (!('violation' in resolved)) {
+        validRanges.push(resolved.evidence.rangeText);
+        validSourcePaths.push(resolved.evidence.sourcePath);
+      }
+    } catch {
+      // 单 ref 解析异常 → 视为未接地，继续。
     }
   }
   return { validSourcePaths, validRanges };
