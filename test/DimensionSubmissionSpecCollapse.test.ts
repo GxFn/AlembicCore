@@ -17,6 +17,7 @@ import {
   buildSubmissionSpec,
   getEvidenceFloorPolicy,
   getImperativeVerbAllowlist,
+  getStage3FieldPolicy,
 } from '../src/knowledge.js';
 
 describe('P2.1 submissionSpec collapse — D-B ≥3 floor, guidance==gate', () => {
@@ -38,6 +39,23 @@ describe('P2.1 submissionSpec collapse — D-B ≥3 floor, guidance==gate', () =
     expect(verbs.positive).toContain('validate');
     // the evidence floor the gate enforces is stated
     expect(spec.contentQuality).toContain(`≥${evidenceFloor.ruleFiles} 个不同来源文件`);
+  });
+
+  it('P3/C6: contentStyle 不再被 slice(0,12) 截断——深度四问 + 来源标注格式规则同时到达 host', () => {
+    const spec = buildDimensionSubmissionSpec(['rule']);
+    // 深度四问(C1 前置)出现在 host contentStyle。
+    expect(spec.contentStyle).toContain('深度四问');
+    expect(spec.contentStyle).toContain('权衡');
+    // 旧 slice(0,12) 会把这条来源标注格式规则(第 13 行)截掉；去 slice 后它随全文到达 host。
+    expect(spec.contentStyle).toContain('代码来源标注: (来源: FileName.ext:行号)');
+  });
+
+  it('P3/C6: contentQuality 的 markdown 下限从门禁同一常量派生(消除手写 floor literal)', () => {
+    const stage3 = getStage3FieldPolicy();
+    const spec = buildDimensionSubmissionSpec(['rule']);
+    // 数值来自 getStage3FieldPolicy().markdownFloor(门禁 MARKDOWN_FLOOR 单源)，非散落的 200 字面量。
+    expect(spec.contentQuality).toContain(`≥${stage3.markdownFloor} 字符`);
+    expect(stage3.markdownFloor).toBe(200);
   });
 
   it('every catalog-payload dimension uses the collapsed builder (no draft "0 条")', () => {

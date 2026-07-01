@@ -3,6 +3,7 @@ import {
   buildSubmissionSpec as buildModuleSubmissionSpec,
   getEvidenceFloorPolicy,
   getImperativeVerbAllowlist,
+  getStage3FieldPolicy,
 } from '../knowledge/recipe-authoring-spec/index.js';
 import { PROJECT_SNAPSHOT_STYLE_GUIDE } from '../knowledge/StyleGuide.js';
 import { DIMENSION_REGISTRY } from './DimensionRegistry.js';
@@ -192,16 +193,21 @@ export function buildDimensionSubmissionSpec(
   const moduleSpec = buildModuleSubmissionSpec('');
   const verbs = getImperativeVerbAllowlist();
   const floor = getEvidenceFloorPolicy();
+  // P3/C6: markdown 下限从门禁同一常量派生(getStage3FieldPolicy().markdownFloor)，消除手写 floor literal，
+  // 与 validateAgainst / front-load 指引路径同源，杜绝 host 收到与门禁漂移的旧硬编码数字。
+  const stage3 = getStage3FieldPolicy();
   return Object.freeze({
     knowledgeTypes: Object.freeze([...knowledgeTypes]),
     targetCandidateCount: `每维度最少 ${moduleSpec.minCandidates} 条，目标 5 条（1-2 条不合格）。将不同关注点（如命名规范 vs 文件组织 vs 注释风格）拆分为独立候选，不要合并到一条中。`,
+    // P3/C6: 去掉旧的 .slice(0, 12) 截断——它会把「深度四问」之后的格式规则/来源标注截掉，且是 host 看到
+    // recipe 深度指引的第二条通道。现放行完整 styleGuide(只滤顶级 # 标题与空行)，与 renderGuidance 的
+    // front-load 深度契约不再冲突；深度四问已在 C1 前置，不再受 12 行预算约束。
     contentStyle: PROJECT_SNAPSHOT_STYLE_GUIDE.split('\n')
       .filter((line) => !line.startsWith('#') || line.startsWith('##'))
       .filter((line) => line.trim())
-      .slice(0, 12)
       .join('\n'),
     contentQuality:
-      'content.markdown 必须 ≥200 字符，含 ## 标题 + 正文说明 + 至少一个代码块 + 来源标注 (来源: Full/Relative/Path/FileName.ext:行号)；短文本、泛化结论或无来源候选会被拒绝。' +
+      `content.markdown 必须 ≥${stage3.markdownFloor} 字符，含 ## 标题 + 正文说明 + 至少一个代码块 + 来源标注 (来源: Full/Relative/Path/FileName.ext:行号)；短文本、泛化结论或无来源候选会被拒绝。` +
       `\ndoClause 必须以下列英文祈使动词之一开头（共 ${verbs.positive.length} 个）: ${verbs.positive.join(', ')}。` +
       `\nrule/pattern 候选需要 ≥${floor.ruleFiles} 个不同来源文件（除非 scope 标记为 ${floor.scopeEscape.source}）；fact 候选需要 ≥${floor.factFiles} 个来源文件。`,
     crossDimensionDedup:
