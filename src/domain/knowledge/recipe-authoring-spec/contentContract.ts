@@ -25,11 +25,24 @@ knowledge({ action: "submit" }) 的 content.markdown 字段必须是「项目特
 3. **项目禁止什么** — 反模式、已废弃写法
 4. **新代码怎么写** — 可直接复制使用的代码模板 + 来源标注 (来源: FileName.ext:行号)
 
+## 深度四问（每问挂 (来源: File:行号)，读不到真实证据的那一维宁可不写）
+设计意图(为何此结构而非显而易见的替代) / 边界与前置(何时适用·依赖哪些不变量) / 失败模式(越界会怎样·谁受影响) / 权衡(放弃了什么·换来什么)
+
 ## 格式要求
 - 标题使用项目真实类名/前缀，不用占位名，不以项目名开头
 - 代码来源标注: (来源: FileName.ext:行号)
 - 不要纯代码罗列，必须有项目上下文
 - 标题和正文中不得出现 "Agent" 字样`;
+
+/**
+ * VALUE_RUBRIC — 「价值标准」(P1/C1)。区别于 DOC_SCORE_TARGETS(评分器数值杠杆)，这是 agent 面的**价值**
+ * 索取：一条 recipe 是否让复用者能安全套用/判断越界。刻意不含具体分数——避免继续明文教「凑长度」。由
+ * guidanceGenerator 渲染进 `## 深度契约` 段(无自带 `##` 顶级标题，供上层包裹)。
+ */
+export const VALUE_RUBRIC = `一条有价值的 recipe 让复用者(人或 AI)能判断：能否在自己场景安全套用、越界会发生什么、放弃了什么换来什么。
+- 价值来自「就真实代码推理」，不来自字数或标题——评分器只认接地深度(挂真实 file:line)，长度冲不出高分。
+- 每个深度断言必须挂 (来源: File:行号) 且能在项目里真解析到；读不到真实证据的那一维宁可不写(编造/占位既拿不到分也过不了自评)。
+- 多来源佐证需跨 ≥2 处不同文件(synthesis)，而非同一处重复计数。`;
 
 /** One scored text lever: empty→0, <minLen→weight*0.2, ≤optimalLen→ramp, else full weight. */
 export interface DocScoreTextTarget {
@@ -56,6 +69,12 @@ export interface DocScoreTargets {
   sources: { perSource: number; cap: number };
   /** usageGuide extra reward when it differs from markdown (textScore(usageGuide, 20, 200, 0.1)). */
   usageGuide: DocScoreTextTarget;
+  /**
+   * P1/C1: 深度覆盖目标——按【接地覆盖的深度维度数】计，而非字符数。这是本次升级把评分口径从「长度」
+   * 转向「接地深度」的目标描述；C8(P5)将其接成真实 scorer 子分(depthCoverage 只在维度论述挂真实
+   * file:line 时计分)。放在这里让 guidance 明说「覆盖 ≥N 维给满，凑长度不得分」。
+   */
+  depthCoverage: { dimensionsForFull: number; note: string };
 }
 
 const DOC_SCORE_TARGETS: DocScoreTargets = {
@@ -65,12 +84,21 @@ const DOC_SCORE_TARGETS: DocScoreTargets = {
   whyStandard: { minLen: 10, optimalLen: 100, weight: 0.15 },
   sources: { perSource: 0.03, cap: 0.1 },
   usageGuide: { minLen: 20, optimalLen: 200, weight: 0.1 },
+  depthCoverage: {
+    dimensionsForFull: 3,
+    note: '深度按【接地覆盖的深度维度数】计分（覆盖 ≥3 个深度维度即满），不按字符数；凑长度/加标题不得分。',
+  },
 };
 
-/** The recipe content contract: the style guide + the explicit scorer targets. */
-export function contentContract(): { styleGuide: string; docScoreTargets: DocScoreTargets } {
+/** The recipe content contract: the style guide + the explicit scorer targets + the value rubric. */
+export function contentContract(): {
+  styleGuide: string;
+  docScoreTargets: DocScoreTargets;
+  valueRubric: string;
+} {
   return {
     styleGuide: PROJECT_SNAPSHOT_STYLE_GUIDE,
     docScoreTargets: DOC_SCORE_TARGETS,
+    valueRubric: VALUE_RUBRIC,
   };
 }

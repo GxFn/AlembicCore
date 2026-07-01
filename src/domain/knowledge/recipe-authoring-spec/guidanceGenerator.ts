@@ -13,6 +13,7 @@ import type {
   RecipeAuthoringSubmitPath,
 } from '../../../types/recipeAuthoringSpec.js';
 import { contentContract, type DocScoreTargets } from './contentContract.js';
+import { buildDepthScaffold, buildDepthSelfReviewChecklist } from './depthContract.js';
 import { example, type WorkedExample } from './examples/index.js';
 import { getAllRequiredFieldNames, getRequiredFieldsDescription, V3_FIELD_SPEC } from './fields.js';
 import {
@@ -32,8 +33,16 @@ export interface GuidanceBlock {
   rules: Array<{ id: string; stage: 1 | 2 | 3; rejectCodes: string[]; guidance: string }>;
   imperativeVerbs: { positive: string[]; negative: string[] };
   evidenceFloor: { ruleFiles: number; factFiles: number; scopeEscape: string };
-  contentContract: { styleGuide: string; docScoreTargets: DocScoreTargets };
+  contentContract: { styleGuide: string; docScoreTargets: DocScoreTargets; valueRubric: string };
   example: WorkedExample;
+  /**
+   * P1/C2: 深度契约段(价值标准 + 写前推理脚手架 + 落笔后自评)，从 DEPTH_DIMENSIONS 单源渲染。作为
+   * GuidanceBlock 一级结构化字段(与 example 同级)，使深度指引活过 host 压缩阶梯——host 截断 front-load
+   * 时保 example/evidenceFloor/imperativeVerbs，深度契约随结构化字段一并保留，不因 text 截断而丢失。
+   */
+  depthContract: string;
+  /** P1/C2: 价值标准(VALUE_RUBRIC)——「什么是有价值的 recipe」，与深度契约同源(contentContract().valueRubric)。 */
+  valueRubric: string;
   /** the assembled human-facing guidance text. */
   text: string;
 }
@@ -77,11 +86,28 @@ export function renderGuidance(
   const requiredFields = getAllRequiredFieldNames();
   const worked = example('typescript');
 
+  // P1/C2: 深度契约段——最高杠杆单点。从 DEPTH_DIMENSIONS 单源渲染(与 C3 契约/C4 裁判/C9 retry 同源)，
+  // 明说「这是价值要求不是门槛：不进门禁、不倒退 floor；但评分器只认接地深度、不认长度」。纯 additive，
+  // 不改任何 gateRules 谓词。作为 GuidanceBlock.depthContract 一级字段返回，活过 host 压缩阶梯。
+  const depthContractText = [
+    '## 深度契约（超越门禁的价值要求）',
+    '这是价值要求不是新门槛：不进门禁校验、不降低现有证据要求。但评分器只认接地深度、不认长度——凑字数或加标题冲不出高分。',
+    contract.valueRubric,
+    '',
+    '### 写正文前先推理（先逐维作答，再落笔）',
+    buildDepthScaffold(),
+    '',
+    '### 落笔后自评（任一未过则回代码重挖）',
+    buildDepthSelfReviewChecklist(),
+  ].join('\n');
+
   const text = [
     contract.styleGuide,
     '',
     '## 提交校验规则（与门禁完全一致）',
     ...rows.map((row) => `- [stage ${row.stage}] ${row.id}: ${row.guidance}`),
+    '',
+    depthContractText,
     '',
     `## doClause 允许的祈使动词（共 ${verbs.positive.length} 个）`,
     verbs.positive.join(', '),
@@ -112,6 +138,8 @@ export function renderGuidance(
     },
     contentContract: contract,
     example: worked,
+    depthContract: depthContractText,
+    valueRubric: contract.valueRubric,
     text,
   };
 }

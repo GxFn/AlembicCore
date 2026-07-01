@@ -29,6 +29,7 @@ export {
   type DocScoreTargets,
   type DocScoreTextTarget,
   PROJECT_SNAPSHOT_STYLE_GUIDE,
+  VALUE_RUBRIC,
 } from './contentContract.js';
 // ── SECTION 7: depth contract (P0/C3) — 深度价值契约(超越门禁的价值要求，两宿主单源) ──
 export {
