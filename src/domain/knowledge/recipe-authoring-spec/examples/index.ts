@@ -63,9 +63,42 @@ interface ExampleSpec {
   sources: string[];
   headers?: string[];
   usageGuide: string;
+  /**
+   * P2/C5: 可选深度分节——示范「就真实代码推理出深度」，每节挂真实 file:line(内联)，跨 ≥2 distinct 文件
+   * 佐证(synthesis)。仅被注入 guidance 的 typescript 范例提供；其余范例不填(向后兼容，仍 gate-clean)。
+   * 措辞必须避开门禁关系词(依赖/关系/调用链/调用方/被调用/影响路径/上游/下游)，否则触发 GRAPH_REF 规则。
+   */
+  depth?: {
+    /** ## 设计意图：为何此结构而非显而易见的替代(须说明被放弃的替代)。 */
+    designIntent: string;
+    /** ## 边界与前置条件：何时适用/不适用、以何为前提、哪些不变量。 */
+    boundaries: string;
+    /** ## 失败模式：越界会怎样(出错/受影响/如何暴露)。 */
+    failureModes: string;
+    /** ## 权衡：放弃了什么、换来什么。 */
+    tradeoffs: string;
+  };
 }
 
 function buildExample(spec: ExampleSpec): Record<string, unknown> {
+  // P2/C5: 深度分节作为纯散文追加在代码块之后——不新增 fenced 块，保证 collectCodeEvidence 仍取 coreCode
+  // 为首个代码证据；每节挂真实 file:line，示范「就真实代码推理」而非填空模板。仅当 spec.depth 提供时渲染。
+  const depthLines = spec.depth
+    ? [
+        '',
+        '## 设计意图',
+        spec.depth.designIntent,
+        '',
+        '## 边界与前置条件',
+        spec.depth.boundaries,
+        '',
+        '## 失败模式',
+        spec.depth.failureModes,
+        '',
+        '## 权衡',
+        spec.depth.tradeoffs,
+      ]
+    : [];
   const markdown = [
     `## ${spec.title}`,
     '',
@@ -78,6 +111,7 @@ function buildExample(spec: ExampleSpec): Record<string, unknown> {
     spec.coreCode,
     '```',
     `(来源: ${spec.sources[0]})`,
+    ...depthLines,
   ].join('\n');
   return {
     title: spec.title,
@@ -145,6 +179,16 @@ export const EXAMPLE_TEMPLATES: Record<string, Record<string, unknown>> = {
     headers: ["import { Injectable } from '@nestjs/common';"],
     usageGuide:
       '### 何时使用\n创建任何新 Service 类时\n### 规范\n所有 Service 类顶部添加 @Injectable()',
+    depth: {
+      designIntent:
+        '选择在每个类上显式标注 @Injectable()，而非让容器约定式扫描全部 class：显式标注把「这是一个可被容器装配的服务」写在类声明处、可被静态检索，见 src/services/UserService.ts:5 装饰器紧贴类名。被放弃的替代方案是约定式全量扫描，它会把纯数据模型也误纳入装配、放大启动成本。',
+      boundaries:
+        '仅适用于进入 DI 容器装配的 Service 类；纯数据模型、静态工具类不在此列。前提是构造参数本身也是容器已注册的可注入项——见 src/services/AuthService.ts:7 构造参数全部为已注册服务，缺一即装配失败。',
+      failureModes:
+        '未标注 @Injectable() 的 Service 在容器解析时抛出「cannot resolve」并在应用启动装配阶段直接失败——问题在装配期即暴露、不会潜伏到请求运行时，见 src/services/UserService.ts:5 一旦缺失装饰器即无法被扫描登记。',
+      tradeoffs:
+        '换来的是启动装配期即失败的确定性与可静态检索的装配点；放弃的是零样板——每个 Service 都要多写一行装饰器，见 src/services/AuthService.ts:7。相比约定式扫描，显式标注多一行成本，但换来装配范围精确可控。',
+    },
   }),
 
   python: buildExample({

@@ -9,6 +9,8 @@ import { describe, expect, it } from 'vitest';
 
 import { contentContract } from '../src/domain/knowledge/recipe-authoring-spec/contentContract.js';
 import { DEPTH_DIMENSIONS } from '../src/domain/knowledge/recipe-authoring-spec/depthContract.js';
+import { reviewRecipeDepth } from '../src/domain/knowledge/recipe-authoring-spec/depthReview.js';
+import { example } from '../src/domain/knowledge/recipe-authoring-spec/examples/index.js';
 import { renderGuidance } from '../src/domain/knowledge/recipe-authoring-spec/guidanceGenerator.js';
 
 describe('renderGuidance 深度契约段 (C2) — 从 DEPTH_DIMENSIONS 单源渲染', () => {
@@ -50,5 +52,40 @@ describe('renderGuidance 深度契约段 (C2) — 从 DEPTH_DIMENSIONS 单源渲
     expect(sliced).toContain('深度四问');
     expect(sliced).toContain('设计意图');
     expect(sliced).toContain('权衡');
+  });
+});
+
+describe('注入的 typescript worked-example (C5) — 是真接地深度范本，非仅 gate-clean', () => {
+  // 范例正文用真实 file:line 跨两文件推理；解析这两文件后，五个深度维度应全部接地。
+  const validSourcePaths = ['src/services/UserService.ts', 'src/services/AuthService.ts'];
+  const candidate = example('typescript').candidate as {
+    content: { markdown: string };
+  };
+
+  it('depthReview 判定五维全接地 + 多来源跨 ≥2 文件(synthesis)', () => {
+    const result = reviewRecipeDepth(
+      { markdown: candidate.content.markdown },
+      { validSourcePaths }
+    );
+    expect(result.grounded).toEqual(
+      expect.arrayContaining([
+        'designIntent',
+        'boundaries',
+        'failureModes',
+        'tradeoffs',
+        'multiSourceCorroboration',
+      ])
+    );
+    expect(result.missing).toHaveLength(0);
+    expect(result.groundedFileCount).toBe(2);
+  });
+
+  it('若两文件都解析不到 → 五维退化为未接地(证明接地不是靠关键词，是靠真 file:line)', () => {
+    const result = reviewRecipeDepth(
+      { markdown: candidate.content.markdown },
+      { validSourcePaths: [] }
+    );
+    expect(result.grounded).not.toContain('designIntent');
+    expect(result.grounded).not.toContain('multiSourceCorroboration');
   });
 });
