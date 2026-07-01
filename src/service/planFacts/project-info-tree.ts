@@ -991,3 +991,31 @@ function buildProjectLanguageFrameworkFacts(
     primaryLanguage: analysis.primaryLanguage,
   };
 }
+
+// ===== U3：统一 plan facts 投影入口（双宿主共用）=====
+// buildPlanFactsProjection —— 把已收集的 PlanProjectContextAnalysis 投影成喂给 plan-selection AI 的
+// 「精简三件套」：≤budgetBytes 的 projectInfoTree 金字塔（超预算 fullTreeRef 外置）+ candidateDimensions
+// + projectProfile 画像。双宿主（host-agent MCP + 主体 in-process daemon）统一经此入口喂 AI，替代主体
+// 此前 JSON.stringify(全量 facts) 的 21M 爆炸路径。完整 facts 仍由各宿主自留给下游生成，不经此入口。
+export interface PlanFactsProjection {
+  projectInfoTree: ProjectInfoTreeRoot;
+  candidateDimensions: CandidateDimension[];
+  projectProfile: PlanIntent['projectProfile'];
+}
+
+export async function buildPlanFactsProjection(
+  analysis: PlanProjectContextAnalysis,
+  options: { budgetBytes: number; scope: { projectRoot: string } }
+): Promise<PlanFactsProjection> {
+  const projectInfoTree = buildProjectInfoTree(analysis, options.budgetBytes);
+  // 超预算时把完整树写到 transient transport，并在 meta.fullTreeRef 挂引用（与 host 交付层同口径）。
+  await attachFullProjectInfoTreeRefIfNeeded(projectInfoTree, {
+    analysis,
+    projectRoot: options.scope.projectRoot,
+  });
+  return {
+    projectInfoTree,
+    candidateDimensions: buildCandidateDimensions(analysis),
+    projectProfile: buildProjectProfileFromAnalysis(analysis),
+  };
+}
