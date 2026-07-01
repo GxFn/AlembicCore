@@ -46,6 +46,9 @@ export {
   WHITELISTED_CATEGORIES as READINESS_WHITELISTED_CATEGORIES,
 } from './domain/knowledge/RecipeReadinessChecker.js';
 export type {
+  DepthDimension,
+  DepthReviewInput,
+  DepthReviewResult,
   DocScoreTargets,
   FailureMode,
   GateRule,
@@ -66,10 +69,13 @@ export type {
 // 门禁 validateAgainst 与指南 renderGuidance 读取同一 gateRules() 表（guidance==gate 的结构性保证）。
 // 仅在此导出 NEW 符号；V3_FIELD_SPEC 等 FieldSpec getters 已由上方 FieldSpec 块导出，避免同名重复导出。
 export {
+  buildDepthScaffold,
+  buildDepthSelfReviewChecklist,
   buildPreSubmitChecklist,
   buildSubmissionSpec,
   buildSubmitKnowledgeContract,
   contentContract,
+  DEPTH_DIMENSIONS,
   describeSubmitToolFields,
   example,
   failureModes,
@@ -80,7 +86,10 @@ export {
   getStage3FieldPolicy,
   renderGuidance,
   resolveAuthoringProfile,
+  resolveGroundedSourcePaths,
+  reviewRecipeDepth,
   validateAgainst,
+  VALUE_RUBRIC,
 } from './domain/knowledge/recipe-authoring-spec/index.js';
 export {
   buildProducerStyleGuide,
