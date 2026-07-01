@@ -1,0 +1,5 @@
+// planFacts：从 host 交付层(AlembicPlugin plan-tool.ts)下沉到 Core 的可复用
+// plan 事实收集 + 精简投影能力，双宿主(host-agent + 主体 in-process)共用。
+// U1a.1：先下沉 project-source-facts（工程源文件事实扫描，PlanProjectContextAnalysis
+// 的 sourceFileFacts 承载类型来源）；后续刀继续迁 projectInfoTree 投影簇。
+export * from './project-source-facts.js';
