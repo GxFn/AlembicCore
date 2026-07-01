@@ -75,6 +75,7 @@ export {
   getImperativeVerbAllowlist,
   getStage3FieldPolicy,
   resolveAuthoringProfile,
+  resolveGroundedSourcePaths,
   type Stage3FieldPolicy,
   type ValidateAgainstOptions,
   validateAgainst,

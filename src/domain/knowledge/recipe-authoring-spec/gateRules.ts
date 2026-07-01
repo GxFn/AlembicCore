@@ -585,6 +585,58 @@ export function validateAgainst(
   return violations;
 }
 
+/**
+ * resolveGroundedSourcePaths — 只读接地投影(P0/C7 支撑)。
+ *
+ * 复用门禁同一套 collectSourceRefs → cleanSourceRef → SOURCE_REF_RE → sourceRefResolver 管线，抽出
+ * 【成功解析成真实文件行】的证据集(validSourcePaths / validRanges)，但**绝不产出任何 violation**。
+ *
+ * 存在理由：`validateAgainst` 在 submit 期算出 validSourcePaths 后只回 violations 就丢弃它；而
+ * `KnowledgeService.updateQuality` 对已持久化 entry 打分时(C7)、以及 `reviewRecipeDepth`(C4)需要知道
+ * 「哪些 file:line 真接地」来判定深度覆盖。此 helper 让评分/深度裁判用与门禁**字节同源**的判定重算接地集，
+ * 从而「深度只在接地时计分」成立。
+ *
+ * 刻意**镜像而非重构**门禁的解析循环：门禁的拒绝集是 rev-60 字节不变量，不能被本只读路径扰动；改动门禁
+ * 解析循环时须同步本函数(二者共用 collectSourceRefs/cleanSourceRef/SOURCE_REF_RE 三原语，天然对齐)。
+ * 无 resolver 或无 projectRoot 时返回空集(纯函数保持，fs 绑定仍在注入 port 后)。
+ */
+export function resolveGroundedSourcePaths(
+  item: Record<string, unknown>,
+  opts: {
+    sourceRefResolver?: RecipeSourceRefResolver;
+    projectRoot?: string;
+    itemIndex?: number;
+  }
+): { validSourcePaths: string[]; validRanges: string[] } {
+  const validSourcePaths: string[] = [];
+  const validRanges: string[] = [];
+  if (!opts.sourceRefResolver || !opts.projectRoot) {
+    return { validSourcePaths, validRanges };
+  }
+  const itemIndex = opts.itemIndex ?? 0;
+  const title = stringValue(item.title) || '(untitled)';
+  for (const sourceRef of collectSourceRefs(item)) {
+    const match = cleanSourceRef(sourceRef).match(SOURCE_REF_RE);
+    if (!match) {
+      continue;
+    }
+    const resolved = opts.sourceRefResolver({
+      projectRoot: opts.projectRoot,
+      sourcePath: match[1] ?? '',
+      startLine: Number(match[2]),
+      endLine: match[3] ? Number(match[3]) : Number(match[2]),
+      sourceRef,
+      itemIndex,
+      title,
+    });
+    if (!('violation' in resolved)) {
+      validRanges.push(resolved.evidence.rangeText);
+      validSourcePaths.push(resolved.evidence.sourcePath);
+    }
+  }
+  return { validSourcePaths, validRanges };
+}
+
 function validateStage1(
   item: Record<string, unknown>,
   itemIndex: number

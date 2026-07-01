@@ -43,6 +43,21 @@ interface ProposalRepoLike {
   deleteByTargetRecipeId(targetRecipeId: string): number;
 }
 
+/**
+ * P0/C7: 宿主注入的「接地投影」port。把一个 recipe item 的结构化 sourceRefs 经宿主 fs resolver 解析成
+ * 真接地集(validSourcePaths / validRanges)。宿主(AlembicPlugin / 主体 AlembicAgent)已绑定 projectRoot +
+ * RecipeSourceRefResolver，闭包内部调用 Core 的 `resolveGroundedSourcePaths`(与门禁 validateAgainst 字节
+ * 同源)，从而 Core 保持 fs-free。
+ *
+ * 断路背景：门禁在 submit 期算出 validSourcePaths 后只回 violations 就丢弃；而 updateQuality 对已持久化
+ * entry 打分时拿不到那次结果。此 port 让评分侧(C8 depthCoverage)重算「哪些 file:line 真接地」，使
+ * 「深度只在接地时计分」成立。未注入 → 退化为旧行为(接地集为空、深度覆盖为 0、旧评分路径不变)。
+ */
+type GroundedSourcePathsPort = (item: Record<string, unknown>) => {
+  validSourcePaths: string[];
+  validRanges: string[];
+};
+
 interface KnowledgeServiceOptions {
   fileWriter?: KnowledgeFileWriter | null;
   skillHooks?: SkillHooksLike | null;
@@ -53,6 +68,8 @@ interface KnowledgeServiceOptions {
   proposalRepo?: ProposalRepoLike | null;
   /** Core 不内置交付渠道，外层可注入发布后的交付/刷新 hook。 */
   afterPublish?: AfterPublishHook | null;
+  /** P0/C7: 宿主注入的接地投影 port；未注入则深度覆盖退化为 0(向后兼容)。 */
+  groundedSourcePaths?: GroundedSourcePathsPort | null;
 }
 
 interface ServiceContext {
@@ -96,6 +113,8 @@ export class KnowledgeService {
   _qualityScorer: QualityScorerLike | null;
   _skillHooks: SkillHooksLike | null;
   _afterPublish: AfterPublishHook | null;
+  /** P0/C7: 接地投影 port(宿主注入)；null 时评分退化为旧行为。 */
+  _groundedSourcePaths: GroundedSourcePathsPort | null;
   auditLogger: AuditLoggerLike;
   gateway: unknown;
   logger: ReturnType<typeof Logger.getInstance>;
@@ -119,6 +138,7 @@ export class KnowledgeService {
     this._edgeRepo = options.edgeRepo || null;
     this._proposalRepo = options.proposalRepo || null;
     this._afterPublish = options.afterPublish || null;
+    this._groundedSourcePaths = options.groundedSourcePaths || null;
     this.logger = Logger.getInstance();
   }
 
@@ -741,8 +761,14 @@ export class KnowledgeService {
         throw new ValidationError('QualityScorer not configured');
       }
 
+      // P0/C7: 若宿主注入了接地 port，重算该 entry 的真接地集(与门禁字节同源)喂给 scorer 做深度覆盖判定；
+      // 未注入则空集 → depthCoverage 退化为 0，旧评分路径不变(additive/向后兼容)。
+      const grounding = this._groundedSourcePaths
+        ? this._groundedSourcePaths(this._groundingItemFromEntry(entry))
+        : { validSourcePaths: [], validRanges: [] };
+
       // 为 QualityScorer 适配输入字段
-      const scorerInput = this._adaptForScorer(entry);
+      const scorerInput = this._adaptForScorer(entry, grounding);
       const result = this._qualityScorer.score(scorerInput);
 
       // 更新 Quality 值对象；同步计算 authority（0‑5）
@@ -940,7 +966,13 @@ export class KnowledgeService {
    * contentMarkdown, contentRationale, reasoningWhyStandard, reasoningSources,
    * reasoningConfidence, source, headers, tags, views, clicks, rating
    */
-  _adaptForScorer(entry: KnowledgeEntry): Record<string, unknown> {
+  _adaptForScorer(
+    entry: KnowledgeEntry,
+    grounding: { validSourcePaths: string[]; validRanges: string[] } = {
+      validSourcePaths: [],
+      validRanges: [],
+    }
+  ): Record<string, unknown> {
     // 从 Stats 值对象提取 engagement 指标
     const stats =
       entry.stats && typeof entry.stats === 'object'
@@ -955,6 +987,11 @@ export class KnowledgeService {
     const reasoning =
       entry.reasoning && typeof entry.reasoning === 'object'
         ? (entry.reasoning as unknown as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+    // P0/C7: 从 Constraints 值对象提取深度维度字段(边界/前置/副作用)，供 C8 depthCoverage 判定。
+    const constraints =
+      entry.constraints && typeof entry.constraints === 'object'
+        ? (entry.constraints as unknown as Record<string, unknown>)
         : ({} as Record<string, unknown>);
 
     return {
@@ -979,6 +1016,31 @@ export class KnowledgeService {
       views: (stats.views ?? 0) + (stats.searchHits ?? 0),
       clicks: (stats.adoptions ?? 0) + (stats.applications ?? 0) + (stats.guardHits ?? 0),
       rating: stats.authority ?? 0,
+      // ── P0/C7 additive: 深度维度字段 + 真接地集(C8 depthCoverage 只在接地时计分；此阶段 scorer 尚未
+      //    消费，加字段安全——旧维度不受影响)。 ──
+      contentSteps: (content.steps as unknown[]) ?? [],
+      contentVerification: content.verification ?? null,
+      constraintsBoundaries: (constraints.boundaries as string[]) ?? [],
+      constraintsPreconditions: (constraints.preconditions as string[]) ?? [],
+      constraintsSideEffects: (constraints.sideEffects as string[]) ?? [],
+      reasoningAlternatives: (reasoning.alternatives as string[]) ?? [],
+      groundedSourcePaths: grounding.validSourcePaths,
+      groundedRanges: grounding.validRanges,
+    };
+  }
+
+  /**
+   * P0/C7: 从持久化 entry 组装门禁 `collectSourceRefs` 认得的最小 item——结构化 refs 落在
+   * `reasoning.sources`(与 submit 期 item 同字段)。仅用于喂接地 port 重算真接地集，不参与评分字段。
+   */
+  _groundingItemFromEntry(entry: KnowledgeEntry): Record<string, unknown> {
+    const reasoning =
+      entry.reasoning && typeof entry.reasoning === 'object'
+        ? (entry.reasoning as unknown as Record<string, unknown>)
+        : ({} as Record<string, unknown>);
+    return {
+      title: entry.title,
+      reasoning: { sources: (reasoning.sources as string[]) || [] },
     };
   }
 
