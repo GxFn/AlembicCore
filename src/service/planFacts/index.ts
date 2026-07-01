@@ -3,3 +3,6 @@
 // U1a.1：先下沉 project-source-facts（工程源文件事实扫描，PlanProjectContextAnalysis
 // 的 sourceFileFacts 承载类型来源）；后续刀继续迁 projectInfoTree 投影簇。
 export * from './project-source-facts.js';
+// U1a.2：transient-transport（.asd/tmp JSON 传输原语；plan fullTreeRef 外置 +
+// briefing-budget / cold-start 响应预算化共用）随 planFacts 一起下沉 Core。
+export * from './transient-transport.js';
