@@ -95,6 +95,9 @@ export {
   buildProducerStyleGuide,
   SUBMIT_REQUIREMENTS,
 } from './domain/knowledge/StyleGuide.js';
+// P5/C8: 可复用 fs-backed 源码引用解析器——两宿主注入 KnowledgeService 的 groundedSourcePaths port 时共用，
+// 保证深度接地判定 parity（Core 拥有共享 fs 能力，domain spec 仍 fs-free）。
+export { createFsSourceRefResolver } from './service/knowledge/FsSourceRefResolver.js';
 export {
   createStatelessValidator,
   UnifiedValidator,
