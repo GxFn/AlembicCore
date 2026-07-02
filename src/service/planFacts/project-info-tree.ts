@@ -1001,6 +1001,126 @@ export interface PlanFactsProjection {
   projectInfoTree: ProjectInfoTreeRoot;
   candidateDimensions: CandidateDimension[];
   projectProfile: PlanIntent['projectProfile'];
+  /** 2026-07-02(用户决策)：每维度证据密度——plan 按真实结构情报评估规模的量化抓手。 */
+  dimensionEvidenceDensity: DimensionEvidenceDensity[];
+}
+
+/**
+ * 一个维度的证据密度：focusKeywords 对项目真实结构信号(文件路径/模块名/模块角色/框架)的
+ * 命中统计。plan LLM 用它逐维评估证据面，替代「按文件数拍规模」的启发式——密度高的维度
+ * 预算高、零命中的维度可排除。纯确定性计算，不依赖 AST/索引，冷启动第一步即可用。
+ */
+export interface DimensionEvidenceDensity {
+  id: string;
+  label: string;
+  /** focusKeywords 命中的源文件路径次数。 */
+  matchedFiles: number;
+  /** 命中的模块信号次数(模块名/路径/角色)。 */
+  matchedModules: number;
+  /** 命中的框架信号次数。 */
+  matchedFrameworks: number;
+  /** 命中样例(≤5 条 关键词→信号，供 plan 引用与人查证)。 */
+  sampleHits: string[];
+  /** 归一化强度 0-100(相对本项目内各维度的命中规模)。 */
+  strength: number;
+}
+
+/**
+ * 计算每维度证据密度——按维度 layer 分型，避免单一路径关键词口径的系统性失真
+ * (真实 workspace 冒烟：architecture 等横切维度的证据在代码内容里而非路径词里，按路径词
+ * 会被压到 0；而「agent/module」这类高频词又会把个别维度推到失真的 100)。
+ *   - universal(横切型)：证据面=整个代码库。strength = 结构基础分(模块数越多越高，
+ *     多模块 monorepo 每模块都贡献约定) + 路径词少量加成(cap 30)。
+ *   - language(语言型)：strength = 该维度适用语言的文件占比(conditions.languages 对
+ *     sourceFileFacts.language 的真实统计——最准的信号，零该语言文件即 0)。
+ *   - framework(框架型)：strength = frameworks 信号命中(命中即高分，未命中按路径词残余)。
+ * 全部来自已收集 analysis，零额外 IO，冷启动第一步即可用。
+ */
+export function buildDimensionEvidenceDensity(
+  analysis: PlanProjectContextAnalysis
+): DimensionEvidenceDensity[] {
+  const filePaths = analysis.sourceFileFacts.map((fact) => fact.filePath.toLowerCase());
+  const languageCounts = new Map<string, number>();
+  for (const fact of analysis.sourceFileFacts) {
+    const lang = (fact.language || '').toLowerCase();
+    languageCounts.set(lang, (languageCounts.get(lang) ?? 0) + 1);
+  }
+  const totalFiles = Math.max(1, analysis.sourceFileFacts.length);
+  const frameworkSignals = analysis.frameworks.map((framework) => framework.toLowerCase());
+  // 结构基础分 cap 70：模块数是横切维度证据面的主尺度(每模块贡献约定)，8+ 模块给满基础分；
+  // 留 30 给路径词加成做维度间区分，避免大型项目所有 universal 维度饱和成同一个 100。
+  const structuralBase = Math.min(70, Math.round((analysis.moduleCount / 8) * 70));
+
+  return analysis.dimensions.map((dimension) => {
+    // matchTopics 是注册表维护的主题词(如 module-boundary/dependency-rule)，比 id 分词准；
+    // 连字符 topic 同时保留整词与拆词两种匹配粒度。
+    const keywords = uniqueStrings([
+      ...(dimension.matchTopics ?? []),
+      ...(dimension.matchTopics ?? []).flatMap((topic) => topic.split('-')),
+      ...dimension.id.split(/[-_]/),
+    ])
+      .map((keyword) => keyword.toLowerCase())
+      .filter((keyword) => keyword.length >= 4);
+
+    // sampleHits 限 2 条且截尾 40 字符：密度表 25 维度全量输出，样本只做可解释性示意，
+    // 不能吃掉 projection 字节预算(树的收缩逻辑不覆盖本表)。
+    const sampleHits: string[] = [];
+    let matchedFiles = 0;
+    for (const keyword of keywords) {
+      for (const filePath of filePaths) {
+        if (filePath.includes(keyword)) {
+          matchedFiles += 1;
+          if (sampleHits.length < 2) {
+            sampleHits.push(`${keyword}→${filePath.slice(-40)}`);
+          }
+        }
+      }
+    }
+
+    const conditionLanguages = (dimension.conditions?.languages ?? []).map((lang) =>
+      lang.toLowerCase()
+    );
+    const conditionFrameworks = (dimension.conditions?.frameworks ?? []).map((framework) =>
+      framework.toLowerCase()
+    );
+    const languageFiles = conditionLanguages.reduce(
+      (sum, lang) => sum + (languageCounts.get(lang) ?? 0),
+      0
+    );
+    const matchedFrameworks = conditionFrameworks.filter((framework) =>
+      frameworkSignals.some((signal) => signal.includes(framework))
+    ).length;
+
+    const layer = dimension.layer ?? 'universal';
+    let strength: number;
+    if (layer === 'language') {
+      // 语言占比是唯一可信信号：零该语言文件 = 0(路径词误命中不再抬分)。
+      strength = Math.round((languageFiles / totalFiles) * 100);
+      if (conditionLanguages.length === 0) {
+        strength = Math.min(30, Math.round((matchedFiles / totalFiles) * 100));
+      }
+    } else if (layer === 'framework') {
+      strength =
+        matchedFrameworks > 0 ? 90 : Math.min(20, Math.round((matchedFiles / totalFiles) * 100));
+    } else {
+      // universal：结构基础分 + 路径词少量加成(cap 30)，横切证据不依赖路径命名。
+      strength = Math.min(
+        100,
+        structuralBase + Math.min(30, Math.round((matchedFiles / totalFiles) * 30))
+      );
+    }
+
+    return {
+      id: dimension.id,
+      label: dimension.label ?? dimension.id,
+      matchedFiles: layer === 'language' ? languageFiles : matchedFiles,
+      matchedModules: layer === 'universal' ? analysis.moduleCount : 0,
+      matchedFrameworks,
+      // 零强度维度不带样本：排除依据是 strength=0 本身，样本只会浪费预算。
+      sampleHits: strength > 0 ? sampleHits : [],
+      strength,
+    };
+  });
 }
 
 export async function buildPlanFactsProjection(
@@ -1017,5 +1137,6 @@ export async function buildPlanFactsProjection(
     projectInfoTree,
     candidateDimensions: buildCandidateDimensions(analysis),
     projectProfile: buildProjectProfileFromAnalysis(analysis),
+    dimensionEvidenceDensity: buildDimensionEvidenceDensity(analysis),
   };
 }

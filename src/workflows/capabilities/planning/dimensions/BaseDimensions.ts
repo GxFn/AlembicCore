@@ -28,6 +28,14 @@ export interface BaseDimension {
   skillMeta?: { name: string; description: string };
   conditions?: { languages?: string[]; frameworks?: string[] };
   tierHint?: number;
+  /**
+   * 维度层级与主题关键词，从 UnifiedDimension 透传(可选、additive)。
+   * plan facts 的 dimensionEvidenceDensity 按 layer 分型计算证据密度：
+   * universal 按结构规模、language 按语言文件占比、framework 按框架命中；
+   * matchTopics 是比 id 分词更准的路径关键词源。缺省时下游按 universal 兜底。
+   */
+  layer?: 'universal' | 'language' | 'framework';
+  matchTopics?: string[];
 }
 
 /**
@@ -49,6 +57,8 @@ export function toBaseDimension(dim: UnifiedDimension): BaseDimension {
         }
       : undefined,
     tierHint: dim.tierHint,
+    layer: dim.layer,
+    matchTopics: [...dim.matchTopics],
   };
 }
 

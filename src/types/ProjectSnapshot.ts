@@ -249,6 +249,8 @@ export interface DimensionDef {
   layer?: 'universal' | 'language' | 'framework';
   /** 输出模式 (统一维度注册表新增) */
   outputMode?: 'candidate-only' | 'dual';
+  /** 主题匹配词 (统一维度注册表透传，plan facts 证据密度用作路径关键词源) */
+  matchTopics?: readonly string[];
 }
 
 /** Enhancement Pack 信息，来自 Phase 4 */
