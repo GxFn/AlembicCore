@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 // Core 内部代码不自引包入口(@alembic/core/*)，用内部相对路径引 workspace 实现。
-import { WorkspaceResolver } from '../../shared/WorkspaceResolver.js';
+import { WorkspaceResolver } from '../../../shared/WorkspaceResolver.js';
 
 export interface TransientTransportRef {
   bytes: number;

@@ -12,7 +12,7 @@ export type {
   PlanSelectionScaleOverride,
   PlanSelectionStageRequirementsOptions,
   PlanStageId,
-} from './service/planIntent/index.js';
+} from './service/plan/intent/index.js';
 export {
   applyPlanSelection,
   assertPlanSelectionShape,
@@ -28,7 +28,7 @@ export {
   renderPlanScaleMethodZh,
   unique,
   validateCompletePlanIntent,
-} from './service/planIntent/index.js';
+} from './service/plan/intent/index.js';
 export type {
   BuildPlanDraftInformationPackageInput,
   PlanCodeRecipeMapping,
@@ -39,7 +39,7 @@ export type {
   PlanSignatureComparison,
   PlanView,
   ProjectContextSignatureInput,
-} from './service/recipeStatus/index.js';
+} from './service/plan/status/index.js';
 export {
   buildCoverage,
   buildPlanDraftInformationPackage,
@@ -47,7 +47,7 @@ export {
   computeProjectContextSignature,
   projectPlanGenerationState,
   projectPlanGenerationStateFromRecords,
-} from './service/recipeStatus/index.js';
+} from './service/plan/status/index.js';
 export {
   buildColdStartWorkflowPlan as buildGenerateFullPlan,
   buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,

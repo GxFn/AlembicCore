@@ -8,16 +8,16 @@ import {
   buildDimensionCatalogPayload,
   type DimensionCatalogPayloadItem,
   type ProjectLanguageFrameworkFacts,
-} from '../../domain/dimension/index.js';
+} from '../../../domain/dimension/index.js';
 import type {
   ProjectContextEnvelope,
   ProjectContextPresenterInput,
   ProjectContextRef,
   ProjectContextRequestKind,
   ProjectContextResult,
-} from '../../domain/project-context/index.js';
-import type { DimensionDef } from '../../types/ProjectSnapshot.js';
-import type { PlanIntent } from '../planIntent/contracts.js';
+} from '../../../domain/project-context/index.js';
+import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
+import type { PlanIntent } from '../intent/contracts.js';
 import type { ProjectSourceFileFact } from './project-source-facts.js';
 import {
   removeTransientTransportIfPresent,

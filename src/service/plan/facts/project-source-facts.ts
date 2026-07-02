@@ -2,7 +2,7 @@ import type { Dirent, Stats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 // Core 内部代码不自引包入口(@alembic/core/*)，用内部相对路径引 shared 实现。
-import { LanguageService } from '../../shared/LanguageService.js';
+import { LanguageService } from '../../../shared/LanguageService.js';
 
 export interface ProjectSourceFileFact {
   filePath: string;

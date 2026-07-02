@@ -4,7 +4,7 @@ import {
   renderPlanPersonaDescription,
   renderPlanScaleChecklistEn,
   renderPlanScaleMethodZh,
-} from '../src/service/planIntent/plan-authoring-spec.js';
+} from '../src/service/plan/intent/plan-authoring-spec.js';
 
 /**
  * PlanAuthoringSpec 钉子(S2,2026-07-02 统一重构)。

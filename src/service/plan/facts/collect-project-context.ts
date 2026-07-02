@@ -4,7 +4,7 @@
 // (host-agent + 主体 in-process)共用。U1b.3 纯提取，行为字节不变；Core 内部相对路径引依赖。
 // 注：projectRoot 由 host 交付层解析(resolvePlanProjectRoot 读 MCP ctx)后传入，本模块不碰 host DI。
 import path, { basename } from 'node:path';
-import { baseDimensions } from '../../domain/dimension/BaseDimensions.js';
+import { baseDimensions } from '../../../domain/dimension/BaseDimensions.js';
 import {
   buildProjectContextPresenterInput,
   type ProjectContextEnvelope,
@@ -12,14 +12,14 @@ import {
   type ProjectContextRequestKind,
   type ProjectContextResult,
   type RepoContext,
-} from '../../domain/project-context/index.js';
+} from '../../../domain/project-context/index.js';
 import {
   loadProjectScopeForFolder,
   type ProjectDescriptor,
   type ProjectFolderDescriptor,
   readProjectScopeRegistryDocument,
-} from '../../shared/ProjectScope.js';
-import { ProjectContextCapabilities } from '../project-context/capabilities.js';
+} from '../../../shared/ProjectScope.js';
+import { ProjectContextCapabilities } from '../../project-context/capabilities.js';
 import type { PlanModuleSeed, PlanProjectContextAnalysis } from './project-info-tree.js';
 import {
   attachSourceFilesToProjectContextModuleSeeds,

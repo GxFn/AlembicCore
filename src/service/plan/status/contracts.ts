@@ -1,4 +1,4 @@
-import type { PlanEvidenceRef, PlanIntent, PlanProjectProfile } from '../planIntent/index.js';
+import type { PlanEvidenceRef, PlanIntent, PlanProjectProfile } from '../intent/index.js';
 
 export interface RecipeStatusReadRepositories {
   knowledgeRepository: {

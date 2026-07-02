@@ -199,8 +199,8 @@
       "import": "./dist/service/candidate/index.js"
     },
     "./service/planFacts": {
-      "types": "./dist/service/planFacts/index.d.ts",
-      "import": "./dist/service/planFacts/index.js"
+      "types": "./dist/service/plan/facts/index.d.ts",
+      "import": "./dist/service/plan/facts/index.js"
     },
     "./service/quality": {
       "types": "./dist/service/quality/index.d.ts",

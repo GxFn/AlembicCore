@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PlanIntent, PlanModuleBinding } from '../planIntent/index.js';
+import type { PlanIntent, PlanModuleBinding } from '../intent/index.js';
 import type {
   BuildPlanDraftInformationPackageInput,
   PlanCodeRecipeMapping,

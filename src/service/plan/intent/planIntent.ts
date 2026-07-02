@@ -1,4 +1,4 @@
-import { resolvePlanDimensionDefinitions } from '../../domain/dimension/DimensionRegistry.js';
+import { resolvePlanDimensionDefinitions } from '../../../domain/dimension/DimensionRegistry.js';
 import type { PlanIntent, PlanSelection, PlanStageId } from './contracts.js';
 
 const VALID_PLAN_STAGES: ReadonlySet<PlanStageId> = new Set([
