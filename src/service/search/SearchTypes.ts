@@ -494,9 +494,14 @@ export interface SlimSearchResult {
 export function slimSearchResult(item: SearchResultItem): SlimSearchResult {
   const doText = (item.doClause as string) || '';
   const whenText = (item.whenClause as string) || '';
+  // 2026-07-02(G3)：actionHint 拼入 dontClause——它是 prime/search 一跳投影里唯一的行为指导，
+  // 此前禁止性知识(项目禁止什么)生成了却在机器消费链上不可见。形态: when → do ⚠️ dont。
+  const dontText = (item.dontClause as string) || '';
   const actionHint =
-    doText || whenText
-      ? `${whenText ? `${whenText} → ` : ''}${doText}`.replace(/ → $/, '')
+    doText || whenText || dontText
+      ? `${whenText ? `${whenText} → ` : ''}${doText}${dontText ? ` ⚠️ ${dontText}` : ''}`
+          .replace(/ → $/, '')
+          .trim()
       : undefined;
   const rawRefs = (item as SearchResultItem & { sourceRefs?: unknown }).sourceRefs;
   const sourceRefs =

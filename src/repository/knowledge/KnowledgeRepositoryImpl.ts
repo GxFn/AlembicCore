@@ -1197,6 +1197,9 @@ export class KnowledgeRepositoryImpl {
         difficulty: knowledgeEntries.difficulty,
         whenClause: knowledgeEntries.whenClause,
         doClause: knowledgeEntries.doClause,
+        // G3(2026-07-02)：dontClause 进详情补充——actionHint 拼接 when → do ⚠️ dont，
+        // 让禁止性知识进入 prime/search 一跳投影。
+        dontClause: knowledgeEntries.dontClause,
       })
       .from(knowledgeEntries)
       .where(inArray(knowledgeEntries.id, ids))

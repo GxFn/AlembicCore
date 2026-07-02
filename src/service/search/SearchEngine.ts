@@ -1009,6 +1009,9 @@ export class SearchEngine {
           if (!item.doClause && row.doClause) {
             item.doClause = row.doClause;
           }
+          if (!item.dontClause && row.dontClause) {
+            item.dontClause = row.dontClause;
+          }
           // 排序信号补充 — 确保 Funnel/Ranker 有真实数据
           if (!item.language && row.language) {
             item.language = row.language;
