@@ -41,11 +41,11 @@ describe('P2.1 submissionSpec collapse — D-B ≥3 floor, guidance==gate', () =
     expect(spec.contentQuality).toContain(`≥${evidenceFloor.ruleFiles} 个不同来源文件`);
   });
 
-  it('P3/C6: contentStyle 不再被 slice(0,12) 截断——深度四问 + 来源标注格式规则同时到达 host', () => {
+  it('P3/C6: contentStyle 不再被 slice(0,12) 截断——深度要求 + 来源标注格式规则同时到达 host', () => {
     const spec = buildDimensionSubmissionSpec(['rule']);
-    // 深度四问(C1 前置)出现在 host contentStyle。
-    expect(spec.contentStyle).toContain('深度四问');
-    expect(spec.contentStyle).toContain('权衡');
+    // 深度要求(2026-07-02 深挖引导版)出现在 host contentStyle。
+    expect(spec.contentStyle).toContain('深度要求');
+    expect(spec.contentStyle).toContain('洞察');
     // 旧 slice(0,12) 会把这条来源标注格式规则(第 13 行)截掉；去 slice 后它随全文到达 host。
     expect(spec.contentStyle).toContain('代码来源标注: (来源: FileName.ext:行号)');
   });

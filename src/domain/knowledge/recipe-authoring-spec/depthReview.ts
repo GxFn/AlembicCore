@@ -29,7 +29,7 @@ export interface DepthReviewInput {
 }
 
 export interface DepthReviewResult {
-  /** 已接地覆盖的深度维度 key(DEPTH_DIMENSIONS.key)。 */
+  /** 已接地覆盖的深度维度 key(DEPTH_DIMENSIONS.key)——小节组织路径的判定结果。 */
   grounded: string[];
   /** 未覆盖或有论述但未接地的维度 key。 */
   missing: string[];
@@ -37,7 +37,22 @@ export interface DepthReviewResult {
   ungroundedClaims: string[];
   /** 深度论述跨到的、已解析成功的不同文件数(多来源判定依据)。 */
   groundedFileCount: number;
+  /**
+   * 叙述信号双轨(2026-07-02 用户决策)：自由叙述里「含深度信号词(因果/代价/例外/对照)且同段
+   * 挂已解析 (来源: file:行)」的断言段落数。作者不用 `## 小节` 组织深度时，凭它同等获得深度
+   * 认可——消费方(scorer depthCoverage / 生成期 depth-retry)取 max(维度覆盖, 信号折算)。
+   * 防刷口径不变：纯信号词无接地 ref 不计。
+   */
+  groundedSignalCount: number;
 }
+
+/**
+ * 深度信号词(中英)：因果/后果、取舍/代价、例外/边界、对照/普遍性。信号词只是「候选断言」的
+ * 筛选器——必须与已解析成功的 (来源: file:行) 同段才计入 groundedSignalCount(anti-gaming：
+ * 塞词无证不算，与本模块「绝不做关键词计数」的原则一致)。
+ */
+const DEPTH_SIGNAL_RE =
+  /因为|否则|一旦|导致|会引发|抛出|拒绝|降级|回滚|放弃|换来|代价|牺牲|相比|而非|替代|不同于|例外|不适用|前提|不变量|反直觉|误解|\b(because|otherwise|fails?|throws?|rejects?|degrades?|instead of|rather than|at the cost|trade-?off|except|unlike|invariant|precondition)\b/i;
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\.\//, '').trim();
@@ -182,10 +197,24 @@ export function reviewRecipeDepth(
     missing.push('multiSourceCorroboration');
   }
 
+  // 叙述信号双轨：按段落(空行分隔)扫描整篇正文——含深度信号词且同段挂已解析 ref 的段落
+  // 计为一个接地深度断言。作者用自由叙述(无 `## 小节`)承载深度时凭此获得同等认可。
+  let groundedSignalCount = 0;
+  for (const paragraph of markdown.split(/\n\s*\n/)) {
+    if (!DEPTH_SIGNAL_RE.test(paragraph)) {
+      continue;
+    }
+    const refs = extractRefs(paragraph, validSet);
+    if (refs.some((ref) => ref.grounded)) {
+      groundedSignalCount += 1;
+    }
+  }
+
   return {
     grounded,
     missing,
     ungroundedClaims,
     groundedFileCount: allGroundedFiles.size,
+    groundedSignalCount,
   };
 }

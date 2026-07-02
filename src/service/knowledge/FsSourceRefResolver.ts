@@ -27,7 +27,15 @@ function isInsideRoot(projectRoot: string, absolutePath: string): boolean {
  * AlembicPlugin 门禁 resolver 逐分支对齐（路径归一 → containment → 存在 → 行范围）。
  */
 export function createFsSourceRefResolver(): RecipeSourceRefResolver {
-  return ({ projectRoot, sourcePath: rawPath, startLine, endLine, sourceRef, itemIndex, title }) => {
+  return ({
+    projectRoot,
+    sourcePath: rawPath,
+    startLine,
+    endLine,
+    sourceRef,
+    itemIndex,
+    title,
+  }) => {
     const sourcePath = path.posix.normalize(rawPath.replaceAll('\\', '/'));
     if (path.isAbsolute(sourcePath) || sourcePath.startsWith('..')) {
       return {

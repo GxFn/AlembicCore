@@ -16,11 +16,15 @@ import { renderGuidance } from '../src/domain/knowledge/recipe-authoring-spec/gu
 describe('renderGuidance 深度契约段 (C2) — 从 DEPTH_DIMENSIONS 单源渲染', () => {
   const block = renderGuidance('host-cold-start');
 
-  it('text 含深度契约标题 + 每个深度维度 label(单源对齐)', () => {
+  it('text 含深度契约标题 + 深挖自问引导(2026-07-02：自选角度真挖，非逐维填表)', () => {
     expect(block.text).toContain('## 深度契约（超越门禁的价值要求）');
-    for (const dim of DEPTH_DIMENSIONS) {
-      expect(block.text).toContain(dim.label);
-    }
+    // 新引导的关键语义：自选真有证据的角度、洞察融入叙述、无证据不写。
+    expect(block.text).toContain('真的读到代码证据');
+    expect(block.text).toContain('反直觉');
+    expect(block.text).toContain('例外');
+    expect(block.text).toContain('宁可不写');
+    // DEPTH_DIMENSIONS 仍是裁判分类轴(单源存续)，但不再作为逐问模板渲染进 scaffold。
+    expect(DEPTH_DIMENSIONS.map((d) => d.key)).toContain('designIntent');
   });
 
   it('明说这是价值要求非门槛、评分只认接地深度不认长度', () => {
@@ -41,17 +45,16 @@ describe('renderGuidance 深度契约段 (C2) — 从 DEPTH_DIMENSIONS 单源渲
     expect(/confidence/i.test(block.depthContract)).toBe(false);
   });
 
-  it('styleGuide 深度四问落在 slice(0,12) 预算内(host contentStyle 不截断深度)', () => {
-    // 复刻 DimensionCatalogPayload.ts:198 的 slice 口径，证明四问全部命中前 12 行。
+  it('styleGuide 深度要求落在 slice(0,12) 预算内(host contentStyle 不截断深度)', () => {
+    // 复刻 DimensionCatalogPayload.ts:198 的 slice 口径，证明深度要求命中前 12 行。
     const sliced = contentContract()
       .styleGuide.split('\n')
       .filter((line) => !line.startsWith('#') || line.startsWith('##'))
       .filter((line) => line.trim())
       .slice(0, 12)
       .join('\n');
-    expect(sliced).toContain('深度四问');
-    expect(sliced).toContain('设计意图');
-    expect(sliced).toContain('权衡');
+    expect(sliced).toContain('深度要求');
+    expect(sliced).toContain('洞察');
   });
 });
 

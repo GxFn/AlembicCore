@@ -11,21 +11,28 @@
  * retry(C9)按同一维度报缺口。三者共用 DEPTH_DIMENSIONS 即天然对齐。
  */
 
-/** 一个深度维度：作者必须回答的「深度问题」+ 它必须携带的真实接地证据。 */
+/**
+ * 一个深度维度。2026-07-02 语义修订(用户决策)：DEPTH_DIMENSIONS 是**裁判与评分的分类轴**
+ * (depthReview 按它归类接地深度、retry 按它报缺口)，以及作者**可选**的组织方式——不再是
+ * 必须逐问作答的写作模板。固定四问模板会把深度退化成「填表式格式化措辞」；真深度来自作者
+ * 自己的深挖思考(见 buildDepthScaffold 的自问引导)，以自由叙述融入正文同样被裁判认可
+ * (depthReview 的叙述信号双轨)。
+ */
 export interface DepthDimension {
   /** 稳定键，depthReview/scorer/retry 按此对齐(勿随文案改)。 */
   key: 'designIntent' | 'boundaries' | 'failureModes' | 'tradeoffs' | 'multiSourceCorroboration';
-  /** 人类可读维度名(中文)，也用于 markdown `## <label>` 分节匹配。 */
+  /** 人类可读维度名(中文)，用于 markdown `## <label>` 分节匹配(作者选用小节组织时)。 */
   label: string;
-  /** 该维度要回答的深度问题(front-load 给 agent)。 */
+  /** 该维度对应的深度问题(裁判分类语义；作者可参考，不强制逐问作答)。 */
   question: string;
   /** 该维度的断言必须携带的真实接地证据要求。 */
   grounding: string;
 }
 
 /**
- * 五个深度维度。前四个是「深度四问」，第五个是「多来源佐证」(把 evidence-floor 的 count 门升级为
- * 跨文件 synthesis)。key 稳定，label 用于 `## <label>` 分节匹配。
+ * 五个深度维度。前四个是深度的分类学(裁判/评分/retry 的对齐轴)，第五个是「多来源佐证」
+ * (把 evidence-floor 的 count 门升级为跨文件 synthesis)。key 稳定；label 仅在作者选用
+ * `## <label>` 小节组织时参与匹配，自由叙述不需要。
  */
 export const DEPTH_DIMENSIONS: readonly DepthDimension[] = [
   {
@@ -61,31 +68,39 @@ export const DEPTH_DIMENSIONS: readonly DepthDimension[] = [
 ];
 
 /**
- * buildDepthScaffold — 「先推理、再落笔」的脚手架。front-load 给 agent，要求它在写 markdown 正文之前
- * 先就每个深度维度作答(并挂真实 file:line)。这一步本身就是深度思考——要答「越界会怎样」就必须回代码
- * 真读失败路径，而不是格式化。
+ * buildDepthScaffold — 「深挖自问」引导(2026-07-02 重设计，用户决策)。
+ *
+ * 旧版要求「就每个深度维度逐一作答」——固定四问模板把深度退化成填表：模型为每问凑一段
+ * 格式化措辞，恰是深度的反面。新版把深度交还给真思考：给出一组洞察角度，作者**自选**
+ * 自己真的挖到证据的 2-3 个深挖到底，以自然叙述融入正文(用不用 `## 小节` 组织自便)；
+ * 防刷底线不变——每个深度断言必须与真实 (来源: file:行) 同句/同段，读不到证据的角度
+ * 宁可不写。裁判端(depthReview)同步双轨：小节组织与自由叙述同等认可。
  */
 export function buildDepthScaffold(): string {
-  const lines = [
-    '写正文之前，先就以下深度维度逐一作答(每条挂真实 file:line，读不到真实证据就不要写这一维)：',
-  ];
-  for (const dim of DEPTH_DIMENSIONS) {
-    lines.push(`- ${dim.label}：${dim.question} —— ${dim.grounding}`);
-  }
-  return lines.join('\n');
+  return [
+    '写正文之前，先对这个知识点做一轮真正的深挖(不是填表)。从下面的角度里，挑出你',
+    '**真的读到代码证据**的 2-3 个，想透，然后把洞察以自然叙述融入正文——用不用小节标题随你：',
+    '- 这个设计最反直觉/最容易被误解的地方是什么？为什么项目仍然这么选(它替代了什么、代价是什么)？',
+    '- 一个不知道这条约定的人最可能怎么写错？错了之后最先坏掉的是什么(哪个校验/异常/降级会暴露它)？',
+    '- 项目里有没有它**不适用**的例外或反例？例外的存在说明了什么边界条件？',
+    '- 同一模式在项目其他地方如何重现或变形？它是普遍约定还是局部选择(跨文件对照)？',
+    '- 有没有量化事实支撑(占比/分布/热点统计)让「为什么」更硬？',
+    '底线：每个深度断言与真实 (来源: file:行) 同句或同段；读不到证据的角度不写——泛泛而谈的段落',
+    '不如不写，它稀释真洞察。',
+  ].join('\n');
 }
 
 /**
- * buildDepthSelfReviewChecklist — 「落笔后自评」清单。draft 完成后 agent 逐条自检：该维度是否真捕获、
- * 是否挂在真实 file:line、多来源是否跨 ≥2 文件。self-review 只用于自我改进/驱动重挖，绝不作为放行依据
- * (不倒退门禁)。
+ * buildDepthSelfReviewChecklist — 「落笔后自评」清单(随深挖引导同步重设计)。自评对象从
+ * 「每维是否覆盖」改为「叙述是否承载了接地的真洞察」。self-review 只用于自我改进/驱动重挖，
+ * 绝不作为放行依据(不倒退门禁)。
  */
 export function buildDepthSelfReviewChecklist(): string {
-  const lines = ['落笔后自评(任一未过则回代码重挖，不要凭空补写)：'];
-  for (const dim of DEPTH_DIMENSIONS) {
-    lines.push(`- [ ] ${dim.label}：是否真捕获且挂了真实 file:line？`);
-  }
-  lines.push('- [ ] 多来源佐证是否跨 ≥2 处不同文件(而非同一处重复)？');
-  lines.push('- [ ] 每个深度断言的 file:line 是否都能在项目里真解析到(不是编造/占位)？');
-  return lines.join('\n');
+  return [
+    '落笔后自评(任一未过则回代码重挖，不要凭空补写)：',
+    '- [ ] 正文里是否有 ≥3 处「带真实 (来源: file:行) 的深度断言」(因果/代价/例外/对照，而非描述性复述)？',
+    '- [ ] 深度断言是否跨 ≥2 处不同文件(佐证它是项目级洞察，非单点观察)？',
+    '- [ ] 每个 (来源: file:行) 是否都能在项目里真解析到(不是编造/占位)？',
+    '- [ ] 有没有一段是没有证据的泛泛而谈？有就删掉——它稀释真洞察。',
+  ].join('\n');
 }

@@ -269,7 +269,10 @@ export class QualityScorer {
       },
       { validSourcePaths: r.groundedSourcePaths ?? [] }
     );
-    s += Math.min(1, review.grounded.length / 3) * 0.44;
+    // 双轨(2026-07-02 用户决策)：小节组织(grounded 维度)与自由叙述(接地深度断言信号)取
+    // 较高者——深度形态自由，防刷口径(必须挂已解析 ref)不变。
+    const depthUnits = Math.max(review.grounded.length, review.groundedSignalCount);
+    s += Math.min(1, depthUnits / 3) * 0.44;
 
     return Math.min(1, s);
   }

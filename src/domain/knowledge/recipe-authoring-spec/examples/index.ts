@@ -83,6 +83,8 @@ interface ExampleSpec {
 function buildExample(spec: ExampleSpec): Record<string, unknown> {
   // P2/C5: 深度分节作为纯散文追加在代码块之后——不新增 fenced 块，保证 collectCodeEvidence 仍取 coreCode
   // 为首个代码证据；每节挂真实 file:line，示范「就真实代码推理」而非填空模板。仅当 spec.depth 提供时渲染。
+  // 2026-07-02 语义注记：`## 小节` 只是深度的一种**可选组织方式**(depthReview 双轨同样认可自由叙述)；
+  // 本示例保留小节形式作示范，价值在其内容——被放弃的替代/量化占比/失败暴露点，而非小节结构本身。
   const depthLines = spec.depth
     ? [
         '',

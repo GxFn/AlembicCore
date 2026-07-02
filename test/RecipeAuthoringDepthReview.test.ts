@@ -24,14 +24,45 @@ describe('depthContract (C3)', () => {
     ]);
   });
 
-  it('scaffold 渲染每个维度、self-review 覆盖多来源与接地自检', () => {
+  it('scaffold 是深挖自问引导(自选角度非逐维填表)、self-review 覆盖接地断言与跨文件自检', () => {
+    // 2026-07-02 重设计：scaffold 不再逐维列 label(那是填表模板)；给洞察角度让作者自选真有
+    // 证据的角度深挖，叙述融入正文。DEPTH_DIMENSIONS 仍是裁判分类轴(见 depthReview 双轨)。
     const scaffold = buildDepthScaffold();
-    for (const dim of DEPTH_DIMENSIONS) {
-      expect(scaffold).toContain(dim.label);
-    }
+    expect(scaffold).toContain('真的读到代码证据');
+    expect(scaffold).toContain('反直觉');
+    expect(scaffold).toContain('例外');
+    expect(scaffold).toContain('(来源: file:行)');
     const checklist = buildDepthSelfReviewChecklist();
-    expect(checklist).toContain('多来源');
-    expect(checklist).toContain('file:line');
+    expect(checklist).toContain('深度断言');
+    expect(checklist).toContain('≥2 处不同文件');
+    expect(checklist).toContain('真解析到');
+  });
+});
+
+describe('叙述信号双轨(2026-07-02) — 自由叙述与小节组织同等获得深度认可', () => {
+  const validSourcePaths = ['lib/foo.ts', 'lib/bar.ts'];
+
+  it('无 ## 小节的自由叙述：含信号词且同段挂已解析 ref 的段落计入 groundedSignalCount', () => {
+    const markdown = [
+      '项目选择显式注册而非约定式扫描，因为约定式会把纯数据模型误纳入装配、放大启动成本 (来源: lib/foo.ts:12)。',
+      '',
+      '一旦绕过注册直接实例化，容器解析在启动期直接抛出，问题不会潜伏到运行时 (来源: lib/bar.ts:33)。',
+      '',
+      '这是一段没有引用的普通描述，不应计入。',
+      '',
+      '这段有信号词「代价」但引用未解析 (来源: lib/missing.ts:1)，同样不计。',
+    ].join('\n');
+    const result = reviewRecipeDepth({ markdown }, { validSourcePaths });
+    expect(result.groundedSignalCount).toBe(2);
+    // 小节路径判定为空(无 ## 标题)——双轨的意义正在于此。
+    expect(result.grounded.filter((k) => k !== 'multiSourceCorroboration')).toHaveLength(0);
+    expect(result.groundedFileCount).toBe(2);
+  });
+
+  it('纯信号词无接地 ref 不计(anti-gaming 口径不变)', () => {
+    const markdown = '因为权衡与代价，我们放弃了替代方案，否则会导致失败。没有任何引用。';
+    const result = reviewRecipeDepth({ markdown }, { validSourcePaths });
+    expect(result.groundedSignalCount).toBe(0);
   });
 });
 
