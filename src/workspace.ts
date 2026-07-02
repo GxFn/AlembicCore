@@ -24,6 +24,7 @@ export {
   getGhostWorkspaceDir,
   getProjectRegistryDir,
   getProjectRegistryPath,
+  getProjectRuntimeControlStatePath,
   normalizeProjectPath,
   type ProjectEntry,
   ProjectRegistry,

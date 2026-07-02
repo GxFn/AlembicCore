@@ -65,6 +65,15 @@ export function getProjectRegistryDir(): string {
   return path.join(getUserHome(), DEFAULT_FOLDER_NAMES.global.root);
 }
 
+/**
+ * W2(2026-07-02 全空间统一):runtime-control.json 状态文件路径单源。
+ * 此前主体 ProjectRuntimeControl 与 Plugin HostProjectAlignment 各自拼同一路径——
+ * 跨宿主状态文件的路径双实现,任一侧改动另一侧不可见(wire:文件名冻结)。
+ */
+export function getProjectRuntimeControlStatePath(): string {
+  return path.join(getProjectRegistryDir(), 'runtime-control.json');
+}
+
 export function getProjectRegistryPath(): string {
   return path.join(getProjectRegistryDir(), 'projects.json');
 }
