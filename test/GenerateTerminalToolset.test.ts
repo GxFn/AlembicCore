@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { getTestModeConfig } from '../src/shared/testMode.js';
-import { buildWorkflowReport } from '../src/workflows/capabilities/persistence/WorkflowReportWriter.js';
+import { buildWorkflowReport } from '../src/workflows/surfaces/persistence/WorkflowReportWriter.js';
 import {
   buildGenerateTerminalPolicyHints,
   getGenerateStageTerminalTools,
   resolveGenerateTerminalToolset,
-} from '../src/workflows/capabilities/planning/dimensions/GenerateTerminalToolset.js';
+} from '../src/workflows/surfaces/planning/dimensions/GenerateTerminalToolset.js';
 
 describe('GenerateTerminalToolset phantom terminal cleanup', () => {
   let oldToolset: string | undefined;

@@ -7,15 +7,15 @@
  * @module types/SnapshotViews
  */
 
-import type { EvolutionPrescreen } from '../workflows/capabilities/planning/knowledge/EvolutionPrescreen.js';
-import type { KnowledgeRescanExecutionDecision } from '../workflows/capabilities/planning/knowledge/KnowledgeRescanPlanBuilder.js';
+import type { EvolutionPrescreen } from '../workflows/surfaces/planning/knowledge/EvolutionPrescreen.js';
+import type { KnowledgeRescanExecutionDecision } from '../workflows/surfaces/planning/knowledge/KnowledgeRescanPlanBuilder.js';
 import type {
   AstSummary,
-  GenerateSessionShape,
   CallGraphResult,
   CodeEntityGraphResult,
   DependencyGraph,
   ExistingRecipeInfo,
+  GenerateSessionShape,
   GuardAudit,
   LocalPackageModule,
   ProjectSnapshot,

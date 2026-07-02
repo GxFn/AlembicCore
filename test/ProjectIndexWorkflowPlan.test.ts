@@ -5,8 +5,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   buildColdStartWorkflowPlan,
-  buildKnowledgeRescanWorkflowPlan,
   buildGenerateFullPlan,
+  buildKnowledgeRescanWorkflowPlan,
   buildProjectIndexIncrementalPlan,
   createHostAgentColdStartIntent,
   createInternalColdStartIntent,

@@ -9,12 +9,12 @@ import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { LifecycleEventRepository } from '../src/repository/evolution/LifecycleEventRepository.js';
 import { ProposalRepository } from '../src/repository/evolution/ProposalRepository.js';
 import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
-import { LifecycleStateMachine } from '../src/service/sustain/LifecycleStateMachine.js';
-import { StagingManager } from '../src/service/sustain/StagingManager.js';
 import { ConfidenceRouter } from '../src/service/knowledge/ConfidenceRouter.js';
 import { KnowledgeFileWriter } from '../src/service/knowledge/KnowledgeFileWriter.js';
 import { KnowledgeService } from '../src/service/knowledge/KnowledgeService.js';
 import { KnowledgeSyncService } from '../src/service/knowledge/KnowledgeSyncService.js';
+import { LifecycleStateMachine } from '../src/service/sustain/LifecycleStateMachine.js';
+import { StagingManager } from '../src/service/sustain/StagingManager.js';
 import pathGuard from '../src/shared/PathGuard.js';
 
 describe('Knowledge productization lifecycle', () => {

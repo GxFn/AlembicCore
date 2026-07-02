@@ -20,7 +20,7 @@ import {
   resolveProjectScopeSourceRef,
   summarizeProjectScopeDescriptor,
 } from '../src/shared/index.js';
-import { auditRecipesForRescan } from '../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
+import { auditRecipesForRescan } from '../src/workflows/surfaces/planning/knowledge/KnowledgeRescanPlanner.js';
 
 describe('ProjectScope multi-root contracts', () => {
   it('models one abstract project with multiple physical folders and Ghost-only storage', () => {

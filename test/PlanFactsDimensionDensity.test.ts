@@ -8,7 +8,7 @@ import type { DimensionDef } from '../src/types/ProjectSnapshot.js';
 import {
   baseDimensions,
   toBaseDimension,
-} from '../src/workflows/capabilities/planning/dimensions/BaseDimensions.js';
+} from '../src/workflows/surfaces/planning/dimensions/BaseDimensions.js';
 
 /**
  * dimensionEvidenceDensity 分型钉子。

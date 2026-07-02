@@ -6,8 +6,8 @@ import type {
   RecipeSourceRefEntity,
   RecipeSourceRefRepositoryImpl,
 } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
-import { ProposalGateway } from '../../../../service/sustain/ProposalGateway.js';
 import type { LifecycleStateMachine } from '../../../../service/sustain/LifecycleStateMachine.js';
+import { ProposalGateway } from '../../../../service/sustain/ProposalGateway.js';
 import type { EvolutionCandidatePlan } from '../../../../service/sustain/RecipeImpactPlanner.js';
 import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
 import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';

@@ -69,9 +69,9 @@ const TOOL_ROUTER_IDENTIFIERS = [
 ];
 
 const HOST_AGENT_WORKFLOW_DIRS = [
-  'src/workflows/capabilities/coverage',
-  'src/workflows/capabilities/host-agent',
-  'src/workflows/capabilities/planning/knowledge',
+  'src/workflows/surfaces/coverage',
+  'src/workflows/surfaces/host-agent',
+  'src/workflows/surfaces/planning/knowledge',
   'src/workflows/cold-start',
   'src/workflows/knowledge-rescan',
   'src/workflows/project-index',

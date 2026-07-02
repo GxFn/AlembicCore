@@ -14,7 +14,7 @@ import {
   type CoverageLedgerModuleAxis,
   isTargetScopedCoverageModuleId,
 } from '../../src/host-agent-workflows.js';
-import { buildCoverageLedgerModuleAxisFromSummaries as buildCoverageLedgerModuleAxisFromCoverage } from '../../src/workflows/capabilities/coverage/index.js';
+import { buildCoverageLedgerModuleAxisFromSummaries as buildCoverageLedgerModuleAxisFromCoverage } from '../../src/workflows/surfaces/coverage/index.js';
 
 const MODULES: CoverageLedgerModuleAxis[] = [
   { moduleId: 'auth', moduleName: 'Auth', ownedPaths: ['src/auth/login.ts', 'src/auth/token.ts'] },

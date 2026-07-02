@@ -54,7 +54,7 @@ describe('Blessed singletons (config/blessed-singletons.json)', () => {
       ['memo-caches', 'src/shared/isOwnDevRepo.ts', '_resetDevRepoCache'],
       [
         'bootstrap-session-manager',
-        'src/workflows/capabilities/host-agent/SessionSupport.ts',
+        'src/workflows/surfaces/host-agent/SessionSupport.ts',
         '_resetGenerateSessionManagersForTesting',
       ],
     ];

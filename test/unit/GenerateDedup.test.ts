@@ -7,10 +7,7 @@
  *   - 阈值拦截逻辑
  */
 import { describe, expect, it } from 'vitest';
-import {
-  GenerateDedup,
-  type CandidateSummary,
-} from '../../src/service/bootstrap/GenerateDedup.js';
+import { type CandidateSummary, GenerateDedup } from '../../src/service/bootstrap/GenerateDedup.js';
 
 function makeSummary(overrides: Partial<CandidateSummary> = {}): CandidateSummary {
   return {

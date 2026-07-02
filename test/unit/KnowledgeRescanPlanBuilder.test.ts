@@ -10,7 +10,7 @@ import {
   buildKnowledgeRescanPlan,
   resolveModuleTier,
   resolvePerCellTargetDefault,
-} from '../../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanBuilder.js';
+} from '../../src/workflows/surfaces/planning/knowledge/KnowledgeRescanPlanBuilder.js';
 
 // 单测最小输入，仅驱动 per-cell 路径（auditSummary/dimensions 空桩；返回放宽以便直读 cellPlans）。
 function plan(opts: Record<string, unknown>): any {

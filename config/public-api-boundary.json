@@ -1217,14 +1217,14 @@
     "./repository/code",
     "./repository/sync",
     "./workflows",
-    "./workflows/capabilities",
+    "./workflows/surfaces",
     "./workflows/cold-start",
     "./workflows/knowledge-rescan",
     "./workflows/shared",
-    "./workflows/capabilities/host-agent",
-    "./workflows/capabilities/persistence",
-    "./workflows/capabilities/planning/dimensions",
-    "./workflows/capabilities/planning/knowledge",
-    "./workflows/capabilities/presentation"
+    "./workflows/surfaces/host-agent",
+    "./workflows/surfaces/persistence",
+    "./workflows/surfaces/planning/dimensions",
+    "./workflows/surfaces/planning/knowledge",
+    "./workflows/surfaces/presentation"
   ]
 }

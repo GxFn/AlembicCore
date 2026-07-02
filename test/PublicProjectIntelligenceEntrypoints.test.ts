@@ -68,7 +68,7 @@ describe('retired project intelligence public entrypoint', () => {
       string,
       unknown
     >;
-    const capabilitiesModule = (await import('../src/workflows/capabilities/index.js')) as Record<
+    const capabilitiesModule = (await import('../src/workflows/surfaces/index.js')) as Record<
       string,
       unknown
     >;

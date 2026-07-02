@@ -234,29 +234,29 @@
       "types": "./dist/workflows/knowledge-rescan/index.d.ts",
       "import": "./dist/workflows/knowledge-rescan/index.js"
     },
-    "./workflows/capabilities": {
-      "types": "./dist/workflows/capabilities/index.d.ts",
-      "import": "./dist/workflows/capabilities/index.js"
+    "./workflows/surfaces": {
+      "types": "./dist/workflows/surfaces/index.d.ts",
+      "import": "./dist/workflows/surfaces/index.js"
     },
-    "./workflows/capabilities/host-agent": {
-      "types": "./dist/workflows/capabilities/host-agent/index.d.ts",
-      "import": "./dist/workflows/capabilities/host-agent/index.js"
+    "./workflows/surfaces/host-agent": {
+      "types": "./dist/workflows/surfaces/host-agent/index.d.ts",
+      "import": "./dist/workflows/surfaces/host-agent/index.js"
     },
-    "./workflows/capabilities/persistence": {
-      "types": "./dist/workflows/capabilities/persistence/index.d.ts",
-      "import": "./dist/workflows/capabilities/persistence/index.js"
+    "./workflows/surfaces/persistence": {
+      "types": "./dist/workflows/surfaces/persistence/index.d.ts",
+      "import": "./dist/workflows/surfaces/persistence/index.js"
     },
-    "./workflows/capabilities/planning/dimensions": {
-      "types": "./dist/workflows/capabilities/planning/dimensions/index.d.ts",
-      "import": "./dist/workflows/capabilities/planning/dimensions/index.js"
+    "./workflows/surfaces/planning/dimensions": {
+      "types": "./dist/workflows/surfaces/planning/dimensions/index.d.ts",
+      "import": "./dist/workflows/surfaces/planning/dimensions/index.js"
     },
-    "./workflows/capabilities/planning/knowledge": {
-      "types": "./dist/workflows/capabilities/planning/knowledge/index.d.ts",
-      "import": "./dist/workflows/capabilities/planning/knowledge/index.js"
+    "./workflows/surfaces/planning/knowledge": {
+      "types": "./dist/workflows/surfaces/planning/knowledge/index.d.ts",
+      "import": "./dist/workflows/surfaces/planning/knowledge/index.js"
     },
-    "./workflows/capabilities/presentation": {
-      "types": "./dist/workflows/capabilities/presentation/index.d.ts",
-      "import": "./dist/workflows/capabilities/presentation/index.js"
+    "./workflows/surfaces/presentation": {
+      "types": "./dist/workflows/surfaces/presentation/index.d.ts",
+      "import": "./dist/workflows/surfaces/presentation/index.js"
     },
     "./infrastructure/cache": {
       "types": "./dist/infrastructure/cache/index.d.ts",

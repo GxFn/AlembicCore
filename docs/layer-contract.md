@@ -74,11 +74,11 @@ bridge layers without creating runtime coupling. Mixed imports
 
 ## Known exception (D3) — host-agent ↔ persistence straddle
 
-`workflows/capabilities/host-agent/BootstrapSession.ts` ↔
-`workflows/capabilities/persistence/WorkflowSnapshotStore.ts` ↔
-`workflows/capabilities/host-agent/HostAgentDimensionCompletionWorkflow.ts`
+`workflows/surfaces/host-agent/BootstrapSession.ts` ↔
+`workflows/surfaces/persistence/WorkflowSnapshotStore.ts` ↔
+`workflows/surfaces/host-agent/HostAgentDimensionCompletionWorkflow.ts`
 couple session state, snapshot persistence, and dimension-completion
-orchestration inside `workflows/capabilities/`. This is a KNOWN straddle, not a
+orchestration inside `workflows/surfaces/`. This is a KNOWN straddle, not a
 contract violation (same area), but its responsibility split is unsettled.
 **No repair in CO2.** Owner: AlembicCore window; trigger: post-CKG1
 restructuring of the cold-start/host-agent area.
@@ -100,7 +100,7 @@ restructuring of the cold-start/host-agent area.
 
 - The single genuine direction violation found by the audit —
   `service/panorama/ModuleDiscoverer.ts` runtime-importing
-  `workflows/capabilities/presentation/TargetClassifier` — was repaired by
+  `workflows/surfaces/presentation/TargetClassifier` — was repaired by
   moving `TargetClassifier` to `shared/TargetClassifier.ts` (pure, dependency-
   free utility). The presentation facade re-exports the same symbols, so the
   public surface is unchanged. `TargetClassifier` is deliberately NOT added to

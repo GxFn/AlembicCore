@@ -53,6 +53,15 @@
 | SkillHooks 'onBootstrapStart'/'onBootstrapComplete' | 'onGenerateStart'/'onGenerateComplete'(旧名 compat 注册保留一个版本) | 批3a |
 | Dashboard i18n bootstrap.* | generate.* | 批3a |
 | ProjectIndex* 27 符号(runProjectIndexWorkflow→runGenerateWorkflow 等;ColdStart* 名实相符保留) | Generate*/ScopedModuleMining* | 批3d |
+| McpSession(+字段 session?)/SseSessionRegistry 族/私有 GenerateSession 双胞胎 | McpConnection(+connection?)/SseConnectionRegistry(HTTP 载荷 sessionId 与 createStreamSession wire 术语保留)/GenerateTaskSession | W3 |
+| src/evolution.ts facade 本体 | src/sustain.ts(exports 新增 './sustain';'./evolution' wire 冻结留 shim 整体转发) | W3 |
+| Evolution{Proposal,Warning,LifecycleEvent,GitDiffCheckpoint,CoverageLedger}Repository 5 个 type 别名 | 删除,消费方改直名(coverage_ledger 是 Generate 概念,别名挂 Evolution 名实不符) | W3 |
+| RecipeSimilarity 的 RecipeLike | SimilarityRecipeLike(与 recipeStatus 侧 RecipeLike 消歧;补进 './sustain' 具名导出) | W3 |
+| exports `./workflows/capabilities` 族 6 条+src 目录 | `./workflows/surfaces` 族(0 外部消费实证,原子切换无 alias;closeout/retired 历史记录保留旧名) | W3 |
+| Agent src/tools/runtime/capabilities/ 目录 | tools/runtime/toolsets/(无独立 exports 子路径;类名 Capability/RuntimeCapability 待 W6 别名层删除后评估) | W3 |
+| Plugin lib/workflows/capabilities/ 目录 | lib/workflows/surfaces/(#workflows/* package-imports 中段同批;stage 验证过) | W3 |
+| 主体 PcvNodeEvidence.ts/Agent PcvNodeEvidence.ts(同名异物) | PcvStageNodeMap.ts(主体,stage node map 构建)/PcvNodeEvidenceRecorder.ts(Agent,运行时证据记录);契约值 'PCVGenerateStageNodeMap' 等冻结 | W3 |
+| [Insight-v3] 日志前缀 | [generate](43 处/10 文件,纯 D 层) | W3 |
 
 回流防护:`scripts/lint-retired-symbols.mjs` + `config/retired-symbols.json`(166 退役符号,五仓 npm run lint:retired-symbols,已接入 check)。
 

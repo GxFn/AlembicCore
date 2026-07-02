@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  GenerateSession,
   buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
   buildMissionBriefing,
@@ -10,6 +9,7 @@ import {
   createIDEAgentAnalysisProgressSeed,
   createIDEAgentAnalysisUnitKey,
   type DimensionDef,
+  GenerateSession,
 } from '../src/host-agent-workflows.js';
 import {
   buildHostAgentAnalysisPacketFromProjectContext as buildHostAgentPacketFromRoot,
@@ -28,8 +28,8 @@ import {
   buildHostAgentAnalysisPacket,
   buildHostAgentAnalysisPacketFromSnapshot,
   buildIDEAgentAnalysisPacket,
-} from '../src/workflows/capabilities/host-agent/HostAgentAnalysisPacketBuilder.js';
-import { buildIDEAgentAnalysisPacketFromSnapshot } from '../src/workflows/capabilities/host-agent/IDEAgentAnalysisPacketBuilder.js';
+} from '../src/workflows/surfaces/host-agent/HostAgentAnalysisPacketBuilder.js';
+import { buildIDEAgentAnalysisPacketFromSnapshot } from '../src/workflows/surfaces/host-agent/IDEAgentAnalysisPacketBuilder.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Find architectural boundaries' },

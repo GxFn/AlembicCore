@@ -8,11 +8,11 @@ import type {
   PhaseReport,
   ProjectSnapshot,
 } from '../../types/ProjectSnapshot.js';
-import { buildInternalNextSteps } from '../capabilities/host-agent/MissionBriefingSupport.js';
-import { buildLanguageExtension as buildProjectLanguageExtension } from '../capabilities/presentation/LanguageExtensionBuilder.js';
-import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
-import type { CleanupResult } from '../capabilities/RecipeSnapshotTypes.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
+import { buildInternalNextSteps } from '../surfaces/host-agent/MissionBriefingSupport.js';
+import { buildLanguageExtension as buildProjectLanguageExtension } from '../surfaces/presentation/LanguageExtensionBuilder.js';
+import { buildTargetFileMap as buildProjectTargetFileMap } from '../surfaces/presentation/TargetFileMapBuilder.js';
+import type { CleanupResult } from '../surfaces/RecipeSnapshotTypes.js';
 import type { ColdStartSelectionSummary } from './ColdStartPlan.js';
 
 export type ColdStartTargetFileMap = Record<string, Array<Record<string, unknown>>>;

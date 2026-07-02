@@ -1,22 +1,22 @@
 import { describe, expect, test } from 'vitest';
 import type { DimensionDef } from '../../src/types/ProjectSnapshot.js';
-import { GenerateSession } from '../../src/workflows/capabilities/host-agent/GenerateSession.js';
-import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/capabilities/host-agent/HostAgentDimensionCompletionWorkflow.js';
-import { buildMissionBriefing } from '../../src/workflows/capabilities/host-agent/MissionBriefingBuilder.js';
-import { buildInternalNextSteps } from '../../src/workflows/capabilities/host-agent/MissionBriefingSupport.js';
-import {
-  buildKnowledgeRescanPlan,
-  type RelevanceAuditResult,
-  type RelevanceAuditSummary,
-} from '../../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
-import { projectHostAgentRescanEvidencePlan } from '../../src/workflows/capabilities/planning/knowledge/RescanEvidenceProjectors.js';
-import type { RecipeSnapshotEntry } from '../../src/workflows/capabilities/RecipeSnapshotTypes.js';
 import { presentHostAgentColdStartResponse } from '../../src/workflows/cold-start/ColdStartPresenters.js';
 import {
   createHostAgentKnowledgeRescanIntent,
   createInternalKnowledgeRescanIntent,
 } from '../../src/workflows/knowledge-rescan/KnowledgeRescanIntent.js';
 import { presentHostAgentKnowledgeRescanResponse } from '../../src/workflows/knowledge-rescan/KnowledgeRescanPresenters.js';
+import { GenerateSession } from '../../src/workflows/surfaces/host-agent/GenerateSession.js';
+import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/surfaces/host-agent/HostAgentDimensionCompletionWorkflow.js';
+import { buildMissionBriefing } from '../../src/workflows/surfaces/host-agent/MissionBriefingBuilder.js';
+import { buildInternalNextSteps } from '../../src/workflows/surfaces/host-agent/MissionBriefingSupport.js';
+import {
+  buildKnowledgeRescanPlan,
+  type RelevanceAuditResult,
+  type RelevanceAuditSummary,
+} from '../../src/workflows/surfaces/planning/knowledge/KnowledgeRescanPlanner.js';
+import { projectHostAgentRescanEvidencePlan } from '../../src/workflows/surfaces/planning/knowledge/RescanEvidenceProjectors.js';
+import type { RecipeSnapshotEntry } from '../../src/workflows/surfaces/RecipeSnapshotTypes.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Architecture guide' } as DimensionDef,

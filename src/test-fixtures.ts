@@ -95,7 +95,7 @@ export {
   normalizeSnapshotPath,
   reconcileSnapshotHashes,
   type SnapshotData,
-} from './workflows/capabilities/persistence/FileDiffSnapshotStore.js';
+} from './workflows/surfaces/persistence/FileDiffSnapshotStore.js';
 
 export const AST_LANGUAGE_TEST_PLUGINS = Object.freeze({
   dart: dartAstPlugin,

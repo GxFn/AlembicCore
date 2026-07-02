@@ -1,12 +1,12 @@
 import type { DimensionDef, GuardAudit, ProjectSnapshot } from '../../types/ProjectSnapshot.js';
+import { envelope } from '../shared/WorkflowEnvelope.js';
 import type {
   HostAgentRescanEvidencePlan,
   InternalRescanGapPlan,
   RelevanceAuditSummary,
-} from '../capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
-import { buildTargetFileMap as buildProjectTargetFileMap } from '../capabilities/presentation/TargetFileMapBuilder.js';
-import type { CleanupResult, RecipeSnapshot } from '../capabilities/RecipeSnapshotTypes.js';
-import { envelope } from '../shared/WorkflowEnvelope.js';
+} from '../surfaces/planning/knowledge/KnowledgeRescanPlanner.js';
+import { buildTargetFileMap as buildProjectTargetFileMap } from '../surfaces/presentation/TargetFileMapBuilder.js';
+import type { CleanupResult, RecipeSnapshot } from '../surfaces/RecipeSnapshotTypes.js';
 
 /**
  * Destructive-reset honesty (MT2 / MT1 P1 finding): the rescan response

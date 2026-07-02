@@ -10,6 +10,19 @@ export type {
   DimensionDef,
   MissionBriefingResult,
 } from './types/ProjectSnapshot.js';
+export * from './workflows/project-index/index.js';
+export {
+  buildColdStartWorkflowPlan as buildGenerateFullPlan,
+  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
+  type ColdStartWorkflowIntent as GenerateFullWorkflowIntent,
+  createHostAgentColdStartIntent as createGenerateIntentFullHostAgent,
+  createHostAgentKnowledgeRescanIntent as createGenerateIntentIncrementalHostAgent,
+  createInternalColdStartIntent as createGenerateIntentFullInternal,
+  createInternalKnowledgeRescanIntent as createGenerateIntentIncrementalInternal,
+  type GenerateWorkflowRunMode,
+  type KnowledgeRescanWorkflowIntent as GenerateIncrementalWorkflowIntent,
+} from './workflows/project-index/index.js';
+export * from './workflows/shared/index.js';
 export {
   buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
@@ -57,8 +70,8 @@ export {
   type IDEAgentStructuralEvidenceKind,
   type IDEAgentStructuralEvidenceRef,
   type IDEAgentStructuralHints,
-} from './workflows/capabilities/host-agent/HostAgentAnalysisPacketBuilder.js';
-export * from './workflows/capabilities/host-agent/index.js';
+} from './workflows/surfaces/host-agent/HostAgentAnalysisPacketBuilder.js';
+export * from './workflows/surfaces/host-agent/index.js';
 export type {
   ProjectSkillAssetKind,
   ProjectSkillAuthorizationStatus,
@@ -75,24 +88,11 @@ export type {
   ProjectSkillRuntimeExportReceipt,
   ProjectSkillRuntimeExportStatus,
   ProjectSkillRuntimeExportStrategy,
-} from './workflows/capabilities/host-agent/ProjectSkillDeliveryContracts.js';
-export * from './workflows/capabilities/persistence/index.js';
-export * from './workflows/capabilities/planning/dimensions/index.js';
-export * from './workflows/capabilities/planning/knowledge/index.js';
-export { buildKnowledgeRescanPlan as buildProjectIndexGapPlan } from './workflows/capabilities/planning/knowledge/index.js';
-export * from './workflows/capabilities/presentation/index.js';
-export * from './workflows/capabilities/RecipeSnapshotTypes.js';
-export * from './workflows/capabilities/WorkflowCleanupPolicies.js';
-export * from './workflows/project-index/index.js';
-export {
-  buildColdStartWorkflowPlan as buildGenerateFullPlan,
-  buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
-  type ColdStartWorkflowIntent as GenerateFullWorkflowIntent,
-  createHostAgentColdStartIntent as createGenerateIntentFullHostAgent,
-  createHostAgentKnowledgeRescanIntent as createGenerateIntentIncrementalHostAgent,
-  createInternalColdStartIntent as createGenerateIntentFullInternal,
-  createInternalKnowledgeRescanIntent as createGenerateIntentIncrementalInternal,
-  type KnowledgeRescanWorkflowIntent as GenerateIncrementalWorkflowIntent,
-  type GenerateWorkflowRunMode,
-} from './workflows/project-index/index.js';
-export * from './workflows/shared/index.js';
+} from './workflows/surfaces/host-agent/ProjectSkillDeliveryContracts.js';
+export * from './workflows/surfaces/persistence/index.js';
+export * from './workflows/surfaces/planning/dimensions/index.js';
+export * from './workflows/surfaces/planning/knowledge/index.js';
+export { buildKnowledgeRescanPlan as buildProjectIndexGapPlan } from './workflows/surfaces/planning/knowledge/index.js';
+export * from './workflows/surfaces/presentation/index.js';
+export * from './workflows/surfaces/RecipeSnapshotTypes.js';
+export * from './workflows/surfaces/WorkflowCleanupPolicies.js';
