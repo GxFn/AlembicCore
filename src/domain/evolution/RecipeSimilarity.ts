@@ -82,7 +82,7 @@ const STOP_WORDS = new Set([
 /* ────────────────────── Types ────────────────────── */
 
 /** 参与相似度计算的最小字段集 */
-export interface RecipeLike {
+export interface SimilarityRecipeLike {
   // U5 #6/#7：可选 recipe id。embeddingSimProvider 据此运行时查预计算向量（不参与 Jaccard 相似度计算本身；
   // 无 id → provider 无法定位向量 → 回退纯 Jaccard）。additive，不影响既有相似度语义。
   id?: string;
@@ -104,9 +104,12 @@ export interface RecipeLike {
  * U5 #6 conduit：embedding 相似度注入器（同步）。
  * 由消费服务 ctor 注入，给 compute/computeDimensions 第 3 参喂入「预计算好的」相似度
  * （domain/service 不发起 embed，只接收算好的 sim）；返回 undefined 或未注入 → compute 回退纯 Jaccard。
- * 入参与 compute 同源（RecipeLike→RecipeLike），保证三处消费站点签名一致。
+ * 入参与 compute 同源（SimilarityRecipeLike→SimilarityRecipeLike），保证三处消费站点签名一致。
  */
-export type EmbeddingSimProvider = (a: RecipeLike, b: RecipeLike) => number | undefined;
+export type EmbeddingSimProvider = (
+  a: SimilarityRecipeLike,
+  b: SimilarityRecipeLike
+) => number | undefined;
 
 /** 5 维分解得分 */
 export interface SimilarityDimensions {
@@ -141,7 +144,7 @@ export class RecipeSimilarity {
   /**
    * 计算两条 Recipe（或候选）之间的 5 维加权相似度 (0-1)
    */
-  static compute(a: RecipeLike, b: RecipeLike, embeddingSim?: number): number {
+  static compute(a: SimilarityRecipeLike, b: SimilarityRecipeLike, embeddingSim?: number): number {
     const dims = RecipeSimilarity.computeDimensions(a, b, embeddingSim);
     return (
       WEIGHTS.title * dims.title +
@@ -156,8 +159,8 @@ export class RecipeSimilarity {
    * 计算各维度分解得分（不加权），供 RedundancyResult 等展示用
    */
   static computeDimensions(
-    a: RecipeLike,
-    b: RecipeLike,
+    a: SimilarityRecipeLike,
+    b: SimilarityRecipeLike,
     embeddingSim?: number
   ): SimilarityDimensions {
     // U5 #6：content 维度可选融合注入的 embeddingSim（domain 不发起 embed，保纯度/确定性）。
@@ -186,7 +189,10 @@ export class RecipeSimilarity {
    *   - coreCodeOverlap: coreCode 共享模式比率
    *   - categoryMatch: 同 category
    */
-  static analyzeFields(candidate: RecipeLike, existing: RecipeLike): FieldAnalysis {
+  static analyzeFields(
+    candidate: SimilarityRecipeLike,
+    existing: SimilarityRecipeLike
+  ): FieldAnalysis {
     return {
       triggerConflict: RecipeSimilarity.#isTriggerConflict(
         candidate.trigger ?? null,
@@ -278,7 +284,7 @@ export class RecipeSimilarity {
    *   - codeSimilarity 捕获字符级排列顺序
    *   - contentTokenSimilarity 捕获语义级 API 标识符重叠
    */
-  static contentTokenSimilarity(a: RecipeLike, b: RecipeLike): number {
+  static contentTokenSimilarity(a: SimilarityRecipeLike, b: SimilarityRecipeLike): number {
     const tokensA = extractRecipeTokens({
       coreCode: a.coreCode ?? undefined,
       content: a.content

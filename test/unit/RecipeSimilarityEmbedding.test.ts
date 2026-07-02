@@ -5,16 +5,19 @@
  * content 维度取 max(tokenJaccard, embeddingSim)：注入时近义改写高于纯 Jaccard，不可用回退 Jaccard（确定）。
  */
 import { describe, expect, it } from 'vitest';
-import { type RecipeLike, RecipeSimilarity } from '../../src/domain/evolution/RecipeSimilarity.js';
+import {
+  RecipeSimilarity,
+  type SimilarityRecipeLike,
+} from '../../src/domain/evolution/RecipeSimilarity.js';
 
-const A: RecipeLike = {
+const A: SimilarityRecipeLike = {
   title: 'Safe dictionary access',
   doClause: 'Use bd_stringForKey for safe retrieval',
   dontClause: 'Do not use raw objectForKey',
   coreCode: '[dict bd_stringForKey:@"k"]',
   content: { markdown: 'safe dictionary access pattern' },
 };
-const B: RecipeLike = {
+const B: SimilarityRecipeLike = {
   // 近义改写：token 重叠低，但语义相近 → 注入 embedding 应高于纯 Jaccard
   title: 'Protected map value reading',
   doClause: 'Read map entries defensively with helpers',

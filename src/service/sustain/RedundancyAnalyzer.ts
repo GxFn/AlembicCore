@@ -12,8 +12,8 @@
 
 import {
   type EmbeddingSimProvider,
-  type RecipeLike,
   RecipeSimilarity,
+  type SimilarityRecipeLike,
 } from '../../domain/evolution/RecipeSimilarity.js';
 import { CONSUMABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
@@ -125,8 +125,8 @@ export class RedundancyAnalyzer {
    * 分析两条 Recipe 的冗余度（委托 RecipeSimilarity 统一算法）
    */
   analyzePair(a: RecipeForRedundancy, b: RecipeForRedundancy): RedundancyResult | null {
-    const aLike = a as RecipeLike;
-    const bLike = b as RecipeLike;
+    const aLike = a as SimilarityRecipeLike;
+    const bLike = b as SimilarityRecipeLike;
     // U5 #6 conduit：注入预计算 embedding 相似度（缺省→第 3 参 undefined→computeDimensions 走纯 Jaccard）。
     const dims = RecipeSimilarity.computeDimensions(
       aLike,

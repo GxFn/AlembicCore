@@ -1,11 +1,11 @@
 import type { AlembicDatabaseHandle, DrizzleDB, SqliteDatabase } from './database.js';
 import {
-  GenerateRepositoryImpl,
-  type GenerateSnapshotEntity,
-  type GenerateSnapshotInsert,
   type DimensionStatMeta,
   type DimFileEntry,
   type DimFileInsert,
+  GenerateRepositoryImpl,
+  type GenerateSnapshotEntity,
+  type GenerateSnapshotInsert,
 } from './repository/bootstrap/GenerateRepository.js';
 import {
   type CodeEntity,
@@ -172,11 +172,6 @@ export type MemoryRepository = MemoryRepositoryImpl;
 export type SessionRepository = SessionRepositoryImpl;
 export type SourceGraphRepository = SourceGraphRepositoryImpl;
 export type SourceRefRepository = RecipeSourceRefRepositoryImpl;
-export type EvolutionProposalRepository = ProposalRepository;
-export type EvolutionWarningRepository = WarningRepository;
-export type EvolutionLifecycleEventRepository = LifecycleEventRepository;
-export type EvolutionGitDiffCheckpointRepository = GitDiffCheckpointRepository;
-export type EvolutionCoverageLedgerRepository = CoverageLedgerRepository;
 
 export {
   GenerateRepositoryImpl,
@@ -214,11 +209,11 @@ export interface AlembicRepositoryBundle {
   memoryRepository: MemoryRepository;
   sessionRepository: SessionRepository;
   sourceGraphRepository: SourceGraphRepository;
-  proposalRepository: EvolutionProposalRepository;
-  warningRepository: EvolutionWarningRepository;
-  lifecycleEventRepository: EvolutionLifecycleEventRepository;
-  gitDiffCheckpointRepository: EvolutionGitDiffCheckpointRepository;
-  coverageLedgerRepository: EvolutionCoverageLedgerRepository;
+  proposalRepository: ProposalRepository;
+  warningRepository: WarningRepository;
+  lifecycleEventRepository: LifecycleEventRepository;
+  gitDiffCheckpointRepository: GitDiffCheckpointRepository;
+  coverageLedgerRepository: CoverageLedgerRepository;
   recipeSourceRefRepository: SourceRefRepository;
 }
 

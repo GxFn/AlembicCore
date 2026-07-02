@@ -20,8 +20,8 @@
 import { EvolutionPolicy, type UpdateVerdict } from '../../domain/evolution/EvolutionPolicy.js';
 import {
   type EmbeddingSimProvider,
-  type RecipeLike,
   RecipeSimilarity,
+  type SimilarityRecipeLike,
 } from '../../domain/evolution/RecipeSimilarity.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { Signal, SignalBus } from '../../infrastructure/signal/SignalBus.js';
@@ -619,7 +619,7 @@ export class ProposalExecutor {
     coreCode?: string;
     trigger?: string;
     content?: unknown;
-  }): RecipeLike {
+  }): SimilarityRecipeLike {
     return {
       // U5 #7：保留 recipe id 流通到 embeddingSimProvider（supersede 两侧均为 findById 实体、运行时带 id）。
       id: e.id,
@@ -628,7 +628,7 @@ export class ProposalExecutor {
       dontClause: e.dontClause ?? null,
       coreCode: e.coreCode ?? null,
       trigger: e.trigger ?? null,
-      content: (e.content as RecipeLike['content']) ?? null,
+      content: (e.content as SimilarityRecipeLike['content']) ?? null,
     };
   }
 

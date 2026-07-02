@@ -11,7 +11,7 @@
  * - D3：本模块只写 coverage_ledger，绝不读写 git_diff_checkpoints（账本链与 git-diff checkpoint 完全正交）。
  * - no-guess：deferred 行只写「调用方明确判定本轮不扫」的 cell，不替宿主/Agent 推断该扫哪些。
  */
-import type { EvolutionCoverageLedgerRepository } from '../../../repositories.js';
+import type { CoverageLedgerRepository } from '../../../repositories.js';
 import {
   buildCoverageLedger,
   type CoverageLedgerCandidate,
@@ -28,7 +28,7 @@ export interface CoverageLedgerWriteLogger {
 }
 
 export interface CoverageLedgerWriteInput {
-  repository: EvolutionCoverageLedgerRepository;
+  repository: CoverageLedgerRepository;
   /** 调用方提供的 project_root（Core 不硬编码宿主路径，统一在 upsert 时落库）。 */
   projectRoot: string;
   /** canonical ModuleSummary ownedPaths 投影出的 module 轴。 */
@@ -162,7 +162,7 @@ export interface DeepMiningRoundReflowResult {
  * best-effort：失败吞掉、返回 updated:false，绝不阻断维度完成。D3：只写 deep_mining_rounds，不碰 git_diff_checkpoints。
  */
 export function reflowDeepMiningRoundOnCompletion(input: {
-  repository: EvolutionCoverageLedgerRepository;
+  repository: CoverageLedgerRepository;
   projectRoot: string;
   newRecipeCount: number;
   now?: number;

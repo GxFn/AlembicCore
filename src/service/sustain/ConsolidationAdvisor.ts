@@ -18,8 +18,8 @@
 import {
   type EmbeddingSimProvider,
   type FieldAnalysis,
-  type RecipeLike,
   RecipeSimilarity,
+  type SimilarityRecipeLike,
 } from '../../domain/evolution/RecipeSimilarity.js';
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
@@ -254,8 +254,8 @@ export class ConsolidationAdvisor {
     if (moderateOverlaps.length > 0) {
       const direction = this.#computeMergeDirection(candidate, top.recipe);
       const fields = RecipeSimilarity.analyzeFields(
-        candidate as RecipeLike,
-        top.recipe as RecipeLike
+        candidate as SimilarityRecipeLike,
+        top.recipe as SimilarityRecipeLike
       );
 
       if (direction.addedDimensions.length === 0) {
@@ -571,7 +571,7 @@ export class ConsolidationAdvisor {
    * 委托 RecipeSimilarity 统一算法。
    */
   #computeSimilarity(candidate: CandidateForConsolidation, recipe: RecipeSummary): number {
-    const candidateLike: RecipeLike = {
+    const candidateLike: SimilarityRecipeLike = {
       // U5 #7：候选 id 流通到 provider（无 id 时 provider 回退 Jaccard）。
       id: candidate.id,
       title: candidate.title,
@@ -586,8 +586,8 @@ export class ConsolidationAdvisor {
           }
         : null,
     };
-    // recipeLike 经 cast 自带 RecipeSummary.id（RecipeLike.id? 后可见），无需重建。
-    const recipeLike = recipe as RecipeLike;
+    // recipeLike 经 cast 自带 RecipeSummary.id（SimilarityRecipeLike.id? 后可见），无需重建。
+    const recipeLike = recipe as SimilarityRecipeLike;
     // U5 #6 conduit：注入预计算 embedding 相似度（缺省→第 3 参 undefined→compute 走纯 Jaccard）。
     return RecipeSimilarity.compute(
       candidateLike,

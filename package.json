@@ -34,6 +34,10 @@
       "types": "./dist/evolution.d.ts",
       "import": "./dist/evolution.js"
     },
+    "./sustain": {
+      "types": "./dist/sustain.d.ts",
+      "import": "./dist/sustain.js"
+    },
     "./memory": {
       "types": "./dist/memory.d.ts",
       "import": "./dist/memory.js"
