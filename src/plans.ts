@@ -19,7 +19,13 @@ export {
   assertPlanSelectionStageRequirements,
   hasPositiveStageBudget,
   normalizeConfirmedPlanIntent,
+  PLAN_SCALE_RULES,
   planSelectionRequiresModuleTargets,
+  renderPlanHardConstraintsZh,
+  renderPlanOutputExampleZh,
+  renderPlanPersonaDescription,
+  renderPlanScaleChecklistEn,
+  renderPlanScaleMethodZh,
   unique,
   validateCompletePlanIntent,
 } from './service/planIntent/index.js';
