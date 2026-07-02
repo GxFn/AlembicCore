@@ -43,6 +43,8 @@ export interface PlanSelectionProjection {
     readonly totalRecipeBudget: number;
     readonly maxFiles: number;
     readonly contentMaxLines: number;
+    /** P-2：plan LLM 的 per-dimension 预算（可选透传，宿主折算建议区间优先用它） */
+    readonly dimensionBudgets?: Readonly<Record<string, number>>;
   };
   readonly moduleScope: string[];
   readonly unknownDimensionIds?: string[];
@@ -229,7 +231,10 @@ function resolvePlanSelectionBudget(input: {
   readonly scaleOverride?: PlanSelectionScaleOverride;
   readonly testMode: boolean;
 }): PlanSelectionProjection['budget'] {
-  const dimensionLowerBound = Math.max(1, input.dimensionCount);
+  // P-4(2026-07-02)：下限从「每维度 1 条」提高到「每维度 3 条」——真机 plan LLM 被输出示例
+  // 数字锚定给出 totalRecipeBudget=6/3 维度(每维度 2 条)，严重低于真实证据面(核心维度 8-12 条)。
+  // 最薄的入选维度也有 3+ 条可提炼约定，确定性下限防 LLM 保守；testMode 上限逻辑不变。
+  const dimensionLowerBound = Math.max(1, input.dimensionCount * 3);
   const totalRecipeBudget =
     input.scaleOverride?.totalRecipeBudget ?? input.scale.totalRecipeBudget ?? dimensionLowerBound;
   const maxFiles =
@@ -243,14 +248,16 @@ function resolvePlanSelectionBudget(input: {
   const boundedTotalRecipeBudget = Math.max(dimensionLowerBound, totalRecipeBudget);
   const testModeUpperBound = Math.max(1, input.dimensionCount * 2);
 
+  const dimensionBudgets = input.scale.dimensionBudgets;
   return {
     totalRecipeBudget: clampPositiveInteger(
       input.testMode
         ? Math.min(boundedTotalRecipeBudget, testModeUpperBound)
         : boundedTotalRecipeBudget,
-      dimensionLowerBound,
+      input.testMode ? 1 : dimensionLowerBound,
       MAX_TOTAL_RECIPE_BUDGET
     ),
+    ...(dimensionBudgets && Object.keys(dimensionBudgets).length > 0 ? { dimensionBudgets } : {}),
     maxFiles: clampPositiveInteger(maxFiles, DEFAULT_MAX_FILES, MAX_PLAN_FILES),
     contentMaxLines: clampPositiveInteger(
       contentMaxLines,

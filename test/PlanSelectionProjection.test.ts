@@ -114,7 +114,9 @@ describe('PlanSelection projection foundation', () => {
     expect(projection).toEqual({
       executionDimensions: ['architecture', 'missing-dimension'],
       budget: {
-        totalRecipeBudget: 2,
+        // P-4(2026-07-02)：下限 = dimensionCount×3（每维度至少 3 条可提炼约定；旧下限
+        // 每维度 1 条纵容 plan LLM 保守拍数）。本用例 2 维度 → 下限 6。
+        totalRecipeBudget: 6,
         maxFiles: 500,
         contentMaxLines: 120,
       },

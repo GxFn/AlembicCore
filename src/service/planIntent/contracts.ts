@@ -25,6 +25,12 @@ export interface PlanScaleDecision {
   contentMaxLines?: number;
   budgetLevel?: string;
   scale?: string;
+  /**
+   * P-2(2026-07-02 用户决策)：plan LLM 按各维度证据面给出的 per-dimension 候选预算。
+   * 均分 totalRecipeBudget 会抹平维度差异(architecture 证据面远大于 performance)；
+   * 有此字段时宿主折算建议区间优先用它，缺失 fallback 均分。可选，不破既有契约。
+   */
+  dimensionBudgets?: Readonly<Record<string, number>>;
 }
 
 export interface PlanModuleBinding {
@@ -63,7 +69,10 @@ export interface PlanIntent {
 export interface PlanSelection {
   generationStage: PlanStageId;
   dimensions: readonly string[];
-  scale: Pick<PlanScaleDecision, 'totalRecipeBudget' | 'maxFiles' | 'contentMaxLines'> & {
+  scale: Pick<
+    PlanScaleDecision,
+    'totalRecipeBudget' | 'maxFiles' | 'contentMaxLines' | 'dimensionBudgets'
+  > & {
     depthLevels?: readonly string[];
   };
   moduleBindings: readonly PlanModuleBinding[];
