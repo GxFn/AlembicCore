@@ -21,7 +21,7 @@ import {
   getGatewaySourceUserId,
 } from '../../shared/sourceContracts.js';
 import type { StructuredPatch } from '../../types/evolution.js';
-import type { GenerateDedup, CandidateSummary } from '../bootstrap/GenerateDedup.js';
+import type { CandidateSummary, GenerateDedup } from '../bootstrap/GenerateDedup.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
 interface GatewayLogger {

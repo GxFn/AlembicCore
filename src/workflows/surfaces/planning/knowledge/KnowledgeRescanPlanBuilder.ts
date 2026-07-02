@@ -1,6 +1,21 @@
 import { recipeBelongsToDimension } from '../../../../domain/dimension/RecipeDimension.js';
 import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
-import type { RecipeSnapshotEntry } from '../../RecipeSnapshotTypes.js';
+import type {
+  KnowledgeRescanExecutionDecision,
+  RecipeSnapshotEntry,
+  RescanExecutionMode,
+  RescanExecutionReason,
+  RescanExecutionReasonKind,
+} from '../../../../types/planningViews.js';
+
+// W4 批A(T3):Rescan 执行决策纯数据类型本体下收 types/planningViews;re-export 保表面。
+export type {
+  KnowledgeRescanExecutionDecision,
+  RescanExecutionMode,
+  RescanExecutionReason,
+  RescanExecutionReasonKind,
+} from '../../../../types/planningViews.js';
+
 import type { RelevanceAuditResult, RelevanceAuditSummary } from './KnowledgeRescanPlanner.js';
 
 export const TARGET_RECIPES_PER_DIMENSION = 5;
@@ -65,38 +80,6 @@ export interface ModuleCellPlan {
 }
 
 export type AuditVerdict = RelevanceAuditResult['verdict'];
-
-export type RescanExecutionReasonKind =
-  | 'manual-request'
-  | 'coverage-gap'
-  | 'recipe-decay'
-  | 'file-change'
-  | 'fully-covered';
-
-export interface RescanExecutionReason {
-  kind: RescanExecutionReasonKind;
-  recipeIds?: string[];
-  changedFiles?: string[];
-  existing?: number;
-  target?: number;
-  gap?: number;
-  detail?: string;
-}
-
-export type RescanExecutionMode = 'skip' | 'verify-only' | 'produce';
-
-export interface KnowledgeRescanExecutionDecision {
-  dimensionId: string;
-  dimension: DimensionDef;
-  mode: RescanExecutionMode;
-  createBudget: number;
-  existingCount: number;
-  gap: number;
-  existingRecipes: RecipeSnapshotEntry[];
-  decayingRecipes: RecipeSnapshotEntry[];
-  reasons: RescanExecutionReason[];
-  shouldExecute: boolean;
-}
 
 export interface KnowledgeRescanDimensionPlan {
   dimension: DimensionDef;

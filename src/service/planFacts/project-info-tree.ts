@@ -8,7 +8,7 @@ import {
   buildDimensionCatalogPayload,
   type DimensionCatalogPayloadItem,
   type ProjectLanguageFrameworkFacts,
-} from '../../dimensions.js';
+} from '../../domain/dimension/index.js';
 import type {
   ProjectContextEnvelope,
   ProjectContextPresenterInput,
@@ -16,7 +16,7 @@ import type {
   ProjectContextRequestKind,
   ProjectContextResult,
 } from '../../domain/project-context/index.js';
-import type { DimensionDef } from '../../host-agent-workflows.js';
+import type { DimensionDef } from '../../types/ProjectSnapshot.js';
 import type { PlanIntent } from '../planIntent/contracts.js';
 import type { ProjectSourceFileFact } from './project-source-facts.js';
 import {

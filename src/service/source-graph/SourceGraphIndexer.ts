@@ -18,6 +18,10 @@ import {
   type SourceGraphStatusResult,
   type SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
+import type {
+  SourceGraphFreshnessReport,
+  SourceGraphIndexBuildResult,
+} from '../../domain/source-graph/SourceGraphContracts.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
 import {
   listProjectScopeFolders,
@@ -47,28 +51,14 @@ export interface SourceGraphIncrementalIndexOptions extends SourceGraphIndexOpti
   deletedFiles?: string[];
 }
 
-export interface SourceGraphIndexBuildResult {
-  snapshot: SourceGraphSnapshot;
-  status: SourceGraphStatusResult;
-  diagnostics: SourceGraphDiagnostic[];
-  changedFiles: string[];
-  deletedFiles: string[];
-  files: SourceFileNode[];
-  symbols: SourceSymbolNode[];
-  edges: SourceGraphEdge[];
-}
+// W4 批A(T1):IndexBuildResult/FreshnessReport 本体下沉 domain/source-graph 契约家;re-export 保表面。
+export type {
+  SourceGraphFreshnessReport,
+  SourceGraphIndexBuildResult,
+} from '../../domain/source-graph/SourceGraphContracts.js';
 
 export interface SourceGraphFreshnessOptions extends SourceGraphIndexOptions {
   generationId?: string;
-}
-
-export interface SourceGraphFreshnessReport {
-  snapshot?: SourceGraphSnapshot;
-  freshness: SourceGraphFreshness;
-  status: SourceGraphStatusResult;
-  diagnostics: SourceGraphDiagnostic[];
-  changedFiles: string[];
-  deletedFiles: string[];
 }
 
 interface NormalizedIndexOptions {

@@ -7,8 +7,6 @@
  * @module types/SnapshotViews
  */
 
-import type { EvolutionPrescreen } from '../workflows/surfaces/planning/knowledge/EvolutionPrescreen.js';
-import type { KnowledgeRescanExecutionDecision } from '../workflows/surfaces/planning/knowledge/KnowledgeRescanPlanBuilder.js';
 import type {
   AstSummary,
   CallGraphResult,
@@ -22,6 +20,7 @@ import type {
   SnapshotFile,
   SnapshotTarget,
 } from './ProjectSnapshot.js';
+import type { EvolutionPrescreen, KnowledgeRescanExecutionDecision } from './planningViews.js';
 
 // ─── H4: SessionCacheShape ───────────────────────────────────
 

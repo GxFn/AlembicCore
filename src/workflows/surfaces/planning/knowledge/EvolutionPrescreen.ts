@@ -2,36 +2,22 @@ import {
   recipeBelongsToDimension,
   resolveRecipeDimensionId,
 } from '../../../../domain/dimension/RecipeDimension.js';
+import type {
+  DimensionGapInfo,
+  EvolutionPrescreen,
+  PrescreenAutoResolved,
+  PrescreenNeedsVerification,
+} from '../../../../types/planningViews.js';
 import type { RelevanceAuditResult, RelevanceAuditSummary } from './KnowledgeRescanPlanner.js';
 
-export interface PrescreenNeedsVerification {
-  recipeId: string;
-  title: string;
-  dimension: string;
-  relevanceVerdict: 'decay' | 'severe' | 'watch';
-  relevanceScore: number;
-  auditHint: string;
-  decayReasons: string[];
-}
-
-export interface PrescreenAutoResolved {
-  recipeId: string;
-  resolution: 'auto-skip' | 'auto-deprecated';
-  reason: string;
-}
-
-export interface DimensionGapInfo {
-  target: number;
-  healthy: number;
-  observing: number;
-  gap: number;
-}
-
-export interface EvolutionPrescreen {
-  needsVerification: PrescreenNeedsVerification[];
-  autoResolved: PrescreenAutoResolved[];
-  dimensionGaps: Record<string, DimensionGapInfo>;
-}
+// W4 批A(T2):四个纯数据接口本体下收 types/planningViews(消解 types→workflows 反向);
+// 本文件 re-export 保持 planning/knowledge barrel 与 host-agent-workflows facade 表面不变。
+export type {
+  DimensionGapInfo,
+  EvolutionPrescreen,
+  PrescreenAutoResolved,
+  PrescreenNeedsVerification,
+} from '../../../../types/planningViews.js';
 
 const TARGET_PER_DIM = 5;
 

@@ -21,19 +21,11 @@ export interface CleanupResult {
   };
 }
 
-export interface RecipeSnapshotEntry {
-  id: string;
-  title: string;
-  trigger: string;
-  dimensionId?: string;
-  category: string;
-  knowledgeType: string;
-  doClause: string;
-  sourceFile?: string;
-  lifecycle: string;
-  content?: { markdown?: string; rationale?: string; coreCode?: string };
-  sourceRefs?: string[];
-}
+// W4 批A(T3):RecipeSnapshotEntry 本体下收 types/planningViews(被 SnapshotViews 的
+// rescanExecutionDecisions 视图字段类型链引用);re-export 保持本文件消费者与 facade 表面不变。
+import type { RecipeSnapshotEntry } from '../../types/planningViews.js';
+
+export type { RecipeSnapshotEntry } from '../../types/planningViews.js';
 
 export interface RecipeSnapshot {
   count: number;

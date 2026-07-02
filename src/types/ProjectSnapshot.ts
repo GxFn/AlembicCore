@@ -14,7 +14,7 @@
  * @module types/ProjectSnapshot
  */
 
-import type { SourceGraphLifecycleResult } from '../service/source-graph/SourceGraphLifecycle.js';
+import type { SourceGraphLifecycleResult } from '../domain/source-graph/SourceGraphContracts.js';
 import type { CanonicalSourceIdentity } from '../shared/ProjectScope.js';
 import type { FileDiffPlan } from './workflows.js';
 

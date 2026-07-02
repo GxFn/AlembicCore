@@ -1445,3 +1445,57 @@ function collectValidationIssues(fn: () => unknown): string[] {
 function isValid(fn: () => unknown): boolean {
   return collectValidationIssues(fn).length === 0;
 }
+
+// ── W4 批A(T1):Indexer/Lifecycle 结果契约下沉(原 service/source-graph 定义) ──
+// 消解 types/ProjectSnapshot → service 的 type-only 反向依赖;原文件 re-export 保表面。
+// 注:domain/index.ts 不转发 source-graph,本追加不扩张根 `.` 面。
+
+export interface SourceGraphIndexBuildResult {
+  snapshot: SourceGraphSnapshot;
+  status: SourceGraphStatusResult;
+  diagnostics: SourceGraphDiagnostic[];
+  changedFiles: string[];
+  deletedFiles: string[];
+  files: SourceFileNode[];
+  symbols: SourceSymbolNode[];
+  edges: SourceGraphEdge[];
+}
+
+export interface SourceGraphFreshnessReport {
+  snapshot?: SourceGraphSnapshot;
+  freshness: SourceGraphFreshness;
+  status: SourceGraphStatusResult;
+  diagnostics: SourceGraphDiagnostic[];
+  changedFiles: string[];
+  deletedFiles: string[];
+}
+
+export type SourceGraphLifecycleReason = 'cold-start' | 'startup-catch-up' | 'file-change';
+
+export type SourceGraphLifecycleAction =
+  | 'built-full'
+  | 'built-incremental'
+  | 'fresh-noop'
+  | 'inspected';
+
+export interface SourceGraphLifecycleResult {
+  operation: 'source-graph-lifecycle';
+  reason: SourceGraphLifecycleReason;
+  action: SourceGraphLifecycleAction;
+  projectRoot: string;
+  repoId: string;
+  generationId?: string;
+  freshness: SourceGraphFreshnessReport['freshness'];
+  status: SourceGraphFreshnessReport['status'] | SourceGraphIndexBuildResult['status'];
+  diagnostics: SourceGraphFreshnessReport['diagnostics'];
+  changedFiles: string[];
+  deletedFiles: string[];
+  durableTables: {
+    source_graph_generations: number;
+    source_graph_files: number;
+    source_graph_symbols: number;
+    source_graph_edges: number;
+  };
+  build?: SourceGraphIndexBuildResult;
+  inspection?: SourceGraphFreshnessReport;
+}

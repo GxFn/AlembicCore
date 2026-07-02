@@ -1,3 +1,8 @@
+import type {
+  SourceGraphLifecycleAction,
+  SourceGraphLifecycleReason,
+  SourceGraphLifecycleResult,
+} from '../../domain/source-graph/SourceGraphContracts.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
 import type {
   SourceGraphFreshnessReport,
@@ -7,35 +12,12 @@ import type {
 } from './SourceGraphIndexer.js';
 import { SourceGraphService } from './SourceGraphService.js';
 
-export type SourceGraphLifecycleReason = 'cold-start' | 'startup-catch-up' | 'file-change';
-
-export type SourceGraphLifecycleAction =
-  | 'built-full'
-  | 'built-incremental'
-  | 'fresh-noop'
-  | 'inspected';
-
-export interface SourceGraphLifecycleResult {
-  operation: 'source-graph-lifecycle';
-  reason: SourceGraphLifecycleReason;
-  action: SourceGraphLifecycleAction;
-  projectRoot: string;
-  repoId: string;
-  generationId?: string;
-  freshness: SourceGraphFreshnessReport['freshness'];
-  status: SourceGraphFreshnessReport['status'] | SourceGraphIndexBuildResult['status'];
-  diagnostics: SourceGraphFreshnessReport['diagnostics'];
-  changedFiles: string[];
-  deletedFiles: string[];
-  durableTables: {
-    source_graph_generations: number;
-    source_graph_files: number;
-    source_graph_symbols: number;
-    source_graph_edges: number;
-  };
-  build?: SourceGraphIndexBuildResult;
-  inspection?: SourceGraphFreshnessReport;
-}
+// W4 批A(T1):Lifecycle 结果契约本体下沉 domain/source-graph 契约家;re-export 保表面。
+export type {
+  SourceGraphLifecycleAction,
+  SourceGraphLifecycleReason,
+  SourceGraphLifecycleResult,
+} from '../../domain/source-graph/SourceGraphContracts.js';
 
 /**
  * SourceGraphLifecycleService 是宿主启动/冷启动/文件变化监听的 Core 入口。

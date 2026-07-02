@@ -2,7 +2,6 @@ export * from './evolution.js';
 export * from './KnowledgeWire.js';
 export type {
   AstSummary,
-  GenerateSessionShape,
   CallGraphResult,
   CodeEntityGraphResult,
   DependencyEdge,
@@ -12,6 +11,7 @@ export type {
   DiscovererInfo,
   EnhancementPackInfo,
   ExistingRecipeInfo,
+  GenerateSessionShape,
   GuardAudit,
   GuardAuditFileEntry,
   GuardAuditSummary,
@@ -35,9 +35,9 @@ export type {
   RecipeSourceRefResolver,
 } from './recipeAuthoringSpec.js';
 export type {
-  GenerateFile,
   DimensionCheckpointResult,
   FileDiffPlan,
+  GenerateFile,
   IncrementalPlan,
   LoggerLike,
   McpContext,

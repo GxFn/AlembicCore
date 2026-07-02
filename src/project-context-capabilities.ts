@@ -1,21 +1,5 @@
-import type {
-  ProjectContext as ProjectContextContract,
-  ProjectContextEnvelope,
-  ProjectContextRequest,
-  ProjectContextResult,
-} from './domain/project-context/index.js';
-import {
-  type ArchitectureIntelligenceInput,
-  type ArchitectureIntelligenceReport,
-  analyzeArchitectureIntelligence,
-} from './service/project-context/architectureIntelligence/index.js';
-import {
-  aggregateDynamicPlanningSignals,
-  type DynamicSignalGatewayInput,
-  type DynamicSignalReport,
-} from './service/project-context/dimensionPlanning/index.js';
-import { ProjectContext } from './service/project-context/ProjectContextService.js';
-
+// W4 批A(R2):装配本体下沉 service/project-context/capabilities.ts,本 facade 只做纯转发,
+// `@alembic/core/project-context-capabilities` wire 面(外部 8 处消费)导出集合不变。
 export type * from './service/project-context/architectureIntelligence/index.js';
 export {
   ArchitectureStyleClassifier,
@@ -25,6 +9,11 @@ export {
   DomainSignalDetector,
   ProjectInformationSupplementAnalyzer,
 } from './service/project-context/architectureIntelligence/index.js';
+export {
+  createProjectContextCapabilities,
+  ProjectContextCapabilities,
+  type ProjectContextCapabilityQuery,
+} from './service/project-context/capabilities.js';
 export type * from './service/project-context/dimensionPlanning/index.js';
 export {
   aggregateDynamicPlanningSignals,
@@ -32,80 +21,3 @@ export {
   ModuleDeltaDetector,
   queryPerModuleCoverage,
 } from './service/project-context/dimensionPlanning/index.js';
-
-export type ProjectContextCapabilityQuery<TPayload = unknown> = Omit<
-  ProjectContextRequest<TPayload>,
-  'kind'
->;
-
-export interface ProjectContextCapabilities {
-  execute<TPayload = unknown>(
-    input: ProjectContextRequest<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeAnchorRangeQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeSpaceQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeRepoQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeProjectMapQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeModuleQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeModuleLayersQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeFileFlowQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeFileSymbolsQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  executeSourceSliceQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
-  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
-  analyzeArchitectureIntelligence(
-    input: ArchitectureIntelligenceInput
-  ): ArchitectureIntelligenceReport;
-  aggregateDynamicPlanningSignals(input: DynamicSignalGatewayInput): DynamicSignalReport;
-}
-
-export function createProjectContextCapabilities(
-  projectContext: ProjectContextContract = ProjectContext
-): ProjectContextCapabilities {
-  const capabilities: ProjectContextCapabilities = {
-    execute: <TPayload = unknown>(input: ProjectContextRequest<TPayload>) =>
-      projectContext.execute(input),
-    executeAnchorRangeQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'anchor-range' }),
-    executeSpaceQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'space' }),
-    executeRepoQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'repo' }),
-    executeProjectMapQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'map' }),
-    executeModuleQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'module' }),
-    executeModuleLayersQuery: <TPayload = unknown>(
-      input: ProjectContextCapabilityQuery<TPayload>
-    ) => projectContext.execute({ ...input, kind: 'module-layers' }),
-    executeFileFlowQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'file-flow' }),
-    executeFileSymbolsQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'file-symbols' }),
-    executeSourceSliceQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'source-slice' }),
-    analyzeArchitectureIntelligence: (input: ArchitectureIntelligenceInput) =>
-      analyzeArchitectureIntelligence(input),
-    aggregateDynamicPlanningSignals: (input: DynamicSignalGatewayInput) =>
-      aggregateDynamicPlanningSignals(input),
-  };
-  return Object.freeze(capabilities);
-}
-
-export const ProjectContextCapabilities = createProjectContextCapabilities(ProjectContext);
