@@ -47,4 +47,17 @@
 
 | 旧名 | 新名 | 批次 |
 |---|---|---|
-| (待 S4 批次填充) | | |
+| EvolutionGateway / 'evolutionGateway'(DI) | ProposalGateway / 'proposalGateway' | 批2 |
+| Bootstrap* 137 符号(BootstrapSession(Manager)/BootstrapConsumers/BootstrapTaskManager/BootstrapEventEmitter/GenerateDedup 等,完整映射见 Design/docs/current/alembic-s4-bootstrap-symbol-map-2026-07-02.md) | Generate* | 批3a |
+| profile id 'bootstrap-session'/'bootstrap-dimension';partitioner/merge/factory;DI 'bootstrapTaskManager'/'bootstrapSessionManager'/'bootstrapRepository' | 'generate-*' 系(原子切换,无 alias——工作区封闭) | 批3a |
+| SkillHooks 'onBootstrapStart'/'onBootstrapComplete' | 'onGenerateStart'/'onGenerateComplete'(旧名 compat 注册保留一个版本) | 批3a |
+| Dashboard i18n bootstrap.* | generate.* | 批3a |
+| ProjectIndex* 27 符号(runProjectIndexWorkflow→runGenerateWorkflow 等;ColdStart* 名实相符保留) | Generate*/ScopedModuleMining* | 批3d |
+
+回流防护:`scripts/lint-retired-symbols.mjs` + `config/retired-symbols.json`(166 退役符号,五仓 npm run lint:retired-symbols,已接入 check)。
+
+### 批3 新增冻结登记(3b 建议补表项)
+- `.asd/bootstrap-checkpoint/`(DimensionCheckpoint/MiningSessionStore/SessionStore 持久化目录)
+- `bootstrap-reports/`(WorkflowReportHistoryStore 运行时报告历史+HTTP 读取路径)
+- env `ALEMBIC_BOOTSTRAP_CONCURRENCY`(用户可见 env,本批保留)
+- workflow session source `'alembic-main-bootstrap'` / `'codex-host-bootstrap'`、intent kind `'bootstrap-host-agent'` / `'host-agent-bootstrap'`(真机运行时 JSON 实证含 'host-agent-bootstrap',全族冻结)
