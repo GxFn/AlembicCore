@@ -69,11 +69,11 @@ export async function writeWorkflowReport({
       totalToolCalls,
     });
     await writeWorkflowReportFile({ ctx, dataRoot, report });
-    logger.info(`[Insight-v3] 📊 Workflow report saved to .asd/bootstrap-report.json`);
+    logger.info(`[generate] 📊 Workflow report saved to .asd/bootstrap-report.json`);
     return report;
   } catch (reportErr: unknown) {
     logger.warn(
-      `[Insight-v3] Bootstrap report generation failed: ${reportErr instanceof Error ? reportErr.message : String(reportErr)}`
+      `[generate] Bootstrap report generation failed: ${reportErr instanceof Error ? reportErr.message : String(reportErr)}`
     );
     return null;
   }

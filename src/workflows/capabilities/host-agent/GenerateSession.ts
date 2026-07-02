@@ -109,7 +109,7 @@ export interface GenerateSessionStatus {
   statusCode?: number;
 }
 
-interface BootstrapSessionStoreFile {
+interface GenerateSessionStoreFile {
   version: 1;
   savedAt: number;
   sessions: GenerateSessionSnapshot[];
@@ -667,7 +667,7 @@ export class GenerateSessionManager {
       return;
     }
 
-    const payload: BootstrapSessionStoreFile = {
+    const payload: GenerateSessionStoreFile = {
       version: 1,
       savedAt: Date.now(),
       sessions: [...this.#sessionsByProject.values()].map((session) => session.toSnapshot()),
@@ -713,7 +713,7 @@ function normalizeHints(
   return normalized;
 }
 
-function isStoreFile(value: unknown): value is BootstrapSessionStoreFile {
+function isStoreFile(value: unknown): value is GenerateSessionStoreFile {
   return (
     isRecord(value) &&
     value.version === 1 &&

@@ -13,10 +13,9 @@
  * 当 ALEMBIC_TEST_MODE 未设置或为 falsy 时，所有 API 透明返回原始数据。
  */
 
-export interface DimensionDef {
-  id: string;
-  [key: string]: unknown;
-}
+// W3(2026-07-02 词族统一):本地 DimensionDef 副本删除——与 types/ProjectSnapshot.ts:238
+// 的正解同名不同形(全空间 52 处引用正解)。testMode 过滤只需 id,改泛型约束,
+// 避免 shared→types 反向耦合。
 
 function envBool(key: string): boolean {
   const v = process.env[key];
@@ -102,10 +101,10 @@ export function getTestModeConfig(): TestModeConfig {
  * - 测试模式开启但未配置对应阶段的维度 ID 时原样返回（不限制）
  * - 测试模式开启且有配置时，只保留配置中列出的维度
  */
-export function applyTestDimensionFilter(
-  dimensions: DimensionDef[],
+export function applyTestDimensionFilter<T extends { id: string }>(
+  dimensions: T[],
   mode: 'bootstrap' | 'rescan'
-): DimensionDef[] {
+): T[] {
   if (!isTestMode()) {
     return dimensions;
   }

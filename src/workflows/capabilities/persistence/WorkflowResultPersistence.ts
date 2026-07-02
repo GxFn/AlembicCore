@@ -145,7 +145,7 @@ function logBootstrapSummary({
 }) {
   logger.info(
     [
-      `[Insight-v3] ═══ Pipeline complete ═══`,
+      `[generate] ═══ Pipeline complete ═══`,
       isIncremental && incrementalPlan
         ? `  Mode: INCREMENTAL (${incrementalPlan.affectedDimensions.length} affected, ${incrementalSkippedDims.length} skipped)`
         : '',
