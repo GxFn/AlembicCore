@@ -18,11 +18,11 @@ import type {
 } from '../../../domain/project-context/index.js';
 import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
 import type { PlanIntent } from '../intent/contracts.js';
-import type { ProjectSourceFileFact } from './project-source-facts.js';
+import type { ProjectSourceFileFact } from './projectSourceFacts.js';
 import {
   removeTransientTransportIfPresent,
   writeTransientTransport,
-} from './transient-transport.js';
+} from './transientTransport.js';
 
 /**
  * C-1(2026-07-02 统一重构)：plan facts 精简投影的统一字节预算。

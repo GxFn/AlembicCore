@@ -3,7 +3,7 @@ import { DIMENSION_REGISTRY } from '../src/domain/dimension/index.js';
 import {
   buildDimensionEvidenceDensity,
   type PlanProjectContextAnalysis,
-} from '../src/service/plan/facts/project-info-tree.js';
+} from '../src/service/plan/facts/projectInfoTree.js';
 import type { DimensionDef } from '../src/types/ProjectSnapshot.js';
 import {
   baseDimensions,

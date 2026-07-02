@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "description": "Machine-readable Core layer contract (CO2). Human contract: docs/layer-contract.md \u2014 edit both together. Enforced by scripts/lint-layer-contract.mjs as a blocking step in npm run check.",
+  "description": "Machine-readable Core layer contract (CO2). Human contract: docs/layer-contract.md — edit both together. Enforced by scripts/lint-layer-contract.mjs as a blocking step in npm run check.",
   "typeOnlyImportsExempt": true,
   "typeOnlyNote": "import type / export type imports are type bridges and do not create runtime coupling; runtime imports must follow allowedRuntimeImports.",
   "areas": [
@@ -85,7 +85,7 @@
     },
     {
       "edge": "workflows -> core",
-      "reason": "core/ is the user-blessed importable analysis leaf (2026-06-12): ProjectIntelligenceRunner is the designated orchestrator of core analysis."
+      "reason": "core/ is the user-blessed importable analysis leaf (2026-06-12). W4 note: the original named consumer ProjectIntelligenceRunner was retired with the project-intelligence route; the edge currently has 0 live runtime imports and is retained as the blessed channel for workflows-side analysis consumption (e.g. host-agent evidence building). Deleting it is a contract narrowing pending a controller/user decision."
     }
   ]
 }

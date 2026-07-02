@@ -20,11 +20,11 @@ import {
   readProjectScopeRegistryDocument,
 } from '../../../shared/ProjectScope.js';
 import { ProjectContextCapabilities } from '../../project-context/capabilities.js';
-import type { PlanModuleSeed, PlanProjectContextAnalysis } from './project-info-tree.js';
+import type { PlanModuleSeed, PlanProjectContextAnalysis } from './projectInfoTree.js';
 import {
   attachSourceFilesToProjectContextModuleSeeds,
   collectProjectSourceFileFacts,
-} from './project-source-facts.js';
+} from './projectSourceFacts.js';
 
 // collectPlanProjectContext 的 hints 输入契约：从 host MCP schema PlanInput['hints'] 解耦为 Core 类型
 // （结构与 draft-only planning hints 一致：focusModules/goal/maxBudget，host 传 args.hints 结构兼容）。

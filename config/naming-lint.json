@@ -39,7 +39,9 @@
       "label": "src modules are camelCase or PascalCase (no kebab/snake)"
     }
   ],
-  "barrelNames": ["index.ts"],
+  "barrelNames": [
+    "index.ts"
+  ],
   "exemptScopes": [],
   "exceptions": [
     {
@@ -56,11 +58,6 @@
       "file": "src/host-agent-workflows.ts",
       "owner": "AlembicCore window",
       "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./host-agent-workflows (export target). Exempt like index.ts barrels (SN4 census)."
-    },
-    {
-      "file": "src/recipe-context.ts",
-      "owner": "AlembicCore window",
-      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./recipe-context (export target, GMAP-2). Barrel re-export peer to ./project-context; renaming would churn the public dist target and ripple into consumer/test references via the export path. Exempt like index.ts barrels."
     },
     {
       "file": "src/core/ast/lang-dart.ts",
@@ -111,6 +108,31 @@
       "file": "src/core/ast/lang-typescript.ts",
       "owner": "AlembicCore window",
       "reason": "Deliberate tree-sitter grammar-plugin family (lang-<id> mirrors the registry langId loaded by registry string in core/ast/index.ts; also serves langId tsx); exempt like the migrations family (SN4 census)."
+    },
+    {
+      "file": "src/test-fixtures.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./test-fixtures (export target). Exempt like index.ts barrels (SN4 census); W4 backfill—red predates this batch."
+    },
+    {
+      "file": "src/types/graph-shared.ts",
+      "owner": "AlembicCore window",
+      "reason": "W2 Core 化 wire file mirroring the public kebab export subpath ./types/graph-shared (export target, frozen wire name). Exempt like package-facade barrels; W4 backfill—red predates this batch."
+    },
+    {
+      "file": "src/types/search-wire.ts",
+      "owner": "AlembicCore window",
+      "reason": "W2 Core 化 wire file mirroring the public kebab export subpath ./types/search-wire (export target, frozen wire name). Exempt like package-facade barrels; W4 backfill—red predates this batch."
+    },
+    {
+      "file": "src/project-context-capabilities.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./project-context-capabilities (export target, frozen wire name). Exempt like index.ts barrels; W4 backfill—red predates this batch."
+    },
+    {
+      "file": "src/recipe-context-capabilities.ts",
+      "owner": "AlembicCore window",
+      "reason": "Package-facade entry barrel mirroring the public kebab export subpath ./recipe-context-capabilities (export target, frozen wire name). Exempt like index.ts barrels; W4 backfill—red predates this batch."
     }
   ],
   "parkedScopes": []
