@@ -10,7 +10,6 @@ import {
   buildProducerStyleGuide,
   CodeEntityGraph,
   ConfidenceRouter,
-  checkRecipeReadiness,
   computeKnowledgeHash,
   getAgentAdapterFieldSpec,
   getExternalAgentRequiredFields,
@@ -57,10 +56,8 @@ describe('stable knowledge and dimension entrypoints', () => {
     expect(getExternalAgentRequiredFields()).toContain('title');
     expect(Object.keys(getAgentAdapterFieldSpec()).length).toBeGreaterThan(0);
 
-    const readiness = checkRecipeReadiness({ title: 'incomplete' });
-    expect(readiness.ready).toBe(false);
-    expect(readiness.missing.length).toBeGreaterThan(0);
-
+    // W1(2026-07-02):RecipeReadinessChecker 兼容壳已删(外层三仓零消费,
+    // UnifiedValidator 是其自述的替代);readiness 语义由 UnifiedValidator 承接。
     expect(new UnifiedValidator()).toBeDefined();
   });
 

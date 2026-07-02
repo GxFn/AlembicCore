@@ -13,7 +13,7 @@ import {
   type RecipeSourceRefPort,
   type RecipeSourceRefRow,
   type RecipeVectorPort,
-} from '../src/recipe-context.js';
+} from '../src/service/recipe-context/index.js';
 
 function makeRecord(id: string, over: Partial<RecipeRecord> = {}): RecipeRecord {
   return {

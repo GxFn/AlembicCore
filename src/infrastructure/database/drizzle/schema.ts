@@ -179,30 +179,9 @@ export const guardViolations = sqliteTable(
 );
 
 // ═══════════════════════════════════════════════════════════════
-// 4. audit_logs — 审计日志
+// 4. audit_logs — 已退役(W1 2026-07-02):全仓无仓储/查询消费,schema 定义删除;
+//    现场物理表 audit_logs 留存无害,如需彻底清理另做 drop migration。
 // ═══════════════════════════════════════════════════════════════
-
-export const auditLogs = sqliteTable(
-  'audit_logs',
-  {
-    id: text('id').primaryKey(),
-    timestamp: integer('timestamp').notNull(),
-    actor: text('actor').notNull(),
-    actorContext: text('actor_context').default('{}'),
-    action: text('action').notNull(),
-    resource: text('resource'),
-    operationData: text('operation_data').default('{}'),
-    result: text('result').notNull(),
-    errorMessage: text('error_message'),
-    duration: integer('duration'),
-  },
-  (table) => [
-    index('idx_audit_actor').on(table.actor),
-    index('idx_audit_action').on(table.action),
-    index('idx_audit_result').on(table.result),
-    index('idx_audit_timestamp').on(table.timestamp),
-  ]
-);
 
 // ═══════════════════════════════════════════════════════════════
 // 5. sessions — 会话管理

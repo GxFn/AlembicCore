@@ -15,12 +15,12 @@ import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
 import { KnowledgeService } from '../src/knowledge.js';
+import { RecipeSourceRefRepositoryImpl } from '../src/repository/sourceref/RecipeSourceRefRepository.js';
 import {
   createRecipeContextServiceFromCore,
   knowledgeReadPortFromService,
   vectorPortFromService,
-} from '../src/recipe-context.js';
-import { RecipeSourceRefRepositoryImpl } from '../src/repository/sourceref/RecipeSourceRefRepository.js';
+} from '../src/service/recipe-context/index.js';
 import pathGuard from '../src/shared/PathGuard.js';
 import { VectorService } from '../src/vector.js';
 

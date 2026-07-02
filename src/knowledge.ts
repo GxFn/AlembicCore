@@ -39,12 +39,6 @@ export {
   PUBLISHED_LIFECYCLES,
 } from './domain/knowledge/index.js';
 export type { KnowledgeEntryProps } from './domain/knowledge/KnowledgeEntry.js';
-export {
-  checkReadinessFromCandidate,
-  checkRecipeReadiness,
-  STANDARD_CATEGORIES as READINESS_STANDARD_CATEGORIES,
-  WHITELISTED_CATEGORIES as READINESS_WHITELISTED_CATEGORIES,
-} from './domain/knowledge/RecipeReadinessChecker.js';
 export type {
   DepthDimension,
   DepthReviewInput,
