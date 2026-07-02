@@ -17,7 +17,7 @@ import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRe
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
 import { extractRecipeTokens } from '../../shared/recipeTokens.js';
 import { assessImpactUnified } from './ContentImpactAnalyzer.js';
-import type { EvolutionAction, EvolutionDecision, EvolutionResult } from './EvolutionGateway.js';
+import type { EvolutionAction, EvolutionDecision, EvolutionResult } from './ProposalGateway.js';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ export interface EvolutionAuditRecipe {
   auditHint: string | null;
 }
 
-interface EvolutionGatewayLike {
+interface ProposalGatewayLike {
   submit(decision: EvolutionDecision): Promise<EvolutionResult>;
 }
 
@@ -398,7 +398,7 @@ export function toRescanImpactDecision(
 
 export async function submitRescanImpactDecisions(
   candidatePlan: EvolutionCandidatePlan,
-  gateway: EvolutionGatewayLike,
+  gateway: ProposalGatewayLike,
   opts: { source?: ProposalSource; now?: number } = {}
 ): Promise<RescanImpactSubmissionResult> {
   const results: EvolutionResult[] = [];

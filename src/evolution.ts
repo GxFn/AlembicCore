@@ -53,7 +53,7 @@ export {
   createCurrentGitHeadBaselineProvider,
   DecayDetector,
   EnhancementSuggester,
-  EvolutionGateway,
+  ProposalGateway,
   extractApiTokens,
   extractRecipeTokens,
   GitDiffCheckpointService,

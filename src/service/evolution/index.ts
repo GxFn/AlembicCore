@@ -3,7 +3,7 @@ export * from './ContentImpactAnalyzer.js';
 export * from './ContentPatcher.js';
 export * from './DecayDetector.js';
 export * from './EnhancementSuggester.js';
-export * from './EvolutionGateway.js';
+export * from './ProposalGateway.js';
 export * from './GitDiffCheckpointService.js';
 export * from './LifecycleStateMachine.js';
 export * from './ProposalExecutor.js';

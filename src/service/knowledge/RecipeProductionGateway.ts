@@ -221,8 +221,8 @@ interface GatewayProposalRepository {
   } | null;
 }
 
-/** EvolutionGateway — 统一进化决策提交接口 */
-interface GatewayEvolutionGateway {
+/** ProposalGateway — 统一进化决策提交接口 */
+interface GatewayProposalGateway {
   submit(decision: {
     recipeId: string;
     action: 'update' | 'deprecate' | 'valid';
@@ -263,8 +263,8 @@ export interface GatewayDeps {
   consolidationAdvisor?: GatewayConsolidationAdvisor | null;
   /** ProposalRepository（可选 — 仅用于检查已有提案等直接操作） */
   proposalRepository?: GatewayProposalRepository | null;
-  /** EvolutionGateway（可选 — 优先通过 Gateway 创建进化提案） */
-  evolutionGateway?: GatewayEvolutionGateway | null;
+  /** ProposalGateway（可选 — 优先通过 Gateway 创建进化提案） */
+  proposalGateway?: GatewayProposalGateway | null;
   /** 相似度检测函数（可选 — 默认导入 SimilarityService） */
   findSimilarRecipes?: GatewaySimilarityFn | null;
   /** U1 #5：canonical 模块轴 name 校验集（Agent 显式 moduleName 须属此集；U1-Plugin 从 ProjectMap.modules 注入）。 */
@@ -281,7 +281,7 @@ export class RecipeProductionGateway {
   readonly #logger?: GatewayLogger;
   readonly #consolidationAdvisor: GatewayConsolidationAdvisor | null;
   readonly #proposalRepo: GatewayProposalRepository | null;
-  readonly #evolutionGateway: GatewayEvolutionGateway | null;
+  readonly #proposalGateway: GatewayProposalGateway | null;
   readonly #findSimilarRecipes: GatewaySimilarityFn | null;
   readonly #knownModuleNames: Set<string> | null;
   readonly #resolveModuleFromSourceRefs: ((sourceRefs: string[]) => string | undefined) | null;
@@ -292,7 +292,7 @@ export class RecipeProductionGateway {
     this.#logger = deps.logger;
     this.#consolidationAdvisor = deps.consolidationAdvisor ?? null;
     this.#proposalRepo = deps.proposalRepository ?? null;
-    this.#evolutionGateway = deps.evolutionGateway ?? null;
+    this.#proposalGateway = deps.proposalGateway ?? null;
     this.#findSimilarRecipes = deps.findSimilarRecipes ?? null;
     this.#knownModuleNames = deps.knownModuleNames ? new Set(deps.knownModuleNames) : null;
     this.#resolveModuleFromSourceRefs = deps.resolveModuleFromSourceRefs ?? null;
@@ -542,7 +542,7 @@ export class RecipeProductionGateway {
 
           if (advice.action === 'create') {
             submittableItems.push(validEntry);
-          } else if (this.#evolutionGateway || this.#proposalRepo) {
+          } else if (this.#proposalGateway || this.#proposalRepo) {
             const proposal = await this.#createProposalFromAdvice(advice, validEntry.item);
             if (proposal) {
               result.merged.push({
@@ -695,9 +695,9 @@ export class RecipeProductionGateway {
     // ── Step 6: Supersede Proposal ──
     if (options.supersedes && createdIds.length > 0) {
       try {
-        if (this.#evolutionGateway) {
-          // 优先通过 EvolutionGateway 提交 deprecate（supersede 语义）
-          const gwResult = await this.#evolutionGateway.submit({
+        if (this.#proposalGateway) {
+          // 优先通过 ProposalGateway 提交 deprecate（supersede 语义）
+          const gwResult = await this.#proposalGateway.submit({
             recipeId: options.supersedes,
             action: 'deprecate',
             source: 'consolidation',
@@ -1006,7 +1006,7 @@ export class RecipeProductionGateway {
     expiresAt: number;
     message: string;
   } | null> {
-    if (!this.#evolutionGateway && !this.#proposalRepo) {
+    if (!this.#proposalGateway && !this.#proposalRepo) {
       return null;
     }
 
@@ -1023,8 +1023,8 @@ export class RecipeProductionGateway {
     ];
 
     if (advice.action === 'merge' && advice.targetRecipe) {
-      if (this.#evolutionGateway) {
-        const gwResult = await this.#evolutionGateway.submit({
+      if (this.#proposalGateway) {
+        const gwResult = await this.#proposalGateway.submit({
           recipeId: advice.targetRecipe.id,
           action: 'update',
           source: 'consolidation',
@@ -1070,7 +1070,7 @@ export class RecipeProductionGateway {
 
     if (advice.action === 'reorganize' && advice.reorganizeTargets?.length) {
       // reorganize → 为每个目标 Recipe 创建 update 提案
-      if (this.#evolutionGateway) {
+      if (this.#proposalGateway) {
         let firstProposal: {
           proposalId: string;
           type: string;
@@ -1083,7 +1083,7 @@ export class RecipeProductionGateway {
 
         for (const target of advice.reorganizeTargets) {
           try {
-            const gwResult = await this.#evolutionGateway.submit({
+            const gwResult = await this.#proposalGateway.submit({
               recipeId: target.id,
               action: 'update',
               source: 'consolidation',
@@ -1110,15 +1110,15 @@ export class RecipeProductionGateway {
         return firstProposal;
       }
       this.#logger?.info(
-        `[Gateway] reorganize advice for ${advice.reorganizeTargets.length} recipes — no EvolutionGateway available`
+        `[Gateway] reorganize advice for ${advice.reorganizeTargets.length} recipes — no ProposalGateway available`
       );
       return null;
     }
 
     if (advice.action === 'insufficient' && advice.coveredBy?.length) {
       const target = advice.coveredBy[0];
-      if (this.#evolutionGateway) {
-        const gwResult = await this.#evolutionGateway.submit({
+      if (this.#proposalGateway) {
+        const gwResult = await this.#proposalGateway.submit({
           recipeId: target.id,
           action: 'update',
           source: 'consolidation',

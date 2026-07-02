@@ -8,7 +8,7 @@ import {
   createCurrentGitHeadBaselineProvider,
   DecayDetector,
   EnhancementSuggester,
-  EvolutionGateway,
+  ProposalGateway,
   extractRecipeTokens,
   LifecycleStateMachine,
   ProposalExecutor,
@@ -26,7 +26,7 @@ describe('stable evolution entrypoint', () => {
     expect(createCurrentGitHeadBaselineProvider).toBeDefined();
     expect(DecayDetector).toBeDefined();
     expect(EnhancementSuggester).toBeDefined();
-    expect(EvolutionGateway).toBeDefined();
+    expect(ProposalGateway).toBeDefined();
     expect(LifecycleStateMachine).toBeDefined();
     expect(ProposalExecutor).toBeDefined();
     expect(RecipeImpactPlanner).toBeDefined();

@@ -1,7 +1,7 @@
 /**
  * U6-Core phase 3 — audit dead→deprecate（替换硬编码 proposalsCreated:0）。
  *
- * 覆盖⑤：dead recipe → 经 EvolutionGateway submit type='deprecate'，source='metabolism'
+ * 覆盖⑤：dead recipe → 经 ProposalGateway submit type='deprecate'，source='metabolism'
  *   （CG⑥b：shouldImmediateExecute 对 metabolism 恒 false → 进观察窗口、非立即执行），
  *   auditSummary.proposalsCreated 反映真实 Gateway 结果（非硬编码 0）；
  *   无 gateway/deps → 降级 proposalsCreated=0、不抛。
@@ -69,7 +69,7 @@ describe('U6 ⑤ audit dead→deprecate', () => {
     };
     const container = {
       get: (name: string): unknown => {
-        if (name === 'evolutionGateway') {
+        if (name === 'proposalGateway') {
           return fakeGateway;
         }
         if (name === 'recipeSourceRefRepository') {
@@ -129,7 +129,7 @@ describe('U6 ⑤ audit dead→deprecate', () => {
       },
     };
     const container = {
-      get: (name: string): unknown => (name === 'evolutionGateway' ? fakeGateway : undefined),
+      get: (name: string): unknown => (name === 'proposalGateway' ? fakeGateway : undefined),
     };
 
     const summary = await auditRecipesForRescan({
@@ -160,7 +160,7 @@ describe('U6 ⑤ audit dead→deprecate', () => {
     ).toBe(false);
   });
 
-  it('无 evolutionGateway/deps → 降级：proposalsCreated=0，不抛', async () => {
+  it('无 proposalGateway/deps → 降级：proposalsCreated=0，不抛', async () => {
     const container = {
       get: (): unknown => {
         throw new Error('not registered');

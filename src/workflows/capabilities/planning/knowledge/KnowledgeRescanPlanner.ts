@@ -6,7 +6,7 @@ import type {
   RecipeSourceRefEntity,
   RecipeSourceRefRepositoryImpl,
 } from '../../../../repository/sourceref/RecipeSourceRefRepository.js';
-import { EvolutionGateway } from '../../../../service/evolution/EvolutionGateway.js';
+import { ProposalGateway } from '../../../../service/evolution/ProposalGateway.js';
 import type { LifecycleStateMachine } from '../../../../service/evolution/LifecycleStateMachine.js';
 import type { EvolutionCandidatePlan } from '../../../../service/evolution/RecipeImpactPlanner.js';
 import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
@@ -148,18 +148,18 @@ export function syncKnowledgeStoreForRescan(opts: KnowledgeSyncOptions): void {
 }
 
 /** auditRecipesForRescan 消费的最小 Gateway 契约（仅 submit）。 */
-type EvolutionGatewayLike = Pick<EvolutionGateway, 'submit'>;
+type ProposalGatewayLike = Pick<ProposalGateway, 'submit'>;
 
 /**
- * U6：解析可用的 EvolutionGateway（dead→deprecate 提案生产者）。
- * 与既有 container.get 防御式取法一致：优先取已注册 evolutionGateway，
- * 否则从 proposalRepository + lifecycleStateMachine + knowledgeRepository 组装既有 EvolutionGateway（复用既有类，不新建服务）；
+ * U6：解析可用的 ProposalGateway（dead→deprecate 提案生产者）。
+ * 与既有 container.get 防御式取法一致：优先取已注册 proposalGateway，
+ * 否则从 proposalRepository + lifecycleStateMachine + knowledgeRepository 组装既有 ProposalGateway（复用既有类，不新建服务）；
  * 都不可用 → 返回 null，dead→deprecate 跳过、proposalsCreated 计 0（降级安全；真机生产由 Plugin 注入这些服务）。
  */
-function resolveEvolutionGateway(
+function resolveProposalGateway(
   container: RescanServiceContainer,
   logger: RescanLogger
-): EvolutionGatewayLike | null {
+): ProposalGatewayLike | null {
   const tryGet = (name: string): unknown => {
     try {
       return container.get(name);
@@ -168,20 +168,20 @@ function resolveEvolutionGateway(
     }
   };
 
-  const direct = tryGet('evolutionGateway');
+  const direct = tryGet('proposalGateway');
   if (direct && typeof (direct as { submit?: unknown }).submit === 'function') {
-    return direct as EvolutionGatewayLike;
+    return direct as ProposalGatewayLike;
   }
 
   const proposalRepo = tryGet('proposalRepository') as ProposalRepository | null;
   const lifecycle = tryGet('lifecycleStateMachine') as LifecycleStateMachine | null;
   const knowledgeRepo = tryGet('knowledgeRepository') as KnowledgeRepositoryImpl | null;
   if (proposalRepo && lifecycle && knowledgeRepo) {
-    return new EvolutionGateway(proposalRepo, lifecycle, knowledgeRepo);
+    return new ProposalGateway(proposalRepo, lifecycle, knowledgeRepo);
   }
 
   logger.info(
-    '[CoverageClassifier] evolutionGateway/deps unavailable, dead→deprecate skipped (proposalsCreated=0)'
+    '[CoverageClassifier] proposalGateway/deps unavailable, dead→deprecate skipped (proposalsCreated=0)'
   );
   return null;
 }
@@ -239,7 +239,7 @@ export async function auditRecipesForRescan(
 
   // U6：content drift → update 提案；dead recipe → deprecate 提案
   // （替换硬编码 proposalsCreated:0 / immediateDeprecated:counters.dead 占位）。
-  // CG⑥b：source='metabolism' → EvolutionGateway 走 observation-window（shouldImmediateExecute 对 metabolism 恒 false），
+  // CG⑥b：source='metabolism' → ProposalGateway 走 observation-window（shouldImmediateExecute 对 metabolism 恒 false），
   // 即「进观察窗口、非立即执行」；proposalsCreated/immediateDeprecated 反映真实 Gateway 结果而非占位数。
   let proposalsCreated = 0;
   let immediateDeprecated = 0;
@@ -248,7 +248,7 @@ export async function auditRecipesForRescan(
   );
   const hasDriftedUpdates = Boolean(driftedByRecipe && driftedByRecipe.size > 0);
   const gateway =
-    deadResults.length > 0 || hasDriftedUpdates ? resolveEvolutionGateway(container, logger) : null;
+    deadResults.length > 0 || hasDriftedUpdates ? resolveProposalGateway(container, logger) : null;
   if (gateway) {
     if (driftedByRecipe && driftedByRecipe.size > 0) {
       proposalsCreated += await submitDriftedUpdates(gateway, driftedByRecipe, logger);
@@ -543,7 +543,7 @@ function refHealthToScore(health: RefHealth): { score: number; reasons: string[]
 }
 
 async function submitDriftedUpdates(
-  gateway: EvolutionGatewayLike,
+  gateway: ProposalGatewayLike,
   driftedByRecipe: Map<string, RecipeSourceRefEntity[]>,
   logger: RescanLogger
 ): Promise<number> {

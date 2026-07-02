@@ -123,7 +123,7 @@ export interface ProposalFilter {
 /** 默认观察窗口：72h（medium tier） */
 const DEFAULT_OBSERVATION_WINDOW = 72 * 60 * 60 * 1000;
 
-/** 观察窗口按 ProposalType 的默认值（EvolutionGateway 按 RiskTier 精确控制） */
+/** 观察窗口按 ProposalType 的默认值（ProposalGateway 按 RiskTier 精确控制） */
 const OBSERVATION_WINDOWS: Record<ProposalType, number> = {
   update: 72 * 60 * 60 * 1000, // 72h (medium tier default)
   deprecate: 7 * 24 * 60 * 60 * 1000, // 7d (high tier)

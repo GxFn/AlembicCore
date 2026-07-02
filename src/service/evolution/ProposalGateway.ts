@@ -1,5 +1,5 @@
 /**
- * EvolutionGateway — 统一进化决策入口
+ * ProposalGateway — 统一进化决策入口
  *
  * 所有进化决策（Agent 工具、MCP handler、Evolution Agent）最终都汇聚到这里。
  * 三种进化方向：update | deprecate | valid
@@ -10,7 +10,7 @@
  *   - deprecate 路径按来源区分：Agent 高置信 → 立即执行；规则引擎 → 观察窗口
  *   - lifecycle 变更通过 LifecycleStateMachine 唯一路径，Guard 拒绝 → 降级为 Proposal
  *
- * @module service/evolution/EvolutionGateway
+ * @module service/evolution/ProposalGateway
  */
 
 import { EvolutionPolicy } from '../../domain/evolution/EvolutionPolicy.js';
@@ -60,7 +60,7 @@ export interface EvolutionResult {
 
 /* ────────────────────── Class ────────────────────── */
 
-export class EvolutionGateway {
+export class ProposalGateway {
   readonly #proposalRepo: ProposalRepository;
   readonly #knowledgeRepo: KnowledgeRepositoryImpl;
   readonly #lifecycle: LifecycleStateMachine;
@@ -127,7 +127,7 @@ export class EvolutionGateway {
       void this.#knowledgeRepo.updateStats(decision.recipeId, stats);
     } catch (err: unknown) {
       this.#logger.warn(
-        `[EvolutionGateway] Failed to update lastVerifiedAt for ${decision.recipeId}: ${err instanceof Error ? err.message : String(err)}`
+        `[ProposalGateway] Failed to update lastVerifiedAt for ${decision.recipeId}: ${err instanceof Error ? err.message : String(err)}`
       );
     }
 
@@ -166,7 +166,7 @@ export class EvolutionGateway {
       this.#resolveExistingDeprecateProposals(decision.recipeId, reason, decision.source);
 
       this.#logger.info(
-        `[EvolutionGateway] immediately deprecated: ${decision.recipeId} (source=${decision.source})`
+        `[ProposalGateway] immediately deprecated: ${decision.recipeId} (source=${decision.source})`
       );
 
       return {
@@ -206,7 +206,7 @@ export class EvolutionGateway {
     }
 
     this.#logger.info(
-      `[EvolutionGateway] ${action} proposal created: ${proposal.id} (signal-driven, no expiry)`
+      `[ProposalGateway] ${action} proposal created: ${proposal.id} (signal-driven, no expiry)`
     );
 
     return {
@@ -262,7 +262,7 @@ export class EvolutionGateway {
         this.#proposalRepo.updateEvidence(match.id, merged);
 
         this.#logger.info(
-          `[EvolutionGateway] Upgraded evidence for existing proposal ${match.id} (source=${decision.source})`
+          `[ProposalGateway] Upgraded evidence for existing proposal ${match.id} (source=${decision.source})`
         );
 
         return {
@@ -281,7 +281,7 @@ export class EvolutionGateway {
       };
     } catch (err: unknown) {
       this.#logger.warn(
-        `[EvolutionGateway] Failed to upgrade existing proposal: ${err instanceof Error ? err.message : String(err)}`
+        `[ProposalGateway] Failed to upgrade existing proposal: ${err instanceof Error ? err.message : String(err)}`
       );
       return {
         recipeId: decision.recipeId,
@@ -304,7 +304,7 @@ export class EvolutionGateway {
       }
     } catch (err: unknown) {
       this.#logger.warn(
-        `[EvolutionGateway] Failed to resolve existing deprecate proposals for ${recipeId}: ${err instanceof Error ? err.message : String(err)}`
+        `[ProposalGateway] Failed to resolve existing deprecate proposals for ${recipeId}: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
@@ -317,7 +317,7 @@ export class EvolutionGateway {
       }
     } catch (err: unknown) {
       this.#logger.warn(
-        `[EvolutionGateway] Failed to reject existing proposals for ${recipeId}: ${err instanceof Error ? err.message : String(err)}`
+        `[ProposalGateway] Failed to reject existing proposals for ${recipeId}: ${err instanceof Error ? err.message : String(err)}`
       );
     }
   }
