@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import type { DimensionDef } from '../../src/types/ProjectSnapshot.js';
-import { BootstrapSession } from '../../src/workflows/capabilities/host-agent/BootstrapSession.js';
+import { GenerateSession } from '../../src/workflows/capabilities/host-agent/GenerateSession.js';
 import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/capabilities/host-agent/HostAgentDimensionCompletionWorkflow.js';
 import { buildMissionBriefing } from '../../src/workflows/capabilities/host-agent/MissionBriefingBuilder.js';
 import { buildInternalNextSteps } from '../../src/workflows/capabilities/host-agent/MissionBriefingSupport.js';
@@ -186,7 +186,7 @@ describe('host-agent mining workflow core', () => {
   });
 
   test('completes a dimension by recovering submissions, binding recipes, and saving checkpoint', async () => {
-    const session = new BootstrapSession({
+    const session = new GenerateSession({
       projectRoot: '/repo',
       dimensions: [dimensions[0]],
       projectContext: { projectName: 'Demo' },

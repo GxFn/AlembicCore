@@ -1,12 +1,12 @@
 import type { AlembicDatabaseHandle, DrizzleDB, SqliteDatabase } from './database.js';
 import {
-  BootstrapRepositoryImpl,
-  type BootstrapSnapshotEntity,
-  type BootstrapSnapshotInsert,
+  GenerateRepositoryImpl,
+  type GenerateSnapshotEntity,
+  type GenerateSnapshotInsert,
   type DimensionStatMeta,
   type DimFileEntry,
   type DimFileInsert,
-} from './repository/bootstrap/BootstrapRepository.js';
+} from './repository/bootstrap/GenerateRepository.js';
 import {
   type CodeEntity,
   type CodeEntityInsert,
@@ -103,8 +103,8 @@ import { RawDbSyncAdapter, type SyncRepo } from './repository/sync/SyncRepoAdapt
 import { TokenUsageStore } from './repository/token/TokenUsageStore.js';
 
 export type {
-  BootstrapSnapshotEntity,
-  BootstrapSnapshotInsert,
+  GenerateSnapshotEntity,
+  GenerateSnapshotInsert,
   CodeEntity,
   CodeEntityInsert,
   CoverageGrade,
@@ -166,7 +166,7 @@ export type {
 export type KnowledgeRepository = KnowledgeRepositoryImpl;
 export type KnowledgeEdgeRepository = KnowledgeEdgeRepositoryImpl;
 export type CodeEntityRepository = CodeEntityRepositoryImpl;
-export type BootstrapRepository = BootstrapRepositoryImpl;
+export type GenerateRepository = GenerateRepositoryImpl;
 export type GuardViolationRepository = GuardViolationRepositoryImpl;
 export type MemoryRepository = MemoryRepositoryImpl;
 export type SessionRepository = SessionRepositoryImpl;
@@ -179,7 +179,7 @@ export type EvolutionGitDiffCheckpointRepository = GitDiffCheckpointRepository;
 export type EvolutionCoverageLedgerRepository = CoverageLedgerRepository;
 
 export {
-  BootstrapRepositoryImpl,
+  GenerateRepositoryImpl,
   CodeEntityRepositoryImpl,
   CoverageLedgerRepository,
   GuardViolationRepositoryImpl,
@@ -209,7 +209,7 @@ export interface AlembicRepositoryBundle {
   knowledgeRepository: KnowledgeRepository;
   knowledgeEdgeRepository: KnowledgeEdgeRepository;
   codeEntityRepository: CodeEntityRepository;
-  bootstrapRepository: BootstrapRepository;
+  generateRepository: GenerateRepository;
   guardViolationRepository: GuardViolationRepository;
   memoryRepository: MemoryRepository;
   sessionRepository: SessionRepository;
@@ -226,7 +226,7 @@ export const ALEMBIC_REPOSITORY_KEYS = [
   'knowledgeRepository',
   'knowledgeEdgeRepository',
   'codeEntityRepository',
-  'bootstrapRepository',
+  'generateRepository',
   'guardViolationRepository',
   'memoryRepository',
   'sessionRepository',
@@ -250,7 +250,7 @@ export function createAlembicRepositories(
     knowledgeRepository: new KnowledgeRepositoryImpl(database, drizzle),
     knowledgeEdgeRepository: new KnowledgeEdgeRepositoryImpl(drizzle),
     codeEntityRepository: new CodeEntityRepositoryImpl(drizzle),
-    bootstrapRepository: new BootstrapRepositoryImpl(drizzle),
+    generateRepository: new GenerateRepositoryImpl(drizzle),
     guardViolationRepository: new GuardViolationRepositoryImpl(drizzle),
     memoryRepository: new MemoryRepositoryImpl(drizzle),
     sessionRepository: new SessionRepositoryImpl(drizzle),

@@ -21,7 +21,7 @@ import {
   getGatewaySourceUserId,
 } from '../../shared/sourceContracts.js';
 import type { StructuredPatch } from '../../types/evolution.js';
-import type { BootstrapDedup, CandidateSummary } from '../bootstrap/BootstrapDedup.js';
+import type { GenerateDedup, CandidateSummary } from '../bootstrap/GenerateDedup.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
 interface GatewayLogger {
@@ -101,7 +101,7 @@ export interface CreateRecipeRequest {
     /** 操作用户 ID */
     userId?: string;
     /** Bootstrap 会话级去重缓存（冷启动跨维度去重） */
-    bootstrapDedup?: BootstrapDedup;
+    bootstrapDedup?: GenerateDedup;
   };
 }
 

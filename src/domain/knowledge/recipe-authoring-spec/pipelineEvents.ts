@@ -1,8 +1,8 @@
 /**
  * RecipePipelineEvents — 生成链进度事件名的 wire 契约单源(C-5 最小件,2026-07-02 统一重构)。
  *
- * 这些字符串是跨进程 wire 契约:主体 BootstrapEventEmitter(Socket.io→Dashboard
- * useBootstrapSocket)与宿主 Plugin BootstrapEventEmitter(EventBus/TaskManager)两边
+ * 这些字符串是跨进程 wire 契约:主体 GenerateEventEmitter(Socket.io→Dashboard
+ * useGenerateSocket)与宿主 Plugin GenerateEventEmitter(EventBus/TaskManager)两边
  * 硬编码同一组事件名,共 44 处(五仓)。收单源后:
  *   - 事件名漂移(一边改名一边不知道)从此编译期可见;
  *   - S4 概念层重命名时,本对象就是事件部分的 wire 冻结表——`bootstrap:` 前缀是

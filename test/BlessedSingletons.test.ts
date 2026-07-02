@@ -55,7 +55,7 @@ describe('Blessed singletons (config/blessed-singletons.json)', () => {
       [
         'bootstrap-session-manager',
         'src/workflows/capabilities/host-agent/SessionSupport.ts',
-        '_resetBootstrapSessionManagersForTesting',
+        '_resetGenerateSessionManagersForTesting',
       ],
     ];
     for (const [id, module, hook] of hookProbes) {

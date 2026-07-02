@@ -1,1 +1,1 @@
-export * from './BootstrapRepository.js';
+export * from './GenerateRepository.js';

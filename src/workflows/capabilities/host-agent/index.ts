@@ -1,5 +1,5 @@
 export * from '../coverage/index.js';
-export * from './BootstrapSession.js';
+export * from './GenerateSession.js';
 export * from './CompletenessCritic.js';
 export * from './EvidenceStarterBuilder.js';
 export {

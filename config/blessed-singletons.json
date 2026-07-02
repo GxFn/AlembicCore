@@ -92,7 +92,7 @@
       "owner": "AlembicCore window",
       "reason": "Host-agent bootstrap sessions; managers are keyed by dataRoot and persist session/lease snapshots under .asd/bootstrap-sessions so process restarts can resume by bootstrapSessionRef.",
       "lifecycle": "process plus dataRoot-local durable index; sessions expire by 2h TTL; same-project concurrent bootstrap is refused as bootstrap_in_progress",
-      "resetHook": "_resetBootstrapSessionManagersForTesting"
+      "resetHook": "_resetGenerateSessionManagersForTesting"
     },
     {
       "id": "ast-grammar-family",
@@ -173,7 +173,7 @@
       "file": "src/workflows/capabilities/host-agent/SessionSupport.ts",
       "binding": "sessionManagers",
       "blessedId": "bootstrap-session-manager",
-      "reason": "Per-dataRoot BootstrapSessionManager cache with durable .asd/bootstrap-sessions index and test reset hook."
+      "reason": "Per-dataRoot GenerateSessionManager cache with durable .asd/bootstrap-sessions index and test reset hook."
     },
     {
       "file": "src/shared/LanguageProfiles.ts",

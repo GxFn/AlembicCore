@@ -1,7 +1,7 @@
 /**
  * SessionSupport — SessionManager 单例获取与项目分析 Session 缓存
  *
- * 为冷启动和增量扫描提供 BootstrapSessionManager 的单例解析，
+ * 为冷启动和增量扫描提供 GenerateSessionManager 的单例解析，
  * 以及 Phase 1-4 分析结果的缓存，供后续维度执行复用。
  */
 
@@ -9,7 +9,7 @@ import path from 'node:path';
 import { resolveDataRoot } from '../../../shared/resolveProjectRoot.js';
 import type { DimensionDef, ProjectSnapshot } from '../../../types/ProjectSnapshot.js';
 import { toSessionCache } from '../../../types/SnapshotViews.js';
-import { BootstrapSessionManager } from './BootstrapSession.js';
+import { GenerateSessionManager } from './GenerateSession.js';
 
 // ═══════════════════════════════════════════════════════════
 // §1 — WorkflowSessionManagerProvider
@@ -23,15 +23,15 @@ interface SessionManagerContainer {
 // Blessed lazy lifecycle (AD4 'bootstrap-session-manager'): one manager per
 // dataRoot so host-agent sessions survive MCP/Core process restarts without
 // mixing project leases.
-const sessionManagers = new Map<string, BootstrapSessionManager>();
+const sessionManagers = new Map<string, GenerateSessionManager>();
 
 export function getOrCreateSessionManager(
   container: SessionManagerContainer
-): BootstrapSessionManager {
+): GenerateSessionManager {
   try {
-    const manager = container.get('bootstrapSessionManager');
+    const manager = container.get('generateSessionManager');
     if (manager) {
-      return manager as BootstrapSessionManager;
+      return manager as GenerateSessionManager;
     }
   } catch {
     // Not registered yet.
@@ -41,12 +41,12 @@ export function getOrCreateSessionManager(
   const managerKey = dataRoot ?? '__memory__';
   let sessionManager = sessionManagers.get(managerKey);
   if (!sessionManager) {
-    sessionManager = new BootstrapSessionManager({ dataRoot });
+    sessionManager = new GenerateSessionManager({ dataRoot });
     sessionManagers.set(managerKey, sessionManager);
   }
 
   try {
-    container.register?.('bootstrapSessionManager', () => sessionManager);
+    container.register?.('generateSessionManager', () => sessionManager);
   } catch {
     // Already registered or container does not support registration.
   }
@@ -54,7 +54,7 @@ export function getOrCreateSessionManager(
   return sessionManager;
 }
 
-export function _resetBootstrapSessionManagersForTesting(): void {
+export function _resetGenerateSessionManagersForTesting(): void {
   sessionManagers.clear();
 }
 
@@ -106,7 +106,7 @@ export function cacheProjectAnalysisSession(opts: {
     return session.id;
   } catch (err: unknown) {
     opts.logger.warn(
-      `[${opts.logPrefix}] BootstrapSessionManager setup failed (non-blocking): ${err instanceof Error ? err.message : String(err)}`
+      `[${opts.logPrefix}] GenerateSessionManager setup failed (non-blocking): ${err instanceof Error ? err.message : String(err)}`
     );
     return null;
   }

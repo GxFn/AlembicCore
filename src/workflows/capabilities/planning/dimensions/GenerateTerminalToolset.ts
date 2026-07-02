@@ -1,29 +1,29 @@
 import { getTestModeConfig } from '../../../../shared/testMode.js';
 
-export type BootstrapTerminalToolset = 'baseline' | 'terminal-run';
+export type GenerateTerminalToolset = 'baseline' | 'terminal-run';
 
-export type BootstrapTerminalMode = 'run';
+export type GenerateTerminalMode = 'run';
 
-export interface BootstrapTerminalToolsetConfig {
+export interface GenerateTerminalToolsetConfig {
   enabled: boolean;
-  toolset: BootstrapTerminalToolset;
-  modes: BootstrapTerminalMode[];
+  toolset: GenerateTerminalToolset;
+  modes: GenerateTerminalMode[];
 }
 
-const TOOLSET_MODES: Record<BootstrapTerminalToolset, BootstrapTerminalMode[]> = {
+const TOOLSET_MODES: Record<GenerateTerminalToolset, GenerateTerminalMode[]> = {
   baseline: [],
   'terminal-run': ['run'],
 };
 
-const ANALYZE_TOOLS: Record<BootstrapTerminalMode, string> = {
+const ANALYZE_TOOLS: Record<GenerateTerminalMode, string> = {
   run: 'terminal',
 };
 
-const EVOLUTION_TOOLS: Record<BootstrapTerminalMode, string> = {
+const EVOLUTION_TOOLS: Record<GenerateTerminalMode, string> = {
   run: 'terminal',
 };
 
-export function resolveBootstrapTerminalToolset(): BootstrapTerminalToolsetConfig {
+export function resolveGenerateTerminalToolset(): GenerateTerminalToolsetConfig {
   const terminalCfg = getTestModeConfig().terminal;
   const envToolset = terminalCfg.toolset;
   const requestedToolset = normalizeToolset(envToolset);
@@ -39,9 +39,9 @@ export function resolveBootstrapTerminalToolset(): BootstrapTerminalToolsetConfi
   };
 }
 
-export function getBootstrapStageTerminalTools(
+export function getGenerateStageTerminalTools(
   stageName: string,
-  config: BootstrapTerminalToolsetConfig
+  config: GenerateTerminalToolsetConfig
 ): string[] {
   if (!config.enabled || config.toolset === 'baseline') {
     return [];
@@ -58,7 +58,7 @@ export function getBootstrapStageTerminalTools(
   return [];
 }
 
-export function buildBootstrapTerminalPolicyHints(config: BootstrapTerminalToolsetConfig) {
+export function buildGenerateTerminalPolicyHints(config: GenerateTerminalToolsetConfig) {
   return {
     terminalCapability: {
       enabled: config.enabled,
@@ -74,7 +74,7 @@ export function buildBootstrapTerminalPolicyHints(config: BootstrapTerminalTools
   };
 }
 
-function normalizeToolset(value: unknown): BootstrapTerminalToolset | null {
+function normalizeToolset(value: unknown): GenerateTerminalToolset | null {
   if (value === 'baseline' || value === 'terminal-run') {
     return value;
   }

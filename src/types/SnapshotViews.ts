@@ -11,7 +11,7 @@ import type { EvolutionPrescreen } from '../workflows/capabilities/planning/know
 import type { KnowledgeRescanExecutionDecision } from '../workflows/capabilities/planning/knowledge/KnowledgeRescanPlanBuilder.js';
 import type {
   AstSummary,
-  BootstrapSessionShape,
+  GenerateSessionShape,
   CallGraphResult,
   CodeEntityGraphResult,
   DependencyGraph,
@@ -26,7 +26,7 @@ import type {
 // ─── H4: SessionCacheShape ───────────────────────────────────
 
 /**
- * BootstrapSession.snapshotCache 的类型化形状。
+ * GenerateSession.snapshotCache 的类型化形状。
  *
  * 替代之前 `Record<string, unknown>` 的擦除类型，
  * 消费端（dimension-complete-external、wiki-external）不再需要 `as` 手动转型。
@@ -57,7 +57,7 @@ export interface PipelineFillView {
   /** 运行时上下文（DI container、logger 等）— 使用 Record 以兼容各种 McpContext 子类型 */
   readonly ctx: Record<string, unknown>;
   /** 当前 bootstrap session（可选，rescan 场景可能为 null） */
-  readonly bootstrapSession: BootstrapSessionShape | null;
+  readonly bootstrapSession: GenerateSessionShape | null;
   /** handler 构建的 target→files 映射 */
   readonly targetFileMap: Record<string, unknown[]>;
   /** 项目根路径 */
@@ -157,7 +157,7 @@ export function toResponseData(snapshot: ProjectSnapshot): Record<string, unknow
 // ─── 视图 2: toSessionCache ──────────────────────────────────
 
 /**
- * 从 ProjectSnapshot 提取 BootstrapSession 的 phase cache 数据。
+ * 从 ProjectSnapshot 提取 GenerateSession 的 phase cache 数据。
  *
  * 替代当前 handler 中手动拼装的 setSnapshotCache({...}) 调用。
  */

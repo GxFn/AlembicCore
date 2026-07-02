@@ -291,7 +291,7 @@ export const semanticMemories = sqliteTable(
 // 8. bootstrap_snapshots — Bootstrap 快照主表
 // ═══════════════════════════════════════════════════════════════
 
-export const bootstrapSnapshots = sqliteTable(
+export const generateSnapshots = sqliteTable(
   'bootstrap_snapshots',
   {
     id: text('id').primaryKey(),
@@ -322,12 +322,12 @@ export const bootstrapSnapshots = sqliteTable(
 // 9. bootstrap_dim_files — 维度-文件关联表
 // ═══════════════════════════════════════════════════════════════
 
-export const bootstrapDimFiles = sqliteTable(
+export const generateDimFiles = sqliteTable(
   'bootstrap_dim_files',
   {
     snapshotId: text('snapshot_id')
       .notNull()
-      .references(() => bootstrapSnapshots.id, { onDelete: 'cascade' }),
+      .references(() => generateSnapshots.id, { onDelete: 'cascade' }),
     dimId: text('dim_id').notNull(),
     filePath: text('file_path').notNull(),
     role: text('role').default('referenced'),

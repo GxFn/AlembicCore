@@ -14,7 +14,7 @@
  */
 
 import type {
-  BootstrapFile,
+  GenerateFile,
   LoggerLike,
   RestoredEpisodicMemory,
   SaveSnapshotParams,
@@ -93,7 +93,7 @@ export class FileDiffPlanner {
    * @param currentFiles 当前扫描到的文件
    * @param allDimIds 所有可用维度 ID
    */
-  evaluate(currentFiles: BootstrapFile[], allDimIds: string[]) {
+  evaluate(currentFiles: GenerateFile[], allDimIds: string[]) {
     try {
       // 1. 加载上次快照
       const previousSnapshot = this.#snapshot.getLatest(this.#projectRoot);

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
-  BootstrapSession,
+  GenerateSession,
   buildColdStartWorkflowPlan,
   buildHostAgentMissionBriefing,
   buildKnowledgeRescanPlan,
@@ -106,7 +106,7 @@ describe('stable host-agent workflow entrypoint', () => {
   });
 
   it('builds host-agent mission briefing with session and submission contracts', () => {
-    const session = new BootstrapSession({
+    const session = new GenerateSession({
       projectRoot: '/project',
       dimensions,
       projectContext: { projectName: 'Demo', primaryLang: 'typescript' },

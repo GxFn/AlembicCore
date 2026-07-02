@@ -25,7 +25,7 @@ export interface WorkflowDatabaseLike {
   filename?: string;
 }
 
-export interface BootstrapFile {
+export interface GenerateFile {
   path: string;
   relativePath: string;
   content: string;
@@ -60,7 +60,7 @@ export interface RestoredEpisodicMemory {
 
 export interface SaveSnapshotParams {
   sessionId: string;
-  allFiles: BootstrapFile[];
+  allFiles: GenerateFile[];
   dimensionStats: Record<string, Record<string, unknown>>;
   episodicMemory?: RestoredEpisodicMemory | null;
   meta?: Record<string, unknown>;

@@ -1,4 +1,4 @@
-import type { BootstrapFile, IncrementalPlan } from '../../../types/workflows.js';
+import type { GenerateFile, IncrementalPlan } from '../../../types/workflows.js';
 import type { MiningSessionStore } from '../host-agent/MiningSessionStore.js';
 import type { FileDiffPlanner } from './FileDiffPlanner.js';
 
@@ -85,7 +85,7 @@ export interface PersistWorkflowResultOptions {
   projectRoot: string;
   projectInfo: { name: string; fileCount: number; lang: string };
   sessionId: string;
-  allFiles: BootstrapFile[] | null;
+  allFiles: GenerateFile[] | null;
   sessionStore: MiningSessionStore;
   dimensionStats: Record<string, DimensionStat>;
   candidateResults: CandidateResults;

@@ -1,1 +1,1 @@
-export * from './BootstrapDedup.js';
+export * from './GenerateDedup.js';

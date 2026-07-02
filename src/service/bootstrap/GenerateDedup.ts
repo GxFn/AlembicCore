@@ -1,5 +1,5 @@
 /**
- * BootstrapDedup — 冷启动期间的会话级去重缓存
+ * GenerateDedup — 冷启动期间的会话级去重缓存
  *
  * 生命周期: 随 bootstrap session 创建/销毁
  * 作用:
@@ -38,7 +38,7 @@ const WEIGHTS = { title: 0.2, clause: 0.3, code: 0.3, guard: 0.2 };
 
 /* ────────────────────── Class ────────────────────── */
 
-export class BootstrapDedup {
+export class GenerateDedup {
   readonly #candidates: CandidateSummary[] = [];
 
   /** 注册已提交的候选（knowledge 提交成功后调用） */

@@ -17,8 +17,8 @@ import { isAbsolute, relative } from 'node:path';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { type DrizzleDB, getDrizzle } from '../../../infrastructure/database/drizzle/index.js';
 import {
-  bootstrapDimFiles,
-  bootstrapSnapshots,
+  generateDimFiles,
+  generateSnapshots,
 } from '../../../infrastructure/database/drizzle/schema.js';
 import { computeContentHash } from '../../../shared/contentHash.js';
 import type { LoggerLike } from '../../../types/workflows.js';
@@ -191,7 +191,7 @@ const MAX_SNAPSHOTS = 5;
 const FULL_REBUILD_THRESHOLD = 0.5;
 
 // Drizzle row type
-type SnapshotRow = typeof bootstrapSnapshots.$inferSelect;
+type SnapshotRow = typeof generateSnapshots.$inferSelect;
 
 // ──────────────────────────────────────────────────────────────
 // FileDiffSnapshotStore 类
@@ -270,7 +270,7 @@ export class FileDiffSnapshotStore {
     // 事务保存（Drizzle 类型安全）
     this.#drizzle.transaction((tx) => {
       // 主记录
-      tx.insert(bootstrapSnapshots)
+      tx.insert(generateSnapshots)
         .values({
           id,
           sessionId: sessionId || null,
@@ -305,7 +305,7 @@ export class FileDiffSnapshotStore {
                 ? relative(projectRoot, filePath)
                 : filePath
               : filePath;
-          tx.insert(bootstrapDimFiles)
+          tx.insert(generateDimFiles)
             .values({
               snapshotId: id,
               dimId,
@@ -333,13 +333,13 @@ export class FileDiffSnapshotStore {
   clearProject(projectRoot: string) {
     try {
       const rows = this.#drizzle
-        .select({ id: bootstrapSnapshots.id })
-        .from(bootstrapSnapshots)
-        .where(eq(bootstrapSnapshots.projectRoot, projectRoot))
+        .select({ id: generateSnapshots.id })
+        .from(generateSnapshots)
+        .where(eq(generateSnapshots.projectRoot, projectRoot))
         .all();
 
       for (const row of rows) {
-        this.#drizzle.delete(bootstrapSnapshots).where(eq(bootstrapSnapshots.id, row.id)).run();
+        this.#drizzle.delete(generateSnapshots).where(eq(generateSnapshots.id, row.id)).run();
       }
       this.#log(`Cleared ${rows.length} snapshots for project`);
     } catch (err: unknown) {
@@ -356,14 +356,14 @@ export class FileDiffSnapshotStore {
   getLatest(projectRoot: string): SnapshotData | null {
     const row = this.#drizzle
       .select()
-      .from(bootstrapSnapshots)
+      .from(generateSnapshots)
       .where(
         and(
-          eq(bootstrapSnapshots.projectRoot, projectRoot),
-          eq(bootstrapSnapshots.status, 'complete')
+          eq(generateSnapshots.projectRoot, projectRoot),
+          eq(generateSnapshots.status, 'complete')
         )
       )
-      .orderBy(desc(bootstrapSnapshots.createdAt))
+      .orderBy(desc(generateSnapshots.createdAt))
       .limit(1)
       .get();
 
@@ -377,8 +377,8 @@ export class FileDiffSnapshotStore {
   getById(id: string): SnapshotData | null {
     const row = this.#drizzle
       .select()
-      .from(bootstrapSnapshots)
-      .where(eq(bootstrapSnapshots.id, id))
+      .from(generateSnapshots)
+      .where(eq(generateSnapshots.id, id))
       .get();
 
     if (!row) {
@@ -391,9 +391,9 @@ export class FileDiffSnapshotStore {
   list(projectRoot: string, limit = 10): SnapshotData[] {
     return this.#drizzle
       .select()
-      .from(bootstrapSnapshots)
-      .where(eq(bootstrapSnapshots.projectRoot, projectRoot))
-      .orderBy(desc(bootstrapSnapshots.createdAt))
+      .from(generateSnapshots)
+      .where(eq(generateSnapshots.projectRoot, projectRoot))
+      .orderBy(desc(generateSnapshots.createdAt))
       .limit(limit)
       .all()
       .map((r) => this.#deserialize(r));
@@ -548,11 +548,11 @@ export class FileDiffSnapshotStore {
   #getDimFileMap(snapshotId: string): Record<string, Set<string>> {
     const rows = this.#drizzle
       .select({
-        dimId: bootstrapDimFiles.dimId,
-        filePath: bootstrapDimFiles.filePath,
+        dimId: generateDimFiles.dimId,
+        filePath: generateDimFiles.filePath,
       })
-      .from(bootstrapDimFiles)
-      .where(eq(bootstrapDimFiles.snapshotId, snapshotId))
+      .from(generateDimFiles)
+      .where(eq(generateDimFiles.snapshotId, snapshotId))
       .all();
 
     const map: Record<string, Set<string>> = {};
@@ -664,13 +664,13 @@ export class FileDiffSnapshotStore {
 
   #enforceCapacity(projectRoot: string, db: DrizzleDB = this.#drizzle) {
     try {
-      db.delete(bootstrapSnapshots)
+      db.delete(generateSnapshots)
         .where(
-          sql`${bootstrapSnapshots.projectRoot} = ${projectRoot}
-          AND ${bootstrapSnapshots.id} NOT IN (
-            SELECT ${bootstrapSnapshots.id} FROM ${bootstrapSnapshots}
-            WHERE ${bootstrapSnapshots.projectRoot} = ${projectRoot}
-            ORDER BY ${bootstrapSnapshots.createdAt} DESC
+          sql`${generateSnapshots.projectRoot} = ${projectRoot}
+          AND ${generateSnapshots.id} NOT IN (
+            SELECT ${generateSnapshots.id} FROM ${generateSnapshots}
+            WHERE ${generateSnapshots.projectRoot} = ${projectRoot}
+            ORDER BY ${generateSnapshots.createdAt} DESC
             LIMIT ${MAX_SNAPSHOTS}
           )`
         )

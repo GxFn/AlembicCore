@@ -1058,7 +1058,7 @@ function summarizePanorama(
  * @param opts.targets allTargets 列表
  * @param opts.activeDimensions signal-aware dimension selection result
  * @param opts.skills 已加载的 bootstrap skills
- * @param opts.session BootstrapSession 实例
+ * @param opts.session GenerateSession 实例
  * @returns Mission Briefing 响应数据
  */
 export function buildMissionBriefing({

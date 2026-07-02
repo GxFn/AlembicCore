@@ -1,11 +1,11 @@
 /**
- * BootstrapSession — 宿主 Agent 驱动的 Bootstrap 会话状态管理
+ * GenerateSession — 宿主 Agent 驱动的 Bootstrap 会话状态管理
  *
  * 会话状态会写入 dataRoot/.asd/bootstrap-sessions/active-sessions.json。
  * 这让 host-agent 在 MCP/Core 进程重启后仍可通过 bootstrapSessionRef
  * 恢复同一条会话，同时用项目级 lease 阻止并发重建覆盖已有会话。
  *
- * @module bootstrap/BootstrapSession
+ * @module bootstrap/GenerateSession
  */
 
 import crypto from 'node:crypto';
@@ -23,7 +23,7 @@ import { type MiningSessionStoreSerialized, SessionStore } from './MiningSession
 // ── 本地类型定义 ─────────────────────────────────────────────
 
 /** Bootstrap 会话构造参数 */
-export interface BootstrapSessionOpts {
+export interface GenerateSessionOpts {
   projectRoot: string;
   dimensions: DimensionDef[];
   projectContext?: Record<string, unknown>;
@@ -60,7 +60,7 @@ export interface CrossDimensionHint {
   hint: string;
 }
 
-export interface BootstrapSessionSnapshot {
+export interface GenerateSessionSnapshot {
   id: string;
   projectRoot: string;
   dimensions: DimensionDef[];
@@ -75,15 +75,15 @@ export interface BootstrapSessionSnapshot {
   savedAt: number;
 }
 
-export interface BootstrapSessionManagerOptions {
+export interface GenerateSessionManagerOptions {
   dataRoot?: string | null;
 }
 
-export interface BootstrapSessionLookupOptions {
+export interface GenerateSessionLookupOptions {
   projectRoot?: string;
 }
 
-export type BootstrapSessionPublicState =
+export type GenerateSessionPublicState =
   | 'active'
   | 'bootstrap_in_progress'
   | 'complete'
@@ -91,8 +91,8 @@ export type BootstrapSessionPublicState =
   | 'session_not_found'
   | 'session_project_mismatch';
 
-export interface BootstrapSessionStatus {
-  state: BootstrapSessionPublicState;
+export interface GenerateSessionStatus {
+  state: GenerateSessionPublicState;
   reason: string;
   sessionId?: string;
   activeSessionId?: string;
@@ -112,7 +112,7 @@ export interface BootstrapSessionStatus {
 interface BootstrapSessionStoreFile {
   version: 1;
   savedAt: number;
-  sessions: BootstrapSessionSnapshot[];
+  sessions: GenerateSessionSnapshot[];
 }
 
 // ── 常量 ────────────────────────────────────────────────────
@@ -121,9 +121,9 @@ export const SESSION_TTL_MS = 2 * 60 * 60 * 1000; // 2 小时
 
 const STORE_RELATIVE_PATH = path.join('.asd', 'bootstrap-sessions', 'active-sessions.json');
 
-// ── BootstrapSession errors ─────────────────────────────────
+// ── GenerateSession errors ─────────────────────────────────
 
-export class BootstrapSessionLeaseError extends Error {
+export class GenerateSessionLeaseError extends Error {
   readonly code = 'BOOTSTRAP_IN_PROGRESS';
   readonly errorCode = 'BOOTSTRAP_IN_PROGRESS';
   readonly failureKind = 'core.failure.conflict';
@@ -138,17 +138,17 @@ export class BootstrapSessionLeaseError extends Error {
   readonly activeProjectRoot: string;
   readonly expiresAt: number;
 
-  constructor(activeSession: BootstrapSession) {
+  constructor(activeSession: GenerateSession) {
     super(
       `Bootstrap already in progress for project "${activeSession.projectRoot}" with session "${activeSession.id}".`
     );
-    this.name = 'BootstrapSessionLeaseError';
+    this.name = 'GenerateSessionLeaseError';
     this.activeSessionId = activeSession.id;
     this.activeProjectRoot = activeSession.projectRoot;
     this.expiresAt = activeSession.expiresAt;
   }
 
-  toJSON(): BootstrapSessionStatus {
+  toJSON(): GenerateSessionStatus {
     return {
       state: this.state,
       reason: 'bootstrap_in_progress',
@@ -167,14 +167,14 @@ export class BootstrapSessionLeaseError extends Error {
   }
 }
 
-// ── BootstrapSession ────────────────────────────────────────
+// ── GenerateSession ────────────────────────────────────────
 
-export class BootstrapSession {
+export class GenerateSession {
   expiresAt: number;
   id: string;
   projectRoot: string;
   startedAt: number;
-  _activeSession: BootstrapSession | null;
+  _activeSession: GenerateSession | null;
   completedDimensions: Map<string, DimensionCompletion>;
   crossDimensionHints: Record<string, CrossDimensionHint[]>;
   dimensions: DimensionDef[];
@@ -202,7 +202,7 @@ export class BootstrapSession {
     sessionStore,
     submissionTracker,
     onChange,
-  }: BootstrapSessionOpts) {
+  }: GenerateSessionOpts) {
     this.#onChange = onChange ?? null;
     this.#projectContext = { ...projectContext };
     this.id = id ?? `bs-${crypto.randomUUID()}`;
@@ -380,7 +380,7 @@ export class BootstrapSession {
 
   // ── 序列化 ────────────────────────────────────────────────
 
-  toSnapshot(): BootstrapSessionSnapshot {
+  toSnapshot(): GenerateSessionSnapshot {
     return {
       id: this.id,
       projectRoot: this.projectRoot,
@@ -417,18 +417,18 @@ export class BootstrapSession {
 // ── Session 管理器（进程级单例）──────────────────────────────
 
 /**
- * BootstrapSessionManager — 管理 active session
+ * GenerateSessionManager — 管理 active session
  *
  * 设计为进程级 lazy lifecycle，通过 ServiceContainer 注册。
  * 每个项目同一时间只有一个未过期 session；dataRoot 可用时写入 durable
  * session index，使新进程能从 bootstrapSessionRef 重建同一条会话。
  */
-export class BootstrapSessionManager {
-  _activeSession: BootstrapSession | null;
-  #sessionsByProject = new Map<string, BootstrapSession>();
+export class GenerateSessionManager {
+  _activeSession: GenerateSession | null;
+  #sessionsByProject = new Map<string, GenerateSession>();
   #storePath: string | null;
 
-  constructor(options: BootstrapSessionManagerOptions = {}) {
+  constructor(options: GenerateSessionManagerOptions = {}) {
     this._activeSession = null;
     this.#storePath = options.dataRoot
       ? path.join(normalizeProjectRoot(options.dataRoot), STORE_RELATIVE_PATH)
@@ -440,20 +440,20 @@ export class BootstrapSessionManager {
   /**
    * 创建新的 bootstrap session。
    *
-   * 同项目已有未过期 session 时抛出 BootstrapSessionLeaseError，外层可将
+   * 同项目已有未过期 session 时抛出 GenerateSessionLeaseError，外层可将
    * errorCode/state 映射为 clean output 的 bootstrap_in_progress 状态。
    */
-  createSession(opts: BootstrapSessionOpts, options: { replace?: boolean } = {}): BootstrapSession {
+  createSession(opts: GenerateSessionOpts, options: { replace?: boolean } = {}): GenerateSession {
     this.#loadFromDisk();
     const projectKey = sessionProjectKey(opts.projectRoot);
     const existing = this.#sessionsByProject.get(projectKey);
     if (existing && !existing.isBlockingLease) {
       this.#sessionsByProject.delete(projectKey);
     } else if (existing && !options.replace) {
-      throw new BootstrapSessionLeaseError(existing);
+      throw new GenerateSessionLeaseError(existing);
     }
 
-    const session = new BootstrapSession({
+    const session = new GenerateSession({
       ...opts,
       onChange: () => this.#persist(),
     });
@@ -469,8 +469,8 @@ export class BootstrapSessionManager {
    */
   getSession(
     sessionId?: string,
-    options: BootstrapSessionLookupOptions = {}
-  ): BootstrapSession | null {
+    options: GenerateSessionLookupOptions = {}
+  ): GenerateSession | null {
     const session = this.#findSession(sessionId, options);
     if (
       !session ||
@@ -486,8 +486,8 @@ export class BootstrapSessionManager {
   /** 获取 active session，无论是否过期（用于兼容恢复场景） */
   getAnySession(
     sessionId?: string,
-    options: BootstrapSessionLookupOptions = {}
-  ): BootstrapSession | null {
+    options: GenerateSessionLookupOptions = {}
+  ): GenerateSession | null {
     const session = this.#findSession(sessionId, options);
     if (
       session &&
@@ -501,8 +501,8 @@ export class BootstrapSessionManager {
 
   getSessionStatus(
     sessionId?: string,
-    options: BootstrapSessionLookupOptions = {}
-  ): BootstrapSessionStatus {
+    options: GenerateSessionLookupOptions = {}
+  ): GenerateSessionStatus {
     const session = this.#findSession(sessionId, options);
     if (session) {
       if (
@@ -553,7 +553,7 @@ export class BootstrapSessionManager {
     if (options.projectRoot) {
       const activeForProject = this.#sessionsByProject.get(sessionProjectKey(options.projectRoot));
       if (activeForProject?.isBlockingLease) {
-        return new BootstrapSessionLeaseError(activeForProject).toJSON();
+        return new GenerateSessionLeaseError(activeForProject).toJSON();
       }
     }
 
@@ -597,8 +597,8 @@ export class BootstrapSessionManager {
 
   #findSession(
     sessionId?: string,
-    options: BootstrapSessionLookupOptions = {}
-  ): BootstrapSession | null {
+    options: GenerateSessionLookupOptions = {}
+  ): GenerateSession | null {
     if (sessionId) {
       for (const session of this.#sessionsByProject.values()) {
         if (session.id === sessionId) {
@@ -619,8 +619,8 @@ export class BootstrapSessionManager {
     this._activeSession = this.#selectNewestSession({ includeExpired: true });
   }
 
-  #selectNewestSession({ includeExpired }: { includeExpired: boolean }): BootstrapSession | null {
-    let newest: BootstrapSession | null = null;
+  #selectNewestSession({ includeExpired }: { includeExpired: boolean }): GenerateSession | null {
+    let newest: GenerateSession | null = null;
     for (const session of this.#sessionsByProject.values()) {
       if (!includeExpired && session.isExpired) {
         continue;
@@ -647,12 +647,12 @@ export class BootstrapSessionManager {
       return;
     }
 
-    const sessionsByProject = new Map<string, BootstrapSession>();
+    const sessionsByProject = new Map<string, GenerateSession>();
     for (const snapshot of parsed.sessions) {
       if (!isSessionSnapshot(snapshot)) {
         continue;
       }
-      const session = new BootstrapSession({
+      const session = new GenerateSession({
         ...snapshot,
         onChange: () => this.#persist(),
       });
@@ -722,7 +722,7 @@ function isStoreFile(value: unknown): value is BootstrapSessionStoreFile {
   );
 }
 
-function isSessionSnapshot(value: unknown): value is BootstrapSessionSnapshot {
+function isSessionSnapshot(value: unknown): value is GenerateSessionSnapshot {
   return (
     isRecord(value) &&
     typeof value.id === 'string' &&
@@ -742,4 +742,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export default BootstrapSession;
+export default GenerateSession;

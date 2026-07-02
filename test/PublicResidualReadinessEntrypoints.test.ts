@@ -10,7 +10,7 @@ import {
   V3_FIELD_SPEC,
 } from '../src/knowledge.js';
 import { MemoryRepositoryImpl } from '../src/memory.js';
-import { BootstrapDedup } from '../src/service/bootstrap/index.js';
+import { GenerateDedup } from '../src/service/bootstrap/index.js';
 import { FeedbackCollector, QualityScorer } from '../src/service/quality/index.js';
 import { RecipeCandidateValidator, RecipeParser } from '../src/service/recipe/index.js';
 
@@ -26,7 +26,7 @@ describe('CCIC-5 residual public readiness entrypoints', () => {
 
   it('keeps residual service facades provisional while capability uses its stable facade', () => {
     expect(CapabilityProbe).toBeTypeOf('function');
-    expect(BootstrapDedup).toBeTypeOf('function');
+    expect(GenerateDedup).toBeTypeOf('function');
     expect(FeedbackCollector).toBeTypeOf('function');
     expect(QualityScorer).toBeTypeOf('function');
     expect(RecipeCandidateValidator).toBeTypeOf('function');

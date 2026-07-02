@@ -2,7 +2,7 @@ export * from './evolution.js';
 export * from './KnowledgeWire.js';
 export type {
   AstSummary,
-  BootstrapSessionShape,
+  GenerateSessionShape,
   CallGraphResult,
   CodeEntityGraphResult,
   DependencyEdge,
@@ -35,7 +35,7 @@ export type {
   RecipeSourceRefResolver,
 } from './recipeAuthoringSpec.js';
 export type {
-  BootstrapFile,
+  GenerateFile,
   DimensionCheckpointResult,
   FileDiffPlan,
   IncrementalPlan,

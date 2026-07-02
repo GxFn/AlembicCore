@@ -312,8 +312,8 @@ export interface DiscovererInfo {
 
 // ── Session ──────────────────────────────────────────────────
 
-/** Minimal shape of BootstrapSession */
-export interface BootstrapSessionShape {
+/** Minimal shape of GenerateSession */
+export interface GenerateSessionShape {
   id: string;
   toJSON(): Record<string, unknown>;
 }

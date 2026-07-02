@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { BootstrapDedup } from '../../src/service/bootstrap/BootstrapDedup.js';
+import { GenerateDedup } from '../../src/service/bootstrap/GenerateDedup.js';
 import {
   type CreateRecipeItem,
   type GatewayDeps,
@@ -249,7 +249,7 @@ describe('RecipeProductionGateway', () => {
     });
 
     it('bootstrap 会话去重命中后不应被后续相似度阶段重新放回创建队列', async () => {
-      const bootstrapDedup = new BootstrapDedup();
+      const bootstrapDedup = new GenerateDedup();
       const item = makeItem();
       bootstrapDedup.register({
         id: 'existing-session-recipe',

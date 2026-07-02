@@ -5,9 +5,9 @@ import { describe, expect, it } from 'vitest';
 
 import type { DimensionDef } from '../src/types/ProjectSnapshot.js';
 import {
-  BootstrapSessionLeaseError,
-  BootstrapSessionManager,
-} from '../src/workflows/capabilities/host-agent/BootstrapSession.js';
+  GenerateSessionLeaseError,
+  GenerateSessionManager,
+} from '../src/workflows/capabilities/host-agent/GenerateSession.js';
 import { runHostAgentDimensionCompletionWorkflow } from '../src/workflows/capabilities/host-agent/HostAgentDimensionCompletionWorkflow.js';
 
 const dimensions: DimensionDef[] = [
@@ -15,12 +15,12 @@ const dimensions: DimensionDef[] = [
   { id: 'quality', label: 'Quality', guide: 'Find quality standards' },
 ];
 
-describe('BootstrapSessionManager durable lease lifecycle', () => {
+describe('GenerateSessionManager durable lease lifecycle', () => {
   it('restores session progress and submission evidence after manager restart', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-session-'));
     try {
       const projectRoot = join(dataRoot, 'repo');
-      const manager = new BootstrapSessionManager({ dataRoot });
+      const manager = new GenerateSessionManager({ dataRoot });
       const session = manager.createSession({
         projectRoot,
         dimensions,
@@ -49,7 +49,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
         candidateCount: 1,
       });
 
-      const restartedManager = new BootstrapSessionManager({ dataRoot });
+      const restartedManager = new GenerateSessionManager({ dataRoot });
       const restored = restartedManager.getSession(session.id);
       expect(restored?.id).toBe(session.id);
       expect(restored?.getProgress()).toMatchObject({
@@ -77,19 +77,19 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-lease-'));
     try {
       const projectRoot = join(dataRoot, 'repo');
-      const manager = new BootstrapSessionManager({ dataRoot });
+      const manager = new GenerateSessionManager({ dataRoot });
       const first = manager.createSession({ projectRoot, dimensions });
 
       expect(() => manager.createSession({ projectRoot, dimensions })).toThrow(
-        BootstrapSessionLeaseError
+        GenerateSessionLeaseError
       );
 
       try {
         manager.createSession({ projectRoot, dimensions });
         throw new Error('expected lease refusal');
       } catch (err: unknown) {
-        expect(err).toBeInstanceOf(BootstrapSessionLeaseError);
-        expect((err as BootstrapSessionLeaseError).toJSON()).toMatchObject({
+        expect(err).toBeInstanceOf(GenerateSessionLeaseError);
+        expect((err as GenerateSessionLeaseError).toJSON()).toMatchObject({
           state: 'bootstrap_in_progress',
           reason: 'bootstrap_in_progress',
           activeSessionId: first.id,
@@ -118,7 +118,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-expiry-'));
     try {
       const projectRoot = join(dataRoot, 'repo');
-      const manager = new BootstrapSessionManager({ dataRoot });
+      const manager = new GenerateSessionManager({ dataRoot });
       const expired = manager.createSession({
         projectRoot,
         dimensions,
@@ -141,7 +141,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-completed-'));
     try {
       const projectRoot = join(dataRoot, 'repo');
-      const manager = new BootstrapSessionManager({ dataRoot });
+      const manager = new GenerateSessionManager({ dataRoot });
       const completed = manager.createSession({ projectRoot, dimensions: [dimensions[0]] });
 
       completed.markDimensionComplete('architecture', {
@@ -157,7 +157,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
         state: 'complete',
       });
 
-      const restartedManager = new BootstrapSessionManager({ dataRoot });
+      const restartedManager = new GenerateSessionManager({ dataRoot });
       expect(restartedManager.getSessionStatus(completed.id, { projectRoot })).toMatchObject({
         reason: 'session_complete',
         state: 'complete',
@@ -179,7 +179,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
     try {
       const projectRoot = join(dataRoot, 'repo');
       const otherProject = join(dataRoot, 'other-repo');
-      const manager = new BootstrapSessionManager({ dataRoot });
+      const manager = new GenerateSessionManager({ dataRoot });
       const session = manager.createSession({ projectRoot, dimensions });
 
       expect(manager.getSession(session.id, { projectRoot: otherProject })).toBeNull();
@@ -200,7 +200,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-complete-'));
     try {
       const projectRoot = join(dataRoot, 'repo');
-      const manager = new BootstrapSessionManager({ dataRoot });
+      const manager = new GenerateSessionManager({ dataRoot });
       const session = manager.createSession({ projectRoot, dimensions: [dimensions[0]] });
 
       const response = await runHostAgentDimensionCompletionWorkflow(
@@ -209,7 +209,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
           container: {
             singletons: { _projectRoot: projectRoot },
             get(name: string) {
-              if (name === 'bootstrapSessionManager') {
+              if (name === 'generateSessionManager') {
                 return manager;
               }
               return null;
@@ -234,7 +234,7 @@ describe('BootstrapSessionManager durable lease lifecycle', () => {
         isBootstrapComplete: true,
       });
 
-      const restartedManager = new BootstrapSessionManager({ dataRoot });
+      const restartedManager = new GenerateSessionManager({ dataRoot });
       expect(restartedManager.getSession(session.id)?.isDimensionComplete('architecture')).toBe(
         true
       );

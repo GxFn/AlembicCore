@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  BootstrapSession,
+  GenerateSession,
   buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
   buildMissionBriefing,
@@ -517,7 +517,7 @@ describe('HostAgentAnalysisPacketBuilder', () => {
   });
 
   it('builds Mission Briefing from ProjectContext presenter input without snapshot data', () => {
-    const session = new BootstrapSession({
+    const session = new GenerateSession({
       projectRoot: '/fixture',
       dimensions,
     });
@@ -544,7 +544,7 @@ describe('HostAgentAnalysisPacketBuilder', () => {
   });
 
   it('builds ProjectContext target file counts from module owned files before anchor refs', () => {
-    const session = new BootstrapSession({
+    const session = new GenerateSession({
       projectRoot: '/fixture/bilidili',
       dimensions,
     });
@@ -600,7 +600,7 @@ describe('HostAgentAnalysisPacketBuilder', () => {
       generatedAt: '2026-05-31T00:00:00.000Z',
       maxUnits: 3,
     });
-    const session = new BootstrapSession({
+    const session = new GenerateSession({
       projectRoot: snapshot.projectRoot,
       dimensions: largeDimensions,
     });

@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getTestModeConfig } from '../src/shared/testMode.js';
 import { buildWorkflowReport } from '../src/workflows/capabilities/persistence/WorkflowReportWriter.js';
 import {
-  buildBootstrapTerminalPolicyHints,
-  getBootstrapStageTerminalTools,
-  resolveBootstrapTerminalToolset,
-} from '../src/workflows/capabilities/planning/dimensions/BootstrapTerminalToolset.js';
+  buildGenerateTerminalPolicyHints,
+  getGenerateStageTerminalTools,
+  resolveGenerateTerminalToolset,
+} from '../src/workflows/capabilities/planning/dimensions/GenerateTerminalToolset.js';
 
-describe('BootstrapTerminalToolset phantom terminal cleanup', () => {
+describe('GenerateTerminalToolset phantom terminal cleanup', () => {
   let oldToolset: string | undefined;
 
   beforeEach(() => {
@@ -29,13 +29,13 @@ describe('BootstrapTerminalToolset phantom terminal cleanup', () => {
   ])('collapses legacy %s requests to live terminal run', (toolset) => {
     process.env.ALEMBIC_TERMINAL_TOOLSET = toolset;
 
-    const config = resolveBootstrapTerminalToolset();
-    const hints = buildBootstrapTerminalPolicyHints(config);
+    const config = resolveGenerateTerminalToolset();
+    const hints = buildGenerateTerminalPolicyHints(config);
 
     expect(getTestModeConfig().terminal).toEqual({ enabled: true, toolset: 'terminal-run' });
     expect(config).toEqual({ enabled: true, toolset: 'terminal-run', modes: ['run'] });
-    expect(getBootstrapStageTerminalTools('analyze', config)).toEqual(['terminal']);
-    expect(getBootstrapStageTerminalTools('evolution', config)).toEqual(['terminal']);
+    expect(getGenerateStageTerminalTools('analyze', config)).toEqual(['terminal']);
+    expect(getGenerateStageTerminalTools('evolution', config)).toEqual(['terminal']);
     expect(JSON.stringify(hints)).not.toContain('terminal_shell');
     expect(JSON.stringify(hints)).not.toContain('terminal_pty');
   });
@@ -43,11 +43,11 @@ describe('BootstrapTerminalToolset phantom terminal cleanup', () => {
   it('keeps baseline as the only no-terminal bootstrap toolset', () => {
     process.env.ALEMBIC_TERMINAL_TOOLSET = 'baseline';
 
-    const config = resolveBootstrapTerminalToolset();
+    const config = resolveGenerateTerminalToolset();
 
     expect(config).toEqual({ enabled: false, toolset: 'baseline', modes: [] });
-    expect(getBootstrapStageTerminalTools('analyze', config)).toEqual([]);
-    expect(getBootstrapStageTerminalTools('evolution', config)).toEqual([]);
+    expect(getGenerateStageTerminalTools('analyze', config)).toEqual([]);
+    expect(getGenerateStageTerminalTools('evolution', config)).toEqual([]);
   });
 
   it('does not project retired terminal ids as report terminal capability', () => {
