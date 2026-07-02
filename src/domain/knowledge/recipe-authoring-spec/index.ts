@@ -95,4 +95,5 @@ export {
   type SubmissionSpec,
   type SubmitContract,
 } from './guidanceGenerator.js';
+export * from './pipelineEvents.js';
 export * from './styleWaiver.js';
