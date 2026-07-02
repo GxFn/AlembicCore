@@ -1,5 +1,5 @@
 /**
- * GenerateRepository — Bootstrap 快照的仓储实现
+ * GenerateRepository — Generate 快照(wire 表名 bootstrap_snapshots 冻结)的仓储实现
  *
  * 从 BootstrapSnapshot 提取的数据操作，
  * 使用 Drizzle 类型安全 API 操作 bootstrap_snapshots + bootstrap_dim_files 表。
