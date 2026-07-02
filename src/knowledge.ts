@@ -93,6 +93,19 @@ export {
   VALUE_RUBRIC,
   validateAgainst,
 } from './domain/knowledge/recipe-authoring-spec/index.js';
+// W2(2026-07-02):生成链事件 payload 基础契约(与 RECIPE_PIPELINE_EVENTS 同域单源)。
+export type {
+  DimensionCheckpointRestoredPayload,
+  DimensionCompletePayload,
+  DimensionErrorPayload,
+  DimensionHostAgentCompletePayload,
+  DimensionHostCompletePayload,
+  DimensionPipelineCompletePayload,
+  DimensionRestoredPayload,
+  DimensionSkillPayload,
+  DimensionSkippedPayload,
+  ProgressPayload,
+} from './domain/knowledge/recipe-authoring-spec/pipelineEventPayloads.js';
 export {
   buildProducerStyleGuide,
   SUBMIT_REQUIREMENTS,
