@@ -20,7 +20,7 @@ import {
   type DeepMiningRoundRecord,
   type UpsertCoverageLedgerInput,
   type UpsertDeepMiningRoundInput,
-} from './repository/evolution/CoverageLedgerRepository.js';
+} from './repository/coverage/CoverageLedgerRepository.js';
 import {
   type GitDiffCheckpointRecord,
   GitDiffCheckpointRepository,

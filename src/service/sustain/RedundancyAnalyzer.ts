@@ -10,12 +10,12 @@
  * 综合: weighted_sum(0.2*d1 + 0.3*d2 + 0.3*d3 + 0.2*d4) ≥ 0.65
  */
 
+import { CONSUMABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import {
   type EmbeddingSimProvider,
   RecipeSimilarity,
   type SimilarityRecipeLike,
-} from '../../domain/evolution/RecipeSimilarity.js';
-import { CONSUMABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
+} from '../../domain/similarity/RecipeSimilarity.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { ReportStore } from '../../infrastructure/report/ReportStore.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';

@@ -5,7 +5,7 @@
  * K/maxRounds 来自 D2（plan ?? D2[tier]，tier 由 moduleCount）。
  */
 import { describe, expect, it } from 'vitest';
-import type { CoverageLedgerRecord } from '../../src/repository/evolution/CoverageLedgerRepository.js';
+import type { CoverageLedgerRecord } from '../../src/repository/coverage/CoverageLedgerRepository.js';
 import {
   adviseCoverageLedger,
   resolveDeepMiningK,

@@ -22,7 +22,7 @@ import {
   type EmbeddingSimProvider,
   RecipeSimilarity,
   type SimilarityRecipeLike,
-} from '../../domain/evolution/RecipeSimilarity.js';
+} from '../../domain/similarity/RecipeSimilarity.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { Signal, SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type {

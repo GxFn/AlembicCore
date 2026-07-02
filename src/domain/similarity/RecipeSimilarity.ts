@@ -21,7 +21,7 @@
  *   coreCodeOverlap  — 共享代码模式比率 (0-1)
  *   categoryMatch    — 同 category
  *
- * @module domain/evolution/RecipeSimilarity
+ * @module domain/similarity/RecipeSimilarity
  */
 
 import { extractRecipeTokens } from '../../shared/recipeTokens.js';

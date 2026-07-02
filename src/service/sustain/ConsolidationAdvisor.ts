@@ -15,13 +15,13 @@
  *   3. 独立价值   — 内容长度、具体性、是否有独立 coreCode
  */
 
+import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import {
   type EmbeddingSimProvider,
   type FieldAnalysis,
   RecipeSimilarity,
   type SimilarityRecipeLike,
-} from '../../domain/evolution/RecipeSimilarity.js';
-import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
+} from '../../domain/similarity/RecipeSimilarity.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { PatchChange, StructuredPatch } from '../../types/evolution.js';

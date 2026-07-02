@@ -16,7 +16,7 @@ import type {
   CoverageGrade,
   CoverageLedgerRecord,
   DeepMiningRoundRecord,
-} from '../../../repository/evolution/CoverageLedgerRepository.js';
+} from '../../../repository/coverage/CoverageLedgerRepository.js';
 import {
   type ModuleTier,
   resolveModuleTier,

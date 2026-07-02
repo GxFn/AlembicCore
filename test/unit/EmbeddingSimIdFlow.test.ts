@@ -10,7 +10,7 @@
  * supersede 执行可达，沿用 U5 #6 grep+build 验证）；RedundancyAnalyzer:131 live 路径由 u5-core-2 conduit 单测覆盖。
  */
 import { describe, expect, it } from 'vitest';
-import type { RecipeLike } from '../../src/domain/evolution/RecipeSimilarity.js';
+import type { RecipeLike } from '../../src/domain/similarity/RecipeSimilarity.js';
 import {
   type CandidateForConsolidation,
   ConsolidationAdvisor,

@@ -10,7 +10,7 @@ export { EvolutionPolicy } from './domain/evolution/EvolutionPolicy.js';
 export type {
   EmbeddingSimProvider,
   SimilarityRecipeLike,
-} from './domain/evolution/RecipeSimilarity.js';
+} from './domain/similarity/RecipeSimilarity.js';
 export type {
   CandidateForConsolidation,
   ConsolidationAction,

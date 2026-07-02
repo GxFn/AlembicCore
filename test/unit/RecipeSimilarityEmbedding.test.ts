@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   RecipeSimilarity,
   type SimilarityRecipeLike,
-} from '../../src/domain/evolution/RecipeSimilarity.js';
+} from '../../src/domain/similarity/RecipeSimilarity.js';
 
 const A: SimilarityRecipeLike = {
   title: 'Safe dictionary access',

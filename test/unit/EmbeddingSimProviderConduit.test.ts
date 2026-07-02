@@ -9,7 +9,7 @@
  * 仅 1 个标识符不同的 coreCode/代码块 → 纯 Jaccard 落在 (0,0.9)，注入 0.9 必胜。
  */
 import { describe, expect, it } from 'vitest';
-import { RecipeSimilarity } from '../../src/domain/evolution/RecipeSimilarity.js';
+import { RecipeSimilarity } from '../../src/domain/similarity/RecipeSimilarity.js';
 import { RedundancyAnalyzer } from '../../src/service/sustain/RedundancyAnalyzer.js';
 
 type RecipePair = Parameters<RedundancyAnalyzer['analyzePair']>[0];
