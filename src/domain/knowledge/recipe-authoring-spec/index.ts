@@ -44,6 +44,7 @@ export {
   type DepthReviewResult,
   reviewRecipeDepth,
 } from './depthReview.js';
+export * from './dimensionCompletion.js';
 // ── SECTION 6: worked examples (P0 default stub) ──
 export { example, type WorkedExample } from './examples/index.js';
 // ── SECTION 5: failure-mode catalog (computed from gateRules) ──

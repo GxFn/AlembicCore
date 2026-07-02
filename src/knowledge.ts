@@ -77,6 +77,7 @@ export {
   buildSubmitKnowledgeContract,
   contentContract,
   DEPTH_DIMENSIONS,
+  DIMENSION_COMPLETION_FLOOR,
   describeSubmitToolFields,
   example,
   failureModes,
