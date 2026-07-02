@@ -9,7 +9,7 @@ import {
   buildHostAgentMissionBriefing,
   buildKnowledgeRescanPlan,
   buildKnowledgeRescanWorkflowPlan,
-  buildProjectIndexFullPlan,
+  buildGenerateFullPlan,
   buildProjectIndexGapPlan,
   buildProjectIndexIncrementalPlan,
   clearDimensionCheckpoints,
@@ -17,10 +17,10 @@ import {
   createHostAgentKnowledgeRescanIntent,
   createInternalColdStartIntent,
   createInternalKnowledgeRescanIntent,
-  createProjectIndexIntentFullHostAgent,
-  createProjectIndexIntentFullInternal,
-  createProjectIndexIntentIncrementalHostAgent,
-  createProjectIndexIntentIncrementalInternal,
+  createGenerateIntentFullHostAgent,
+  createGenerateIntentFullInternal,
+  createGenerateIntentIncrementalHostAgent,
+  createGenerateIntentIncrementalInternal,
   type DimensionDef,
   HostAgentSubmissionTracker,
   loadDimensionCheckpoints,
@@ -28,13 +28,13 @@ import {
   saveDimensionCheckpoint,
 } from '../src/host-agent-workflows.js';
 import {
-  buildProjectIndexFullPlan as buildProjectIndexFullPlanFromPlans,
+  buildGenerateFullPlan as buildProjectIndexFullPlanFromPlans,
   buildProjectIndexGapPlan as buildProjectIndexGapPlanFromPlans,
   buildProjectIndexIncrementalPlan as buildProjectIndexIncrementalPlanFromPlans,
-  createProjectIndexIntentFullHostAgent as createProjectIndexIntentFullHostAgentFromPlans,
-  createProjectIndexIntentFullInternal as createProjectIndexIntentFullInternalFromPlans,
-  createProjectIndexIntentIncrementalHostAgent as createProjectIndexIntentIncrementalHostAgentFromPlans,
-  createProjectIndexIntentIncrementalInternal as createProjectIndexIntentIncrementalInternalFromPlans,
+  createGenerateIntentFullHostAgent as createProjectIndexIntentFullHostAgentFromPlans,
+  createGenerateIntentFullInternal as createProjectIndexIntentFullInternalFromPlans,
+  createGenerateIntentIncrementalHostAgent as createProjectIndexIntentIncrementalHostAgentFromPlans,
+  createGenerateIntentIncrementalInternal as createProjectIndexIntentIncrementalInternalFromPlans,
 } from '../src/plans.js';
 
 const dimensions: DimensionDef[] = [
@@ -84,13 +84,13 @@ describe('stable host-agent workflow entrypoint', () => {
   });
 
   it('exposes additive ProjectIndex aliases beside existing workflow names', () => {
-    expect(buildProjectIndexFullPlan).toBe(buildColdStartWorkflowPlan);
+    expect(buildGenerateFullPlan).toBe(buildColdStartWorkflowPlan);
     expect(buildProjectIndexIncrementalPlan).toBe(buildKnowledgeRescanWorkflowPlan);
     expect(buildProjectIndexGapPlan).toBe(buildKnowledgeRescanPlan);
-    expect(createProjectIndexIntentFullInternal).toBe(createInternalColdStartIntent);
-    expect(createProjectIndexIntentFullHostAgent).toBe(createHostAgentColdStartIntent);
-    expect(createProjectIndexIntentIncrementalInternal).toBe(createInternalKnowledgeRescanIntent);
-    expect(createProjectIndexIntentIncrementalHostAgent).toBe(createHostAgentKnowledgeRescanIntent);
+    expect(createGenerateIntentFullInternal).toBe(createInternalColdStartIntent);
+    expect(createGenerateIntentFullHostAgent).toBe(createHostAgentColdStartIntent);
+    expect(createGenerateIntentIncrementalInternal).toBe(createInternalKnowledgeRescanIntent);
+    expect(createGenerateIntentIncrementalHostAgent).toBe(createHostAgentKnowledgeRescanIntent);
 
     expect(buildProjectIndexFullPlanFromPlans).toBe(buildColdStartWorkflowPlan);
     expect(buildProjectIndexIncrementalPlanFromPlans).toBe(buildKnowledgeRescanWorkflowPlan);

@@ -5,7 +5,7 @@ import type {
   ProjectAnalysisScanOptions,
 } from '../shared/ProjectAnalysisPlanTypes.js';
 import type { ColdStartWorkflowIntent } from './ColdStartIntent.js';
-import { buildProjectIndexWorkflowPlanParts } from './ProjectIndexPlan.js';
+import { buildGenerateWorkflowPlanParts } from './ProjectIndexPlan.js';
 
 export interface ColdStartWorkflowPlan {
   intent: ColdStartWorkflowIntent;
@@ -51,7 +51,7 @@ export function buildColdStartWorkflowPlan({
   projectRoot: string;
   dataRoot: string;
 }): ColdStartWorkflowPlan {
-  const parts = buildProjectIndexWorkflowPlanParts({
+  const parts = buildGenerateWorkflowPlanParts({
     mode: 'full',
     intent,
     projectRoot,

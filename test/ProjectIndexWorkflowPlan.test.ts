@@ -6,12 +6,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildColdStartWorkflowPlan,
   buildKnowledgeRescanWorkflowPlan,
-  buildProjectIndexFullPlan,
+  buildGenerateFullPlan,
   buildProjectIndexIncrementalPlan,
   createHostAgentColdStartIntent,
   createInternalColdStartIntent,
   createInternalKnowledgeRescanIntent,
-  type ProjectIndexMode,
+  type GenerateWorkflowRunMode,
 } from '../src/host-agent-workflows.js';
 import {
   createProjectDescriptor,
@@ -67,7 +67,7 @@ describe('project-index workflow plan collapse', () => {
       dataRoot: '/workspace/data',
     });
 
-    expect(buildProjectIndexFullPlan).toBe(buildColdStartWorkflowPlan);
+    expect(buildGenerateFullPlan).toBe(buildColdStartWorkflowPlan);
     expect(internalPlan).toMatchObject({
       cleanup: {
         policy: 'full-reset',
@@ -166,7 +166,7 @@ describe('project-index workflow plan collapse', () => {
   });
 
   it('exposes explicit project-index mode vocabulary without renaming frozen stage ids', () => {
-    const modes: ProjectIndexMode[] = ['full', 'incremental'];
+    const modes: GenerateWorkflowRunMode[] = ['full', 'incremental'];
 
     expect(modes).toEqual(['full', 'incremental']);
   });

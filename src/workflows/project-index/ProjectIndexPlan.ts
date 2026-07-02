@@ -9,7 +9,7 @@ import type { ProjectAnalysisMaterializationPlan } from '../shared/ProjectAnalys
 import type { ColdStartWorkflowIntent } from './ColdStartIntent.js';
 import type { KnowledgeRescanWorkflowIntent } from './KnowledgeRescanIntent.js';
 
-export type ProjectIndexMode = 'full' | 'incremental';
+export type GenerateWorkflowRunMode = 'full' | 'incremental';
 
 type ProjectIndexIntentByMode = {
   full: ColdStartWorkflowIntent;
@@ -28,7 +28,7 @@ type ProjectIndexCleanupByMode = {
   };
 };
 
-export interface ProjectIndexWorkflowPlanParts<Mode extends ProjectIndexMode> {
+export interface GenerateWorkflowPlanParts<Mode extends GenerateWorkflowRunMode> {
   cleanup: ProjectIndexCleanupByMode[Mode];
   projectAnalysis: {
     projectRoot: string;
@@ -51,16 +51,16 @@ export interface ProjectIndexWorkflowPlanParts<Mode extends ProjectIndexMode> {
   };
 }
 
-type BuildProjectIndexWorkflowPlanPartsInput<Mode extends ProjectIndexMode> = {
+type BuildProjectIndexWorkflowPlanPartsInput<Mode extends GenerateWorkflowRunMode> = {
   dataRoot: string;
   intent: ProjectIndexIntentByMode[Mode];
   mode: Mode;
   projectRoot: string;
 };
 
-export function buildProjectIndexWorkflowPlanParts<Mode extends ProjectIndexMode>(
+export function buildGenerateWorkflowPlanParts<Mode extends GenerateWorkflowRunMode>(
   input: BuildProjectIndexWorkflowPlanPartsInput<Mode>
-): ProjectIndexWorkflowPlanParts<Mode> {
+): GenerateWorkflowPlanParts<Mode> {
   const materialize: ProjectAnalysisMaterializationPlan = {
     sourceGraph: true,
     dependencyEdges: true,
@@ -106,7 +106,7 @@ export function buildProjectIndexWorkflowPlanParts<Mode extends ProjectIndexMode
         },
         materialize,
       },
-    } as ProjectIndexWorkflowPlanParts<Mode>;
+    } as GenerateWorkflowPlanParts<Mode>;
   }
 
   const intent = input.intent as KnowledgeRescanWorkflowIntent;
@@ -130,7 +130,7 @@ export function buildProjectIndexWorkflowPlanParts<Mode extends ProjectIndexMode
       },
       materialize,
     },
-  } as ProjectIndexWorkflowPlanParts<Mode>;
+  } as GenerateWorkflowPlanParts<Mode>;
 }
 
 function resolveFullProjectAnalysisScope(input: {

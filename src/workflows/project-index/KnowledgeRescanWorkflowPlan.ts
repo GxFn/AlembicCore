@@ -5,7 +5,7 @@ import type {
   ProjectAnalysisScanOptions,
 } from '../shared/ProjectAnalysisPlanTypes.js';
 import type { KnowledgeRescanWorkflowIntent } from './KnowledgeRescanIntent.js';
-import { buildProjectIndexWorkflowPlanParts } from './ProjectIndexPlan.js';
+import { buildGenerateWorkflowPlanParts } from './ProjectIndexPlan.js';
 
 export interface KnowledgeRescanWorkflowPlan {
   intent: KnowledgeRescanWorkflowIntent;
@@ -33,7 +33,7 @@ export function buildKnowledgeRescanWorkflowPlan({
   projectRoot: string;
   dataRoot: string;
 }): KnowledgeRescanWorkflowPlan {
-  const parts = buildProjectIndexWorkflowPlanParts({
+  const parts = buildGenerateWorkflowPlanParts({
     mode: 'incremental',
     intent,
     projectRoot,
