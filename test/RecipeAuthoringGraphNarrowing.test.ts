@@ -82,6 +82,89 @@ function graphCodes(markdownBody: string): string[] {
     .filter((c) => c === 'GRAPH_REF_INVALID' || c === 'STALE_GRAPH');
 }
 
+describe('特写模板豁免（markdown 代码块退出逐字校验，coreCode 证据位仍逐字）', () => {
+  /** 提炼后的范式模板：与项目任何连续行范围都不逐字匹配，但非占位代码。 */
+  const DISTILLED_TEMPLATE = [
+    '```ts',
+    'export const layerRule = defineLayerBoundary({',
+    "  from: 'alpha',",
+    "  allow: ['beta'],",
+    '});',
+    '```',
+  ].join('\n');
+
+  function withMarkdownTemplate(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const base = candidate('模块分层由显式配置声明，新增层沿用同一声明结构。');
+    const content = base.content as Record<string, unknown>;
+    return {
+      ...base,
+      content: { ...content, markdown: `${String(content.markdown)}\n${DISTILLED_TEMPLATE}` },
+      ...extra,
+    };
+  }
+
+  it('markdown 范式模板（非项目原文）不触发 SNIPPET_MISMATCH', () => {
+    const codes = validateAgainst([withMarkdownTemplate()], {
+      stage: 'all',
+      path: 'in-process',
+      profile: 'cold-start',
+      sourceRefResolver: resolver,
+      projectRoot,
+    }).map((v) => v.code);
+    expect(codes).not.toContain('SNIPPET_MISMATCH');
+  });
+
+  it('coreCode 证据位仍逐字校验：凭空 coreCode 被拒，真实片段放行', () => {
+    const fabricated = validateAgainst(
+      [withMarkdownTemplate({ coreCode: 'const fabricated = rewriteFromMemory();' })],
+      {
+        stage: 'all',
+        path: 'in-process',
+        profile: 'cold-start',
+        sourceRefResolver: resolver,
+        projectRoot,
+      }
+    ).map((v) => v.code);
+    expect(fabricated).toContain('SNIPPET_MISMATCH');
+
+    const genuine = validateAgainst(
+      [withMarkdownTemplate({ coreCode: fileLines('alpha', 1, 3) })],
+      {
+        stage: 'all',
+        path: 'in-process',
+        profile: 'cold-start',
+        sourceRefResolver: resolver,
+        projectRoot,
+      }
+    ).map((v) => v.code);
+    expect(genuine).not.toContain('SNIPPET_MISMATCH');
+  });
+
+  it('markdown 模板的防伪底线仍在：占位代码触发 PLACEHOLDER_EVIDENCE', () => {
+    const base = candidate('模块分层由显式配置声明。');
+    const content = base.content as Record<string, unknown>;
+    const codes = validateAgainst(
+      [
+        {
+          ...base,
+          content: {
+            ...content,
+            markdown: `${String(content.markdown)}\n\`\`\`ts\nawait operation(foo, bar); // TODO\n\`\`\``,
+          },
+        },
+      ],
+      {
+        stage: 'all',
+        path: 'in-process',
+        profile: 'cold-start',
+        sourceRefResolver: resolver,
+        projectRoot,
+      }
+    ).map((v) => v.code);
+    expect(codes).toContain('PLACEHOLDER_EVIDENCE');
+  });
+});
+
 describe('graph-evidence 关系词收窄（架构描述放行，调用链断言仍拦）', () => {
   it('「依赖/分层/边界/上下游」架构描述不再触发 GRAPH_REF_INVALID', () => {
     expect(graphCodes('模块间依赖保持单向，上游层不得引用下游层，边界关系由配置声明。')).toEqual(

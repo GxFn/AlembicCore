@@ -186,13 +186,34 @@ function collectSourceRefs(item: Record<string, unknown>): string[] {
   return uniqueStrings(refs.map(cleanSourceRef).filter(Boolean));
 }
 
+/**
+ * 逐字 snippet-match 的探针集合（2026-07-02 修正）：只取 coreCode / content.pattern——它们的
+ * 语义就是「来自项目的核心代码证据」，必须与 cited range 逐字对照。markdown 代码块**不再**参与
+ * 逐字校验：PROJECT_SNAPSHOT_STYLE_GUIDE 定义特写正文的代码为「可直接复制使用的代码模板」
+ * （提炼物，天然不逐字）；其接地由 (来源: File:行号) 标注的 fs 解析 + stage-3
+ * NEEDS_CODE_OR_FILEREF 保证。原实现把 fenced 纳入逐字判据与特写契约冲突——真机上两宿主
+ * 均被挤压成「粘贴项目原文」，特写的范式意义被门禁摧毁（用户验收否决）。
+ */
 function collectCodeEvidence(item: Record<string, unknown>): string[] {
+  const content = asRecord(item.content);
+  return uniqueStrings(
+    [stringValue(item.coreCode), stringValue(content?.pattern)].filter((value): value is string =>
+      Boolean(value?.trim())
+    )
+  );
+}
+
+/**
+ * placeholder 反伪探针集合：markdown 代码块虽退出逐字校验，但仍必须不是占位代码
+ * （operation()/doThing/foo/bar/TODO）——防伪底线与特写契约不冲突。
+ */
+function collectPlaceholderProbes(item: Record<string, unknown>): string[] {
   const content = asRecord(item.content);
   const markdown = stringValue(content?.markdown) || '';
   const fenced = markdown.match(/```(?:[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)```/);
   return uniqueStrings(
-    [stringValue(item.coreCode), stringValue(content?.pattern), fenced?.[1]].filter(
-      (value): value is string => Boolean(value?.trim())
+    [...collectCodeEvidence(item), fenced?.[1] ?? ''].filter((value): value is string =>
+      Boolean(value?.trim())
     )
   );
 }
@@ -382,7 +403,7 @@ const GATE_RULES: GateRule[] = [
       minSignificantLine: 6,
     },
     guidanceText:
-      'Code evidence must match a cited source line range and must not be placeholder code (operation(), doThing, foo, bar, TODO).',
+      'coreCode / content.pattern must match a cited source line range verbatim (they are project evidence). The markdown code block is a distilled, reusable template — it is NOT checked verbatim, but must not be placeholder code (operation(), doThing, foo, bar, TODO) and its claims stay grounded via (来源: File:行号) refs.',
     failureModeKey: 'SNIPPET_MISMATCH',
   },
   {
@@ -817,8 +838,10 @@ function validateStage2(
     }
   }
 
-  // Snippet match + placeholder (pure, operate on resolved range text).
-  for (const snippet of collectCodeEvidence(item)) {
+  // Placeholder（含 markdown 模板代码的防伪底线）与逐字 snippet-match（仅 coreCode/pattern
+  // 证据位）分探针集合执行——markdown 特写模板不做逐字校验，见 collectCodeEvidence 注释。
+  const snippetProbes = new Set(collectCodeEvidence(item));
+  for (const snippet of collectPlaceholderProbes(item)) {
     if (looksLikePlaceholder(snippet)) {
       violations.push({
         code: 'PLACEHOLDER_EVIDENCE',
@@ -830,6 +853,7 @@ function validateStage2(
       continue;
     }
     if (
+      snippetProbes.has(snippet) &&
       validRanges.length > 0 &&
       !validRanges.some((rangeText) => snippetMatchesSourceRange(snippet, rangeText))
     ) {
