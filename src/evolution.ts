@@ -42,7 +42,7 @@ export type {
   RescanImpactSubmissionResult,
   StagingCheckResult,
   StagingEntry,
-} from './service/evolution/index.js';
+} from './service/sustain/index.js';
 export {
   assessDiffImpact,
   assessFileImpact,
@@ -66,4 +66,4 @@ export {
   toEvolutionAuditRecipe,
   tokenizeIdentifiers,
   toRescanImpactDecision,
-} from './service/evolution/index.js';
+} from './service/sustain/index.js';

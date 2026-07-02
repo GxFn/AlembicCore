@@ -14,7 +14,7 @@
  *   - lifecycle signal 由 StateMachine 内部自动发射
  *   - 所有依赖必需（non-nullable），消除降级路径
  *
- * @module service/evolution/ProposalExecutor
+ * @module service/sustain/ProposalExecutor
  */
 
 import { EvolutionPolicy, type UpdateVerdict } from '../../domain/evolution/EvolutionPolicy.js';

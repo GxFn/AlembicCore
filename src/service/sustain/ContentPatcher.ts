@@ -14,7 +14,7 @@
  *   - suggestedChanges 缺失或格式不合规时降级跳过（不阻塞状态转移）
  *   - 所有变更在 before/after 快照中可追溯
  *
- * @module service/evolution/ContentPatcher
+ * @module service/sustain/ContentPatcher
  */
 
 import Logger from '../../infrastructure/logging/Logger.js';

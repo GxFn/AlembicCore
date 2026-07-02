@@ -17,7 +17,7 @@
  *   - Guard 拒绝 = 操作失败，调用者不应 fallback 到 updateLifecycle()
  *   - lifecycle signal 仅从此处发射，服务层不直接操作 SignalBus
  *
- * @module service/evolution/LifecycleStateMachine
+ * @module service/sustain/LifecycleStateMachine
  */
 
 import { randomUUID } from 'node:crypto';

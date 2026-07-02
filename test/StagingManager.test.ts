@@ -10,8 +10,8 @@ import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { LifecycleEventRepository } from '../src/repository/evolution/LifecycleEventRepository.js';
 import { ProposalRepository } from '../src/repository/evolution/ProposalRepository.js';
 import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
-import { LifecycleStateMachine } from '../src/service/evolution/LifecycleStateMachine.js';
-import { StagingManager } from '../src/service/evolution/StagingManager.js';
+import { LifecycleStateMachine } from '../src/service/sustain/LifecycleStateMachine.js';
+import { StagingManager } from '../src/service/sustain/StagingManager.js';
 import pathGuard from '../src/shared/PathGuard.js';
 
 describe('StagingManager lifecycle promotion', () => {

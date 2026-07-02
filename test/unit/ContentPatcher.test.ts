@@ -10,7 +10,7 @@
  *   - before/after 快照创建
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ContentPatcher } from '../../src/service/evolution/ContentPatcher.js';
+import { ContentPatcher } from '../../src/service/sustain/ContentPatcher.js';
 
 /* ── Mock factories ── */
 

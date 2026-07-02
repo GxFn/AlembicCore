@@ -10,7 +10,7 @@
  *   - deprecate 路径按来源区分：Agent 高置信 → 立即执行；规则引擎 → 观察窗口
  *   - lifecycle 变更通过 LifecycleStateMachine 唯一路径，Guard 拒绝 → 降级为 Proposal
  *
- * @module service/evolution/ProposalGateway
+ * @module service/sustain/ProposalGateway
  */
 
 import { EvolutionPolicy } from '../../domain/evolution/EvolutionPolicy.js';

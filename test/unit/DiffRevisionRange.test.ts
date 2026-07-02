@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { assessFileImpact } from '../../src/service/evolution/ContentImpactAnalyzer.js';
+import { assessFileImpact } from '../../src/service/sustain/ContentImpactAnalyzer.js';
 import { getFileDiff } from '../../src/shared/diffParser.js';
 import type { RecipeTokens } from '../../src/shared/recipeTokens.js';
 

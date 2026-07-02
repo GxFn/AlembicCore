@@ -8,7 +8,7 @@
  *   - FileChangeHandler 处理实时 IDE 事件，使用 git diff HEAD，逐个文件分析
  *   - RecipeImpactPlanner 处理 rescan 批量 diff，消费分析快照的 incrementalPlan 产出
  *
- * @module service/evolution/RecipeImpactPlanner
+ * @module service/sustain/RecipeImpactPlanner
  */
 
 import { isConsumable, isDegraded } from '../../domain/knowledge/Lifecycle.js';

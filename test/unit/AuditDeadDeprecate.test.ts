@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { EvolutionPolicy } from '../../src/domain/evolution/EvolutionPolicy.js';
-import type { EvolutionCandidatePlan } from '../../src/service/evolution/RecipeImpactPlanner.js';
+import type { EvolutionCandidatePlan } from '../../src/service/sustain/RecipeImpactPlanner.js';
 import { auditRecipesForRescan } from '../../src/workflows/capabilities/planning/knowledge/KnowledgeRescanPlanner.js';
 import type { RecipeSnapshotEntry } from '../../src/workflows/capabilities/RecipeSnapshotTypes.js';
 

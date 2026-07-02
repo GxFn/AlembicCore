@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { RecipeSimilarity } from '../../src/domain/evolution/RecipeSimilarity.js';
-import { RedundancyAnalyzer } from '../../src/service/evolution/RedundancyAnalyzer.js';
+import { RedundancyAnalyzer } from '../../src/service/sustain/RedundancyAnalyzer.js';
 
 type RecipePair = Parameters<RedundancyAnalyzer['analyzePair']>[0];
 

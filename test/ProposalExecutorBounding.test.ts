@@ -24,9 +24,9 @@ import { ProposalRepository } from '../src/repository/evolution/ProposalReposito
 import { KnowledgeEdgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeEdgeRepository.js';
 import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
 import { RecipeSourceRefRepositoryImpl } from '../src/repository/sourceref/RecipeSourceRefRepository.js';
-import { ContentPatcher } from '../src/service/evolution/ContentPatcher.js';
-import { LifecycleStateMachine } from '../src/service/evolution/LifecycleStateMachine.js';
-import { ProposalExecutor } from '../src/service/evolution/ProposalExecutor.js';
+import { ContentPatcher } from '../src/service/sustain/ContentPatcher.js';
+import { LifecycleStateMachine } from '../src/service/sustain/LifecycleStateMachine.js';
+import { ProposalExecutor } from '../src/service/sustain/ProposalExecutor.js';
 import pathGuard from '../src/shared/PathGuard.js';
 
 describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {

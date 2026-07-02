@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type CandidateForConsolidation,
   ConsolidationAdvisor,
-} from '../../src/service/evolution/ConsolidationAdvisor.js';
+} from '../../src/service/sustain/ConsolidationAdvisor.js';
 
 /* ── Mock Repo ── */
 

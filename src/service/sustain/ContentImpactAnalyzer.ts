@@ -13,7 +13,7 @@
  *
  * Token 提取基础设施已移至 shared/recipeTokens.ts，本模块聚焦 diff 影响评估。
  *
- * @module service/evolution/ContentImpactAnalyzer
+ * @module service/sustain/ContentImpactAnalyzer
  */
 
 import fs from 'node:fs';

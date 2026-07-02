@@ -21,7 +21,7 @@ import {
   RecipeImpactPlanner,
   submitRescanImpactDecisions,
   toRescanImpactDecision,
-} from '../../src/service/evolution/RecipeImpactPlanner.js';
+} from '../../src/service/sustain/RecipeImpactPlanner.js';
 
 // ── Mock factories ──
 

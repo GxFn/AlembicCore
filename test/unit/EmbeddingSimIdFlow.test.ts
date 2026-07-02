@@ -14,7 +14,7 @@ import type { RecipeLike } from '../../src/domain/evolution/RecipeSimilarity.js'
 import {
   type CandidateForConsolidation,
   ConsolidationAdvisor,
-} from '../../src/service/evolution/ConsolidationAdvisor.js';
+} from '../../src/service/sustain/ConsolidationAdvisor.js';
 
 type Ctor0 = ConstructorParameters<typeof ConsolidationAdvisor>[0];
 

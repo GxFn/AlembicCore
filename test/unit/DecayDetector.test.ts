@@ -6,7 +6,7 @@
  * 新增：authority 归一断言、cold-start 不误判、scanAll(cap) 有界、注入 lifecycle 驱动迁移。
  */
 import { describe, expect, it } from 'vitest';
-import { DecayDetector } from '../../src/service/evolution/DecayDetector.js';
+import { DecayDetector } from '../../src/service/sustain/DecayDetector.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
