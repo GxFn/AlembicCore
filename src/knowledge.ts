@@ -82,6 +82,8 @@ export {
   gateRule,
   gateRules,
   getEvidenceFloorPolicy,
+  RELATIONSHIP_CN_RE,
+  RELATIONSHIP_EN_RE,
   getImperativeVerbAllowlist,
   getStage3FieldPolicy,
   renderGuidance,

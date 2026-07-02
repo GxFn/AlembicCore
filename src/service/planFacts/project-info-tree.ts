@@ -24,6 +24,13 @@ import {
   writeTransientTransport,
 } from './transient-transport.js';
 
+/**
+ * C-1(2026-07-02 统一重构)：plan facts 精简投影的统一字节预算。
+ * 此前主体 PlanSelectionGate 与宿主 plan-tool 各自硬编码 12KB——同一语义双定义，
+ * 改一处漏一处。两宿主统一 import 本常量;树的收缩与 fullTreeRef 外置逻辑以它为界。
+ */
+export const PLAN_FACTS_PROJECTION_BUDGET_BYTES = 12 * 1024;
+
 export interface PlanModuleSeed {
   moduleName: string;
   modulePath?: string;

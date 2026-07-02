@@ -135,8 +135,10 @@ const SCOPE_ESCAPE_RE = /\b(single-file|file-local|local-only|narrow)\b/;
 // 负责（KnowledgeService._autoDiscoverRelations 落库自动建边 + ConsolidationAdvisor 融合），
 // 不依赖候选文本措辞。十轮真机验证表明宽词表在两宿主实践中均退化为「措辞税」：host（cc）靠
 // 改述规避、in-process DeepSeek 直接被拒——没有任何宿主真正走过 graphRefs 正向通道。
-const RELATIONSHIP_EN_RE = /\b(call chain|caller|callee|called by|invokes)\b/i;
-const RELATIONSHIP_CN_RE = /调用链|调用方|被调用/;
+// C-7(2026-07-02 统一重构)：关系词表导出为单源——Agent insightGate 的 graph-retry 判定
+// 此前维护「本地同形副本」，Core 收窄词表时必须手动同步；导出后两宿主同一 RegExp 对象。
+export const RELATIONSHIP_EN_RE = /\b(call chain|caller|callee|called by|invokes)\b/i;
+export const RELATIONSHIP_CN_RE = /调用链|调用方|被调用/;
 const PLACEHOLDER_PATTERNS = [
   /\bawait\s+operation\s*\(/i,
   /\boperation\s*\(/i,
