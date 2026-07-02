@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { UnifiedValidator } from '../src/domain/knowledge/UnifiedValidator.js';
-import { aggregateCandidates } from '../src/service/candidate/CandidateAggregator.js';
-import { validateCandidatesUnified } from '../src/service/candidate/CandidateValidationFacade.js';
-import { RecipeCandidateValidator } from '../src/service/recipe/RecipeCandidateValidator.js';
+import { aggregateCandidates } from '../src/service/knowledge/validation/candidate/CandidateAggregator.js';
+import { validateCandidatesUnified } from '../src/service/knowledge/validation/candidate/CandidateValidationFacade.js';
+import { RecipeCandidateValidator } from '../src/service/knowledge/validation/recipe/RecipeCandidateValidator.js';
 
 const weakCandidate = { title: 'incomplete candidate' };
 const richCandidate = {

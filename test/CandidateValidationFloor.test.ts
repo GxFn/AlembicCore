@@ -7,8 +7,8 @@
  */
 
 import { UnifiedValidator } from '../src/domain/knowledge/UnifiedValidator.js';
-import { aggregateCandidates } from '../src/service/candidate/CandidateAggregator.js';
-import { validateCandidatesUnified } from '../src/service/candidate/CandidateValidationFacade.js';
+import { aggregateCandidates } from '../src/service/knowledge/validation/candidate/CandidateAggregator.js';
+import { validateCandidatesUnified } from '../src/service/knowledge/validation/candidate/CandidateValidationFacade.js';
 
 function strongCandidate(overrides: Record<string, unknown> = {}) {
   const markdown = [

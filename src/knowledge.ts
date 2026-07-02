@@ -131,14 +131,6 @@ export type {
   RecipeSourceRefEntity,
   RecipeSourceRefInsert,
 } from './repository/sourceref/RecipeSourceRefRepository.js';
-// CO2 B3: unified validator entry — composes UnifiedValidator + RecipeCandidateValidator +
-// CandidateAggregator so callers cannot accidentally pick a weaker subset. No enforcement.
-export {
-  type UnifiedCandidateValidationItem,
-  type UnifiedCandidateValidationOptions,
-  type UnifiedCandidateValidationResult,
-  validateCandidatesUnified,
-} from './service/candidate/CandidateValidationFacade.js';
 // P5/C8: 可复用 fs-backed 源码引用解析器——两宿主注入 KnowledgeService 的 groundedSourcePaths port 时共用，
 // 保证深度接地判定 parity（Core 拥有共享 fs 能力，domain spec 仍 fs-free）。
 export { createFsSourceRefResolver } from './service/knowledge/FsSourceRefResolver.js';
@@ -187,3 +179,11 @@ export {
   SourceRefReconciler,
   type SyncAllReport,
 } from './service/knowledge/index.js';
+// CO2 B3: unified validator entry — composes UnifiedValidator + RecipeCandidateValidator +
+// CandidateAggregator so callers cannot accidentally pick a weaker subset. No enforcement.
+export {
+  type UnifiedCandidateValidationItem,
+  type UnifiedCandidateValidationOptions,
+  type UnifiedCandidateValidationResult,
+  validateCandidatesUnified,
+} from './service/knowledge/validation/candidate/CandidateValidationFacade.js';

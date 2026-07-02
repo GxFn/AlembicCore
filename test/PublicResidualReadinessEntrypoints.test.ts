@@ -6,8 +6,14 @@ import { runFullResetPolicy } from '../src/host-agent-workflows.js';
 import { FieldLevel, UnifiedValidator, V3_FIELD_SPEC } from '../src/knowledge.js';
 import { MemoryRepositoryImpl } from '../src/memory.js';
 import { GenerateDedup } from '../src/service/bootstrap/index.js';
-import { FeedbackCollector, QualityScorer } from '../src/service/quality/index.js';
-import { RecipeCandidateValidator, RecipeParser } from '../src/service/recipe/index.js';
+import {
+  FeedbackCollector,
+  QualityScorer,
+} from '../src/service/knowledge/validation/quality/index.js';
+import {
+  RecipeCandidateValidator,
+  RecipeParser,
+} from '../src/service/knowledge/validation/recipe/index.js';
 
 describe('CCIC-5 residual public readiness entrypoints', () => {
   it('exposes residual stable domain contracts through stable facades', () => {

@@ -1,9 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getProjectRecipesPath } from '../../infrastructure/config/Paths.js';
-import Logger from '../../infrastructure/logging/Logger.js';
-import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
-import { jaccardSimilarity, tokenizeForSimilarity } from '../../shared/similarity.js';
+import { getProjectRecipesPath } from '../../../../infrastructure/config/Paths.js';
+import Logger from '../../../../infrastructure/logging/Logger.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../../../shared/DiagnosticCodes.js';
+import { jaccardSimilarity, tokenizeForSimilarity } from '../../../../shared/similarity.js';
 
 /**
  * CO3 C6 walk guards: recipes live in a shallow user-managed tree; 16

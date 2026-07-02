@@ -195,20 +195,20 @@
       "import": "./dist/service/bootstrap/index.js"
     },
     "./service/candidate": {
-      "types": "./dist/service/candidate/index.d.ts",
-      "import": "./dist/service/candidate/index.js"
+      "types": "./dist/service/knowledge/validation/candidate/index.d.ts",
+      "import": "./dist/service/knowledge/validation/candidate/index.js"
     },
     "./service/planFacts": {
       "types": "./dist/service/plan/facts/index.d.ts",
       "import": "./dist/service/plan/facts/index.js"
     },
     "./service/quality": {
-      "types": "./dist/service/quality/index.d.ts",
-      "import": "./dist/service/quality/index.js"
+      "types": "./dist/service/knowledge/validation/quality/index.d.ts",
+      "import": "./dist/service/knowledge/validation/quality/index.js"
     },
     "./service/recipe": {
-      "types": "./dist/service/recipe/index.d.ts",
-      "import": "./dist/service/recipe/index.js"
+      "types": "./dist/service/knowledge/validation/recipe/index.d.ts",
+      "import": "./dist/service/knowledge/validation/recipe/index.js"
     },
     "./types": {
       "types": "./dist/types/index.d.ts",

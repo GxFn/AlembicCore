@@ -1,7 +1,7 @@
 import type { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { HOST_AGENT_SOURCE } from '../../shared/sourceContracts.js';
-import type { QualityScorer } from '../quality/QualityScorer.js';
+import type { QualityScorer } from './validation/quality/QualityScorer.js';
 
 interface ConfidenceRouterConfig {
   autoApproveThreshold?: number;

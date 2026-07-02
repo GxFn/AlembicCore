@@ -11,7 +11,7 @@
  * 保持独立，不进入本门面。
  */
 
-import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
+import { UnifiedValidator } from '../../../../domain/knowledge/UnifiedValidator.js';
 import { RecipeCandidateValidator } from '../recipe/RecipeCandidateValidator.js';
 import { aggregateCandidates } from './CandidateAggregator.js';
 

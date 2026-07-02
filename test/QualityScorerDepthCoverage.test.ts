@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { QualityScorer } from '../src/service/quality/QualityScorer.js';
+import { QualityScorer } from '../src/service/knowledge/validation/quality/QualityScorer.js';
 
 const scorer = new QualityScorer();
 const depthOf = (r: Record<string, unknown>): number => scorer.score(r).dimensions.contentDepth;

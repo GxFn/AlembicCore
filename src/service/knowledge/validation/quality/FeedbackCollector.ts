@@ -6,12 +6,12 @@
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { WriteZone } from '../../infrastructure/io/index.js';
-import Logger from '../../infrastructure/logging/Logger.js';
-import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
-import { PersistenceError, ValidationError } from '../../shared/errors/index.js';
-import pathGuard from '../../shared/PathGuard.js';
-import { DEFAULT_KNOWLEDGE_BASE_DIR } from '../../shared/ProjectMarkers.js';
+import type { WriteZone } from '../../../../infrastructure/io/index.js';
+import Logger from '../../../../infrastructure/logging/Logger.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../../../shared/DiagnosticCodes.js';
+import { PersistenceError, ValidationError } from '../../../../shared/errors/index.js';
+import pathGuard from '../../../../shared/PathGuard.js';
+import { DEFAULT_KNOWLEDGE_BASE_DIR } from '../../../../shared/ProjectMarkers.js';
 
 interface FeedbackEvent {
   type: string;

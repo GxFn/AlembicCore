@@ -17,9 +17,9 @@
  * - SonarQube: 多维度渐进评级，非二元判断
  */
 
-import { reviewRecipeDepth } from '../../domain/knowledge/recipe-authoring-spec/index.js';
-import { QUALITY_GRADES, QUALITY_WEIGHTS } from '../../shared/constants.js';
-import { LanguageProfiles } from '../../shared/LanguageProfiles.js';
+import { reviewRecipeDepth } from '../../../../domain/knowledge/recipe-authoring-spec/index.js';
+import { QUALITY_GRADES, QUALITY_WEIGHTS } from '../../../../shared/constants.js';
+import { LanguageProfiles } from '../../../../shared/LanguageProfiles.js';
 
 const DEFAULT_WEIGHTS = QUALITY_WEIGHTS;
 
