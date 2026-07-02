@@ -9,7 +9,7 @@ import type {
   ProjectSnapshot,
 } from '../../types/ProjectSnapshot.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
-import { buildInternalNextSteps } from '../surfaces/host-agent/MissionBriefingSupport.js';
+import { buildInternalNextSteps } from '../surfaces/host-agent/briefing/MissionBriefingSupport.js';
 import { buildLanguageExtension as buildProjectLanguageExtension } from '../surfaces/presentation/LanguageExtensionBuilder.js';
 import { buildTargetFileMap as buildProjectTargetFileMap } from '../surfaces/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult } from '../surfaces/RecipeSnapshotTypes.js';

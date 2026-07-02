@@ -3,11 +3,11 @@ import type {
   DimensionDef,
   MissionBriefingResult,
   ProjectSnapshot,
-} from '../../../types/ProjectSnapshot.js';
-import { toSessionCache } from '../../../types/SnapshotViews.js';
-import { buildLanguageExtension } from '../presentation/LanguageExtensionBuilder.js';
-import { buildMissionBriefing } from './MissionBriefingBuilder.js';
-import type { BriefingProfile, RescanBriefingInput } from './MissionBriefingSupport.js';
+} from '../../../../types/ProjectSnapshot.js';
+import { toSessionCache } from '../../../../types/SnapshotViews.js';
+import { buildLanguageExtension } from '../../presentation/LanguageExtensionBuilder.js';
+import { buildMissionBriefing } from '../briefing/MissionBriefingBuilder.js';
+import type { BriefingProfile, RescanBriefingInput } from '../briefing/MissionBriefingSupport.js';
 import { getOrCreateSessionManager } from './SessionSupport.js';
 
 export type HostAgentSessionContainer = Parameters<typeof getOrCreateSessionManager>[0];

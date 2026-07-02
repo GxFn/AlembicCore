@@ -2,12 +2,12 @@ import type {
   ProjectContextEnvelope,
   ProjectContextPresenterInput,
   ProjectContextResult,
-} from '../../../../domain/project-context/index.js';
+} from '../../../../../domain/project-context/index.js';
 import type {
   DimensionDef,
   ProjectSnapshot,
   ProjectSnapshotInput,
-} from '../../../../types/ProjectSnapshot.js';
+} from '../../../../../types/ProjectSnapshot.js';
 
 export type ProjectAnalysisResult = Omit<ProjectSnapshotInput, 'projectRoot'>;
 

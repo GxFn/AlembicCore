@@ -6,9 +6,9 @@
  */
 
 import path from 'node:path';
-import { resolveDataRoot } from '../../../shared/resolveProjectRoot.js';
-import type { DimensionDef, ProjectSnapshot } from '../../../types/ProjectSnapshot.js';
-import { toSessionCache } from '../../../types/SnapshotViews.js';
+import { resolveDataRoot } from '../../../../shared/resolveProjectRoot.js';
+import type { DimensionDef, ProjectSnapshot } from '../../../../types/ProjectSnapshot.js';
+import { toSessionCache } from '../../../../types/SnapshotViews.js';
 import { GenerateSessionManager } from './GenerateSession.js';
 
 // ═══════════════════════════════════════════════════════════

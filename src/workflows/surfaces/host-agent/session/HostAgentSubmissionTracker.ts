@@ -24,7 +24,7 @@
  * @module bootstrap/HostAgentSubmissionTracker
  */
 
-import { CORE_CONTENT_SLICE_BUDGETS } from '../../../shared/OutputBudget.js';
+import { CORE_CONTENT_SLICE_BUDGETS } from '../../../../shared/OutputBudget.js';
 
 // ── 常量 ────────────────────────────────────────────────────
 

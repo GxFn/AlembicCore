@@ -11,8 +11,8 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
-import type { SessionCacheShape } from '../../../types/SnapshotViews.js';
+import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
+import type { SessionCacheShape } from '../../../../types/SnapshotViews.js';
 import {
   type DimensionQualityReport,
   HostAgentSubmissionTracker,

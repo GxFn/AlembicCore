@@ -1,7 +1,5 @@
 export * from '../coverage/index.js';
-export * from './CompletenessCritic.js';
-export * from './EvidenceStarterBuilder.js';
-export * from './GenerateSession.js';
+export * from './briefing/EvidenceStarterBuilder.js';
 export {
   buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
@@ -49,7 +47,12 @@ export {
   type IDEAgentStructuralEvidenceKind,
   type IDEAgentStructuralEvidenceRef,
   type IDEAgentStructuralHints,
-} from './HostAgentAnalysisPacketBuilder.js';
+} from './briefing/HostAgentAnalysisPacketBuilder.js';
+export * from './briefing/MissionBriefingBuilder.js';
+export * from './briefing/MissionBriefingSupport.js';
+export * from './delivery/ProjectSkillDeliveryContracts.js';
+export * from './session/CompletenessCritic.js';
+export * from './session/GenerateSession.js';
 export {
   type HostAgentDimensionCompleteArgs,
   type HostAgentDimensionCompletedEvent,
@@ -59,7 +62,7 @@ export {
   type HostAgentSessionContainer,
   type HostAgentWorkflowSession,
   runHostAgentDimensionCompletionWorkflow,
-} from './HostAgentDimensionCompletionWorkflow.js';
+} from './session/HostAgentDimensionCompletionWorkflow.js';
 export {
   buildHostAgentMissionBriefing,
   createHostAgentWorkflowSession,
@@ -68,10 +71,7 @@ export {
   type HostAgentMissionBriefingResult,
   type HostAgentSessionContainer as HostAgentMissionSessionContainer,
   type HostAgentWorkflowSession as HostAgentMissionWorkflowSession,
-} from './HostAgentMissionWorkflow.js';
-export * from './HostAgentSubmissionTracker.js';
-export * from './MiningSessionStore.js';
-export * from './MissionBriefingBuilder.js';
-export * from './MissionBriefingSupport.js';
-export * from './ProjectSkillDeliveryContracts.js';
-export * from './SessionSupport.js';
+} from './session/HostAgentMissionWorkflow.js';
+export * from './session/HostAgentSubmissionTracker.js';
+export * from './session/MiningSessionStore.js';
+export * from './session/SessionSupport.js';

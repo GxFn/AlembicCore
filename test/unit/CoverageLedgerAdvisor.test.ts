@@ -10,7 +10,7 @@ import {
   adviseCoverageLedger,
   resolveDeepMiningK,
   resolveDeepMiningMaxRounds,
-} from '../../src/workflows/surfaces/host-agent/CoverageLedgerAdvisor.js';
+} from '../../src/workflows/surfaces/coverage/CoverageLedgerAdvisor.js';
 
 function cell(over: Partial<CoverageLedgerRecord>): CoverageLedgerRecord {
   return {

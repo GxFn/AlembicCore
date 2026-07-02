@@ -4,7 +4,7 @@ import {
   pathsOverlap,
   refsOverlap,
   sortUnique,
-} from '../coverage/shared/coveragePathMatching.js';
+} from '../../coverage/shared/coveragePathMatching.js';
 
 const DEFAULT_TARGET_PER_DIMENSION = 5;
 const DEFAULT_FLOOR_PER_DIMENSION = 3;

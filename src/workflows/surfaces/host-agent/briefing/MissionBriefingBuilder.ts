@@ -14,17 +14,17 @@
  * @module bootstrap/MissionBriefingBuilder
  */
 
-import { buildDimensionSubmissionSpec } from '../../../domain/dimension/DimensionCatalogPayload.js';
-import { getDimensionSOP } from '../../../domain/dimension/DimensionSop.js';
+import { buildDimensionSubmissionSpec } from '../../../../domain/dimension/DimensionCatalogPayload.js';
+import { getDimensionSOP } from '../../../../domain/dimension/DimensionSop.js';
 // P3 §C.9: the worked examples moved DOWN into the RecipeAuthoringSpec module; consume them via
 // example(lang) from the knowledge module (NOT EXAMPLE_TEMPLATES through the host-agent facade).
-import { example as recipeExample } from '../../../domain/knowledge/recipe-authoring-spec/index.js';
+import { example as recipeExample } from '../../../../domain/knowledge/recipe-authoring-spec/index.js';
 import {
   buildProjectContextPresenterInput,
   type ProjectContextEnvelope,
   type ProjectContextPresenterInput,
   type ProjectContextResult,
-} from '../../../domain/project-context/index.js';
+} from '../../../../domain/project-context/index.js';
 import type {
   AstCategoryInfo,
   AstProtocolInfo,
@@ -37,8 +37,8 @@ import type {
   GuardViolation,
   IncrementalPlan,
   LocalPackageModule,
-} from '../../../types/ProjectSnapshot.js';
-import { TierScheduler } from '../planning/dimensions/TierScheduler.js';
+} from '../../../../types/ProjectSnapshot.js';
+import { TierScheduler } from '../../planning/dimensions/TierScheduler.js';
 import { buildEvidenceStarters } from './EvidenceStarterBuilder.js';
 import {
   applyBriefingCompressionPolicy,

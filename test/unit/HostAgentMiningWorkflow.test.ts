@@ -6,10 +6,10 @@ import {
   createInternalKnowledgeRescanIntent,
 } from '../../src/workflows/knowledge-rescan/KnowledgeRescanIntent.js';
 import { presentHostAgentKnowledgeRescanResponse } from '../../src/workflows/knowledge-rescan/KnowledgeRescanPresenters.js';
-import { GenerateSession } from '../../src/workflows/surfaces/host-agent/GenerateSession.js';
-import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/surfaces/host-agent/HostAgentDimensionCompletionWorkflow.js';
-import { buildMissionBriefing } from '../../src/workflows/surfaces/host-agent/MissionBriefingBuilder.js';
-import { buildInternalNextSteps } from '../../src/workflows/surfaces/host-agent/MissionBriefingSupport.js';
+import { buildMissionBriefing } from '../../src/workflows/surfaces/host-agent/briefing/MissionBriefingBuilder.js';
+import { buildInternalNextSteps } from '../../src/workflows/surfaces/host-agent/briefing/MissionBriefingSupport.js';
+import { GenerateSession } from '../../src/workflows/surfaces/host-agent/session/GenerateSession.js';
+import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/surfaces/host-agent/session/HostAgentDimensionCompletionWorkflow.js';
 import {
   buildKnowledgeRescanPlan,
   type RelevanceAuditResult,

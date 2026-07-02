@@ -7,7 +7,7 @@
  */
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { GenerateFile, IncrementalPlan } from '../../../types/workflows.js';
-import type { MiningSessionStore } from '../host-agent/MiningSessionStore.js';
+import type { MiningSessionStore } from '../host-agent/session/MiningSessionStore.js';
 import { FileDiffPlanner } from './FileDiffPlanner.js';
 import type {
   CandidateResults,

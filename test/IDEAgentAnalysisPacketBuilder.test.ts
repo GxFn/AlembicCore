@@ -28,8 +28,8 @@ import {
   buildHostAgentAnalysisPacket,
   buildHostAgentAnalysisPacketFromSnapshot,
   buildIDEAgentAnalysisPacket,
-} from '../src/workflows/surfaces/host-agent/HostAgentAnalysisPacketBuilder.js';
-import { buildIDEAgentAnalysisPacketFromSnapshot } from '../src/workflows/surfaces/host-agent/IDEAgentAnalysisPacketBuilder.js';
+} from '../src/workflows/surfaces/host-agent/briefing/HostAgentAnalysisPacketBuilder.js';
+import { buildIDEAgentAnalysisPacketFromSnapshot } from '../src/workflows/surfaces/host-agent/briefing/IDEAgentAnalysisPacketBuilder.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Find architectural boundaries' },

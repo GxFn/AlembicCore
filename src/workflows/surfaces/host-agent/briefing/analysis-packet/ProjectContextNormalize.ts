@@ -3,7 +3,7 @@ import {
   type ProjectContextEnvelope,
   type ProjectContextPresenterInput,
   type ProjectContextResult,
-} from '../../../../domain/project-context/index.js';
+} from '../../../../../domain/project-context/index.js';
 
 export function normalizeProjectContextPresenterInput(
   input: ProjectContextPresenterInput | readonly ProjectContextEnvelope<ProjectContextResult>[]

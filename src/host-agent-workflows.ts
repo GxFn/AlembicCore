@@ -70,8 +70,7 @@ export {
   type IDEAgentStructuralEvidenceKind,
   type IDEAgentStructuralEvidenceRef,
   type IDEAgentStructuralHints,
-} from './workflows/surfaces/host-agent/HostAgentAnalysisPacketBuilder.js';
-export * from './workflows/surfaces/host-agent/index.js';
+} from './workflows/surfaces/host-agent/briefing/HostAgentAnalysisPacketBuilder.js';
 export type {
   ProjectSkillAssetKind,
   ProjectSkillAuthorizationStatus,
@@ -88,7 +87,8 @@ export type {
   ProjectSkillRuntimeExportReceipt,
   ProjectSkillRuntimeExportStatus,
   ProjectSkillRuntimeExportStrategy,
-} from './workflows/surfaces/host-agent/ProjectSkillDeliveryContracts.js';
+} from './workflows/surfaces/host-agent/delivery/ProjectSkillDeliveryContracts.js';
+export * from './workflows/surfaces/host-agent/index.js';
 export * from './workflows/surfaces/persistence/index.js';
 export * from './workflows/surfaces/planning/dimensions/index.js';
 export * from './workflows/surfaces/planning/knowledge/index.js';

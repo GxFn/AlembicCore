@@ -7,7 +7,7 @@
  * exclusion semantics, and stats aggregation.
  */
 
-import { HostAgentSubmissionTracker } from '../src/workflows/surfaces/host-agent/HostAgentSubmissionTracker.js';
+import { HostAgentSubmissionTracker } from '../src/workflows/surfaces/host-agent/session/HostAgentSubmissionTracker.js';
 
 function record(
   tracker: HostAgentSubmissionTracker,

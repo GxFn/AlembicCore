@@ -2,8 +2,8 @@ import { isAbsolute, relative } from 'node:path';
 import type {
   ProjectContextPresenterInput,
   ProjectContextRef,
-} from '../../../domain/project-context/index.js';
-import type { CanonicalSourceIdentity } from '../../../shared/ProjectScope.js';
+} from '../../../../domain/project-context/index.js';
+import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
 import type {
   AstClassInfo,
   AstMethodInfo,
@@ -18,8 +18,8 @@ import type {
   PanoramaResult,
   ProjectSnapshot,
   SnapshotFile,
-} from '../../../types/ProjectSnapshot.js';
-import { buildProjectSnapshot } from '../../../types/projectSnapshotBuilder.js';
+} from '../../../../types/ProjectSnapshot.js';
+import { buildProjectSnapshot } from '../../../../types/projectSnapshotBuilder.js';
 import { normalizeProjectContextPresenterInput } from './analysis-packet/ProjectContextNormalize.js';
 import {
   expectedEvidenceForDimension,

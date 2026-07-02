@@ -9,7 +9,7 @@ import type {
   DimensionDef,
   GuardAudit,
   GuardViolation,
-} from '../../../types/ProjectSnapshot.js';
+} from '../../../../types/ProjectSnapshot.js';
 
 export interface EvidenceStarterOpts {
   astData?: AstSummary | null;

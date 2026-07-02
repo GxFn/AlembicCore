@@ -1,4 +1,4 @@
-import type { ProjectContextRef } from '../../../../domain/project-context/index.js';
+import type { ProjectContextRef } from '../../../../../domain/project-context/index.js';
 import { sortUnique } from './StableIdentity.js';
 import type { HostAgentStructuralEvidenceKind, HostAgentStructuralEvidenceRef } from './Types.js';
 

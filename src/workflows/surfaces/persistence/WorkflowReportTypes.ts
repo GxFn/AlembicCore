@@ -1,5 +1,5 @@
 import type { GenerateFile, IncrementalPlan } from '../../../types/workflows.js';
-import type { MiningSessionStore } from '../host-agent/MiningSessionStore.js';
+import type { MiningSessionStore } from '../host-agent/session/MiningSessionStore.js';
 import type { FileDiffPlanner } from './FileDiffPlanner.js';
 
 export interface DimensionStat {

@@ -1,4 +1,4 @@
-import { computeContentHash } from '../../../../shared/contentHash.js';
+import { computeContentHash } from '../../../../../shared/contentHash.js';
 
 export function sortUnique(values: readonly string[]): string[] {
   return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));

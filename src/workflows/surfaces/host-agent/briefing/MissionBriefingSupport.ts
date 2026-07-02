@@ -6,14 +6,14 @@
  * 由 MissionBriefingBuilder 统一调用。
  */
 
-import { sopToCompactText } from '../../../domain/dimension/DimensionSop.js';
+import { sopToCompactText } from '../../../../domain/dimension/DimensionSop.js';
 import {
   getRequiredFieldNames,
   getRequiredFieldsDescription,
-} from '../../../domain/knowledge/FieldSpec.js';
-import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
-import { TierScheduler } from '../planning/dimensions/TierScheduler.js';
-import type { HostAgentRescanEvidencePlan } from '../planning/knowledge/KnowledgeRescanPlanner.js';
+} from '../../../../domain/knowledge/FieldSpec.js';
+import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
+import { TierScheduler } from '../../planning/dimensions/TierScheduler.js';
+import type { HostAgentRescanEvidencePlan } from '../../planning/knowledge/KnowledgeRescanPlanner.js';
 
 // ═══════════════════════════════════════════════════════════
 // §1 — MissionBriefingProfiles

@@ -7,8 +7,8 @@ import type { DimensionDef } from '../src/types/ProjectSnapshot.js';
 import {
   GenerateSessionLeaseError,
   GenerateSessionManager,
-} from '../src/workflows/surfaces/host-agent/GenerateSession.js';
-import { runHostAgentDimensionCompletionWorkflow } from '../src/workflows/surfaces/host-agent/HostAgentDimensionCompletionWorkflow.js';
+} from '../src/workflows/surfaces/host-agent/session/GenerateSession.js';
+import { runHostAgentDimensionCompletionWorkflow } from '../src/workflows/surfaces/host-agent/session/HostAgentDimensionCompletionWorkflow.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Map architecture decisions' },
