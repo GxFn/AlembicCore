@@ -253,6 +253,18 @@
     "./workflows/capabilities/presentation": {
       "types": "./dist/workflows/capabilities/presentation/index.d.ts",
       "import": "./dist/workflows/capabilities/presentation/index.js"
+    },
+    "./infrastructure/cache": {
+      "types": "./dist/infrastructure/cache/index.d.ts",
+      "import": "./dist/infrastructure/cache/index.js"
+    },
+    "./types/graph-shared": {
+      "types": "./dist/types/graph-shared.d.ts",
+      "import": "./dist/types/graph-shared.js"
+    },
+    "./types/search-wire": {
+      "types": "./dist/types/search-wire.d.ts",
+      "import": "./dist/types/search-wire.js"
     }
   },
   "files": [

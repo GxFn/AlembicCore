@@ -70,6 +70,7 @@ export * from './packageRoot.js';
 export * from './recipeTokens.js';
 export * from './resolveProjectRoot.js';
 export * from './schemas/index.js';
+export * from './shutdown.js';
 export * from './similarity.js';
 export * from './sourceContracts.js';
 export * from './TimerRegistry.js';
