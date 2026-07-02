@@ -69,6 +69,7 @@ export type {
 // 门禁 validateAgainst 与指南 renderGuidance 读取同一 gateRules() 表（guidance==gate 的结构性保证）。
 // 仅在此导出 NEW 符号；V3_FIELD_SPEC 等 FieldSpec getters 已由上方 FieldSpec 块导出，避免同名重复导出。
 export {
+  applyStyleWaiver,
   buildDepthScaffold,
   buildDepthSelfReviewChecklist,
   buildPreSubmitChecklist,
@@ -82,14 +83,17 @@ export {
   gateRule,
   gateRules,
   getEvidenceFloorPolicy,
-  RELATIONSHIP_CN_RE,
-  RELATIONSHIP_EN_RE,
   getImperativeVerbAllowlist,
   getStage3FieldPolicy,
+  isSoftAuthoringViolation,
+  RELATIONSHIP_CN_RE,
+  RELATIONSHIP_EN_RE,
   renderGuidance,
   resolveAuthoringProfile,
   resolveGroundedSourcePaths,
   reviewRecipeDepth,
+  STYLE_WAIVER_MIN_JUSTIFICATION,
+  STYLE_WAIVER_SESSION_LIMIT,
   VALUE_RUBRIC,
   validateAgainst,
 } from './domain/knowledge/recipe-authoring-spec/index.js';

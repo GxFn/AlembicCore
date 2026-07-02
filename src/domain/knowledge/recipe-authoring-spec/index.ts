@@ -72,11 +72,11 @@ export {
   type GateRule,
   gateRule,
   gateRules,
-  RELATIONSHIP_CN_RE,
-  RELATIONSHIP_EN_RE,
   getEvidenceFloorPolicy,
   getImperativeVerbAllowlist,
   getStage3FieldPolicy,
+  RELATIONSHIP_CN_RE,
+  RELATIONSHIP_EN_RE,
   resolveAuthoringProfile,
   resolveGroundedSourcePaths,
   type Stage3FieldPolicy,
@@ -94,3 +94,4 @@ export {
   type SubmissionSpec,
   type SubmitContract,
 } from './guidanceGenerator.js';
+export * from './styleWaiver.js';
