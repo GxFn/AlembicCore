@@ -128,9 +128,15 @@ function readContentMarkdown(value: unknown): string | null {
 const SOURCE_REF_RE = /^(.+?):(\d+)(?:-(\d+))?$/;
 const EVIDENCE_FLOOR = { ruleFiles: 3, factFiles: 1 } as const;
 const SCOPE_ESCAPE_RE = /\b(single-file|file-local|local-only|narrow)\b/;
-const RELATIONSHIP_EN_RE =
-  /\b(call chain|caller|callee|called by|depends on|impact path|relationship|invokes)\b/i;
-const RELATIONSHIP_CN_RE = /调用链|调用方|被调用|依赖|影响路径|关系|上游|下游/;
+// 2026-07-02 收窄（用户决策）：关系词判定只保留「具体调用链断言」（caller/callee/call chain/
+// invokes/called by）——这类论断没有图谱背书即凭印象，必须拦。原词表中的「依赖/影响路径/
+// 关系/上游/下游/depends on/impact path/relationship」是架构描述语言：架构维度知识天然充满
+// 这些词，其真实性已由 snippet-match + source-ref fs 接地覆盖；Recipe 之间的关联另有系统链路
+// 负责（KnowledgeService._autoDiscoverRelations 落库自动建边 + ConsolidationAdvisor 融合），
+// 不依赖候选文本措辞。十轮真机验证表明宽词表在两宿主实践中均退化为「措辞税」：host（cc）靠
+// 改述规避、in-process DeepSeek 直接被拒——没有任何宿主真正走过 graphRefs 正向通道。
+const RELATIONSHIP_EN_RE = /\b(call chain|caller|callee|called by|invokes)\b/i;
+const RELATIONSHIP_CN_RE = /调用链|调用方|被调用/;
 const PLACEHOLDER_PATTERNS = [
   /\bawait\s+operation\s*\(/i,
   /\boperation\s*\(/i,
@@ -388,7 +394,7 @@ const GATE_RULES: GateRule[] = [
       relationshipCn: RELATIONSHIP_CN_RE.source,
     },
     guidanceText:
-      'Relationship claims require fresh graph-backed refs; stale/partial/pending graph evidence is rejected.',
+      'Concrete call-chain claims (caller/callee/call chain/invokes) require fresh graph-backed refs; stale/partial/pending graph evidence is rejected. General dependency/layering/boundary wording does not trigger this gate — its grounding is covered by snippet and source-ref checks.',
     failureModeKey: 'GRAPH_REF_INVALID',
   },
   {
