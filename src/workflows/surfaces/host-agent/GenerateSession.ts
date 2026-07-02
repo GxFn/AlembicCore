@@ -18,7 +18,7 @@ import {
   HostAgentSubmissionTracker,
   type HostAgentSubmissionTrackerSerialized,
 } from './HostAgentSubmissionTracker.js';
-import { type MiningSessionStoreSerialized, SessionStore } from './MiningSessionStore.js';
+import { MiningSessionStore, type MiningSessionStoreSerialized } from './MiningSessionStore.js';
 
 // ── 本地类型定义 ─────────────────────────────────────────────
 
@@ -179,7 +179,7 @@ export class GenerateSession {
   crossDimensionHints: Record<string, CrossDimensionHint[]>;
   dimensions: DimensionDef[];
   snapshotCache: SessionCacheShape | null;
-  sessionStore: SessionStore;
+  sessionStore: MiningSessionStore;
   submissionTracker: HostAgentSubmissionTracker;
   #onChange: (() => void) | null;
   #projectContext: Record<string, unknown>;
@@ -212,8 +212,8 @@ export class GenerateSession {
       Object.entries(completedDimensions ?? {})
     );
     this.sessionStore = sessionStore
-      ? SessionStore.fromJSON(sessionStore as unknown as Record<string, unknown>)
-      : new SessionStore(projectContext);
+      ? MiningSessionStore.fromJSON(sessionStore as unknown as Record<string, unknown>)
+      : new MiningSessionStore(projectContext);
 
     /** 宿主 Agent 提交追踪 (v2: 对标内部 Agent 的 EvidenceCollector) */
     this.submissionTracker = submissionTracker
