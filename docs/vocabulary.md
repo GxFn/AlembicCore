@@ -1,6 +1,6 @@
 # Alembic 全空间统一词汇表
 
-- 生效:2026-07-02(全空间统一重构 W3 词族批收尾;wire-contract.md 的姊妹篇)
+- 生效:2026-07-02;定稿:2026-07-03(全空间统一重构 W0-W8 全批收官;wire-contract.md 的姊妹篇,增量随各批追加)
 - 语义:本表定义每个核心词在全空间(AlembicCore/Alembic/AlembicAgent/AlembicPlugin/AlembicDashboard)的**唯一含义**与命名边界。新代码命名前先查本表;与 wire-contract.md 冲突时以 wire 冻结为准(wire 名是机器契约,本表管概念层)。
 - 执行依据:W3 底稿 `Design/docs/current/alembic-w3-vocabulary-map-2026-07-02.md`(工作区文档);判定与方案预测不一致处以底稿实测为准。
 
