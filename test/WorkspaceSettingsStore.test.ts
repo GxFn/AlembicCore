@@ -3,7 +3,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 import { ProjectRegistry } from '../src/shared/ProjectRegistry.js';
-import { collectAiEnv, WorkspaceSettingsStore } from '../src/shared/WorkspaceSettingsStore.js';
+import {
+  collectAiEnv,
+  maskAiEnvConfig,
+  WorkspaceSettingsStore,
+} from '../src/shared/WorkspaceSettingsStore.js';
 
 const ORIGINAL_ALEMBIC_HOME = process.env.ALEMBIC_HOME;
 const ORIGINAL_PROJECT_DIR = process.env.ALEMBIC_PROJECT_DIR;
@@ -169,12 +173,83 @@ describe('WorkspaceSettingsStore', () => {
     expect(process.env.ALEMBIC_OPENAI_API_KEY).toBeUndefined();
   });
 
-  test('ignores legacy embedding settings while preserving normal AI provider settings', () => {
+  test('persists embedding settings alongside main AI settings (single config source)', () => {
+    useTempAlembicHome();
+    const projectRoot = makeProjectRoot();
+    ProjectRegistry.register(projectRoot, true);
+    const store = WorkspaceSettingsStore.fromProject(projectRoot);
+    delete process.env.ALEMBIC_AI_PROVIDER;
+    delete process.env.ALEMBIC_GOOGLE_API_KEY;
+    delete process.env.ALEMBIC_EMBED_PROVIDER;
+    delete process.env.ALEMBIC_EMBED_MODEL;
+    delete process.env.ALEMBIC_EMBED_BASE_URL;
+    delete process.env.ALEMBIC_EMBED_API_KEY;
+
+    const writeResult = store.writeAiConfig({
+      ALEMBIC_AI_PROVIDER: 'deepseek',
+      ALEMBIC_DEEPSEEK_API_KEY: 'secret-deepseek-key',
+      ALEMBIC_EMBED_PROVIDER: 'ollama',
+      ALEMBIC_EMBED_MODEL: 'qwen3-embedding:0.6b',
+      ALEMBIC_EMBED_BASE_URL: 'http://127.0.0.1:11434',
+      ALEMBIC_EMBED_API_KEY: 'secret-embed-key',
+    });
+
+    expect(writeResult.env).toMatchObject({
+      ALEMBIC_AI_PROVIDER: 'deepseek',
+      ALEMBIC_DEEPSEEK_API_KEY: 'secret-deepseek-key',
+      ALEMBIC_EMBED_PROVIDER: 'ollama',
+      ALEMBIC_EMBED_MODEL: 'qwen3-embedding:0.6b',
+      ALEMBIC_EMBED_BASE_URL: 'http://127.0.0.1:11434',
+      ALEMBIC_EMBED_API_KEY: 'secret-embed-key',
+    });
+
+    // 持久化分家：非密钥入 settings.json，embedding 密钥只入 secrets.json
+    const settings = JSON.parse(fs.readFileSync(store.settingsPath, 'utf8')) as {
+      ai: Record<string, string>;
+    };
+    expect(settings.ai).toMatchObject({
+      provider: 'deepseek',
+      embedProvider: 'ollama',
+      embedModel: 'qwen3-embedding:0.6b',
+      embedBaseUrl: 'http://127.0.0.1:11434',
+    });
+    expect(JSON.stringify(settings)).not.toContain('secret-');
+    const secrets = JSON.parse(fs.readFileSync(store.secretsPath, 'utf8')) as {
+      ai: { providerKeys: Record<string, string>; embedApiKey?: string };
+    };
+    expect(secrets.ai.providerKeys.deepseek).toBe('secret-deepseek-key');
+    expect(secrets.ai.embedApiKey).toBe('secret-embed-key');
+
+    // 重启等价：新实例重读仍在（长期记录）
+    const reread = WorkspaceSettingsStore.fromProject(projectRoot).readAiConfig();
+    expect(reread.env.ALEMBIC_EMBED_PROVIDER).toBe('ollama');
+    expect(reread.env.ALEMBIC_EMBED_API_KEY).toBe('secret-embed-key');
+
+    // 启动链：applyToProcessEnv 与主 AI 同链带入 embed
+    WorkspaceSettingsStore.fromProject(projectRoot).applyToProcessEnv();
+    expect(process.env.ALEMBIC_EMBED_PROVIDER).toBe('ollama');
+    expect(process.env.ALEMBIC_EMBED_MODEL).toBe('qwen3-embedding:0.6b');
+    expect(process.env.ALEMBIC_EMBED_BASE_URL).toBe('http://127.0.0.1:11434');
+    expect(process.env.ALEMBIC_EMBED_API_KEY).toBe('secret-embed-key');
+
+    // collectAiEnv 认 embed 键（import-env / env override 同链）
+    expect(collectAiEnv({ ALEMBIC_EMBED_PROVIDER: 'ollama' })).toEqual({
+      ALEMBIC_EMBED_PROVIDER: 'ollama',
+    });
+
+    // embedding 密钥按密钥打码
+    expect(maskAiEnvConfig({ ALEMBIC_EMBED_API_KEY: 'secret-embed-key' })).toEqual({
+      ALEMBIC_EMBED_API_KEY: 'se...-key',
+    });
+  });
+
+  test('revives embed fields already present in persisted files and no longer strips them', () => {
     useTempAlembicHome();
     const projectRoot = makeProjectRoot();
     ProjectRegistry.register(projectRoot, true);
     const store = WorkspaceSettingsStore.fromProject(projectRoot);
 
+    // 预置早期版本落盘的 embed 字段（形状与现行一致）：现在作为一等配置直接读出
     fs.mkdirSync(path.dirname(store.settingsPath), { recursive: true });
     fs.writeFileSync(
       store.settingsPath,
@@ -183,9 +258,9 @@ describe('WorkspaceSettingsStore', () => {
           ai: {
             provider: 'google',
             model: 'gemini-3-flash-preview',
-            embedProvider: 'legacy-provider',
-            embedModel: 'legacy-model',
-            embedBaseUrl: 'http://legacy-embed.invalid',
+            embedProvider: 'ollama',
+            embedModel: 'qwen3-embedding:0.6b',
+            embedBaseUrl: 'http://127.0.0.1:11434',
           },
           version: 1,
         },
@@ -201,7 +276,7 @@ describe('WorkspaceSettingsStore', () => {
             providerKeys: {
               google: 'secret-google-key',
             },
-            embedApiKey: 'legacy-embed-secret',
+            embedApiKey: 'persisted-embed-secret',
           },
           version: 1,
         },
@@ -219,47 +294,24 @@ describe('WorkspaceSettingsStore', () => {
     const readResult = store.readAiConfig();
     expect(readResult.env).toMatchObject({
       ALEMBIC_AI_PROVIDER: 'google',
-      ALEMBIC_AI_MODEL: 'gemini-3-flash-preview',
       ALEMBIC_GOOGLE_API_KEY: 'secret-google-key',
-    });
-    expect(Object.keys(readResult.env).filter((key) => key.startsWith('ALEMBIC_EMBED_'))).toEqual(
-      []
-    );
-
-    store.applyToProcessEnv({ override: true });
-    expect(process.env.ALEMBIC_AI_PROVIDER).toBe('google');
-    expect(process.env.ALEMBIC_GOOGLE_API_KEY).toBe('secret-google-key');
-    expect(process.env.ALEMBIC_EMBED_PROVIDER).toBeUndefined();
-    expect(process.env.ALEMBIC_EMBED_MODEL).toBeUndefined();
-    expect(process.env.ALEMBIC_EMBED_BASE_URL).toBeUndefined();
-    expect(process.env.ALEMBIC_EMBED_API_KEY).toBeUndefined();
-
-    const processEnv = collectAiEnv({
-      ALEMBIC_AI_PROVIDER: 'openai',
-      ALEMBIC_EMBED_PROVIDER: 'legacy-provider',
-      ALEMBIC_EMBED_MODEL: 'legacy-model',
-      ALEMBIC_EMBED_BASE_URL: 'http://legacy-embed.invalid',
-      ALEMBIC_EMBED_API_KEY: 'legacy-embed-secret',
-    });
-    expect(processEnv).toEqual({ ALEMBIC_AI_PROVIDER: 'openai' });
-
-    const writeResult = store.writeAiConfig({
-      ALEMBIC_AI_PROVIDER: 'openai',
-      ALEMBIC_OPENAI_API_KEY: 'secret-openai-key',
-      ALEMBIC_EMBED_PROVIDER: 'legacy-provider',
-      ALEMBIC_EMBED_MODEL: 'legacy-model',
-      ALEMBIC_EMBED_BASE_URL: 'http://legacy-embed.invalid',
-      ALEMBIC_EMBED_API_KEY: 'legacy-embed-secret',
+      ALEMBIC_EMBED_PROVIDER: 'ollama',
+      ALEMBIC_EMBED_MODEL: 'qwen3-embedding:0.6b',
+      ALEMBIC_EMBED_BASE_URL: 'http://127.0.0.1:11434',
+      ALEMBIC_EMBED_API_KEY: 'persisted-embed-secret',
     });
 
-    expect(Object.keys(writeResult.env).filter((key) => key.startsWith('ALEMBIC_EMBED_'))).toEqual(
-      []
-    );
-    expect(JSON.stringify(JSON.parse(fs.readFileSync(store.settingsPath, 'utf8')))).not.toContain(
-      'legacy-'
-    );
-    expect(JSON.stringify(JSON.parse(fs.readFileSync(store.secretsPath, 'utf8')))).not.toContain(
-      'legacy-'
-    );
+    // 无关字段的普通写入不得剥离既有 embed 配置
+    store.writeAiConfig({ ALEMBIC_AI_MODEL: 'gemini-3-pro' });
+    const settings = JSON.parse(fs.readFileSync(store.settingsPath, 'utf8')) as {
+      ai: Record<string, string>;
+    };
+    expect(settings.ai.embedProvider).toBe('ollama');
+    expect(settings.ai.embedModel).toBe('qwen3-embedding:0.6b');
+    expect(settings.ai.embedBaseUrl).toBe('http://127.0.0.1:11434');
+    const secrets = JSON.parse(fs.readFileSync(store.secretsPath, 'utf8')) as {
+      ai: { embedApiKey?: string };
+    };
+    expect(secrets.ai.embedApiKey).toBe('persisted-embed-secret');
   });
 });

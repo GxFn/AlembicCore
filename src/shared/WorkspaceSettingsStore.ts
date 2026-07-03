@@ -7,8 +7,12 @@ export const AI_SECRET_ENV_KEYS = new Set([
   'ALEMBIC_OPENAI_API_KEY',
   'ALEMBIC_CLAUDE_API_KEY',
   'ALEMBIC_DEEPSEEK_API_KEY',
+  'ALEMBIC_EMBED_API_KEY',
 ]);
 
+// embed（向量化）配置与主 AI 同级持久化：非密钥字段落 settings.json，
+// 密钥落 secrets.json。纳入 AI_ENV_KEYS 后，collectAiEnv / applyToProcessEnv /
+// import-env / mask 全部复用主 AI 的同一条链，不另开配置源。
 export const AI_ENV_KEYS = [
   'ALEMBIC_AI_PROVIDER',
   'ALEMBIC_AI_MODEL',
@@ -18,6 +22,10 @@ export const AI_ENV_KEYS = [
   'ALEMBIC_DEEPSEEK_API_KEY',
   'ALEMBIC_AI_PROXY',
   'ALEMBIC_AI_REASONING_EFFORT',
+  'ALEMBIC_EMBED_PROVIDER',
+  'ALEMBIC_EMBED_MODEL',
+  'ALEMBIC_EMBED_BASE_URL',
+  'ALEMBIC_EMBED_API_KEY',
 ] as const;
 
 export const PROVIDER_KEY_ENV: Record<string, string> = {
@@ -32,6 +40,9 @@ const ENV_TO_SETTING_FIELD: Record<string, keyof WorkspaceAiSettings> = {
   ALEMBIC_AI_MODEL: 'model',
   ALEMBIC_AI_PROXY: 'proxy',
   ALEMBIC_AI_REASONING_EFFORT: 'reasoningEffort',
+  ALEMBIC_EMBED_PROVIDER: 'embedProvider',
+  ALEMBIC_EMBED_MODEL: 'embedModel',
+  ALEMBIC_EMBED_BASE_URL: 'embedBaseUrl',
 };
 
 const SETTING_FIELD_TO_ENV: Record<keyof WorkspaceAiSettings, string> = {
@@ -39,7 +50,13 @@ const SETTING_FIELD_TO_ENV: Record<keyof WorkspaceAiSettings, string> = {
   model: 'ALEMBIC_AI_MODEL',
   proxy: 'ALEMBIC_AI_PROXY',
   reasoningEffort: 'ALEMBIC_AI_REASONING_EFFORT',
+  embedProvider: 'ALEMBIC_EMBED_PROVIDER',
+  embedModel: 'ALEMBIC_EMBED_MODEL',
+  embedBaseUrl: 'ALEMBIC_EMBED_BASE_URL',
 };
+
+// embed API key 与 provider key 同属密钥，只落 secrets.json（0o600），绝不进 settings.json。
+const EMBED_SECRET_ENV_KEY = 'ALEMBIC_EMBED_API_KEY';
 
 const ENV_TO_PROVIDER = Object.fromEntries(
   Object.entries(PROVIDER_KEY_ENV).map(([provider, envKey]) => [envKey, provider])
@@ -50,6 +67,10 @@ export interface WorkspaceAiSettings {
   model?: string;
   proxy?: string;
   reasoningEffort?: string;
+  // embedding provider 的非密钥配置；embedding 密钥见 secrets.ai.embedApiKey。
+  embedProvider?: string;
+  embedModel?: string;
+  embedBaseUrl?: string;
 }
 
 interface WorkspaceSettingsFile {
@@ -61,6 +82,7 @@ interface WorkspaceSettingsFile {
 interface WorkspaceSecretsFile {
   ai?: {
     providerKeys?: Record<string, string>;
+    embedApiKey?: string;
   };
   updatedAt?: string;
   version?: number;
@@ -112,6 +134,11 @@ export class WorkspaceSettingsStore {
       }
     }
 
+    const embedApiKey = secrets.ai?.embedApiKey;
+    if (typeof embedApiKey === 'string' && embedApiKey.length > 0) {
+      env[EMBED_SECRET_ENV_KEY] = embedApiKey;
+    }
+
     return {
       env,
       hasSecretsFile: existsSync(this.secretsPath),
@@ -142,16 +169,21 @@ export class WorkspaceSettingsStore {
       const provider = ENV_TO_PROVIDER[key];
       if (provider) {
         secrets.ai.providerKeys[provider] = value;
+        continue;
+      }
+      if (key === EMBED_SECRET_ENV_KEY) {
+        secrets.ai.embedApiKey = value;
       }
     }
-    stripLegacyEmbedConfig(settings, secrets);
 
     const now = new Date().toISOString();
     settings.updatedAt = now;
     secrets.updatedAt = now;
     this.#writeJson(this.settingsPath, settings, 0o644);
     const hasSecrets =
-      Object.keys(secrets.ai.providerKeys || {}).length > 0 || existsSync(this.secretsPath);
+      Object.keys(secrets.ai.providerKeys || {}).length > 0 ||
+      Boolean(secrets.ai.embedApiKey) ||
+      existsSync(this.secretsPath);
     if (hasSecrets) {
       this.#writeJson(this.secretsPath, secrets, 0o600);
     }
@@ -180,22 +212,6 @@ export class WorkspaceSettingsStore {
     mkdirSync(dirname(filePath), { recursive: true });
     writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, { mode });
     chmodSync(filePath, mode);
-  }
-}
-
-function stripLegacyEmbedConfig(
-  settings: WorkspaceSettingsFile,
-  secrets: WorkspaceSecretsFile
-): void {
-  const aiSettings = settings.ai as Record<string, unknown> | undefined;
-  if (aiSettings) {
-    for (const field of ['embedProvider', 'embedModel', 'embedBaseUrl']) {
-      delete aiSettings[field];
-    }
-  }
-  const aiSecrets = secrets.ai as Record<string, unknown> | undefined;
-  if (aiSecrets) {
-    delete aiSecrets.embedApiKey;
   }
 }
 
