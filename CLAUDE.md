@@ -100,7 +100,7 @@ Before returning a `TargetResultEnvelope` or handoff, this child window must sel
 
 - `package.json` 的 `exports` 是外层长期接入契约。新增公共模块时必须同步更新 `exports`、`src/**/index.ts` 和对应测试。
 - 根入口 `src/index.ts` 只暴露外层常用的稳定契约；不要为了省事把 `repository`、`types`、`workflows` 等大目录全部 `export *` 到根入口，避免同名 DTO 冲突。
-- 完整模块接入优先使用子路径，例如 `@alembic/core/repository/knowledge`、`@alembic/core/workflows/capabilities/project-intelligence`。
+- 完整模块接入优先使用子路径，例如 `@alembic/core/repository/knowledge`、`@alembic/core/host-agent-workflows`。
 - 不要绕过包入口从外层直接引用 `vendor/AlembicCore/src/**`。
 
 ## 验证与回填
@@ -132,15 +132,16 @@ Before returning a `TargetResultEnvelope` or handoff, this child window must sel
 
 ```text
 src/
-├── core
+├── core            # AST/discovery 分析叶(blessed)
 ├── daemon
-├── domain
+├── domain          # 实体与域契约(dimension/evolution 机制/similarity/source-graph 契约家…)
 ├── infrastructure
 ├── repository
-├── service
+├── service         # plan/{facts,intent,status}、knowledge/validation、sustain、project-context…
 ├── shared
 ├── types
-└── workflows
+└── workflows       # surfaces/(host-agent{session,briefing,delivery}…)+project-index+冻结 shim 目录
+(2026-07-03 W4/W8 校准;分层契约见 docs/layer-contract.md,词汇见 docs/vocabulary.md)
 ```
 
 ## 技术与代码规则
