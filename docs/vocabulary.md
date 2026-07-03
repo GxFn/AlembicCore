@@ -88,3 +88,24 @@
 ## KnowledgeEntry
 
 唯一知识实体;**candidate/recipe 是 lifecycle 视图词**(不是独立实体)。HTTP `/api/v1/candidates/*` 等 wire 保留,词汇表注明视图词语义。
+
+## 宿主层词(W5 增补)
+
+| 词 | 唯一含义 |
+|---|---|
+| **host-runtime** | Plugin 宿主运行时层(L2;原 lib/runtime+#codex,双宿主后旧名退役);分组 mcp/host-adapter/context/status/diagnostics/policy |
+| **recipe-pipeline** | 两宿主同名镜像目录(主体 in-process API Agent 皮/Plugin 宿主 Agent 皮);四环子目录同型 |
+| **project-facts** | 主体共用事实层(原 workflows/project-context+lib/project-context;与 Core `@alembic/core/project-context` 服务消歧) |
+| **HostRuntimeStatus** | Plugin 恒 null 假 daemon 状态(载荷键 `daemon`/磁盘 daemon.json 族 wire 冻结);**主体同名 DaemonStatus 是真 daemon 进程状态,同名异物并存正当**——此类同名异物不入 retired 词表 |
+| **RecipePipelineFacade** | daemon 调 pipeline 的唯一入口(主体;kind/generationStage→执行器分派收拢) |
+
+## Agent 层词(W6 增补)
+
+| 词 | 唯一含义 |
+|---|---|
+| **preset** | profile 的「运行时默认块」(Capability+Strategy+Policy 命名组合,含工厂/闭包,受 assertSerializableProfile 序列化门约束不可内联)——不是第二套 profile;三 id chat/insight/evolution 冻结 |
+| **profile** | 可序列化声明层(11 个 definition),经 basePreset 回指 preset 展开 |
+| **evaluation/** | 质量门+工件构建+gate evaluator+stage builder 层(自 prompts 拆出;prompt 文本≠门禁逻辑) |
+| **prompts/** | 只装 persona/prompt 文本与 retry/repair 修复文案 |
+| **evidence/ memory/** | 证据供给(EvidenceCollector)/记忆三层+固化引擎(EpisodicConsolidator)——原 agent/domain 拆归 |
+| **能力键** | 'code_analysis' 等 7 个字面串=半 wire(profile defaults/skills 值+特判+主体断言),类的安置与别名变化不动键 |
