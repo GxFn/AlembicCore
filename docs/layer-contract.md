@@ -38,7 +38,7 @@ bridge layers without creating runtime coupling. Mixed imports
 | infrastructure | ✓ | ✓ | ✗ | ✗ | — | ✗ | ✗ | ✗ | ✗ |
 | repository | ✓ | ✓ | ✓ | ✗ | ✓ | — | ✗ | ✗ | ✗ |
 | service | ✓ | ✓ | ✓ | ✓* | ✓ | ✓ | — | ✗ | ✗ |
-| workflows | ✓ | ✓ | ✓ | ✓* | ✓ | ✓ | ✓ | — | ✗ |
+| workflows | ✓ | ✓ | ✓ | ✗ | ✓ | ✓ | ✓ | — | ✗ |
 | daemon | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | — |
 | root facades | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
@@ -50,12 +50,11 @@ bridge layers without creating runtime coupling. Mixed imports
   checks need real AST analysis; `core/` is the blessed analysis leaf and the
   engine lazy-loads it. Introducing an adapter layer would duplicate the
   analyzer surface for no isolation gain (user decision 2026-06-12).
-- **`workflows` → `core` (matrix edge, currently 0 live edges)** — the edge is
-  retained as the blessed channel for workflows-side analysis consumption
-  (e.g. host-agent evidence building). Its original named consumer
-  (`ProjectIntelligenceRunner`) was retired with the project-intelligence
-  route; deleting the edge is a contract narrowing that requires a
-  controller/user decision (recorded W4, left open).
+- (Removed 2026-07-03, user decision) **`workflows` → `core`** matrix edge:
+  0 live runtime edges since the project-intelligence route retirement; the
+  W4-open narrowing question was decided — edge deleted. A future genuine
+  workflows-side analysis need re-enters via a written blessing per the
+  process below.
 - **`infrastructure/database/migrations/009_knowledge_dimension_id.ts` →
   `domain/dimension/DimensionRegistry`** — file-level exception: the data
   migration backfills dimension ids and must use the single registry source of

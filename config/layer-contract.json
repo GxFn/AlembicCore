@@ -51,7 +51,6 @@
       "shared",
       "types",
       "domain",
-      "core",
       "infrastructure",
       "repository",
       "service"
@@ -82,10 +81,6 @@
     {
       "edge": "service -> core",
       "reason": "core/ is the user-blessed importable analysis leaf (2026-06-12): GuardCheckEngine needs real AST analysis; an adapter layer would duplicate the analyzer surface."
-    },
-    {
-      "edge": "workflows -> core",
-      "reason": "core/ is the user-blessed importable analysis leaf (2026-06-12). W4 note: the original named consumer ProjectIntelligenceRunner was retired with the project-intelligence route; the edge currently has 0 live runtime imports and is retained as the blessed channel for workflows-side analysis consumption (e.g. host-agent evidence building). Deleting it is a contract narrowing pending a controller/user decision."
     }
   ]
 }
