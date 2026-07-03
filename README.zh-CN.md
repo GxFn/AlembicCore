@@ -74,7 +74,7 @@ import { applyOutputBudget, DivergenceError } from '@alembic/core';
 import { validateCandidatesUnified } from '@alembic/core/knowledge';
 import { createGuardCheckEngine } from '@alembic/core/guard';
 import { createAlembicRepositories } from '@alembic/core/repositories';
-import { runHostAgentDimensionCompletionWorkflow } from '@alembic/core/workflows/capabilities/host-agent';
+import { runHostAgentDimensionCompletionWorkflow } from '@alembic/core/host-agent-workflows';
 ```
 
 每条导出子路径都在 `config/public-api-boundary.json` 中分级：

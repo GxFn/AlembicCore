@@ -61,12 +61,12 @@ bridge.
 | --- | --- | --- |
 | `shared/` | Leaf utilities: errors, schemas, taxonomies, similarity, path guard, language profiles, output budgets | — |
 | `types/` | Cross-layer type bridges (snapshots, views, wire contracts) | shared |
-| `domain/` | Entities and domain contracts (knowledge, dimension, evolution, snippet, source-graph) | shared, types |
+| `domain/` | Entities and domain contracts (knowledge, dimension, evolution mechanism, similarity, snippet, source-graph, project-context, recipe-context) | shared, types |
 | `core/` | Multi-language AST / discovery / capability **analysis leaf** | shared, types, infrastructure |
 | `infrastructure/` | Database (drizzle/migrations), io, logging, signal, report, vector, config plumbing | shared, types |
 | `repository/` | Persistence contracts and implementations (SQLite + `.md` file store) | shared, types, domain, infrastructure |
 | `service/` | Business orchestration and rules | + core*, repository |
-| `workflows/` | High-level orchestration (cold-start, rescan, host-agent, planning, coverage) | + service |
+| `workflows/` | High-level orchestration: `surfaces/` (host-agent{session,briefing,delivery}, planning, coverage, persistence, presentation) + `project-index/` plans/presenters | + service |
 | `daemon/` | Job/runtime display and resident-service contracts | shared, types |
 | `src/*.ts` | Root facades — public package entrypoints | any |
 
@@ -85,7 +85,7 @@ import { applyOutputBudget, DivergenceError } from '@alembic/core';
 import { validateCandidatesUnified } from '@alembic/core/knowledge';
 import { createGuardCheckEngine } from '@alembic/core/guard';
 import { createAlembicRepositories } from '@alembic/core/repositories';
-import { runHostAgentDimensionCompletionWorkflow } from '@alembic/core/workflows/capabilities/host-agent';
+import { runHostAgentDimensionCompletionWorkflow } from '@alembic/core/host-agent-workflows';
 ```
 
 Every exported subpath is classified in `config/public-api-boundary.json` as
