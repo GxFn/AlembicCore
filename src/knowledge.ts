@@ -1,3 +1,18 @@
+// 证据台账契约（Wave A E1）：冷启动证据保真——引用=台账条目 ID，file:line 由条目机械展开。
+// 纯领域契约；存储实现在宿主运行时（AlembicAgent），提交门禁语义不因台账放松。
+export {
+  EVIDENCE_ENTRY_MAX_CHARS,
+  EVIDENCE_ID_RE,
+  EVIDENCE_TOOL_IDS,
+  type EvidenceEntry,
+  type EvidenceRange,
+  type EvidenceToolId,
+  isEvidenceToolId,
+  isValidEvidenceEntry,
+  makeEvidenceId,
+  type ParsedEvidenceRef,
+  parseEvidenceRef,
+} from './domain/knowledge/evidence-ledger/index.js';
 export {
   FieldLevel,
   getAgentAdapterFieldSpec,
