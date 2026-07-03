@@ -62,6 +62,12 @@
 | Plugin lib/workflows/capabilities/ 目录 | lib/workflows/surfaces/(#workflows/* package-imports 中段同批;stage 验证过) | W3 |
 | 主体 PcvNodeEvidence.ts/Agent PcvNodeEvidence.ts(同名异物) | PcvStageNodeMap.ts(主体,stage node map 构建)/PcvNodeEvidenceRecorder.ts(Agent,运行时证据记录);契约值 'PCVGenerateStageNodeMap' 等冻结 | W3 |
 | [Insight-v3] 日志前缀 | [generate](43 处/10 文件,纯 D 层) | W3 |
+| 主体 lib/workflows 目录+#workflows 别名 | 消亡:completion/skill-delivery/wiki→recipe-pipeline/generate/;project-context→lib/project-facts | W5 |
+| 主体 service/{planFacts→plan/facts 已在 W4;handler-runtime 解散;daemon 平铺} | types→lib/types/handler-runtime.ts;daemon 三群 jobs/observability/runtime | W5 |
+| Plugin lib/recipe-generation+#recipe-generation | lib/recipe-pipeline+#recipe-pipeline(与主体同名镜像;四环 plan/generate/curate/sustain;RECIPE_GENERATION_* 符号词族缓议) | W5 |
+| Plugin lib/runtime+#codex | lib/host-runtime+#host-runtime(双宿主后旧名退役;分组 mcp/host-adapter/context/status/diagnostics/policy) | W5 |
+| Plugin DaemonStatus/DaemonStatusKind(恒 null 假状态) | HostRuntimeStatus(Kind)(载荷键 `daemon`、磁盘 daemon.json/pid/lock/log 冻结;**主体同名 DaemonStatus 是真 daemon 状态,正当保留**——故 retired 词表只收 Kind) | W5 |
+| 事件消费端裸串(daemon 订阅 8 处+facts 3 处+两仓 GenerateTaskManager 六 emit) | RECIPE_PIPELINE_EVENTS 常量(wire 值恒为 bootstrap:*,预定的消费端切换完成) | W5 |
 
 回流防护:`scripts/lint-retired-symbols.mjs` + `config/retired-symbols.json`(166 退役符号,五仓 npm run lint:retired-symbols,已接入 check)。
 
