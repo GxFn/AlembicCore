@@ -14,7 +14,8 @@ describe('Dimension catalog payload', () => {
       languages: ['TypeScript'],
     });
 
-    expect(catalog).toHaveLength(25);
+    // M4（2026-07-04）：+cross-dimension-synthesis（Layer 4 Synthesis，weight 0 不进自动选维）
+    expect(catalog).toHaveLength(26);
     expect(catalog.map((dimension) => dimension.id)).toEqual([...ALL_DIMENSION_IDS]);
 
     for (const dimension of catalog) {
@@ -37,11 +38,11 @@ describe('Dimension catalog payload', () => {
     const universal = catalog.filter((dimension) => dimension.layer === 'universal');
     const conditional = catalog.filter((dimension) => dimension.layer !== 'universal');
 
-    expect(universal).toHaveLength(13);
+    expect(universal).toHaveLength(14);
     expect(universal.every((dimension) => dimension.languageApplicable)).toBe(true);
     expect(conditional).toHaveLength(12);
     expect(conditional.every((dimension) => !dimension.languageApplicable)).toBe(true);
-    expect(catalog).toHaveLength(25);
+    expect(catalog).toHaveLength(26);
   });
 
   it('uses only factual language and framework intersections for conditional tags', () => {

@@ -545,6 +545,36 @@ const DF5_DJANGO_FASTAPI: UnifiedDimension = {
 };
 
 // ═══════════════════════════════════════════════════════════
+// Layer 4: Synthesis（跨维综合，M4 挖掘产出升级 2026-07-04）
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * 跨维综合维度：在其它维度全部完成后（tierHint 取最大，末 tier 顺跑），
+ * 以全部兄弟维度的证据台账与发现为输入，产出单维度视角看不见的跨领域 Recipe
+ * （如"分层契约 × 导入边界 × barrel 结构是同一边界体系的三个执法面"）。
+ * 默认不进自动选维（weight 0 + 不参与匹配）；由显式 dimensions 请求或宿主编排开启。
+ */
+const DS1_CROSS_DIMENSION_SYNTHESIS: UnifiedDimension = {
+  id: 'cross-dimension-synthesis',
+  label: '跨维综合',
+  layer: 'universal',
+  icon: 'Combine',
+  colorFamily: 'amber',
+  extractionGuide:
+    '综合既有各维度的证据台账（[evidence] E-x 已含兄弟维度采集）与发现，挖掘跨维度关联：同一设计约束的多个执法面、跨层的一致性机制、多个维度共同指向的体系性取舍。每条结论必须引用 ≥2 个不同维度来源的证据；不重复单维度已产出的知识。',
+  allowedKnowledgeTypes: ['architecture', 'boundary-constraint', 'module-dependency'],
+  outputMode: 'dual',
+  qualityDescription: '跨维关联的真实性（多维证据支撑）、体系性洞察深度、与单维知识的不重复度',
+  matchTopics: [],
+  matchCategories: [],
+  weight: 0,
+  suggestedTopics: ['cross-cutting-constraint', 'system-invariant'],
+  relatedRoles: ['core', 'foundation'],
+  tierHint: 9,
+  displayGroup: 'architecture',
+};
+
+// ═══════════════════════════════════════════════════════════
 // 维度注册表（唯一来源）
 // ═══════════════════════════════════════════════════════════
 
@@ -579,6 +609,9 @@ export const DIMENSION_REGISTRY: readonly UnifiedDimension[] = [
   DF3_SPRING_PATTERNS,
   DF4_SWIFTUI_PATTERNS,
   DF5_DJANGO_FASTAPI,
+
+  // Layer 4: Synthesis (1) — 显式请求才运行（weight 0 不进自动选维）
+  DS1_CROSS_DIMENSION_SYNTHESIS,
 ];
 
 // ═══════════════════════════════════════════════════════════

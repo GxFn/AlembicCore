@@ -104,14 +104,19 @@ export const FRAMEWORK_DIM_IDS = [
   'django-fastapi',
 ] as const;
 
+/** Layer 4: 综合维度 ID（M4 挖掘产出升级 2026-07-04；weight 0 不进自动选维，显式请求运行） */
+export const SYNTHESIS_DIM_IDS = ['cross-dimension-synthesis'] as const;
+
 export type UniversalDimId = (typeof UNIVERSAL_DIM_IDS)[number];
 export type LanguageDimId = (typeof LANGUAGE_DIM_IDS)[number];
 export type FrameworkDimId = (typeof FRAMEWORK_DIM_IDS)[number];
-export type DimensionId = UniversalDimId | LanguageDimId | FrameworkDimId;
+export type SynthesisDimId = (typeof SYNTHESIS_DIM_IDS)[number];
+export type DimensionId = UniversalDimId | LanguageDimId | FrameworkDimId | SynthesisDimId;
 
 /** 所有维度 ID 数组 */
 export const ALL_DIMENSION_IDS = [
   ...UNIVERSAL_DIM_IDS,
   ...LANGUAGE_DIM_IDS,
   ...FRAMEWORK_DIM_IDS,
+  ...SYNTHESIS_DIM_IDS,
 ] as const;

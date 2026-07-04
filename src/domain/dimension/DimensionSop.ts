@@ -1682,6 +1682,55 @@ const COMPACT_SOPS: Record<string, CompactSop> = {
       '【跨维度边界】django-fastapi 只关注 Python Web 框架模式 — Python 语言惯用法归 python-structure',
     ],
   },
+
+  // ──────────────────────────────────────────────
+  // cross-dimension-synthesis — 跨维综合（M4 挖掘产出升级）
+  // ──────────────────────────────────────────────
+  'cross-dimension-synthesis': {
+    keywords: [
+      '跨维关联',
+      '体系性约束',
+      '一致性机制',
+      '分层契约',
+      '边界体系',
+      'invariant',
+      'cross-cutting',
+      '同一约束多个执法面',
+    ],
+    phases: [
+      {
+        name: '跨维证据盘点',
+        action:
+          '工具返回的 [evidence] E-x 已包含全部兄弟维度的采集证据（seed 注入）。用 evidence.search 按主题横向检索多个维度的证据，识别同一设计约束在不同维度的表现（如配置文件的分层声明、导入边界的 lint 执法、barrel 结构的实际形态）',
+        output: '候选跨维关联清单：每条列出涉及的 ≥2 个维度来源证据 E-x',
+        tools: [
+          'evidence({ action: "search" }) 横向检索',
+          'evidence({ action: "get" }) 取回 verbatim',
+        ],
+      },
+      {
+        name: '关联核实与连接性阅读',
+        action:
+          '对每条候选关联做最小连接性验证：code.read 关键文件确认两端证据指向同一机制而非巧合相似；不成立的关联直接放弃',
+        output: '核实过的跨维发现（note_finding，evidenceRefs 引用多维度证据+新读区间）',
+        tools: ['code({ action: "read" }) 连接性阅读（capture 自动成为合法证据）'],
+      },
+      {
+        name: '体系性知识产出',
+        action:
+          '每条产出讲清体系：这个约束为什么存在、由哪几个执法面共同保证、破坏其中一环会发生什么。sources 必须跨 ≥2 个维度的证据来源；不重复单维度已产出的知识',
+        output: '3-5 条跨维 Recipe 候选',
+        tools: ['knowledge({ action: "submit" })'],
+      },
+    ],
+    submitAction:
+      '每条跨维发现提交一个候选：title 点名体系性约束、sources 跨 ≥2 个维度证据来源、content.markdown 讲清"约束-执法面-破坏后果"三段',
+    mistakes: [
+      '把单维度知识换个说法当跨维产出（查重会拒）',
+      '仅凭名词相似断言关联（必须连接性阅读核实）',
+      '引用只来自一个维度的证据（跨维断言需 ≥2 维度来源）',
+    ],
+  },
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
