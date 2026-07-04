@@ -61,6 +61,12 @@ export const ReasoningSchema = z.object({
   confidence: z.number().min(0).max(1),
   qualitySignals: z.record(z.string(), z.unknown()).optional(),
   alternatives: z.array(z.string()).optional(),
+  // 挖掘产出升级 M1 收尾（2026-07-04）：zod 严格对象 parse 会剥离未声明键——下列提交侧
+  // 扩展字段此前在此静默丢失（run-9 取证：styleAdvisories attach×5 未落库；既有 styleWaiver
+  // 同理从未持久化）。声明为可选使其随候选入库，供 Dashboard 人工复核与证据溯源。
+  evidenceRefs: z.array(z.string()).optional(),
+  styleAdvisories: z.array(z.string()).optional(),
+  styleWaiver: z.object({ codes: z.array(z.string()), justification: z.string() }).optional(),
 });
 
 // ── ID / 常用字段 ────────────────────────────────────────────
