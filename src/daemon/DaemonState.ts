@@ -34,6 +34,17 @@ export interface DaemonState {
   lastReadyAt: string;
   databasePath: string;
   schemaMigrationVersion: string | null;
+  /**
+   * daemon 自注册的入口脚本绝对路径（daemon-server 启动时写入）。
+   * 供外部（如插件 MCP 的 ensure-on-use 自启）在 daemon 退出后按同款入口重新拉起；
+   * 仅插件形态（无主体安装）没有该入口，消费方必须容缺降级。旧状态文件无此字段。
+   */
+  entrypoint?: string | null;
+  /**
+   * 启动 daemon 的 Node 可执行绝对路径。nvm/多版本场景下 PATH 不可靠，
+   * 重新拉起时优先复用同一 Node；容缺（老状态文件/异常写入）。
+   */
+  execPath?: string | null;
 }
 
 export function getPackageVersion(): string {
