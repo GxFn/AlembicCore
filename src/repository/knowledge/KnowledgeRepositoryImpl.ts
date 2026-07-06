@@ -762,6 +762,23 @@ export class KnowledgeRepositoryImpl {
    * Guard 命中次数递增 — stats.guardHits += count
    * (GuardCheckEngine._recordHits)
    */
+  /**
+   * prime 采纳信号回流（2026-07-06 闭环审查落地）：guard primeAlignment 观测到
+   * "prime 交付的知识与被检文件真实重叠"时递增 stats.primeAdoptions——知识被
+   * 用在对的地方的确定性证据。observe-first：先积累事实，decay/排序消费另行
+   * 调参决策。json_set 原子递增；updatedAt bump 保证增量索引可见。
+   */
+  incrementPrimeAdoptionsSync(id: string, count: number): void {
+    this.#drizzle
+      .update(knowledgeEntries)
+      .set({
+        stats: sql`json_set(COALESCE(${knowledgeEntries.stats}, '{}'), '$.primeAdoptions', COALESCE(json_extract(${knowledgeEntries.stats}, '$.primeAdoptions'), 0) + ${count})`,
+        updatedAt: unixNow(),
+      })
+      .where(eq(knowledgeEntries.id, id))
+      .run();
+  }
+
   incrementGuardHitsSync(id: string, hits: number): void {
     this.#drizzle
       .update(knowledgeEntries)
