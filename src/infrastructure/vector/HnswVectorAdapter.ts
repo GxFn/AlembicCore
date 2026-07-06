@@ -17,9 +17,9 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, relative } from 'node:path';
-import Logger from '../logging/Logger.js';
 import pathGuard from '../../shared/PathGuard.js';
 import type { WriteZone } from '../io/WriteZone.js';
+import Logger from '../logging/Logger.js';
 import { AsyncPersistence, WAL_OP } from './AsyncPersistence.js';
 import { BinaryPersistence } from './BinaryPersistence.js';
 import { HnswIndex } from './HnswIndex.js';
