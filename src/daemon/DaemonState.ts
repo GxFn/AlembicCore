@@ -114,3 +114,61 @@ export function removeDaemonState(
     rmSync(paths.lockDir, { recursive: true, force: true });
   }
 }
+
+/**
+ * daemon 入口注册表（daemon-entrypoint.json）——与运行状态 daemon.json 分离的
+ * "最后已知入口"持久层。daemon 优雅退出会清理 daemon.json（连同其中的
+ * entrypoint 自注册字段），导致外部 ensure-on-use 自启在 graceful kill 后失忆；
+ * 注册表只在 daemon 启动时覆盖写、退出**不**清理，专供自启解析 fallback。
+ */
+export interface DaemonEntrypointRegistry {
+  /** daemon 入口脚本绝对路径 */
+  entrypoint: string;
+  /** 启动该 daemon 的 Node 可执行绝对路径（nvm 多版本场景 PATH 不可靠） */
+  execPath: string;
+  /** 最近一次注册（daemon 启动）时刻 ISO */
+  registeredAt: string;
+  /** 注册时的 daemon 版本（诊断用） */
+  version: string;
+}
+
+export function resolveDaemonEntrypointRegistryPath(runtimeDir: string): string {
+  return join(runtimeDir, 'daemon-entrypoint.json');
+}
+
+export function writeDaemonEntrypointRegistry(
+  runtimeDir: string,
+  registry: DaemonEntrypointRegistry
+): void {
+  const registryPath = resolveDaemonEntrypointRegistryPath(runtimeDir);
+  mkdirSync(dirname(registryPath), { recursive: true });
+  const tmpPath = `${registryPath}.${process.pid}.tmp`;
+  writeFileSync(tmpPath, `${JSON.stringify(registry, null, 2)}\n`, { mode: 0o600 });
+  renameSync(tmpPath, registryPath);
+}
+
+export function readDaemonEntrypointRegistry(runtimeDir: string): DaemonEntrypointRegistry | null {
+  const registryPath = resolveDaemonEntrypointRegistryPath(runtimeDir);
+  if (!existsSync(registryPath)) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(registryPath, 'utf8')) as Record<string, unknown>;
+    if (
+      typeof parsed.entrypoint !== 'string' ||
+      parsed.entrypoint.length === 0 ||
+      typeof parsed.execPath !== 'string' ||
+      parsed.execPath.length === 0
+    ) {
+      return null;
+    }
+    return {
+      entrypoint: parsed.entrypoint,
+      execPath: parsed.execPath,
+      registeredAt: typeof parsed.registeredAt === 'string' ? parsed.registeredAt : '',
+      version: typeof parsed.version === 'string' ? parsed.version : '',
+    };
+  } catch {
+    return null;
+  }
+}

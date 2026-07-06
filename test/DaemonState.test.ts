@@ -8,9 +8,12 @@ import {
   type DaemonState,
   ensureDaemonDirs,
   getPackageVersion,
+  readDaemonEntrypointRegistry,
   readDaemonState,
   removeDaemonState,
+  resolveDaemonEntrypointRegistryPath,
   resolveDaemonPaths,
+  writeDaemonEntrypointRegistry,
   writeDaemonState,
 } from '../src/daemon/DaemonState.js';
 import { getGhostWorkspaceDir, ProjectRegistry } from '../src/shared/ProjectRegistry.js';
@@ -107,5 +110,40 @@ describe('DaemonState', () => {
     fs.writeFileSync(paths.statePath, `${JSON.stringify(stateWithoutToken, null, 2)}\n`);
 
     expect(readDaemonState(paths.statePath)).toBeNull();
+  });
+
+  test('entrypoint registry round-trips and survives removeDaemonState (graceful-exit fallback)', () => {
+    useTempAlembicHome();
+    const paths = resolveDaemonPaths(makeProjectRoot());
+    ensureDaemonDirs(paths);
+    writeDaemonState(paths.statePath, makeState(paths));
+    writeDaemonEntrypointRegistry(paths.runtimeDir, {
+      entrypoint: '/main/dist/bin/daemon-server.js',
+      execPath: process.execPath,
+      registeredAt: new Date().toISOString(),
+      version: getPackageVersion(),
+    });
+
+    // 优雅退出清理运行状态——注册表必须幸存（ensure-on-use 自启的 fallback 依据）。
+    removeDaemonState(paths);
+    expect(readDaemonState(paths.statePath)).toBeNull();
+
+    const registry = readDaemonEntrypointRegistry(paths.runtimeDir);
+    expect(registry?.entrypoint).toBe('/main/dist/bin/daemon-server.js');
+    expect(registry?.execPath).toBe(process.execPath);
+  });
+
+  test('entrypoint registry rejects malformed content instead of throwing', () => {
+    useTempAlembicHome();
+    const paths = resolveDaemonPaths(makeProjectRoot());
+    ensureDaemonDirs(paths);
+    fs.writeFileSync(resolveDaemonEntrypointRegistryPath(paths.runtimeDir), '{not json');
+    expect(readDaemonEntrypointRegistry(paths.runtimeDir)).toBeNull();
+
+    fs.writeFileSync(
+      resolveDaemonEntrypointRegistryPath(paths.runtimeDir),
+      `${JSON.stringify({ entrypoint: '', execPath: '' })}\n`
+    );
+    expect(readDaemonEntrypointRegistry(paths.runtimeDir)).toBeNull();
   });
 });
