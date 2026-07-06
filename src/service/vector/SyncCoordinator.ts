@@ -450,7 +450,13 @@ export class SyncCoordinator {
   > {
     const map = new Map<
       string,
-      { kind: string; language: string; category: string; dimensionId: string; knowledgeType: string }
+      {
+        kind: string;
+        language: string;
+        category: string;
+        dimensionId: string;
+        knowledgeType: string;
+      }
     >();
     if (!this.#drizzle || entryIds.length === 0) {
       return map;
