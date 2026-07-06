@@ -126,6 +126,31 @@ describe('StagingManager lifecycle promotion', () => {
     expect(promotedMissing?.lifecycle).toBe('active');
   });
 
+  it('listReviewQueue returns staging entries awaiting review with assertion content + sources, excluding reviewed', async () => {
+    const now = Date.now();
+    const pending = await createStagingRecipe('queue-pending', now + 60_000, true);
+    const reviewed = await createStagingRecipe('queue-reviewed', now + 60_000, true);
+    await stagingManager.recordReview(reviewed.id, { outcome: 'pass', reviewer: 'host-agent' });
+
+    const queue = await stagingManager.listReviewQueue();
+    const ids = queue.map((item) => item.id);
+    expect(ids).toContain(pending.id);
+    // 已有 pass/fail 结论的条目不在待复核队列（与 checkAndPromote 三态门口径一致）
+    expect(ids).not.toContain(reviewed.id);
+
+    const item = queue.find((q) => q.id === pending.id);
+    expect(item?.title).toBe('queue-pending');
+    // reasoning.sources 作为「断言 vs 源码」的引用位置交付宿主
+    expect(item?.sources).toEqual(['test/StagingManager.test.ts']);
+    // 断言四要素字段恒在场（本 fixture 未设则返回空串而非 undefined，宿主可稳定解析）
+    expect(item).toMatchObject({
+      whenClause: expect.any(String),
+      doClause: expect.any(String),
+      dontClause: expect.any(String),
+      coreCode: expect.any(String),
+    });
+  });
+
   it('recordReview rejects entries that are not in staging', async () => {
     const now = Date.now();
     const entry = await createStagingRecipe('active-entry', now - 1_000, true);

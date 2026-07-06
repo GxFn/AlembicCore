@@ -36,6 +36,22 @@ export interface StagingCheckResult {
   waiting: StagingEntry[];
 }
 
+/**
+ * 复核队列项——宿主 LLM 做「断言 vs 源码」复核所需的最小内容包。
+ * 断言四要素（whenClause/doClause/dontClause/coreCode）+ reasoning.sources（提交时声明的
+ * 引用位置，repo 相对 file:line）。宿主据 sources 读源码、对比断言，再经 recordReview 写回。
+ */
+export interface StagingReviewQueueItem {
+  id: string;
+  title: string;
+  whenClause: string;
+  doClause: string;
+  dontClause: string;
+  coreCode: string;
+  sources: string[];
+  stagingDeadline: number;
+}
+
 export interface LifecycleTransitionExecutor {
   transition(request: TransitionRequest): Promise<TransitionResult>;
 }
@@ -208,6 +224,42 @@ export class StagingManager {
       `StagingManager: staging review recorded for ${entry.title} — ${review.outcome}`
     );
     return true;
+  }
+
+  /**
+   * 复核队列（Option A：宿主 LLM 按需复核的只读读面，observe-first）。
+   *
+   * 返回 staging 中「尚无 pass/fail 复核结论」的条目及其「断言 vs 源码」复核所需内容。宿主 LLM
+   * （本就在读该仓库）在 pendingReviewCount>0 时顺手拉取本队列，按 sources 读引用源码、对比 doClause/
+   * dontClause/coreCode 断言是否与真实源码一致，再经 recordReview（manage 'review' / HTTP）写回结论。
+   * 系统只做「确定性标记」（列队列 + 记录结论），「概率性消解」（判断断言真伪）交给宿主 LLM。
+   *
+   * @param limit 可选上界；透传 findAllByLifecycles（最旧优先），不传=无界。
+   */
+  async listReviewQueue(limit?: number): Promise<StagingReviewQueueItem[]> {
+    const entries = await this.#knowledgeRepo.findAllByLifecycles(['staging'], limit);
+    const queue: StagingReviewQueueItem[] = [];
+    for (const e of entries) {
+      // 已有 pass/fail 结论的不再列入待复核队列（与 checkAndPromote 三态门口径一致）。
+      const outcome = this.#knowledgeRepo.getStagingReviewSync(e.id)?.outcome;
+      if (outcome === 'pass' || outcome === 'fail') {
+        continue;
+      }
+      const sources = Array.isArray(e.reasoning?.sources)
+        ? e.reasoning.sources.filter((s): s is string => typeof s === 'string')
+        : [];
+      queue.push({
+        id: e.id,
+        title: e.title,
+        whenClause: e.whenClause ?? '',
+        doClause: e.doClause ?? '',
+        dontClause: e.dontClause ?? '',
+        coreCode: e.coreCode ?? '',
+        sources,
+        stagingDeadline: e.stagingDeadline || 0,
+      });
+    }
+    return queue;
   }
 
   /**
