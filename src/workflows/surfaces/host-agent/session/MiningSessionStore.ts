@@ -441,7 +441,7 @@ export class MiningSessionStore {
     );
   }
 
-  async loadCheckpoint(projectRoot: string, ttlMs = 3600_000): Promise<boolean> {
+  async loadCheckpoint(projectRoot: string, ttlMs = 24 * 3600_000): Promise<boolean> {
     const checkpointPath = path.join(
       projectRoot,
       '.asd',

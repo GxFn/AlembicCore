@@ -25,6 +25,7 @@ export interface CoverageLedgerWriteLogger {
   info(msg: string, meta?: Record<string, unknown>): void;
   warn(msg: string, meta?: Record<string, unknown>): void;
   debug?(msg: string, meta?: Record<string, unknown>): void;
+  error?(msg: string, meta?: Record<string, unknown>): void;
 }
 
 export interface CoverageLedgerWriteInput {
@@ -135,7 +136,10 @@ export function writeCoverageLedgerForCompletion(
   } catch (err: unknown) {
     // advisory 写入失败绝不上抛：吞掉异常、返回零计数，保证维度完成 / confirm 主链不受影响。
     const reason = err instanceof Error ? err.message : String(err);
-    logger?.warn('[CoverageLedger] coverage ledger write skipped (advisory, non-blocking)', {
+    // 可观测性升级（2026-07-06 闭环审查）：仍不阻断主链，但 ledger 写失败意味着
+    // 下一轮 rescan 的 advisor 指导缺失——error 级留痕，别再淹没在 warn 噪音里。
+    const escalate = logger?.error?.bind(logger) ?? logger?.warn?.bind(logger);
+    escalate?.('[CoverageLedger] coverage ledger write FAILED (advisory, non-blocking)', {
       projectRoot: input.projectRoot,
       reason,
     });

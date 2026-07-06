@@ -5,7 +5,10 @@ import pathGuard from '../../../shared/PathGuard.js';
 import type { DimensionCheckpointResult } from '../../../types/workflows.js';
 
 const logger = Logger.getInstance();
-const CHECKPOINT_TTL_MS = 3600_000;
+// 闭环审查修正（2026-07-06）：1h TTL 短于真实冷启动/深挖全程（多维度数小时），
+// 中断后重启恢复点已过期=白丢已完成维度。放宽到 24h——checkpoint 仅在同一
+// planSelection 语义内消费，跨日重跑应走新 plan，24h 是安全上界。
+const CHECKPOINT_TTL_MS = 24 * 3600_000;
 
 export interface DimensionCheckpoint extends DimensionCheckpointResult {
   dimId?: string;
