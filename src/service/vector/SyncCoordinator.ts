@@ -12,7 +12,7 @@
  * @module service/vector/SyncCoordinator
  */
 
-import { ne } from 'drizzle-orm';
+import { inArray, ne } from 'drizzle-orm';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { knowledgeEntries } from '../../infrastructure/database/drizzle/schema.js';
 import type { EventBus } from '../../infrastructure/event/EventBus.js';
@@ -372,6 +372,13 @@ export class SyncCoordinator {
         const validUpserts = upserts.filter((u) => u.title || u.content);
 
         if (validUpserts.length > 0) {
+          // metadata 契约补齐（2026-07-06 语义零召回孪生缝修复）：入队条目只带
+          // entryId/title/content/kind，写出的向量 metadata 缺 type/language/
+          // category/dimensionId/knowledgeType——任何按这些键的显式过滤都会把
+          // entry 向量全部灭掉（与 type:'all' 哨兵同型缝）。批处理时按 id 从 DB
+          // 一次回查补全（单点覆盖 reconcile 与 knowledge:changed 两个入队来源）；
+          // drizzle 缺席时容缺降级为原有字段。
+          const hydrated = this.#hydrateEntryFields(validUpserts.map((u) => u.entryId));
           const texts = validUpserts.map((u) => this.#extractText(u));
           try {
             const embedResult = await this.#embedProvider.embed(texts);
@@ -379,18 +386,28 @@ export class SyncCoordinator {
               ? (embedResult as number[][])
               : [embedResult as number[]];
 
-            const items = validUpserts.map((u, i) => ({
-              id: `entry_${u.entryId}`,
-              content: texts[i],
-              vector: vectors[i] || [],
-              metadata: {
-                entryId: u.entryId,
-                title: u.title || '',
-                kind: u.kind || 'unknown',
-                source: 'event_sync',
-                updatedAt: Date.now(),
-              },
-            }));
+            const items = validUpserts.map((u, i) => {
+              const extra = hydrated.get(u.entryId);
+              return {
+                id: `entry_${u.entryId}`,
+                content: texts[i],
+                vector: vectors[i] || [],
+                metadata: {
+                  entryId: u.entryId,
+                  title: u.title || '',
+                  kind: u.kind || extra?.kind || 'unknown',
+                  // 'recipe' 对齐查询侧 type 语义（region 向量为 recipe-semantic-region，
+                  // 两类向量靠 type 值天然互斥，显式 type:'recipe' 过滤命中 entry 域）。
+                  type: 'recipe',
+                  language: extra?.language ?? '',
+                  category: extra?.category ?? '',
+                  dimensionId: extra?.dimensionId ?? '',
+                  knowledgeType: extra?.knowledgeType ?? '',
+                  source: 'event_sync',
+                  updatedAt: Date.now(),
+                },
+              };
+            });
 
             await this.#vectorStore.batchUpsert(items);
           } catch (err: unknown) {
@@ -414,6 +431,66 @@ export class SyncCoordinator {
         this.#enqueue(this.#pendingChanges.values().next().value!);
       }
     }
+  }
+
+  /**
+   * 按 entryId 批量回查 metadata 补齐字段（language/category/dimensionId/
+   * knowledgeType/kind）。drizzle 缺席或查询失败时返回空 Map——调用方容缺
+   * 降级为入队自带字段，写出仍成功（可观测面留 warn）。
+   */
+  #hydrateEntryFields(entryIds: string[]): Map<
+    string,
+    {
+      kind: string;
+      language: string;
+      category: string;
+      dimensionId: string;
+      knowledgeType: string;
+    }
+  > {
+    const map = new Map<
+      string,
+      { kind: string; language: string; category: string; dimensionId: string; knowledgeType: string }
+    >();
+    if (!this.#drizzle || entryIds.length === 0) {
+      return map;
+    }
+    try {
+      const rows = this.#drizzle
+        .select({
+          id: knowledgeEntries.id,
+          kind: knowledgeEntries.kind,
+          language: knowledgeEntries.language,
+          category: knowledgeEntries.category,
+          dimensionId: knowledgeEntries.dimensionId,
+          knowledgeType: knowledgeEntries.knowledgeType,
+        })
+        .from(knowledgeEntries)
+        .where(inArray(knowledgeEntries.id, entryIds))
+        .all() as Array<{
+        id: string;
+        kind: string | null;
+        language: string | null;
+        category: string | null;
+        dimensionId: string | null;
+        knowledgeType: string | null;
+      }>;
+      for (const row of rows) {
+        map.set(row.id, {
+          kind: row.kind ?? '',
+          language: row.language ?? '',
+          category: row.category ?? '',
+          dimensionId: row.dimensionId ?? '',
+          knowledgeType: row.knowledgeType ?? '',
+        });
+      }
+    } catch (err: unknown) {
+      this.#logger.warn('[SyncCoordinator] metadata hydrate failed (degraded to queue fields)', {
+        count: entryIds.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+    return map;
   }
 
   #extractText(change: PendingChange): string {
