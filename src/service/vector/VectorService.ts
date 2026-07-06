@@ -376,7 +376,7 @@ export class VectorService {
         | { hasVectors?: number; count?: number }
         | undefined;
       this.#logger.info(
-        `[VectorService] search: embed=${Math.round(tEmbed - t0)}ms hnsw=${Math.round(tHnsw - tEmbed)}ms total=${Math.round(tHnsw - t0)}ms results=${results.length} qdim=${(queryVector as number[])?.length ?? 0} nodes=${storeStats?.hasVectors ?? storeStats?.count ?? -1}`
+        `[VectorService] search: embed=${Math.round(tEmbed - t0)}ms hnsw=${Math.round(tHnsw - tEmbed)}ms total=${Math.round(tHnsw - t0)}ms results=${results.length} qdim=${(queryVector as number[])?.length ?? 0} nodes=${storeStats?.hasVectors ?? storeStats?.count ?? -1} adapter=${this.#vectorStore?.constructor?.name ?? 'unknown'}`
       );
 
       return results;

@@ -1336,9 +1336,15 @@ export class SearchEngine {
     ];
 
     for (const key of keys) {
-      const values = this.#normalizeFilterValues(
+      let values = this.#normalizeFilterValues(
         rawFilters[key] ?? (options as Record<string, unknown>)[key]
       );
+      // 'all' 是范围哨兵（route/调用方的 type 默认值），不是 metadata 过滤值。
+      // 2026-07-06 真机定案：type:'all' 被当真实条件传进向量道，而向量 metadata
+      // 没有 type 字段 → 全部候选被灭、语义检索恒 0。哨兵进 filter 一律剔除。
+      if (key === 'type') {
+        values = values.filter((value) => value !== 'all');
+      }
       if (values.length > 0) {
         filters[key] = values;
       }

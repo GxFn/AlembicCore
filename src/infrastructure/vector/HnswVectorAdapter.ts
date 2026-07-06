@@ -481,51 +481,70 @@ export class HnswVectorAdapter extends VectorStore {
     // HNSW 搜索 (多召回一些, 后续过滤可能减少)
     const rawK = filter ? topK * 3 : topK;
 
-    let knnResults: { id: string | undefined; nodeIdx: number; dist: number }[];
-    if (this.#quantizer?.trained && this.#index.size > this.#config.quantizeThreshold) {
-      // 2-pass: SQ8 粗排 → Float32 精排
-      const quantizedQuery = this.#quantizer.encode(queryVector);
-      knnResults = this.#index.searchKnn(queryVector, rawK, {
-        quantizedQuery,
-        quantizer: this.#quantizer,
-      });
-    } else {
-      // 直接 Float32 搜索
-      knnResults = this.#index.searchKnn(queryVector, rawK);
-    }
+    const runKnnPass = (k: number) => {
+      let knnResults: { id: string | undefined; nodeIdx: number; dist: number }[];
+      if (this.#quantizer?.trained && this.#index.size > this.#config.quantizeThreshold) {
+        // 2-pass: SQ8 粗排 → Float32 精排
+        const quantizedQuery = this.#quantizer.encode(queryVector);
+        knnResults = this.#index.searchKnn(queryVector, k, {
+          quantizedQuery,
+          quantizer: this.#quantizer,
+        });
+      } else {
+        // 直接 Float32 搜索
+        knnResults = this.#index.searchKnn(queryVector, k);
+      }
 
-    // 转换为标准格式 + 过滤
-    const aliveResults = knnResults.filter((r) => r.id); // 过滤掉已删除节点
-    let results = aliveResults
-      .map((r) => ({
-        item: {
-          id: r.id,
-          content: this.#contents.get(r.id) || '',
-          vector: this.#index.nodes[r.nodeIdx]
-            ? Array.from(this.#index.nodes[r.nodeIdx]!.vector)
-            : [],
-          metadata: this.#metadata.get(r.id) || {},
-        },
-        score: 1 - r.dist, // 距离转相似度
-      }))
-      .filter((r) => r.score >= minScore);
-    const afterScoreCount = results.length;
+      // 转换为标准格式 + 过滤
+      const aliveResults = knnResults.filter((r) => r.id); // 过滤掉已删除节点
+      let passResults = aliveResults
+        .map((r) => ({
+          item: {
+            id: r.id,
+            content: this.#contents.get(r.id) || '',
+            vector: this.#index.nodes[r.nodeIdx]
+              ? Array.from(this.#index.nodes[r.nodeIdx]!.vector)
+              : [],
+            metadata: this.#metadata.get(r.id) || {},
+          },
+          score: 1 - r.dist, // 距离转相似度
+        }))
+        .filter((r) => r.score >= minScore);
+      const afterScoreCount = passResults.length;
 
-    // 应用过滤
-    if (filter) {
-      results = results.filter((r) => this.#matchFilter(r.item, filter));
+      // 应用过滤
+      if (filter) {
+        passResults = passResults.filter((r) => this.#matchFilter(r.item, filter));
+      }
+      return { knnResults, aliveResults, afterScoreCount, passResults };
+    };
+
+    let pass = runKnnPass(rawK);
+
+    // 带 filter 的过召回不足额补偿（2026-07-06 语义零召回终局修复）：
+    // 同一索引池混存异类向量（entry 全文向量 vs recipe-region 切片向量），带
+    // type=recipe-semantic-region 过滤的检索会被距离更近的 entry 向量挤占全部
+    // rawK 候选位——过滤后归零。此时扩大到全图重试一次：百级节点代价微秒级，
+    // 大图也仅在"过滤后不足额"才触发，并留痕以便观察触发频率。
+    if (filter && pass.passResults.length < topK && this.#index.size > rawK) {
+      const fullPass = runKnnPass(this.#index.size);
+      Logger.getInstance().info(
+        `[HnswVectorAdapter] filter under-recall retry: rawK=${rawK} matched=${pass.passResults.length} fullScan=${this.#index.size} matchedAfter=${fullPass.passResults.length}`
+      );
+      pass = fullPass;
     }
 
     // 零结果诊断（2026-07-06 语义零召回排障加固）：图非空却零返回时，
     // 打出四道过滤各自的存活数与首个原始距离——直接指认断层在 knn / 软删 /
     // minScore / metadata filter 的哪一层。
-    if (results.length === 0 && this.#index.size > 0) {
+    if (pass.passResults.length === 0 && this.#index.size > 0) {
+      const firstAlive = pass.aliveResults[0];
       Logger.getInstance().warn(
-        `[HnswVectorAdapter] empty search result diagnostics: knnRaw=${knnResults.length} alive=${aliveResults.length} afterScore=${afterScoreCount} afterFilter=${results.length} firstDist=${knnResults[0]?.dist ?? 'n/a'} minScore=${minScore} hasFilter=${Boolean(filter)} indexSize=${this.#index.size}`
+        `[HnswVectorAdapter] empty search result diagnostics: knnRaw=${pass.knnResults.length} alive=${pass.aliveResults.length} afterScore=${pass.afterScoreCount} afterFilter=${pass.passResults.length} firstDist=${pass.knnResults[0]?.dist ?? 'n/a'} minScore=${minScore} indexSize=${this.#index.size} filter=${JSON.stringify(filter ?? null)} firstCandidateMeta=${JSON.stringify(firstAlive ? { id: firstAlive.id, meta: this.#metadata.get(firstAlive.id) ?? null } : null)?.slice(0, 400)}`
       );
     }
 
-    return results.slice(0, topK);
+    return pass.passResults.slice(0, topK);
   }
 
   /**
