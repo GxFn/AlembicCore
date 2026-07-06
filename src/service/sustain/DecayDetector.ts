@@ -82,6 +82,8 @@ const GRACE_PERIOD_STANDARD = 30 * DAY_MS;
 const GRACE_PERIOD_SEVERE = 15 * DAY_MS;
 
 const DECAY_THRESHOLDS = {
+  /** 新条目整体豁免天数：期内不参与衰减评分（healthy 视同）。 */
+  NEW_RECIPE_GRACE_DAYS: 14,
   /** 无使用天数上限 */
   NO_USAGE_DAYS: 90,
   /** FP 率上限 */
@@ -188,6 +190,24 @@ export class DecayDetector {
     const stats = DecayDetector.#parseStats(recipe.stats);
     const signals: DecaySignal[] = [];
     const now = Date.now();
+
+    // 新条目整体豁免期（2026-07-06 真机定案）：冷启 grace 此前只救 freshness 一维，
+    // usage=0 硬拖累让"新且尚未被用"的条目总分恰落 decaying 带（0.3+0+0.1+0.1≈50）
+    // → B1 直走 transition，出现"同一 sweep 内刚晋级 active 即被打 decaying"。
+    // createdAt 距今 < NEW_RECIPE_GRACE_DAYS 的条目直接判 healthy——不动加权公式，
+    // 只加护栏；过期后照常全维度评分，未放松衰减门禁。
+    const createdAtMs = toMs(recipe.created_at ?? now);
+    if ((now - createdAtMs) / DAY_MS < DECAY_THRESHOLDS.NEW_RECIPE_GRACE_DAYS) {
+      return {
+        recipeId: recipe.id,
+        title: recipe.title ?? recipe.id,
+        decayScore: 100,
+        level: 'healthy',
+        signals: [],
+        dimensions: { freshness: 1, usage: 0, quality: 1, authority: 1 },
+        suggestedGracePeriod: 0,
+      };
+    }
 
     // 策略 1: 90 天无使用
     const lastHitAt = stats.lastHitAt ?? null;
