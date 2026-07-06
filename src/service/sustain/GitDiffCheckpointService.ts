@@ -77,6 +77,13 @@ export interface RecordGitDiffCheckpointRouteInput extends GitDiffCheckpointScop
   routeReason?: string | null;
   scannedAt?: number;
   advancedAt?: number;
+  /**
+   * 基线重置（2026-07-06 空间根修配套）：checkpointCommit 残留自另一个 git 仓
+   * （扫描根从 workspace 切到 ProjectScope folder 后的一次性形态）时，调用方
+   * 确认 previousHead 在目标仓不存在后显式置 true——无视 routeStatus 推进
+   * checkpoint 到 targetCommit 重建基线，否则 unresolved 死循环。
+   */
+  resetBaseline?: boolean;
 }
 
 export interface RecordGitDiffCheckpointRouteResult {
@@ -152,7 +159,7 @@ export class GitDiffCheckpointService {
   recordRouteOutcome(input: RecordGitDiffCheckpointRouteInput): RecordGitDiffCheckpointRouteResult {
     const current = this.ensureCheckpoint(input).checkpoint;
     const scannedAt = input.scannedAt ?? Date.now();
-    const advanced = ADVANCING_ROUTE_STATUSES.has(input.routeStatus);
+    const advanced = input.resetBaseline === true || ADVANCING_ROUTE_STATUSES.has(input.routeStatus);
     const nextCheckpointCommit = advanced ? input.targetCommit : current.checkpointCommit;
     const advancedAt = advanced ? (input.advancedAt ?? scannedAt) : current.advancedAt;
     const routeReason = input.routeReason ?? defaultRouteReason(input.routeStatus);
