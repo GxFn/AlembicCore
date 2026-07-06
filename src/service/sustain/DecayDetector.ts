@@ -196,8 +196,14 @@ export class DecayDetector {
     // → B1 直走 transition，出现"同一 sweep 内刚晋级 active 即被打 decaying"。
     // createdAt 距今 < NEW_RECIPE_GRACE_DAYS 的条目直接判 healthy——不动加权公式，
     // 只加护栏；过期后照常全维度评分，未放松衰减门禁。
-    const createdAtMs = toMs(recipe.created_at ?? now);
-    if ((now - createdAtMs) / DAY_MS < DECAY_THRESHOLDS.NEW_RECIPE_GRACE_DAYS) {
+    // created_at 缺失代表旧数据未知创建时刻，不能回落 now，否则历史测试/真实旧条目会被误判为新条目。
+    const hasCreatedAt =
+      typeof recipe.created_at === 'number' && Number.isFinite(recipe.created_at);
+    const createdAtMs = hasCreatedAt ? toMs(recipe.created_at as number) : null;
+    if (
+      createdAtMs !== null &&
+      (now - createdAtMs) / DAY_MS < DECAY_THRESHOLDS.NEW_RECIPE_GRACE_DAYS
+    ) {
       return {
         recipeId: recipe.id,
         title: recipe.title ?? recipe.id,

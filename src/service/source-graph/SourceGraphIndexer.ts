@@ -13,9 +13,7 @@ import {
   type SourceGraphEdge,
   type SourceGraphEdgeInput,
   type SourceGraphFreshness,
-  type SourceGraphSnapshot,
   type SourceGraphSnapshotStatus,
-  type SourceGraphStatusResult,
   type SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
 import type {

@@ -159,7 +159,8 @@ export class GitDiffCheckpointService {
   recordRouteOutcome(input: RecordGitDiffCheckpointRouteInput): RecordGitDiffCheckpointRouteResult {
     const current = this.ensureCheckpoint(input).checkpoint;
     const scannedAt = input.scannedAt ?? Date.now();
-    const advanced = input.resetBaseline === true || ADVANCING_ROUTE_STATUSES.has(input.routeStatus);
+    const advanced =
+      input.resetBaseline === true || ADVANCING_ROUTE_STATUSES.has(input.routeStatus);
     const nextCheckpointCommit = advanced ? input.targetCommit : current.checkpointCommit;
     const advancedAt = advanced ? (input.advancedAt ?? scannedAt) : current.advancedAt;
     const routeReason = input.routeReason ?? defaultRouteReason(input.routeStatus);

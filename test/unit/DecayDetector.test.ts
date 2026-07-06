@@ -325,7 +325,7 @@ describe('DecayDetector', () => {
     expect(aMissing.dimensions.authority).toBe(0.5);
   });
 
-  it('U4 cold-start：健康新 recipe (lastHitAt=null, createdAt=now, authority=4) 不被误判 severe/dead', async () => {
+  it('U4 cold-start：健康新 recipe (lastHitAt=null, createdAt=now, authority=4) 直接走新条目豁免', async () => {
     const now = Date.now();
     // BiliDili 同形：从未命中、刚创建、quality=0.85、authority=4(0-5 域)
     const recipe = makeRecipe({
@@ -336,16 +336,11 @@ describe('DecayDetector', () => {
     const detector = new DecayDetector(makeMockRepo() as any);
 
     const result = await detector.evaluate(recipe);
-    // 修前：freshness≈0(无 grace) + authority 4/100=0.04 → decayScore≈18 → dead（会被误 transition）。
-    // 修后：cold-start grace（freshness 回落 createdAt=now≈1）+ authority 4/5=0.8 → 不被判 severe/dead。
-    expect(result.level).not.toBe('severe');
-    expect(result.level).not.toBe('dead');
-    expect(result.dimensions.freshness).toBeCloseTo(1, 1);
-    expect(result.dimensions.authority).toBeCloseTo(0.8, 5);
-    // 全修态三态对照锚点：decayScore = round(freshness 1×30 + usage 0 + quality 0.85×20 + authority 0.8×20) = 63 → 'watch'
-    // （修前 18=dead / 仅修 authority 33=severe / 全修 63=watch、不 transition）
-    expect(result.decayScore).toBe(63);
-    expect(result.level).toBe('watch');
+    // 2026-07-06 真机定案：createdAt 14 天内的条目不进衰减评分，避免刚晋级 active 即被打回 decaying。
+    expect(result.level).toBe('healthy');
+    expect(result.decayScore).toBe(100);
+    expect(result.signals).toHaveLength(0);
+    expect(result.suggestedGracePeriod).toBe(0);
   });
 
   it('U4 scanAll(cap) 把 limit 透传给 findAllByLifecycles；undefined 保持无界', async () => {

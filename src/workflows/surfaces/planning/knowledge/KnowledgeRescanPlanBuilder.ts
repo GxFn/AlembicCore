@@ -5,7 +5,6 @@ import type {
   RecipeSnapshotEntry,
   RescanExecutionMode,
   RescanExecutionReason,
-  RescanExecutionReasonKind,
 } from '../../../../types/planningViews.js';
 
 // W4 批A(T3):Rescan 执行决策纯数据类型本体下收 types/planningViews;re-export 保表面。
