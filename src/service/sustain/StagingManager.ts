@@ -141,6 +141,20 @@ export class StagingManager {
         continue;
       }
 
+      // 复核期晋级门（2026-07-06）：复核结论 fail 的到期条目回滚 pending 而非晋级；
+      // pass/缺失走现状（向后兼容——复核缺席不阻断既有 grace 晋级语义）。
+      const review = this.#knowledgeRepo.getStagingReviewSync(e.id);
+      if (review?.outcome === 'fail') {
+        const rolled = await this.rollback(
+          e.id,
+          `staging review failed${review.notes ? `: ${review.notes}` : ''}`
+        );
+        if (rolled) {
+          result.rolledBack.push(entry);
+          continue;
+        }
+      }
+
       const promoted = await this.#promote(entry);
       if (promoted) {
         result.promoted.push(entry);
@@ -154,6 +168,41 @@ export class StagingManager {
     }
 
     return result;
+  }
+
+  /**
+   * staging 复核结论登记（2026-07-06 复核期落地，observe-first）：grace 窗口从
+   * "等待期"升级为"复核期"——AI/人工把"断言 vs 源码"复核结论写回，checkAndPromote
+   * 按三态消费：fail=到期回滚 pending（不晋级）；pass/缺失=现状晋级（向后兼容，
+   * 复核是增强不是阻断）。结论落 stats.stagingReview（json_set 原子）。
+   */
+  async recordReview(
+    entryId: string,
+    review: { outcome: 'pass' | 'fail'; reviewer?: string; notes?: string }
+  ): Promise<boolean> {
+    const entry = await this.#knowledgeRepo.findById(entryId);
+    if (!entry || entry.lifecycle !== 'staging') {
+      this.#logger.warn(
+        `StagingManager: recordReview skipped — entry ${entryId} is not in staging`
+      );
+      return false;
+    }
+    this.#knowledgeRepo.setStagingReviewSync(entryId, {
+      outcome: review.outcome,
+      ...(review.reviewer ? { reviewer: review.reviewer } : {}),
+      ...(review.notes ? { notes: review.notes.slice(0, 500) } : {}),
+      reviewedAt: Date.now(),
+    });
+    if (this.#signalBus) {
+      this.#signalBus.send('lifecycle', 'StagingManager.recordReview', 0.8, {
+        target: entryId,
+        metadata: { action: 'staging_review', outcome: review.outcome, title: entry.title },
+      });
+    }
+    this.#logger.info(
+      `StagingManager: staging review recorded for ${entry.title} — ${review.outcome}`
+    );
+    return true;
   }
 
   /**

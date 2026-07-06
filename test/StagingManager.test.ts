@@ -94,6 +94,47 @@ describe('StagingManager lifecycle promotion', () => {
     expect(eventRepo.getHistory(dueManual.id)).toHaveLength(0);
   });
 
+  // ───────────── staging 复核期（2026-07-06 observe-first）三态用例 ─────────────
+
+  it('review outcome fail rolls a due auto-approvable entry back to pending instead of promoting', async () => {
+    const now = Date.now();
+    const failing = await createStagingRecipe('review-fail', now - 1_000, true);
+    const passing = await createStagingRecipe('review-pass', now - 1_000, true);
+    const unreviewed = await createStagingRecipe('review-missing', now - 1_000, true);
+
+    expect(
+      await stagingManager.recordReview(failing.id, { outcome: 'fail', notes: '断言与源码不符' })
+    ).toBe(true);
+    expect(
+      await stagingManager.recordReview(passing.id, { outcome: 'pass', reviewer: 'host-agent' })
+    ).toBe(true);
+
+    const result = await stagingManager.checkAndPromote();
+
+    expect(result.rolledBack.map((entry) => entry.id)).toEqual([failing.id]);
+    expect(result.promoted.map((entry) => entry.id).sort()).toEqual(
+      [passing.id, unreviewed.id].sort()
+    );
+
+    const rolled = await knowledgeRepo.findById(failing.id);
+    expect(rolled?.lifecycle).toBe('pending');
+    expect(rolled?.stagingDeadline).toBeNull();
+    const promotedPass = await knowledgeRepo.findById(passing.id);
+    expect(promotedPass?.lifecycle).toBe('active');
+    const promotedMissing = await knowledgeRepo.findById(unreviewed.id);
+    // missing 向后兼容：无复核结论不阻断既有 grace 晋级
+    expect(promotedMissing?.lifecycle).toBe('active');
+  });
+
+  it('recordReview rejects entries that are not in staging', async () => {
+    const now = Date.now();
+    const entry = await createStagingRecipe('active-entry', now - 1_000, true);
+    await stagingManager.checkAndPromote(); // 先晋级到 active
+    expect(await stagingManager.recordReview(entry.id, { outcome: 'fail' })).toBe(false);
+    const stillActive = await knowledgeRepo.findById(entry.id);
+    expect(stillActive?.lifecycle).toBe('active');
+  });
+
   // ───────────────── P1 tick 有界化（cap/limit）补充用例 ─────────────────
 
   it('(a) checkAndPromote(N) 在 >N 条到期 staging 下只晋级 ≤N（取最旧 N）', async () => {

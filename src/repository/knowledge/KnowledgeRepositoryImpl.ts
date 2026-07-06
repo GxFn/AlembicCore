@@ -779,6 +779,46 @@ export class KnowledgeRepositoryImpl {
       .run();
   }
 
+  /**
+   * staging 复核结论写入（2026-07-06 复核期落地）：落 stats JSON（reasoning 是
+   * Reasoning 值对象会剥未知字段，stats 是自由 Record 与 guardHits/primeAdoptions
+   * 同族）。json_set 原子写 + updatedAt bump（增量索引可见）。
+   */
+  setStagingReviewSync(
+    id: string,
+    review: { outcome: 'pass' | 'fail'; reviewer?: string; notes?: string; reviewedAt: number }
+  ): void {
+    this.#drizzle
+      .update(knowledgeEntries)
+      .set({
+        stats: sql`json_set(COALESCE(${knowledgeEntries.stats}, '{}'), '$.stagingReview', json(${JSON.stringify(review)}))`,
+        updatedAt: unixNow(),
+      })
+      .where(eq(knowledgeEntries.id, id))
+      .run();
+  }
+
+  /** staging 复核结论读取（checkAndPromote 晋级门消费）。 */
+  getStagingReviewSync(
+    id: string
+  ): { outcome?: string; reviewer?: string; notes?: string; reviewedAt?: number } | null {
+    const row = this.#drizzle
+      .select({
+        review: sql<string | null>`json_extract(${knowledgeEntries.stats}, '$.stagingReview')`,
+      })
+      .from(knowledgeEntries)
+      .where(eq(knowledgeEntries.id, id))
+      .get();
+    if (!row?.review) {
+      return null;
+    }
+    try {
+      return JSON.parse(row.review) as { outcome?: string };
+    } catch {
+      return null;
+    }
+  }
+
   incrementGuardHitsSync(id: string, hits: number): void {
     this.#drizzle
       .update(knowledgeEntries)
