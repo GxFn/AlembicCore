@@ -358,6 +358,24 @@ describe('KnowledgeService', () => {
       expect(fileWriter.persist).toHaveBeenCalled();
     });
 
+    test('persist 返回 null 时 fail-fast — 不写 DB（file-first 防更新静默丢失）', async () => {
+      // 与 create 主链同构：写盘失败即 throw，repository.update 不再执行 → 库/盘停在旧态可重试。
+      // 若吞掉 null 继续写 DB，.md 停在旧内容而 DB 已更新，下一轮 syncAll 以 .md 为真相源会回滚覆盖。
+      const failingWriter = {
+        persist: vi.fn(() => null),
+        remove: vi.fn(),
+        moveOnLifecycleChange: vi.fn(),
+      };
+      const { service, repo } = createService({ fileWriter: failingWriter });
+      repo._seed(makeEntry());
+
+      await expect(
+        service.update('test-id-001', { title: 'Updated Title' }, { userId: 'user1' })
+      ).rejects.toThrow('aborting update');
+      expect(failingWriter.persist).toHaveBeenCalledTimes(1);
+      expect(repo.update).not.toHaveBeenCalled();
+    });
+
     test('更新 knowledgeType 联动更新 kind', async () => {
       const { service, repo } = createService();
       repo._seed(makeEntry());

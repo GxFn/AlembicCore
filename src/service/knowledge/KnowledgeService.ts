@@ -422,9 +422,17 @@ export class KnowledgeService {
       dbUpdates.updatedAt = Math.floor(Date.now() / 1000);
 
       // ── file-first: 先落盘 .md，再写 DB（文件=真相源） ──
+      // persist 在 repository.update 之前 fail-fast（与 create 主链同构）：写盘失败即 throw，
+      // DB 更新不再执行 → 库/盘都停在旧态、调用方可重试。若吞掉 null 继续写 DB，则 .md 停在旧内容而
+      // DB 已更新，下一轮 syncAll/rescan 以 .md 为真相源会把 DB 更新回滚覆盖 → 用户更新静默丢失。
       if (this._fileWriter) {
         Object.assign(_entry, dbUpdates);
-        this._fileWriter.persist(_entry);
+        const persistedPath = this._fileWriter.persist(_entry);
+        if (persistedPath === null) {
+          throw new Error(
+            `Knowledge file persist failed for "${_entry.title}" — aborting update (file-first source of truth; see fileWriter error log)`
+          );
+        }
         // fileWriter 可能更新 sourceFile，同步到 dbUpdates
         if (_entry.sourceFile) {
           dbUpdates.sourceFile = _entry.sourceFile;
