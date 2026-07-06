@@ -26,6 +26,8 @@ export interface StagingEntry {
   stagingDeadline: number;
   confidence: number;
   autoApprovable?: boolean;
+  /** 复核期观测面：stats.stagingReview.outcome（pass/fail），缺失=待复核。 */
+  reviewOutcome?: 'pass' | 'fail' | null;
 }
 
 export interface StagingCheckResult {
@@ -118,12 +120,15 @@ export class StagingManager {
     for (const e of entries) {
       const deadline = e.stagingDeadline || 0;
 
+      const reviewOutcomeRaw = this.#knowledgeRepo.getStagingReviewSync(e.id)?.outcome;
       const entry: StagingEntry = {
         id: e.id,
         title: e.title,
         stagingDeadline: deadline,
         confidence: 0,
         autoApprovable: e.autoApprovable,
+        reviewOutcome:
+          reviewOutcomeRaw === 'pass' || reviewOutcomeRaw === 'fail' ? reviewOutcomeRaw : null,
       };
 
       if (deadline === 0) {
@@ -143,11 +148,11 @@ export class StagingManager {
 
       // 复核期晋级门（2026-07-06）：复核结论 fail 的到期条目回滚 pending 而非晋级；
       // pass/缺失走现状（向后兼容——复核缺席不阻断既有 grace 晋级语义）。
-      const review = this.#knowledgeRepo.getStagingReviewSync(e.id);
-      if (review?.outcome === 'fail') {
+      if (entry.reviewOutcome === 'fail') {
+        const review = this.#knowledgeRepo.getStagingReviewSync(e.id);
         const rolled = await this.rollback(
           e.id,
-          `staging review failed${review.notes ? `: ${review.notes}` : ''}`
+          `staging review failed${review?.notes ? `: ${review.notes}` : ''}`
         );
         if (rolled) {
           result.rolledBack.push(entry);
