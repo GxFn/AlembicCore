@@ -214,7 +214,16 @@ export class KnowledgeService {
       // fileWriter.persist() 会设置 entry.sourceFile，
       // 后续 repository.create() 自动包含 sourceFile 字段，无需异步回写。
       if (this._fileWriter) {
-        this._fileWriter.persist(entry);
+        // 危险交互根修（2026-07-06 闭环审查）：persist 失败此前吞成 null、DB 照写
+        // → 库有盘无 → 下次 syncAll 孤儿检测把这条合法知识自动标 deprecated
+        // （写失败演变成知识丢失）。file-first 语义下真相源写不进就不该有 DB 条目：
+        // create 主链 fail-fast，提交者立刻看到失败可重试。
+        const persistedPath = this._fileWriter.persist(entry);
+        if (persistedPath === null) {
+          throw new Error(
+            `Knowledge file persist failed for "${entry.title}" — aborting create (file-first source of truth; see fileWriter error log)`
+          );
+        }
       }
 
       const saved = await this.repository.create(entry);
