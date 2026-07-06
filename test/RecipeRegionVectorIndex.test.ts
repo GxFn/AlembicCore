@@ -10,6 +10,7 @@ import {
   RECIPE_REGION_VECTOR_SCHEMA_VERSION,
   RECIPE_SEMANTIC_REGION_METADATA_TYPE,
   type RecipeRegionSourceEntry,
+  syncRecipeSemanticRegionVectors,
   VectorService,
 } from '../src/vector.js';
 
@@ -263,7 +264,9 @@ describe('Recipe semantic-region vector index', () => {
     expect(result.status).toBe('completed');
     expect(result.scanned).toBe(1);
     expect(result.generated).toBeGreaterThan(0);
-    expect(result.upserted).toBe(result.generated);
+    // freshId 已在 listIds（内容未变）→ 已存在跳过（2026-07-06）：upsert 少 1、skippedExisting 计 1
+    expect(result.skippedExisting).toBe(1);
+    expect(result.upserted).toBe(result.generated - 1);
     expect(vectorStore.remove).toHaveBeenCalledWith('recipe_region_recipe-1_identity_oldhash');
     expect(vectorStore.remove).not.toHaveBeenCalledWith('entry_recipe-1');
     expect(vectorStore.remove).not.toHaveBeenCalledWith('recipe_region_other-1_identity_oldhash');
@@ -550,5 +553,79 @@ describe('Recipe semantic-region vector index', () => {
 
     expect(results.map((result) => result.item.id)).toEqual(['region-1']);
     store.destroy();
+  });
+});
+
+// ── 已存在跳过（2026-07-06 启动同步加速）──
+describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
+  const tmpDirs: string[] = [];
+  afterEach(() => {
+    for (const dir of tmpDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function makeStore() {
+    const dir = mkdtempSync(join(tmpdir(), 'region-skip-'));
+    tmpDirs.push(dir);
+    const store = new JsonVectorAdapter(dir, {});
+    store.initSync();
+    return store;
+  }
+
+  function makeEmbed() {
+    return {
+      embed: vi.fn(async (texts: string | string[]) => {
+        const list = Array.isArray(texts) ? texts : [texts];
+        return list.map((_, i) => [0.1 + i * 0.01, 0.2]);
+      }),
+    };
+  }
+
+  it('second sync with unchanged entries skips embed entirely (idempotent fast path)', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const entries = [createRecipe()];
+
+    const first = await syncRecipeSemanticRegionVectors(store, embed as never, entries);
+    expect(first.status).toBe('completed');
+    expect(first.upserted).toBeGreaterThan(0);
+    expect(first.skippedExisting).toBe(0);
+    expect(embed.embed).toHaveBeenCalledTimes(1);
+
+    const second = await syncRecipeSemanticRegionVectors(store, embed as never, entries);
+    expect(second.status).toBe('completed');
+    expect(second.upserted).toBe(0);
+    expect(second.skippedExisting).toBe(first.upserted);
+    // 内容未变 → id 未变 → 第二轮零 embed 调用
+    expect(embed.embed).toHaveBeenCalledTimes(1);
+  });
+
+  it('force:true bypasses the skip and re-embeds everything', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const entries = [createRecipe()];
+    await syncRecipeSemanticRegionVectors(store, embed as never, entries);
+
+    const forced = await syncRecipeSemanticRegionVectors(store, embed as never, entries, {
+      force: true,
+    });
+    expect(forced.upserted).toBeGreaterThan(0);
+    expect(forced.skippedExisting ?? 0).toBe(0);
+    expect(embed.embed).toHaveBeenCalledTimes(2);
+  });
+
+  it('content change produces a new id which is generated while stale sibling is removed', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const base = createRecipe();
+    await syncRecipeSemanticRegionVectors(store, embed as never, [base]);
+
+    const changed = createRecipe({ doClause: 'sync region vectors with a brand new do clause' });
+    const second = await syncRecipeSemanticRegionVectors(store, embed as never, [changed]);
+    // 变更的 region 走生成，未变的 region 走跳过，旧 id 由 removeStale 清理
+    expect(second.upserted).toBeGreaterThan(0);
+    expect(second.skippedExisting).toBeGreaterThan(0);
+    expect(second.removed).toBeGreaterThan(0);
   });
 });

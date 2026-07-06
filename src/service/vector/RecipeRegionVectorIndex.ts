@@ -95,6 +95,8 @@ export interface RecipeRegionSyncOptions {
   sourceRefsBridgeByRecipeId?: Record<string, RecipeSourceRefsBridge>;
   removeStale?: boolean;
   maxRegionChars?: number;
+  /** true = 全量重建（禁用"id 已存在跳过"加速），用于显式 rebuild 场景 */
+  force?: boolean;
 }
 
 export interface RecipeRegionSyncResult {
@@ -105,6 +107,8 @@ export interface RecipeRegionSyncResult {
   upserted: number;
   removed: number;
   skipped: number;
+  /** id 已在索引（内容未变）而跳过 embed/upsert 的 chunk 数（2026-07-06 启动加速） */
+  skippedExisting?: number;
   errors: string[];
   degradedReason?: string;
   generatedMetadata: RecipeRegionVectorMetadata[];
@@ -617,10 +621,24 @@ export async function syncRecipeSemanticRegionVectors(
   result.generated = chunks.length;
   result.generatedMetadata = chunks.map((chunk) => chunk.metadata);
 
+  // 已存在跳过（2026-07-06 启动同步加速）：chunk id 内嵌 regionHash（recipeId+
+  // regionClass+regionContent 的稳定哈希），id 在索引中即内容未变——重复 embed
+  // 纯属浪费（真机 76 条 ≈656 chunk 全量 re-embed ~86s/每次启动）。内容变化 →
+  // regionHash 变 → id 不同 → 自然走生成+旧 id 由 removeStale 清理。
+  // options.force 显式全量重建时不跳过。
+  let existingIds: Set<string> | null = null;
+  if (options.force !== true) {
+    try {
+      existingIds = new Set(await vectorStore.listIds());
+    } catch {
+      existingIds = null; // listIds 不可用则退回全量（容缺，不影响正确性）
+    }
+  }
+
   if (options.removeStale !== false) {
     try {
       const recipeIds = new Set(entries.map((entry) => entry.id));
-      const vectorIds = await vectorStore.listIds();
+      const vectorIds = existingIds ? [...existingIds] : await vectorStore.listIds();
       for (const id of vectorIds) {
         if (!id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
           continue;
@@ -638,23 +656,26 @@ export async function syncRecipeSemanticRegionVectors(
     }
   }
 
-  if (chunks.length === 0) {
+  const pendingChunks = existingIds ? chunks.filter((chunk) => !existingIds.has(chunk.id)) : chunks;
+  result.skippedExisting = chunks.length - pendingChunks.length;
+
+  if (pendingChunks.length === 0) {
     return result;
   }
 
   if (!embedProvider) {
     result.status = 'degraded';
     result.degradedReason = 'embed-provider-unavailable';
-    result.skipped = chunks.length;
+    result.skipped = pendingChunks.length;
     return result;
   }
 
   try {
-    const embedResult = await embedProvider.embed(chunks.map((chunk) => chunk.content));
+    const embedResult = await embedProvider.embed(pendingChunks.map((chunk) => chunk.content));
     const vectors = Array.isArray(embedResult[0])
       ? (embedResult as number[][])
       : [embedResult as number[]];
-    const items = chunks.map((chunk, index) => ({
+    const items = pendingChunks.map((chunk, index) => ({
       id: chunk.id,
       content: chunk.content,
       vector: vectors[index] ?? [],
