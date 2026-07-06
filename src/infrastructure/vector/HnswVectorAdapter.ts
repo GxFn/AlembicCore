@@ -17,6 +17,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import Logger from '../logging/Logger.js';
 import pathGuard from '../../shared/PathGuard.js';
 import type { WriteZone } from '../io/WriteZone.js';
 import { AsyncPersistence, WAL_OP } from './AsyncPersistence.js';
@@ -494,8 +495,8 @@ export class HnswVectorAdapter extends VectorStore {
     }
 
     // 转换为标准格式 + 过滤
-    let results = knnResults
-      .filter((r) => r.id) // 过滤掉已删除节点
+    const aliveResults = knnResults.filter((r) => r.id); // 过滤掉已删除节点
+    let results = aliveResults
       .map((r) => ({
         item: {
           id: r.id,
@@ -508,10 +509,20 @@ export class HnswVectorAdapter extends VectorStore {
         score: 1 - r.dist, // 距离转相似度
       }))
       .filter((r) => r.score >= minScore);
+    const afterScoreCount = results.length;
 
     // 应用过滤
     if (filter) {
       results = results.filter((r) => this.#matchFilter(r.item, filter));
+    }
+
+    // 零结果诊断（2026-07-06 语义零召回排障加固）：图非空却零返回时，
+    // 打出四道过滤各自的存活数与首个原始距离——直接指认断层在 knn / 软删 /
+    // minScore / metadata filter 的哪一层。
+    if (results.length === 0 && this.#index.size > 0) {
+      Logger.getInstance().warn(
+        `[HnswVectorAdapter] empty search result diagnostics: knnRaw=${knnResults.length} alive=${aliveResults.length} afterScore=${afterScoreCount} afterFilter=${results.length} firstDist=${knnResults[0]?.dist ?? 'n/a'} minScore=${minScore} hasFilter=${Boolean(filter)} indexSize=${this.#index.size}`
+      );
     }
 
     return results.slice(0, topK);

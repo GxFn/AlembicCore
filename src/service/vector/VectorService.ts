@@ -370,8 +370,13 @@ export class VectorService {
       });
       const tHnsw = performance.now();
 
+      // 诊断维度（2026-07-06 语义零召回排障加固）：qdim=查询向量维度（0=embed 返回空）、
+      // nodes=图节点数（0=索引未建/进程内实例分裂）。零结果时这两个数直接指向断层。
+      const storeStats = (await this.#vectorStore.getStats?.()) as
+        | { hasVectors?: number; count?: number }
+        | undefined;
       this.#logger.info(
-        `[VectorService] search: embed=${Math.round(tEmbed - t0)}ms hnsw=${Math.round(tHnsw - tEmbed)}ms total=${Math.round(tHnsw - t0)}ms results=${results.length}`
+        `[VectorService] search: embed=${Math.round(tEmbed - t0)}ms hnsw=${Math.round(tHnsw - tEmbed)}ms total=${Math.round(tHnsw - t0)}ms results=${results.length} qdim=${(queryVector as number[])?.length ?? 0} nodes=${storeStats?.hasVectors ?? storeStats?.count ?? -1}`
       );
 
       return results;
@@ -822,6 +827,28 @@ export class VectorService {
     });
 
     return result;
+  }
+
+  /**
+   * 公开的索引对账入口（孤儿 entry 向量清理 + 缺失 entry 向量排队补索引）。
+   *
+   * 背景（2026-07-06 真机定案）：UiStartupTasks Stage 3 此前访问
+   * `vectorService.syncCoordinator`——但 #syncCoordinator 是私有字段，外部永远
+   * 读到 undefined → 启动对账从未运行过；叠加 bootstrap fullReset 只清
+   * knowledge_entries 不清向量索引，索引里累积了 100% 陈旧向量而 live 条目
+   * 零向量。此方法是对账的唯一公开面；coordinator 缺席（embed 不可用等）时
+   * 返回 null 并留痕，调用方按可降级能力处理。
+   */
+  async reconcileIndex(): Promise<{
+    orphansRemoved: number;
+    missingSynced: number;
+    errors: string[];
+  } | null> {
+    if (!this.#syncCoordinator) {
+      this.#logger.info('[VectorService] reconcileIndex skipped — sync coordinator unavailable');
+      return null;
+    }
+    return this.#syncCoordinator.reconcile();
   }
 
   // ═══ 生命周期 ═══
