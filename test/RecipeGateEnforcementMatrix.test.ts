@@ -22,13 +22,17 @@ import matrix from './fixtures/recipe-gate-enforcement-matrix.json' with { type:
 // absent, so Plugin live-source round-trips are skipped but Core-only matrix
 // checks still run.
 const PLUGIN_ROOT = path.resolve(process.cwd(), '../AlembicPlugin');
+// Paths follow AlembicPlugin's recipe-pipeline four-rings refactor: the
+// stage-1 content-quality gate now lives under host-runtime, and the stage-2
+// evidence gate under recipe-pipeline/curate. Stale paths here silently
+// degrade the round-trip to it.skip and defeat the drift guard.
 const STAGE1_FILE = path.join(
   PLUGIN_ROOT,
-  'lib/runtime/mcp/handlers/recipe-content-quality-gate.ts'
+  'lib/host-runtime/mcp/handlers/recipe-content-quality-gate.ts'
 );
 const STAGE2_FILE = path.join(
   PLUGIN_ROOT,
-  'lib/recipe-generation/host-agent-workflows/recipe-evidence-gate.ts'
+  'lib/recipe-pipeline/curate/recipe-evidence-gate.ts'
 );
 const STAGE3_FILE = path.resolve(process.cwd(), 'src/domain/knowledge/UnifiedValidator.ts');
 const PLUGIN_LIVE_SOURCE_FILES = [STAGE1_FILE, STAGE2_FILE] as const;

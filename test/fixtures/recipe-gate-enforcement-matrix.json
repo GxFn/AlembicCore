@@ -10,7 +10,7 @@
     "lineNote": "sourceLine values are live as of 2026-06-30 (line drift confirmed vs design doc; oracle is authoritative)."
   },
   "stage1": {
-    "_file": "AlembicPlugin/lib/runtime/mcp/handlers/recipe-content-quality-gate.ts",
+    "_file": "AlembicPlugin/lib/host-runtime/mcp/handlers/recipe-content-quality-gate.ts",
     "_unionType": "RecipeContentQualityViolationCode",
     "_runs": "always (tool-router.ts:163)",
     "codes": {
@@ -73,7 +73,7 @@
     }
   },
   "stage2": {
-    "_file": "AlembicPlugin/lib/recipe-generation/host-agent-workflows/recipe-evidence-gate.ts",
+    "_file": "AlembicPlugin/lib/recipe-pipeline/curate/recipe-evidence-gate.ts",
     "_unionType": "RecipeEvidenceViolationCode",
     "_runs": "cold-start only (tool-router.ts:172-181, gated by shouldRunRecipeEvidenceGate); DIMENSION_*/QUALITY_GATE_FAILED serve dimension_complete, not submit",
     "codes": {
