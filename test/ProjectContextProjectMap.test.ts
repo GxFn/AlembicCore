@@ -8,6 +8,7 @@ import type {
   ProjectMap,
 } from '../src/domain/project-context/index.js';
 import { ProjectContext } from '../src/project-context.js';
+import { buildCoverageLedgerModuleAxisFromSummaries } from '../src/workflows/surfaces/coverage/index.js';
 
 describe('ProjectContext PCQ-6 project map', () => {
   it('returns project-level module graph facts, cycles, hotspots, flows, and drill-down refs', async () => {
@@ -70,6 +71,44 @@ describe('ProjectContext PCQ-6 project map', () => {
       });
 
       expect(left).toStrictEqual(right);
+    });
+  });
+
+  it('characterizes ProjectMap module ids against coverage ledger module axis ids', async () => {
+    await withFixture(createMapFixture(), async (projectRoot) => {
+      const envelope = await ProjectContext.execute({
+        kind: 'map',
+        payload: {
+          moduleSeeds: [createFeatureSeed(), createSharedSeed()],
+        },
+        scope: { projectRoot, repoId: 'core' },
+      });
+      const data = envelope.data as ProjectMap;
+      const coverageAxis = buildCoverageLedgerModuleAxisFromSummaries({
+        modules: data.modules.map((module) => ({
+          id: module.id,
+          moduleName: module.name,
+          modulePath: readStringMetadata(module.ref.metadata?.modulePath),
+          ownedFiles: readStringArrayMetadata(module.ref.metadata?.ownedFiles),
+        })),
+      });
+
+      const projectMapModuleIds = data.modules.map((module) => module.id).sort();
+      const coverageLedgerModuleIds = coverageAxis.map((module) => module.moduleId).sort();
+
+      expect(projectMapModuleIds).toEqual([
+        'module:core:feature:src/feature',
+        'module:core:shared:src/shared',
+      ]);
+      expect(coverageLedgerModuleIds).toEqual([
+        'target:feature:src/feature',
+        'target:shared:src/shared',
+      ]);
+      expect(coverageLedgerModuleIds).not.toEqual(projectMapModuleIds);
+      expect(coverageAxis.map((module) => module.ownedPaths)).toEqual([
+        ['src/feature/api/index.ts', 'src/feature/domain/model.ts', 'src/feature/service/run.ts'],
+        ['src/shared/format.ts'],
+      ]);
     });
   });
 
@@ -185,6 +224,16 @@ function createExternalDependencyFixture(): Record<string, string> {
       'export const schema = z.object({ name: z.string() });',
     ].join('\n'),
   };
+}
+
+function readStringMetadata(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function readStringArrayMetadata(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 async function withFixture(
