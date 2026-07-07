@@ -30,10 +30,7 @@ const STAGE1_FILE = path.join(
   PLUGIN_ROOT,
   'lib/host-runtime/mcp/handlers/recipe-content-quality-gate.ts'
 );
-const STAGE2_FILE = path.join(
-  PLUGIN_ROOT,
-  'lib/recipe-pipeline/curate/recipe-evidence-gate.ts'
-);
+const STAGE2_FILE = path.join(PLUGIN_ROOT, 'lib/recipe-pipeline/curate/recipe-evidence-gate.ts');
 const STAGE3_FILE = path.resolve(process.cwd(), 'src/domain/knowledge/UnifiedValidator.ts');
 const PLUGIN_LIVE_SOURCE_FILES = [STAGE1_FILE, STAGE2_FILE] as const;
 const MISSING_PLUGIN_LIVE_SOURCE_FILES = PLUGIN_LIVE_SOURCE_FILES.filter(
