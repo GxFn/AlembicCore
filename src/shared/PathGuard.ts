@@ -394,6 +394,16 @@ class PathGuard {
     }
   }
 
+  /** 动态添加项目根可写文件（外层 host guidance delivery 使用） */
+  addProjectWritableFile(fileName: string) {
+    const normalized = normalizeProjectRootFile(fileName);
+    if (!normalized) {
+      return false;
+    }
+    this.#extraProjectWritableFiles.add(normalized);
+    return true;
+  }
+
   /** resolved 是否在 base 目录下 */
   #isUnder(resolved: string, base: string) {
     return resolved === base || resolved.startsWith(base + path.sep);

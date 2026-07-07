@@ -12,7 +12,12 @@ import {
   summarizeProjectRuntimeScopeReadiness,
 } from '../src/daemon/index.js';
 import { EventBus, SignalBus, timerRegistry } from '../src/events.js';
-import { pathGuard, WriteZone } from '../src/io.js';
+import {
+  ALEMBIC_MANAGED_GUIDANCE_BEGIN,
+  pathGuard,
+  upsertAlembicManagedBlockText,
+  WriteZone,
+} from '../src/io.js';
 import { Logger } from '../src/logging.js';
 import { DEFAULT_FOLDER_NAMES, resolveProjectRoot, WorkspaceResolver } from '../src/workspace.js';
 
@@ -31,6 +36,8 @@ describe('stable foundation entrypoints', () => {
   it('exposes write-boundary contracts through the narrow io entrypoint', () => {
     expect(WriteZone).toBeDefined();
     expect(pathGuard).toBeDefined();
+    expect(ALEMBIC_MANAGED_GUIDANCE_BEGIN).toBe('<!-- alembic:managed-guidance:begin -->');
+    expect(upsertAlembicManagedBlockText('', 'Use Alembic.').content).toContain('Use Alembic.');
   });
 
   it('exposes event, signal, and timer contracts through the narrow events entrypoint', () => {

@@ -246,6 +246,21 @@ describe('PathGuard', () => {
       ).toThrow(PathGuardError);
     });
 
+    test('should allow only runtime-added project root files', () => {
+      expect(pathGuard.addProjectWritableFile('CLAUDE.md')).toBe(true);
+      expect(pathGuard.addProjectWritableFile('nested/AGENTS.md')).toBe(false);
+
+      expect(() =>
+        pathGuard.assertProjectWriteSafe(path.join(PROJECT_ROOT, 'CLAUDE.md'))
+      ).not.toThrow();
+      expect(() => pathGuard.assertProjectWriteSafe(path.join(PROJECT_ROOT, 'AGENTS.md'))).toThrow(
+        PathGuardError
+      );
+      expect(() =>
+        pathGuard.assertProjectWriteSafe(path.join(PROJECT_ROOT, 'nested', 'CLAUDE.md'))
+      ).toThrow(PathGuardError);
+    });
+
     test('should allow writes within packageRoot', () => {
       expect(() =>
         pathGuard.assertProjectWriteSafe(path.join(PACKAGE_ROOT, 'logs/error.log'))
