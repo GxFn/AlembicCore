@@ -144,10 +144,13 @@ function resolveFullProjectAnalysisScope(input: {
   const projectScope = loadProjectScopeForProjectIndexRoot(input.projectRoot);
   const explicitSourceFolders = normalizeProjectIndexSourceFolders(input.sourceFolders);
   if (explicitSourceFolders) {
+    const sourceFolders = projectScope
+      ? sourceFoldersWithinProjectScope(projectScope, explicitSourceFolders)
+      : explicitSourceFolders;
     return {
       projectRoot: projectScope?.controlRoot.path ?? input.projectRoot,
       projectScope,
-      sourceFolders: explicitSourceFolders,
+      sourceFolders,
     };
   }
   if (!projectScope) {
@@ -193,6 +196,19 @@ function sourceFoldersFromProjectScope(projectScope: ProjectDescriptor): string[
     }
   }
   return dedupeSourceFolders(folders);
+}
+
+function sourceFoldersWithinProjectScope(
+  projectScope: ProjectDescriptor,
+  sourceFolders: readonly string[]
+): string[] {
+  const projectScopeSourceFolders = sourceFoldersFromProjectScope(projectScope);
+  const boundedSourceFolders = sourceFolders.filter((sourceFolder) =>
+    projectScopeSourceFolders.some((projectScopeSourceFolder) =>
+      isSameOrInsidePosixPath(sourceFolder, projectScopeSourceFolder)
+    )
+  );
+  return boundedSourceFolders.length ? boundedSourceFolders : projectScopeSourceFolders;
 }
 
 function normalizeProjectIndexSourceFolders(
@@ -262,4 +278,11 @@ function assertFullResetCleanupRoot(input: {
 function isSameOrInsidePath(candidatePath: string, parentPath: string): boolean {
   const relativePath = path.relative(path.resolve(parentPath), path.resolve(candidatePath));
   return relativePath === '' || (!relativePath.startsWith('..') && !path.isAbsolute(relativePath));
+}
+
+function isSameOrInsidePosixPath(candidatePath: string, parentPath: string): boolean {
+  const relativePath = path.posix.relative(parentPath, candidatePath);
+  return (
+    relativePath === '' || (!relativePath.startsWith('..') && !path.posix.isAbsolute(relativePath))
+  );
 }

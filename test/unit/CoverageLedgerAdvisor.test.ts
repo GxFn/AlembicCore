@@ -5,9 +5,11 @@
  * K/maxRounds 来自 D2（plan ?? D2[tier]，tier 由 moduleCount）。
  */
 import { describe, expect, it } from 'vitest';
+import type { UnifiedDimension } from '../../src/domain/dimension/UnifiedDimension.js';
 import type { CoverageLedgerRecord } from '../../src/repository/coverage/CoverageLedgerRepository.js';
 import {
   adviseCoverageLedger,
+  buildCoverageLedgerPanoramaRollup,
   resolveDeepMiningK,
   resolveDeepMiningMaxRounds,
 } from '../../src/workflows/surfaces/coverage/CoverageLedgerAdvisor.js';
@@ -34,6 +36,27 @@ function cell(over: Partial<CoverageLedgerRecord>): CoverageLedgerRecord {
   };
 }
 
+function dimension(input: Partial<UnifiedDimension> & Pick<UnifiedDimension, 'id' | 'label'>) {
+  return {
+    id: input.id,
+    label: input.label,
+    layer: 'universal',
+    icon: 'Circle',
+    colorFamily: 'sky',
+    extractionGuide: '',
+    allowedKnowledgeTypes: [],
+    outputMode: 'candidate-only',
+    qualityDescription: '',
+    matchTopics: [],
+    matchCategories: [],
+    weight: 0.5,
+    suggestedTopics: [],
+    relatedRoles: [],
+    displayGroup: 'architecture',
+    ...input,
+  } satisfies UnifiedDimension;
+}
+
 describe('CoverageLedgerAdvisor — D2 resolvers', () => {
   it('K = S1/M2/L3，maxRounds = S2/M3/L5；env 覆盖 + guard', () => {
     expect(resolveDeepMiningK('S')).toBe(1);
@@ -56,6 +79,171 @@ describe('CoverageLedgerAdvisor — D2 resolvers', () => {
         process.env.ALEMBIC_DEEP_MINING_K_M = prev;
       }
     }
+  });
+});
+
+describe('CoverageLedgerAdvisor — Panorama rollup', () => {
+  const dimensions = [
+    dimension({
+      id: 'architecture',
+      label: '架构与设计',
+      weight: 1,
+      suggestedTopics: ['module-boundary'],
+      relatedRoles: ['core', 'foundation'],
+    }),
+    dimension({
+      id: 'error-resilience',
+      label: '错误与健壮性',
+      weight: 1,
+      suggestedTopics: ['error-recovery'],
+      relatedRoles: ['service', 'networking', 'core'],
+    }),
+  ];
+
+  it('rolls coverage ledger cells into DimensionRegistry-backed coverage, health radar, and gaps', () => {
+    const rollup = buildCoverageLedgerPanoramaRollup({
+      dimensions,
+      moduleRoles: [
+        { moduleId: 'target:Core:src/core', roles: ['core', 'ui'] },
+        { moduleId: 'target:Plugin:src/plugin', roles: ['app'] },
+        { moduleId: 'target:Service:src/service', roles: ['service'] },
+      ],
+      cells: [
+        cell({
+          moduleId: 'target:Core:src/core',
+          dimensionId: 'architecture',
+          grade: 'empty',
+          valueScore: 0.9,
+        }),
+        cell({
+          moduleId: 'target:Plugin:src/plugin',
+          dimensionId: 'architecture',
+          grade: 'thin',
+          valueScore: 0.4,
+        }),
+        cell({
+          moduleId: 'target:Service:src/service',
+          dimensionId: 'error-resilience',
+          grade: 'partial',
+          coveredCount: 1,
+          totalCandidateCount: 2,
+        }),
+        cell({
+          moduleId: 'target:Core:src/core',
+          dimensionId: 'error-resilience',
+          grade: 'covered',
+          coveredCount: 2,
+          totalCandidateCount: 2,
+        }),
+      ],
+    });
+
+    expect(rollup).toMatchObject({
+      basis: 'coverage-ledger-rollup',
+      directModuleIdAligned: false,
+      healthRadar: {
+        basis: 'coverage-ledger-rollup',
+        score: 44,
+      },
+    });
+    expect(rollup.dimensionCoverage).toEqual([
+      {
+        id: 'architecture',
+        label: '架构与设计',
+        weight: 1,
+        status: 'missing',
+        score: 13,
+        coverageRatio: 0.125,
+        cellCount: 2,
+        coveredCandidateCount: 0,
+        totalCandidateCount: 0,
+        coveredCellCount: 0,
+        partialCellCount: 0,
+        weakCellCount: 1,
+        missingCellCount: 1,
+      },
+      {
+        id: 'error-resilience',
+        label: '错误与健壮性',
+        weight: 1,
+        status: 'adequate',
+        score: 75,
+        coverageRatio: 0.75,
+        cellCount: 2,
+        coveredCandidateCount: 3,
+        totalCandidateCount: 4,
+        coveredCellCount: 1,
+        partialCellCount: 1,
+        weakCellCount: 0,
+        missingCellCount: 0,
+      },
+    ]);
+    expect(rollup.gaps).toEqual([
+      {
+        dimensionId: 'architecture',
+        dimensionName: '架构与设计',
+        status: 'missing',
+        priority: 'high',
+        weight: 1,
+        suggestedTopics: ['module-boundary'],
+        relatedRoles: ['core', 'foundation'],
+        affectedRoles: ['core'],
+        affectedModuleIds: ['target:Core:src/core', 'target:Plugin:src/plugin'],
+        missingCellCount: 1,
+        weakCellCount: 1,
+        valueScore: 0.9,
+      },
+    ]);
+  });
+
+  it('keeps empty ledgers and partial coverage deterministic without fabricating recipe counts', () => {
+    const emptyRollup = buildCoverageLedgerPanoramaRollup({
+      dimensions: [dimensions[0]],
+      cells: [],
+    });
+    expect(emptyRollup.dimensionCoverage).toEqual([
+      {
+        id: 'architecture',
+        label: '架构与设计',
+        weight: 1,
+        status: 'missing',
+        score: 0,
+        coverageRatio: 0,
+        cellCount: 0,
+        coveredCandidateCount: 0,
+        totalCandidateCount: 0,
+        coveredCellCount: 0,
+        partialCellCount: 0,
+        weakCellCount: 0,
+        missingCellCount: 0,
+      },
+    ]);
+    expect(emptyRollup.gaps[0]).toMatchObject({
+      dimensionId: 'architecture',
+      status: 'missing',
+      affectedModuleIds: [],
+      valueScore: 0,
+    });
+    expect('recipeCount' in emptyRollup.gaps[0]).toBe(false);
+
+    const partialRollup = buildCoverageLedgerPanoramaRollup({
+      dimensions: [dimensions[0]],
+      cells: [
+        cell({
+          dimensionId: 'architecture',
+          grade: 'partial',
+          coveredCount: 1,
+          totalCandidateCount: 4,
+        }),
+      ],
+    });
+    expect(partialRollup.dimensionCoverage[0]).toMatchObject({
+      status: 'weak',
+      score: 25,
+      coveredCandidateCount: 1,
+      totalCandidateCount: 4,
+    });
+    expect(partialRollup.gaps).toEqual([]);
   });
 });
 

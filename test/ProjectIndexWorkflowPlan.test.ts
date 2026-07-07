@@ -226,13 +226,14 @@ describe('project-index workflow plan collapse', () => {
     process.env.ALEMBIC_HOME = singleRoot;
     const projectRoot = path.join(singleRoot, 'StandaloneRepo');
     const dataRoot = path.join(singleRoot, '.asd', 'workspaces', 'standalone');
+    const intent = createInternalColdStartIntent({
+      contentMaxLines: 77,
+      maxFiles: 123,
+      skipGuard: true,
+    });
 
     const plan = buildColdStartWorkflowPlan({
-      intent: createInternalColdStartIntent({
-        contentMaxLines: 77,
-        maxFiles: 123,
-        skipGuard: true,
-      }),
+      intent,
       projectRoot,
       dataRoot,
     });
@@ -246,6 +247,35 @@ describe('project-index workflow plan collapse', () => {
     });
     expect(plan.projectAnalysis.scan.sourceFolders).toBeUndefined();
     expect(plan.intent.projectAnalysis.sourceFolders).toBeUndefined();
+    expect(plan).toEqual({
+      intent,
+      cleanup: {
+        policy: 'full-reset',
+        projectRoot,
+        dataRoot,
+      },
+      projectAnalysis: {
+        projectRoot,
+        prepare: { clearOldData: true },
+        scan: {
+          maxFiles: 123,
+          contentMaxLines: 77,
+          skipGuard: true,
+          sourceTag: 'bootstrap',
+          generateReport: true,
+          generateAstContext: true,
+          incremental: false,
+          logPrefix: 'Bootstrap',
+        },
+        materialize: {
+          sourceGraph: true,
+          dependencyEdges: true,
+          moduleEntities: true,
+          guardViolations: true,
+        },
+      },
+      response: { tool: 'alembic_bootstrap' },
+    });
   });
 
   it('keeps explicit ColdStartWorkflowIntent sourceFolders as the scan contract', () => {
@@ -254,6 +284,41 @@ describe('project-index workflow plan collapse', () => {
     });
 
     expect(intent.projectAnalysis.sourceFolders).toEqual(['AlembicCore', 'packages/ui']);
+  });
+
+  it('bounds explicit ProjectScope full-mode sourceFolders to configured members', () => {
+    const fixture = createNativeProjectScopeFixture();
+
+    const plan = buildColdStartWorkflowPlan({
+      intent: createHostAgentColdStartIntent({
+        sourceFolders: ['AlembicCore/src', 'BiliDili', 'wakeflow-ledger', 'AlembicDashboard'],
+      }),
+      projectRoot: fixture.controlRoot,
+      dataRoot: fixture.dataRoot,
+    });
+
+    expect(plan.projectAnalysis.projectRoot).toBe(fixture.controlRoot);
+    expect(plan.projectAnalysis.scan.sourceFolders).toEqual([
+      'AlembicCore/src',
+      'AlembicDashboard',
+    ]);
+    expect(plan.intent.projectAnalysis.sourceFolders).toEqual([
+      'AlembicCore/src',
+      'AlembicDashboard',
+    ]);
+
+    const allRejectedPlan = buildColdStartWorkflowPlan({
+      intent: createHostAgentColdStartIntent({
+        sourceFolders: ['BiliDili', 'legacy', 'wakeflow-ledger'],
+      }),
+      projectRoot: fixture.controlRoot,
+      dataRoot: fixture.dataRoot,
+    });
+
+    expect(allRejectedPlan.projectAnalysis.scan.sourceFolders).toEqual([...PROJECT_SCOPE_MEMBERS]);
+    expect(allRejectedPlan.intent.projectAnalysis.sourceFolders).toEqual([
+      ...PROJECT_SCOPE_MEMBERS,
+    ]);
   });
 });
 
@@ -264,7 +329,13 @@ function createNativeProjectScopeFixture(): { controlRoot: string; dataRoot: str
   const registryDir = path.join(controlRoot, '.asd');
   const dataRoot = path.join(registryDir, 'workspaces', 'ecf32806');
   fs.mkdirSync(registryDir, { recursive: true });
-  for (const folder of [...PROJECT_SCOPE_MEMBERS, 'Test', 'wakeflow-ledger', 'legacy']) {
+  for (const folder of [
+    ...PROJECT_SCOPE_MEMBERS,
+    'BiliDili',
+    'Test',
+    'wakeflow-ledger',
+    'legacy',
+  ]) {
     fs.mkdirSync(path.join(controlRoot, folder), { recursive: true });
   }
   const projectScope = createProjectDescriptor({
