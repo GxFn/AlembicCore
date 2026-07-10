@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
 import {
   createSourceGraphDiagnostic,
   createSourceGraphFreshness,
@@ -117,16 +118,16 @@ const DEFAULT_INCLUDE_EXTENSIONS = [
   '.toml',
 ];
 
+// Track2 激活真机复核(2026-07-10 BiliDili):私有排除表漏 '.build'(SPM 检出物),
+// 首次全量 1408 文件里 87% 是 .build 依赖源码——与 ReDoS 事故同源的污染入口。
+// 改为对齐共享排除家族(COMMON_SOURCE_SCAN_EXCLUDE_DIRS:含 .build/Pods/
+// DerivedData/Carthage 等),叠加本索引器的 workspace 运行时目录。
 const DEFAULT_IGNORE_DIRECTORIES = [
-  '.git',
+  ...COMMON_SOURCE_SCAN_EXCLUDE_DIRS,
   '.workspace-active',
   '.workspace-local',
   '.asd',
-  'dist',
-  'build',
-  'coverage',
-  'node_modules',
-  'vendor',
+  '.swiftpm',
 ];
 
 const PARSABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
