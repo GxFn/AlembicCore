@@ -107,6 +107,13 @@ export interface SearchResultItem {
   coarseScore?: number;
   contextScore?: number;
   recallScore?: number;
+  /** 命中知识的源码锚点(recipe_source_refs 桥表;renamed 用 newPath)。 */
+  sourceRefs?: string[];
+  /** G-C P1:内容指纹已漂移(文件在但被引区间内容变)的锚点子集。 */
+  driftedSourceRefs?: string[];
+  /** G-C P1:item 级源锚聚合态——任一锚点 drifted 即 'drifted',否则 'active'。
+   *  drifted 不排除检索(漂移≠错误,可能只是行号动了),但降权并透出交使用现场判断。 */
+  sourceRefStatus?: 'active' | 'drifted';
   [key: string]: unknown;
 }
 

@@ -80,6 +80,10 @@ export {
 } from './SearchTypes.js';
 export { tokenize } from './tokenizer.js';
 
+// G-C P1:源锚漂移的检索降权因子(乘性)。0.85=温和降权——漂移不等于错误,
+// 只在同分附近让 active 上浮,不把漂移知识挤出结果(降级消费而非排除)。
+const DRIFTED_SOURCE_REF_SCORE_FACTOR = 0.85;
+
 /**
  * SearchEngine - 完整搜索服务
  * 整合召回评分 + 关键词 + 可选 AI 增强
@@ -471,11 +475,18 @@ export class SearchEngine {
     if ((context?.sessionHistory?.length ?? 0) > 0) {
       ranked = contextBoost(ranked as SearchItem[], context) as SearchResultItem[];
     }
-    return ranked.map((r: SearchResultItem) => ({
-      ...r,
-      recallScore: r.recallScore || 0,
-      score: r.contextScore || r.rankerScore || r.coarseScore || r.recallScore || 0,
-    }));
+    return ranked.map((r: SearchResultItem) => {
+      const baseScore = r.contextScore || r.rankerScore || r.coarseScore || r.recallScore || 0;
+      // G-C P1:源锚漂移降权(active 优先)。漂移≠错误(可能只是行号动了),故只降级
+      // 消费而不排除——乘性小惩罚保持相对序,仅在同分附近让 active 上浮。透出交现场判断。
+      const score =
+        r.sourceRefStatus === 'drifted' ? baseScore * DRIFTED_SOURCE_REF_SCORE_FACTOR : baseScore;
+      return {
+        ...r,
+        recallScore: r.recallScore || 0,
+        score,
+      };
+    });
   }
 
   /**
@@ -1094,7 +1105,11 @@ export class SearchEngine {
         rowCount: refsRows.length,
       });
 
-      const refsMap = new Map<string, string[]>();
+      // G-C P1:携带 per-ref 状态,不再把非 stale 锚点塌成无区分的扁平路径。
+      // drifted(文件在、被引区间内容变)此前混进 refs 与 active 无从区分——检索因此
+      // 对漂移视而不见。现聚合出 driftedSourceRefs 子集 + item 级 sourceRefStatus,
+      // 供排序降权与输出透出(status='stale' 已被 findActiveByRecipeIds 在 SQL 层排除)。
+      const refsMap = new Map<string, { refs: string[]; drifted: string[] }>();
       for (const row of refsRows) {
         const recipeId =
           ((row as Record<string, unknown>).recipeId as string) ??
@@ -1108,15 +1123,25 @@ export class SearchEngine {
           ((row as Record<string, unknown>).new_path as string | null);
         const refPath = status === 'renamed' && newPath ? newPath : sourcePath;
         if (!refsMap.has(recipeId)) {
-          refsMap.set(recipeId, []);
+          refsMap.set(recipeId, { drifted: [], refs: [] });
         }
-        refsMap.get(recipeId)?.push(refPath);
+        const bucket = refsMap.get(recipeId);
+        bucket?.refs.push(refPath);
+        if (status === 'drifted') {
+          bucket?.drifted.push(refPath);
+        }
       }
 
       for (const item of items) {
-        const refs = refsMap.get(item.id);
-        if (refs && refs.length > 0) {
-          (item as SearchResultItem & { sourceRefs?: string[] }).sourceRefs = refs;
+        const bucket = refsMap.get(item.id);
+        if (bucket && bucket.refs.length > 0) {
+          item.sourceRefs = bucket.refs;
+          if (bucket.drifted.length > 0) {
+            item.driftedSourceRefs = bucket.drifted;
+            item.sourceRefStatus = 'drifted';
+          } else {
+            item.sourceRefStatus = 'active';
+          }
         }
       }
     } catch {

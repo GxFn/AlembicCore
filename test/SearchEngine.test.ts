@@ -746,4 +746,69 @@ describe('SearchEngine', () => {
     const cached = engine._getCache('test:all:20:keyword:::nofilters');
     expect(cached).toBeNull();
   });
+
+  /* ────────────────────────────────────────────
+   *  G-C P1: 源锚漂移在检索侧透出 + 降权
+   * ──────────────────────────────────────────── */
+  describe('source-ref drift surfacing (G-C P1)', () => {
+    /** 注入 mock sourceRefRepo,按 recipeId 返回不同 status 的桥表行。 */
+    function engineWithRefs(rowsByRecipe) {
+      const engine = new SearchEngine(makeMockDb(), {
+        sourceRefRepo: {
+          findActiveByRecipeIds: (ids) => ids.flatMap((id) => rowsByRecipe[id] ?? []),
+        },
+      });
+      return engine;
+    }
+
+    test('_supplementDetails: 纯 active 锚点 → sourceRefStatus=active,无 driftedSourceRefs', () => {
+      const engine = engineWithRefs({
+        r1: [
+          { recipeId: 'r1', sourcePath: 'src/a.ts:1-9', status: 'active', newPath: null },
+          { recipeId: 'r1', sourcePath: 'src/b.ts:1-9', status: 'active', newPath: null },
+        ],
+      });
+      const items = [{ id: 'r1' }];
+      engine._supplementDetails(items);
+      expect(items[0].sourceRefs).toEqual(['src/a.ts:1-9', 'src/b.ts:1-9']);
+      expect(items[0].sourceRefStatus).toBe('active');
+      expect(items[0].driftedSourceRefs).toBeUndefined();
+    });
+
+    test('_supplementDetails: 含 drifted 锚点 → sourceRefStatus=drifted + driftedSourceRefs 子集;renamed 用 newPath', () => {
+      const engine = engineWithRefs({
+        r2: [
+          { recipeId: 'r2', sourcePath: 'src/a.ts:1-9', status: 'active', newPath: null },
+          { recipeId: 'r2', sourcePath: 'src/b.ts:10-20', status: 'drifted', newPath: null },
+          {
+            recipeId: 'r2',
+            sourcePath: 'src/old.ts:1-5',
+            status: 'renamed',
+            newPath: 'src/new.ts:1-5',
+          },
+        ],
+      });
+      const items = [{ id: 'r2' }];
+      engine._supplementDetails(items);
+      // drifted 不排除:三条锚点都在 refs 里(renamed 用 newPath)。
+      expect(items[0].sourceRefs).toEqual(['src/a.ts:1-9', 'src/b.ts:10-20', 'src/new.ts:1-5']);
+      // 但 drifted 子集单列 + item 聚合态为 drifted。
+      expect(items[0].driftedSourceRefs).toEqual(['src/b.ts:10-20']);
+      expect(items[0].sourceRefStatus).toBe('drifted');
+    });
+
+    test('_applyRanking: drifted item 相对同分 active item 被降权(active 优先)', async () => {
+      const engine = new SearchEngine(makeMockDb());
+      // 两条几乎同分,只有源锚态不同;降权后 active 应排在 drifted 前。
+      const items = [
+        { id: 'drift', title: 'x', coarseScore: 1, rankerScore: 1, sourceRefStatus: 'drifted' },
+        { id: 'fresh', title: 'x', coarseScore: 1, rankerScore: 1, sourceRefStatus: 'active' },
+      ];
+      const ranked = await engine._applyRanking(items, 'x', {});
+      const drift = ranked.find((r) => r.id === 'drift');
+      const fresh = ranked.find((r) => r.id === 'fresh');
+      // drifted 乘性降权 → 分数严格低于 active。
+      expect(drift.score).toBeLessThan(fresh.score);
+    });
+  });
 });
