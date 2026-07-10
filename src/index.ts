@@ -61,6 +61,10 @@ export * from './infrastructure/index.js';
 export { KnowledgeRepositoryImpl } from './repository/knowledge/index.js';
 export * from './service/index.js';
 export { DivergenceError, PersistenceError } from './shared/errors/index.js';
+// G-C P3(2026-07-10):readFileAtCommit 是漂移分类器的 git 历史读取封装,消费方为
+// AlembicPlugin KnowledgeModule(gitReader 注入)。按 SD-5 B2=re-point 先例经 ROOT
+// 门面具名导出,不进已冻结在 shrink-only 预算 192 的 ./shared 门面。
+export { type ReadFileAtCommitOptions, readFileAtCommit } from './shared/gitBlob.js';
 export * from './shared/index.js';
 // SD-5 phase-2 (RW1, B2=re-point): the MT2 output-budget mechanism and the
 // CO3 persistence/divergence error classes are re-pointed onto the ROOT facade

@@ -23,7 +23,9 @@ export {
 export * from './FailureTaxonomy.js';
 export * from './FieldTaxonomy.js';
 export * from './folderNames.js';
-export * from './gitBlob.js';
+// gitBlob(readFileAtCommit,G-C P3 漂移分类的 git 历史读取)不进本冻结门面:
+// ./shared 处于 CO1 shrink-only 收缩预算(192),新增符号按 SD-5 B2=re-point
+// 先例走 ROOT 门面(@alembic/core)具名导出——见 src/index.ts。
 export * from './isOwnDevRepo.js';
 export * from './LanguageProfiles.js';
 export * from './LanguageService.js';
