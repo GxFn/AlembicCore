@@ -1,5 +1,3 @@
-import path from 'node:path';
-
 import '../../../core/ast/index.js';
 import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
 import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
