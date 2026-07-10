@@ -485,6 +485,14 @@ export interface SlimSearchResult {
   tags?: string[];
   /** 已验证的项目来源文件路径（可信度证据链） */
   sourceRefs?: string[];
+  /**
+   * D5(2026-07-11,prime 面 drift 对称):G-C P1 的 item 级源锚聚合态此前在瘦身
+   * 投影被丢弃——同一 Recipe 走 search 带 drifted 标注,走 prime(经 slim)则以
+   * 无标记 trusted 证据交付。透传仅标注,不改变排序/信任门(消费方自判)。
+   */
+  sourceRefStatus?: 'active' | 'drifted';
+  /** drifted 子集(与 sourceRefs 同一 refPath 串,可集合匹配逐条标记)。 */
+  driftedSourceRefs?: string[];
 }
 
 /**
@@ -518,6 +526,13 @@ export function slimSearchResult(item: SearchResultItem): SlimSearchResult {
   const tags = Array.isArray(item.tags)
     ? item.tags.filter((tag): tag is string => typeof tag === 'string')
     : undefined;
+  // D5:drift 标注随 sourceRefs 一起过瘦身投影(此前被丢弃,prime 面漂移盲)。
+  const driftedRefs =
+    Array.isArray(item.driftedSourceRefs) && item.driftedSourceRefs.length > 0
+      ? item.driftedSourceRefs.filter(
+          (ref): ref is string => typeof ref === 'string' && ref.length > 0
+        )
+      : undefined;
   return {
     id: item.id,
     title: (item.title as string) || '',
@@ -533,6 +548,8 @@ export function slimSearchResult(item: SearchResultItem): SlimSearchResult {
     category: (item.category as string) || undefined,
     tags,
     sourceRefs,
+    ...(item.sourceRefStatus ? { sourceRefStatus: item.sourceRefStatus } : {}),
+    ...(driftedRefs ? { driftedSourceRefs: driftedRefs } : {}),
   };
 }
 
