@@ -60,6 +60,14 @@ export * from './infrastructure/index.js';
 // 阶段 14：根入口只暴露外层收敛需要的稳定契约，避免把内部重复类型通过 export * 撞到一起。
 export { KnowledgeRepositoryImpl } from './repository/knowledge/index.js';
 export * from './service/index.js';
+export type { SourceGraphIndexOptions } from './service/source-graph/SourceGraphIndexer.js';
+// Track2(2026-07-10):source-graph 生命周期激活。该子系统此前连 service 门面都未
+// 导出(全仓零调用方,四表恒 0 行);按 SD-5 先例经 ROOT 门面具名导出,消费方=
+// 主体挖掘准备段(catchUpOnStartup:无快照全量/stale 增量/fresh noop,幂等)。
+export {
+  type SourceGraphLifecycleResult,
+  SourceGraphLifecycleService,
+} from './service/source-graph/SourceGraphLifecycle.js';
 export { DivergenceError, PersistenceError } from './shared/errors/index.js';
 // G-C P3(2026-07-10):readFileAtCommit 是漂移分类器的 git 历史读取封装,消费方为
 // AlembicPlugin KnowledgeModule(gitReader 注入)。按 SD-5 B2=re-point 先例经 ROOT
