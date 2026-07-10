@@ -1029,6 +1029,12 @@ function createLocalPackageSummaries(input: {
   for (const target of input.targets) {
     const targetPath = normalizeTargetPath(input.repo, target);
     const metadata = readRecord(target.metadata);
+    // 带清单元数据(packageName/packagePath)的 target 走下方清单派生路径:
+    // 否则 SPM 的 test target 会以 target 名冒充包名,且 ref 指向不存在的
+    // package.json((C) 修复时收敛的旧循环噪音)。
+    if (readString(metadata?.packageName)) {
+      continue;
+    }
     const targetPackageJson = readRecord(metadata?.packageJson);
     const packageName = readString(targetPackageJson?.name) ?? target.name;
     if (!targetPath || targetPath === '.' || !packageName) {
