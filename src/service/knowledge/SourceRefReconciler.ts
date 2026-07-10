@@ -101,8 +101,6 @@ export class SourceRefReconciler {
   #ttlMs: number;
   #sourceRefIndex: ProjectScopeSourceRefIndex | null;
   #gitReader: ((commit: string, relPath: string) => string | null) | null = null;
-  /** 当前 reconcile 轮的基线 commit(P3 精判用;每轮开始设置,结束清空)。 */
-  #baselineCommit: string | null = null;
 
   constructor(
     projectRoot: string,
@@ -138,7 +136,8 @@ export class SourceRefReconciler {
   async reconcile(opts?: { force?: boolean; baselineCommit?: string }): Promise<ReconcileReport> {
     const force = opts?.force ?? false;
     // P3 observe-only:整批 reconcile 的基线 commit(用于 drifted 精判);缺省=不精判。
-    this.#baselineCommit = opts?.baselineCommit ?? null;
+    // 经参数链传递而非实例态——本类是 DI 单例且 MCP 处理并发,实例态会被并行轮次互踩。
+    const baselineCommit = opts?.baselineCommit ?? null;
     const report: ReconcileReport = {
       inserted: 0,
       active: 0,
@@ -168,6 +167,7 @@ export class SourceRefReconciler {
       }
 
       this.#reconcileRecipeSourceRefs(row.id, parsed.sources, {
+        baselineCommit,
         countRecipe: true,
         force,
         now,
@@ -189,7 +189,6 @@ export class SourceRefReconciler {
       this.#emitStaleSignals();
     }
 
-    this.#baselineCommit = null;
     return report;
   }
 
@@ -233,15 +232,15 @@ export class SourceRefReconciler {
       return report;
     }
 
-    // P3 observe-only:本轮基线 commit(用于 drifted 精判);缺省=不精判。
-    this.#baselineCommit = opts?.baselineCommit ?? null;
+    // P3 observe-only:本轮基线 commit(用于 drifted 精判);缺省=不精判。参数链传递,
+    // 不用实例态(DI 单例 + MCP 并发,实例态会被并行轮次互踩)。
     this.#reconcileRecipeSourceRefs(recipe.id, parsed.sources, {
+      baselineCommit: opts?.baselineCommit ?? null,
       countRecipe: true,
       force: opts?.force ?? true,
       now: Date.now(),
       report,
     });
-    this.#baselineCommit = null;
 
     this.#logger.info('SourceRefReconciler: recipe source refs refreshed', {
       active: report.active,
@@ -298,7 +297,13 @@ export class SourceRefReconciler {
   #reconcileRecipeSourceRefs(
     recipeId: string,
     sources: readonly string[],
-    opts: { countRecipe: boolean; force: boolean; now: number; report: ReconcileReport }
+    opts: {
+      baselineCommit: string | null;
+      countRecipe: boolean;
+      force: boolean;
+      now: number;
+      report: ReconcileReport;
+    }
   ): void {
     if (opts.countRecipe) {
       opts.report.recipesProcessed++;
@@ -307,6 +312,7 @@ export class SourceRefReconciler {
 
     for (const sourcePath of sources) {
       this.#reconcileSourceRef(recipeId, sourcePath, {
+        baselineCommit: opts.baselineCommit,
         force: opts.force,
         now: opts.now,
         report: opts.report,
@@ -331,7 +337,7 @@ export class SourceRefReconciler {
   #reconcileSourceRef(
     recipeId: string,
     sourcePath: string,
-    opts: { force: boolean; now: number; report: ReconcileReport }
+    opts: { baselineCommit: string | null; force: boolean; now: number; report: ReconcileReport }
   ): void {
     const existing = this.#sourceRefRepo.findOne(recipeId, sourcePath);
     if (existing && !opts.force && opts.now - existing.verifiedAt < this.#ttlMs) {
@@ -341,7 +347,15 @@ export class SourceRefReconciler {
 
     const exists = this.#sourcePathExists(sourcePath);
     if (existing) {
-      this.#updateExistingSourceRef(recipeId, sourcePath, exists, opts.now, opts.report, existing);
+      this.#updateExistingSourceRef(
+        recipeId,
+        sourcePath,
+        exists,
+        opts.now,
+        opts.report,
+        existing,
+        opts.baselineCommit
+      );
       return;
     }
 
@@ -407,7 +421,8 @@ export class SourceRefReconciler {
     exists: boolean,
     verifiedAt: number,
     report: ReconcileReport,
-    existing: RecipeSourceRefEntity
+    existing: RecipeSourceRefEntity,
+    baselineCommit: string | null
   ): void {
     if (!exists) {
       // 文件不存在 → stale；不写 content_fp，保留旧指纹以便文件复活后比对。
@@ -488,16 +503,20 @@ export class SourceRefReconciler {
     });
     // P3 observe-only 精判:有 git 读取器+基线 commit 时,判 drifted 是行号漂移还是内容实变,
     // 只记进 report + 日志,不改 status、不改 sourceRefs(自动修 range 是后续项)。
-    this.#classifyDriftObserveOnly(recipeId, sourcePath, report);
+    this.#classifyDriftObserveOnly(recipeId, sourcePath, report, baselineCommit);
   }
 
   /**
    * P3 observe-only:分类 drifted 原因。缺 gitReader/baselineCommit/旧内容任一 → 静默跳过
    * (不精判,维持粗粒度 drifted)。绝不因精判失败影响 reconcile 主流程。
    */
-  #classifyDriftObserveOnly(recipeId: string, sourcePath: string, report: ReconcileReport): void {
+  #classifyDriftObserveOnly(
+    recipeId: string,
+    sourcePath: string,
+    report: ReconcileReport,
+    baselineCommit: string | null
+  ): void {
     const gitReader = this.#gitReader;
-    const baselineCommit = this.#baselineCommit;
     if (!gitReader || !baselineCommit) {
       return;
     }

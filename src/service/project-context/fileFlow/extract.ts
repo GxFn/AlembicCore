@@ -40,12 +40,16 @@ interface AstCallSiteLike {
 // parseCommonJsRequire 的懒惰组在其上灾难性回溯,钉死宿主 MCP 单线程事件循环 1h+)。
 // 三层防御:①整文件压缩/生成物判定(本常量组)→ 走 unavailableReason 降级;②行长门——
 // 超长行不进任何行级正则(真实 import/require 语句远短于此);③正则组自身界长。
-// 阈值语义:超过它们的内容不是人写的可挖源码,跳过是"正确语义"而不仅是保护。
+// 阈值分工(复审校准):防线②的 2000 是"单行不解析"门,兜住正则安全;防线①的整文件
+// 跳过必须显著保守——合法手写源码里嵌 5-15KB 的 data-URI/base64 字符串是真实形态,
+// 单行 5000 就整文件跳过会把这类文件的 imports 全部误杀(防线②本就会跳过那一行)。
+// 20000 以上的单行不再有合法手写场景(jquery.min 单行 80KB+ 仍稳判);平均行长 400
+// 仍是 minified bundle(整文件几乎无换行)的主判据。
 const MAX_PARSE_LINE_LENGTH = 2_000;
-const PATHOLOGICAL_SINGLE_LINE_LENGTH = 5_000;
+const PATHOLOGICAL_SINGLE_LINE_LENGTH = 20_000;
 const PATHOLOGICAL_AVG_LINE_LENGTH = 400;
 
-/** 压缩/生成物形态判定:任一行超长,或平均行长离谱(минified bundle 的典型形态)。 */
+/** 压缩/生成物形态判定:任一行极端超长,或平均行长离谱(minified bundle 的典型形态)。 */
 function detectPathologicalSourceShape(
   text: string
 ): { pathological: true; reason: string } | { pathological: false } {

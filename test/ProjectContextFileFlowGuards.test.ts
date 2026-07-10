@@ -65,6 +65,37 @@ describe('fileFlow 病态输入防线(ReDoS 回归)', () => {
     );
   });
 
+  it('防线①收窄:含 8KB data-URI 行的合法源码不被整文件误杀——该行跳过,imports 保留', async () => {
+    // 复审发现的过激边界:单行 5000 就整文件跳过会误杀"合法代码里嵌长 base64/data-URI"
+    // 的真实形态。收窄到 20000 后:8KB 行只被防线②跳过,文件本身照常抽取 imports。
+    const dataUriLine = `const ICON = 'data:image/png;base64,${'A'.repeat(8_000)}';`;
+    expect(dataUriLine.length).toBeGreaterThan(5_000);
+    expect(dataUriLine.length).toBeLessThan(20_000);
+    const source = [
+      "const helper = require('./helper');",
+      dataUriLine,
+      'module.exports = { helper, ICON };',
+      // 压低平均行长(防线①的 avg 判据不应触发)。
+      ...Array.from({ length: 60 }, (_, index) => `// filler ${index}`),
+    ].join('\n');
+
+    await withFixture(
+      { 'src/helper.js': 'module.exports = {};', 'src/icon.js': source },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/icon.js' },
+          scope: { projectRoot, repoId: 'core' },
+        });
+        const data = envelope.data as FileFlowContext;
+        // 整文件未被跳过:合法 require 照常解析。
+        const specifiers = data.imports.map((relation) => relation.to?.label ?? '');
+        expect(specifiers).toContain('src/helper.js');
+        expect(JSON.stringify(envelope)).not.toContain('minified/generated');
+      }
+    );
+  });
+
   it('防线③:门限内的对抗行(大量 var/= 无 require 尾)也必须快速完成', async () => {
     // 1900 字符 < 行长门限 2000 → 进正则;界长组 {1,240} 把回溯限制在常数级。
     const adversarial = `var ${'a='.repeat(940)}b;`;
