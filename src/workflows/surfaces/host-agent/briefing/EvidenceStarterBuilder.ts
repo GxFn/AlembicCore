@@ -17,6 +17,19 @@ export interface EvidenceStarterOpts {
   depGraphData?: DependencyGraph | null;
   callGraphResult?: CallGraphResult | null;
   panoramaResult?: Record<string, unknown> | null;
+  /**
+   * 决策④(2026-07-11):source_graph 实体索引证据(files/symbols 计数)。
+   * 默认不传(生产行为零变化);主体挖掘链仅在 eval 开关
+   * ALEMBIC_SOURCE_GRAPH_EVIDENCE=1 时注入,A/B 对照后再决定常开。
+   */
+  sourceGraphResult?: {
+    action?: string;
+    durableTables?: {
+      source_graph_files?: number;
+      source_graph_symbols?: number;
+      source_graph_edges?: number;
+    };
+  } | null;
 }
 
 type EvidenceStarter = { hint: string; data: unknown };
@@ -24,7 +37,14 @@ type WeightedEvidenceStarter = EvidenceStarter & { strength: number };
 
 export function buildEvidenceStarters(
   dim: DimensionDef,
-  { astData, guardAudit, depGraphData, callGraphResult, panoramaResult }: EvidenceStarterOpts
+  {
+    astData,
+    guardAudit,
+    depGraphData,
+    callGraphResult,
+    panoramaResult,
+    sourceGraphResult,
+  }: EvidenceStarterOpts
 ): Record<string, WeightedEvidenceStarter> | undefined {
   const starters: Record<string, EvidenceStarter> = {};
   const dimId = dim.id;
@@ -407,6 +427,31 @@ export function buildEvidenceStarters(
         })),
       };
     }
+  }
+
+  // 决策④(2026-07-11,eval 开关注入):source_graph 实体库存证据——只给结构/
+  // 架构/命名类维度,提示 AI 实体索引可用(规模+构建动作),不内联实体明细
+  // (预算纪律:明细经检索工具按需取)。
+  const sourceGraphSymbols = sourceGraphResult?.durableTables?.source_graph_symbols ?? 0;
+  if (
+    sourceGraphResult &&
+    sourceGraphSymbols > 0 &&
+    (dimId === 'architecture-patterns' ||
+      dimId === 'naming-conventions' ||
+      dimId === 'code-standard' ||
+      dimKeywords.includes('架构') ||
+      dimKeywords.includes('模块') ||
+      dimKeywords.includes('structure') ||
+      dimKeywords.includes('architecture'))
+  ) {
+    starters.sourceGraphInventory = {
+      hint: `source-graph 实体索引已就绪(${sourceGraphResult.action ?? 'built'}):可按符号级证据核对命名/结构断言`,
+      data: {
+        files: sourceGraphResult.durableTables?.source_graph_files ?? 0,
+        symbols: sourceGraphSymbols,
+        edges: sourceGraphResult.durableTables?.source_graph_edges ?? 0,
+      },
+    };
   }
 
   if (Object.keys(starters).length === 0) {
