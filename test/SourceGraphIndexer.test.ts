@@ -187,7 +187,10 @@ describe('SourceGraphIndexer', () => {
     writeFixture('src/large.ts', `export const large = '${'x'.repeat(120)}';\n`);
     writeFixture('src/timeout.ts', `export const slow = '${'y'.repeat(60)}';\n`);
     writeFixture('src/Broken.ts', 'SOURCE_GRAPH_PARSE_FAILURE\n');
+    // Track2-b(2026-07-11):Swift 走 AST 解析(不再 unsupported)——正向断言其 parsed;
+    // 真正 unsupported 的样本换 ruby(不在 AST_PARSER_LANGUAGES)。
     writeFixture('src/App.swift', 'struct App {}\n');
+    writeFixture('src/legacy.rb', 'class Legacy; end\n');
 
     const repositories = createAlembicRepositories(runtime.connection);
     const service = new SourceGraphService(repositories.sourceGraphRepository);
@@ -197,14 +200,14 @@ describe('SourceGraphIndexer', () => {
       projectScope: 'src',
       generationId: 'gen-degraded',
       now: 4000,
-      includeExtensions: ['.ts', '.swift'],
+      includeExtensions: ['.ts', '.swift', '.rb'],
       maxFileSizeBytes: 100,
       maxParseBytes: 40,
     });
 
     expect(result.snapshot).toMatchObject({
       status: 'partial',
-      fileCount: 5,
+      fileCount: 6,
       parseErrorCount: 4,
     });
     expect(result.snapshot.freshness.status).toBe('partial');
@@ -217,12 +220,19 @@ describe('SourceGraphIndexer', () => {
     ]);
     expect(result.files.map((file) => [file.repoRelativePath, file.parseStatus])).toEqual(
       expect.arrayContaining([
-        ['src/App.swift', 'skipped'],
+        ['src/App.swift', 'parsed'],
+        ['src/legacy.rb', 'skipped'],
         ['src/Broken.ts', 'failed'],
         ['src/large.ts', 'skipped'],
         ['src/timeout.ts', 'partial'],
       ])
     );
+    // Swift AST 实体真实入库(struct App 以 class kind 归一)。
+    expect(
+      result.symbols.some(
+        (symbol) => symbol.filePath === 'src/App.swift' && symbol.displayName === 'App'
+      )
+    ).toBe(true);
   });
 
   function writeFixture(repoRelativePath: string, content: string): void {

@@ -35,6 +35,35 @@ describe('SourceGraphLifecycleService.catchUpOnStartup(Track2 激活)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('Track2-b:Swift 文件经 AST 出实体(此前非 JS 系一律 skipped,0 符号)', async () => {
+    write(
+      'Sources/Feed/FeedViewModel.swift',
+      [
+        'import AOXFoundationKit',
+        '',
+        'final class FeedViewModel {',
+        '    var title: String = ""',
+        '    func load() {',
+        '    }',
+        '}',
+        '',
+      ].join('\n')
+    );
+    const repositories = createAlembicRepositories(runtime.connection);
+    const lifecycle = new SourceGraphLifecycleService(
+      repositories.sourceGraphRepository as ConstructorParameters<
+        typeof SourceGraphLifecycleService
+      >[0]
+    );
+    const result = await lifecycle.catchUpOnStartup({ projectRoot: tmpDir });
+    expect(result.action).toBe('built-full');
+    // module 符号 + class FeedViewModel + func load + var title ≥ 4。
+    expect(result.durableTables.source_graph_symbols).toBeGreaterThanOrEqual(4);
+    const symbolNames = (result.build?.symbols ?? []).map((symbol) => symbol.displayName);
+    expect(symbolNames).toContain('FeedViewModel');
+    expect(symbolNames).toContain('load');
+  });
+
   it('无快照→全量建库;再跑→fresh noop;改文件→增量', async () => {
     write('src/index.ts', "import { helper } from './util';\nexport const app = helper();\n");
     write('src/util.ts', 'export function helper() { return 1; }\n');

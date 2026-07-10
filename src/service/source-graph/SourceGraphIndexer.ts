@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import '../../core/ast/index.js';
+import { analyzeFile, isAvailable as isAstAvailable } from '../../core/AstAnalyzer.js';
 import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
 import {
   createSourceGraphDiagnostic,
@@ -27,6 +29,10 @@ import {
   type ProjectDescriptor,
   type ProjectFolderDescriptor,
 } from '../../shared/ProjectScope.js';
+import {
+  JS_FAMILY_LANGUAGES,
+  resolveAstParserLanguage,
+} from '../project-context/shared/parserLanguage.js';
 
 export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v1';
 
@@ -523,6 +529,17 @@ async function parseInventoryFile(
     );
   }
   if (!PARSABLE_EXTENSIONS.has(file.extension)) {
+    // Track2-b(2026-07-11 决策③生态补全):非 JS 系但 AstAnalyzer 支持的语言
+    // (swift/objectivec/kotlin/python/go/rust/dart…)走 AST 符号抽取——此前一律
+    // skipped,BiliDili(纯 Swift)source_graph 恒 0 实体。预算闸(maxParseBytes)
+    // 对 AST 路径同样生效;AST 不可用/解析失败按 failed 降级,files 行保留。
+    const astLanguage = resolveAstParserLanguage(file.repoRelativePath, file.language);
+    if (astLanguage && !JS_FAMILY_LANGUAGES.has(astLanguage)) {
+      if (file.sizeBytes > options.maxParseBytes) {
+        return partialFile(baseFile, 'parser-timeout', 'File exceeded source graph parser budget.');
+      }
+      return parseAstFile(content, baseFile, file, generationId, options, lineCount, astLanguage);
+    }
     return skippedFile(
       baseFile,
       'unsupported-language',
@@ -542,6 +559,113 @@ async function parseInventoryFile(
     file: baseFile,
     symbols,
     edges,
+    diagnostics: [],
+  };
+}
+
+/** AstAnalyzer 的 summary 记录最小读取形态(与 fileSymbols 适配层同源语义)。 */
+interface AstSymbolRecordLike {
+  name?: unknown;
+  kind?: unknown;
+  line?: unknown;
+  endLine?: unknown;
+  className?: unknown;
+}
+
+interface AstSummaryLike {
+  classes?: AstSymbolRecordLike[];
+  protocols?: AstSymbolRecordLike[];
+  methods?: AstSymbolRecordLike[];
+  properties?: AstSymbolRecordLike[];
+  imports?: Array<{ specifier?: unknown } | string>;
+}
+
+/**
+ * Track2-b:AST 语言的符号/导入抽取。产出契约与正则版 extractSymbols 完全同型
+ * (symbolId=path#name/range/provenance),消费方(仓储/查询)零改动。
+ * Swift 等模块名导入解析不到仓内文件(与 JS 相对导入语义不同),本期不产伪 file
+ * 边——imports 证据留待模块名 join 需求(与 Track1 同语义)单独立项。
+ */
+function parseAstFile(
+  content: string,
+  baseFile: SourceFileNodeInput,
+  file: InventoryFile,
+  generationId: string,
+  options: NormalizedIndexOptions,
+  lineCount: number,
+  astLanguage: string
+): ParsedFile {
+  if (!isAstAvailable()) {
+    return failedFile(baseFile, `AST runtime unavailable for language ${astLanguage}.`);
+  }
+  let summary: AstSummaryLike | null = null;
+  try {
+    summary = analyzeFile(content, astLanguage, { extractCallSites: false }) as AstSummaryLike;
+  } catch (error) {
+    return failedFile(
+      baseFile,
+      `AST parse failed for ${astLanguage}: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  if (!summary) {
+    return failedFile(baseFile, `AST parser returned no summary for ${astLanguage}.`);
+  }
+
+  const symbols: SourceSymbolNode[] = [
+    moduleSymbolFromInventory(file, generationId, options.extractorVersion, lineCount),
+  ];
+  const pushSymbol = (record: AstSymbolRecordLike, kind: string) => {
+    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : null;
+    if (!name) {
+      return;
+    }
+    const startLine =
+      typeof record.line === 'number' && record.line >= 1 ? Math.trunc(record.line) : 1;
+    const endLine =
+      typeof record.endLine === 'number' && record.endLine >= startLine
+        ? Math.trunc(record.endLine)
+        : startLine;
+    const container =
+      typeof record.className === 'string' && record.className.trim()
+        ? record.className.trim()
+        : null;
+    symbols.push({
+      generationId,
+      symbolId: `${file.repoRelativePath}#${container ? `${container}.` : ''}${name}`,
+      displayName: name,
+      qualifiedName: container ? `${container}.${name}` : name,
+      kind,
+      filePath: file.repoRelativePath,
+      range: { startLine, startColumn: 0, endLine, endColumn: 0 },
+      exported: false,
+      imported: false,
+      metadata: {
+        extractorVersion: options.extractorVersion,
+        declarationKind: kind,
+        astLanguage,
+      },
+      provenance: {
+        extractor: 'source-graph-ast-symbols',
+      },
+    });
+  };
+  for (const record of summary.classes ?? []) {
+    pushSymbol(record, 'class');
+  }
+  for (const record of summary.protocols ?? []) {
+    pushSymbol(record, 'interface');
+  }
+  for (const record of summary.methods ?? []) {
+    pushSymbol(record, 'function');
+  }
+  for (const record of summary.properties ?? []) {
+    pushSymbol(record, 'variable');
+  }
+
+  return {
+    file: baseFile,
+    symbols,
+    edges: [],
     diagnostics: [],
   };
 }
