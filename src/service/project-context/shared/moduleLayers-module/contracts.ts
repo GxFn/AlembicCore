@@ -363,12 +363,27 @@ function shouldSkipDirectory(
   directoryName: string,
   input: { includeGenerated: boolean; includeVendor: boolean }
 ): boolean {
-  if (!input.includeVendor && ['node_modules', 'vendor', '.git'].includes(directoryName)) {
+  // 点目录通则:与 repo.ts 源扫描 walker(entry.name.startsWith('.') 即跳)对齐——
+  // 隐藏目录不是模块源码。2026-07-10 真实事故:本过滤器排了无点的 build 却放行了
+  // `.build`(SPM 依赖 checkout),Alamofire 文档里的 jquery.min.js 一路流进 fileFlow
+  // 正则并钉死宿主 MCP 事件循环。includeVendor/includeGenerated 不豁免点目录:
+  // 依赖源码的合法审视入口是 vendor/node_modules 这类显名目录,不是构建工具的隐藏目录。
+  if (directoryName.startsWith('.')) {
+    return true;
+  }
+  if (
+    !input.includeVendor &&
+    // Pods=CocoaPods 依赖 checkout(无点前缀,点通则覆盖不到)。
+    ['node_modules', 'vendor', 'Pods'].includes(directoryName)
+  ) {
     return true;
   }
   if (
     !input.includeGenerated &&
-    ['dist', 'build', 'coverage', '__generated__', 'generated'].includes(directoryName)
+    // DerivedData=Xcode 构建产物(无点前缀)。
+    ['dist', 'build', 'coverage', '__generated__', 'generated', 'DerivedData'].includes(
+      directoryName
+    )
   ) {
     return true;
   }

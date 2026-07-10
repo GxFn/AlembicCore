@@ -36,6 +36,51 @@ interface AstCallSiteLike {
   isAwait?: unknown;
 }
 
+// 行级解析防线(2026-07-10 真实事故:SPM checkout 里的 jquery.min.js 单行 80KB+,
+// parseCommonJsRequire 的懒惰组在其上灾难性回溯,钉死宿主 MCP 单线程事件循环 1h+)。
+// 三层防御:①整文件压缩/生成物判定(本常量组)→ 走 unavailableReason 降级;②行长门——
+// 超长行不进任何行级正则(真实 import/require 语句远短于此);③正则组自身界长。
+// 阈值语义:超过它们的内容不是人写的可挖源码,跳过是"正确语义"而不仅是保护。
+const MAX_PARSE_LINE_LENGTH = 2_000;
+const PATHOLOGICAL_SINGLE_LINE_LENGTH = 5_000;
+const PATHOLOGICAL_AVG_LINE_LENGTH = 400;
+
+/** 压缩/生成物形态判定:任一行超长,或平均行长离谱(минified bundle 的典型形态)。 */
+function detectPathologicalSourceShape(
+  text: string
+): { pathological: true; reason: string } | { pathological: false } {
+  let lineStart = 0;
+  let lineCount = 0;
+  let maxLineLength = 0;
+  for (let index = 0; index <= text.length; index++) {
+    if (index === text.length || text[index] === '\n' || text[index] === '\r') {
+      const length = index - lineStart;
+      if (length > maxLineLength) {
+        maxLineLength = length;
+      }
+      lineCount += 1;
+      if (maxLineLength > PATHOLOGICAL_SINGLE_LINE_LENGTH) {
+        return {
+          pathological: true,
+          reason: `single line of ${maxLineLength}+ chars (minified/generated content)`,
+        };
+      }
+      if (index < text.length && text[index] === '\r' && text[index + 1] === '\n') {
+        index += 1;
+      }
+      lineStart = index + 1;
+    }
+  }
+  const avg = lineCount > 0 ? text.length / lineCount : 0;
+  if (avg > PATHOLOGICAL_AVG_LINE_LENGTH) {
+    return {
+      pathological: true,
+      reason: `average line length ${Math.round(avg)} chars (minified/generated content)`,
+    };
+  }
+  return { pathological: false };
+}
+
 export function extractFileFlowFromSource(input: {
   text: string;
   filePath: string;
@@ -49,6 +94,18 @@ export function extractFileFlowFromSource(input: {
       exports: [],
       imports: [],
       unavailableReason: `file-flow parser is unavailable for language ${input.language ?? 'unknown'}.`,
+    };
+  }
+
+  // 防线①:压缩/生成物整体跳过(先于 AST——垃圾内容连 AST 成本也不值得付)。
+  // 降级走既有 unavailableReason 通道,消费方(fileFlow handler/上游投影)已适配该形态。
+  const shape = detectPathologicalSourceShape(input.text);
+  if (shape.pathological) {
+    return {
+      callSites: [],
+      exports: [],
+      imports: [],
+      unavailableReason: `file-flow line-parse skipped for ${input.filePath}: ${shape.reason}.`,
     };
   }
 
@@ -131,6 +188,10 @@ function collectImports(
   for (const [index, line] of codeLines.entries()) {
     const lineNumber = index + 1;
     if (seenDynamicLines.has(lineNumber)) {
+      continue;
+    }
+    // 防线②:超长行不进行级正则(真实 require 语句远短于门限;超长行=生成物/数据行)。
+    if (line.length > MAX_PARSE_LINE_LENGTH) {
       continue;
     }
     if (isCommentOnlyLine(lines[index] ?? '')) {
@@ -315,6 +376,12 @@ function collectLogicalStatements(
 
   for (const [index, line] of lines.entries()) {
     const lineNumber = index + 1;
+    // 防线②:超长行既不能开启也不能延续逻辑语句(真实 import/export 语句远短于门限;
+    // 已开启的语句遇到超长续行直接废弃——它不是人写的语句体)。
+    if (line.length > MAX_PARSE_LINE_LENGTH) {
+      current = undefined;
+      continue;
+    }
     if (!current && !startPattern.test(line)) {
       continue;
     }
@@ -360,7 +427,11 @@ function parseStaticImportStatement(statement: string):
       typeOnly?: boolean;
     }
   | undefined {
-  const match = statement.match(/^\s*import\s+(type\s+)?(?:(.*?)\s+from\s+)?['"]([^'"]+)['"]/);
+  // 防线③:clause 组界长(同 parseCommonJsRequire——以 import 开头的单行压缩 ESM bundle
+  // 会让无界 (.*?) 在寻找带空白 from 的过程中 O(n²) 回溯)。
+  const match = statement.match(
+    /^\s*import\s+(type\s+)?(?:(.{0,240}?)\s+from\s+)?['"]([^'"]+)['"]/
+  );
   if (!match?.[3]) {
     return undefined;
   }
@@ -431,7 +502,11 @@ function parseCommonJsRequire(line: string):
       kind: FileFlowImportKind;
     }
   | undefined {
-  const match = line.match(/\b(?:const|let|var)\s+(.+?)\s*=\s*require\(\s*['"]([^'"]+)['"]\s*\)/);
+  // 防线③:绑定组界长(1-240 已覆盖真实解构绑定;无界懒惰组 (.+?) 在含大量 var/= 的
+  // 单行压缩 JS 上回溯 O(n²)——2026-07-10 jquery.min.js 事故的直接引信)。
+  const match = line.match(
+    /\b(?:const|let|var)\s+(.{1,240}?)\s*=\s*require\(\s*['"]([^'"]+)['"]\s*\)/
+  );
   if (!match?.[1] || !match[2]) {
     return undefined;
   }
