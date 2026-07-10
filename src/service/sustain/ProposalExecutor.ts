@@ -313,6 +313,28 @@ export class ProposalExecutor {
       if (this.#inFlight.has(proposal.id)) {
         continue;
       }
+      // P-E(2026-07-11 BiliDili 真机):本循环自称"对长期 observing 兜底"却从不检查
+      // 时长——rescan 起始的 sweep 把出生 32 秒的 30 个 drifted→update 提案全量送进
+      // evaluateUpdate 的 hasUsage 闸处决(51 条历史提案无一活过观察期/人审)。
+      // 恢复 EvolutionPolicy 观察窗口语义:窗口未满 → 留在 observing 跳过。
+      // 信号驱动路径(#evaluateOnSignal)本就 fail-silent 等下一信号,不受影响;
+      // 人工 executeOne 不经本循环,人主动执行不被窗口拦。
+      if (proposal.type === 'update' || proposal.type === 'deprecate') {
+        const risk = EvolutionPolicy.assessRisk(
+          proposal.type,
+          proposal.confidence,
+          proposal.source
+        );
+        const windowMs = EvolutionPolicy.observationWindow(risk);
+        if (Date.now() - proposal.proposedAt < windowMs) {
+          result.skipped.push({
+            id: proposal.id,
+            type: proposal.type,
+            reason: 'observation window not elapsed',
+          });
+          continue;
+        }
+      }
       await this.#processExpiredProposal(proposal, result);
     }
     // 共享预算按 observing 实际扫描（返回）行数递减；cap===undefined 时保持 undefined（无界）

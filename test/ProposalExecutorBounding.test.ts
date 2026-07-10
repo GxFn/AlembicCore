@@ -78,6 +78,18 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('P-E 观察窗口闸：窗口未满的 observing 提案 skipped 且留在 observing(BiliDili 32 秒处决回归)', async () => {
+    // 真实事故:rescan 起始 sweep 把出生 32 秒的 30 个 drifted→update 提案送进
+    // hasUsage 闸全灭。新鲜提案(confidence 0.8→risk low→24h 窗)必须活过 sweep。
+    const sink = await createRecipe('r-sink-fresh', 'active', { guardHits: 0, searchHits: 0 });
+    seedObserving('ep-fresh', Date.now() - 30_000, { targetRecipeId: sink.id });
+
+    const result = await executor.checkAndExecute();
+    expect(result.rejected).toHaveLength(0);
+    expect(result.skipped.map((s) => s.reason)).toContain('observation window not elapsed');
+    expect(proposalRepo.find({ status: 'observing' })).toHaveLength(1);
+  });
+
   it('cap：单 tick 处理 ≤cap 条（最旧优先 proposedAt 升序），多 tick 排空', async () => {
     // 共用 0-usage 目标 recipe（FK 要求 target 存在）→ 每条评估 reject（no usage）→ 离开 observing；proposedAt 乱序
     const sink = await createRecipe('r-sink-a', 'active', { guardHits: 0, searchHits: 0 });
