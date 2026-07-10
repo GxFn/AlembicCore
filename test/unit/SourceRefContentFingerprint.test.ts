@@ -113,6 +113,26 @@ describe('U6 ②③ drift reconcile（真 SQLite + 真磁盘文件）', () => {
       { force: true }
     );
 
+  it('P2 提交即落锚：全新 recipe（无既有源锚行）reconcile 立即 seed content_fp（消除真空窗）', async () => {
+    // submit → refreshCreatedRecipeFreshness → reconcileRecipeSourceRefs 的首建路径:
+    // 无 pre-upsert 行,走 #insertSourceRef,应即刻算当前 region 指纹作基线,
+    // 而非等下一轮 reconcile。基线 = 提交时的真实内容(此刻文件仍是提交态)。
+    writeSource(tmpDir, FILE_V1);
+    expect(repo.findOne('r1', SOURCE_REF)).toBeNull(); // 提交前无锚
+
+    await reconcileOnce();
+
+    const row = repo.findOne('r1', SOURCE_REF);
+    expect(row?.status).toBe('active');
+    // 锚已在,且是提交态指纹——后续任何 reconcile 都对"提交时的真相"比对。
+    expect(row?.contentFp).toBe(computeSourceRegionFingerprint(FILE_V1, { start: 2, end: 3 }));
+
+    // 反证真空窗已闭:落锚后 region 内容变 → 下一轮 reconcile 立即判 drifted。
+    writeSource(tmpDir, FILE_REGION_CHANGED);
+    await reconcileOnce();
+    expect(repo.findOne('r1', SOURCE_REF)?.status).toBe('drifted');
+  });
+
   it('②CG⑥a：首轮 content_fp=null → 只回填指纹、status 保持 active（不误判 drifted）', async () => {
     writeSource(tmpDir, FILE_V1);
     // 模拟迁移后老行：active 但 content_fp 为 null（不传 contentFp）。
@@ -165,5 +185,69 @@ describe('U6 ②③ drift reconcile（真 SQLite + 真磁盘文件）', () => {
     const row = repo.findOne('r1', SOURCE_REF);
     expect(row?.status).toBe('active'); // region 外改动不漂移
     expect(row?.contentFp).toBe(fpV1); // 指纹不变
+  });
+
+  // ── P3 observe-only:drifted 精判(注入 gitReader + baselineCommit)──
+  const reconcileWithGit = (gitReader: (commit: string, relPath: string) => string | null) =>
+    new SourceRefReconciler(
+      tmpDir,
+      repo,
+      {} as unknown as ConstructorParameters<typeof SourceRefReconciler>[2],
+      { gitReader }
+    ).reconcileRecipeSourceRefs(
+      { id: 'r1', reasoning: { sources: [SOURCE_REF] } },
+      { force: true, baselineCommit: 'basecommit' }
+    );
+
+  it('P3 精判:region 内容实变 → drifted 且 report.driftContentChange(旧块在新文件找不到)', async () => {
+    const fpV1 = computeSourceRegionFingerprint(FILE_V1, { start: 2, end: 3 });
+    repo.upsert({
+      recipeId: 'r1',
+      sourcePath: SOURCE_REF,
+      status: 'active',
+      verifiedAt: 1000,
+      contentFp: fpV1,
+    });
+    // 工作树 = region 内容实变;gitReader 返回旧版本(基线 = 提交态 FILE_V1)。
+    writeSource(tmpDir, FILE_REGION_CHANGED);
+    const report = await reconcileWithGit(() => FILE_V1);
+    expect(repo.findOne('r1', SOURCE_REF)?.status).toBe('drifted'); // status 不变(observe-only)
+    expect(report.driftContentChange).toBe(1);
+    expect(report.driftLineShift ?? 0).toBe(0);
+  });
+
+  it('P3 精判:纯行号漂移(区间块整体下移)→ drifted 且 report.driftLineShift', async () => {
+    const fpV1 = computeSourceRegionFingerprint(FILE_V1, { start: 2, end: 3 });
+    repo.upsert({
+      recipeId: 'r1',
+      sourcePath: SOURCE_REF,
+      status: 'active',
+      verifiedAt: 1000,
+      contentFp: fpV1,
+    });
+    // 工作树 = 顶部插两行(第 2-3 行的原块下移到第 4-5 行,内容不变)——第 2-3 行指纹变→drifted。
+    const shifted = ['// added 1', '// added 2', ...FILE_V1.split('\n')].join('\n');
+    writeSource(tmpDir, shifted);
+    const report = await reconcileWithGit(() => FILE_V1);
+    expect(repo.findOne('r1', SOURCE_REF)?.status).toBe('drifted'); // 仍 drifted,不自动改 range
+    expect(report.driftLineShift).toBe(1);
+    expect(report.driftContentChange ?? 0).toBe(0);
+  });
+
+  it('P3 缺 gitReader/baselineCommit → 不精判,行为与既有完全一致(无 drift* 计数)', async () => {
+    const fpV1 = computeSourceRegionFingerprint(FILE_V1, { start: 2, end: 3 });
+    repo.upsert({
+      recipeId: 'r1',
+      sourcePath: SOURCE_REF,
+      status: 'active',
+      verifiedAt: 1000,
+      contentFp: fpV1,
+    });
+    writeSource(tmpDir, FILE_REGION_CHANGED);
+    // 共享 reconciler 无 gitReader → drifted 但不精判。
+    const report = await reconcileOnce();
+    expect(repo.findOne('r1', SOURCE_REF)?.status).toBe('drifted');
+    expect(report.driftLineShift ?? 0).toBe(0);
+    expect(report.driftContentChange ?? 0).toBe(0);
   });
 });

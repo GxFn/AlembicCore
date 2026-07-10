@@ -23,6 +23,7 @@ export {
 export * from './FailureTaxonomy.js';
 export * from './FieldTaxonomy.js';
 export * from './folderNames.js';
+export * from './gitBlob.js';
 export * from './isOwnDevRepo.js';
 export * from './LanguageProfiles.js';
 export * from './LanguageService.js';

@@ -28,6 +28,7 @@ import {
   type ProjectScopeSourceRefIndex,
   resolveProjectScopeSourceRef,
 } from '../../shared/ProjectScope.js';
+import { classifyRegionDrift } from './driftClassifier.js';
 import { rewriteRecipePaths } from './RecipePathRewriter.js';
 
 const execFileAsync = promisify(execFile);
@@ -49,6 +50,10 @@ export interface ReconcileReport {
   failed?: number;
   /** U6：内容指纹漂移（文件在、region 内容变）标记为 drifted 的条目数 */
   drifted?: number;
+  /** P3 observe-only：drifted 中判为「行号漂移」(旧块在新文件整块出现)的条目数。 */
+  driftLineShift?: number;
+  /** P3 observe-only：drifted 中判为「内容实变」(旧块在新文件找不到)的条目数。 */
+  driftContentChange?: number;
   /** 阻止 source_ref 更新的可审计原因 */
   blockers?: string[];
 }
@@ -95,6 +100,9 @@ export class SourceRefReconciler {
   #logger = Logger.getInstance();
   #ttlMs: number;
   #sourceRefIndex: ProjectScopeSourceRefIndex | null;
+  #gitReader: ((commit: string, relPath: string) => string | null) | null = null;
+  /** 当前 reconcile 轮的基线 commit(P3 精判用;每轮开始设置,结束清空)。 */
+  #baselineCommit: string | null = null;
 
   constructor(
     projectRoot: string,
@@ -104,6 +112,12 @@ export class SourceRefReconciler {
       sourceIdentities?: readonly CanonicalSourceIdentity[];
       signalBus?: SignalBus;
       ttlMs?: number;
+      /**
+       * P3 observe-only:读取某 commit 下文件内容的注入(通常 gitBlob.readFileAtCommit 偏应用)。
+       * 提供 + reconcile 传 baselineCommit 时,drifted 分支会精判 line-shift vs content-change
+       * 并记进 report(不改 status、不改 sourceRefs)。缺省=不精判,行为与既有完全一致。
+       */
+      gitReader?: (commit: string, relPath: string) => string | null;
     }
   ) {
     this.#projectRoot = projectRoot;
@@ -111,6 +125,7 @@ export class SourceRefReconciler {
     this.#knowledgeRepo = knowledgeRepo;
     this.#signalBus = options?.signalBus ?? null;
     this.#ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
+    this.#gitReader = options?.gitReader ?? null;
     this.#sourceRefIndex = options?.sourceIdentities?.length
       ? buildProjectScopeSourceRefIndex(options.sourceIdentities)
       : null;
@@ -120,8 +135,10 @@ export class SourceRefReconciler {
    * 从 knowledge_entries.reasoning 填充 recipe_source_refs 表。
    * 对已有条目验证路径存在性，更新 status。
    */
-  async reconcile(opts?: { force?: boolean }): Promise<ReconcileReport> {
+  async reconcile(opts?: { force?: boolean; baselineCommit?: string }): Promise<ReconcileReport> {
     const force = opts?.force ?? false;
+    // P3 observe-only:整批 reconcile 的基线 commit(用于 drifted 精判);缺省=不精判。
+    this.#baselineCommit = opts?.baselineCommit ?? null;
     const report: ReconcileReport = {
       inserted: 0,
       active: 0,
@@ -172,6 +189,7 @@ export class SourceRefReconciler {
       this.#emitStaleSignals();
     }
 
+    this.#baselineCommit = null;
     return report;
   }
 
@@ -185,7 +203,7 @@ export class SourceRefReconciler {
    */
   async reconcileRecipeSourceRefs(
     recipe: ReconcileRecipeSourceRefsInput,
-    opts?: { force?: boolean }
+    opts?: { force?: boolean; baselineCommit?: string }
   ): Promise<ReconcileReport> {
     const report: ReconcileReport = {
       inserted: 0,
@@ -215,12 +233,15 @@ export class SourceRefReconciler {
       return report;
     }
 
+    // P3 observe-only:本轮基线 commit(用于 drifted 精判);缺省=不精判。
+    this.#baselineCommit = opts?.baselineCommit ?? null;
     this.#reconcileRecipeSourceRefs(recipe.id, parsed.sources, {
       countRecipe: true,
       force: opts?.force ?? true,
       now: Date.now(),
       report,
     });
+    this.#baselineCommit = null;
 
     this.#logger.info('SourceRefReconciler: recipe source refs refreshed', {
       active: report.active,
@@ -449,7 +470,7 @@ export class SourceRefReconciler {
       return;
     }
 
-    // 指纹变化 → drifted（文件在、region 内容变）；下游 P3 gate 决 update/deprecate。
+    // 指纹变化 → drifted（文件在、region 内容变）；下游 gate 决 update/deprecate。
     this.#sourceRefRepo.upsert({
       recipeId,
       sourcePath,
@@ -465,6 +486,59 @@ export class SourceRefReconciler {
       previousFp: existing.contentFp,
       currentFp,
     });
+    // P3 observe-only 精判:有 git 读取器+基线 commit 时,判 drifted 是行号漂移还是内容实变,
+    // 只记进 report + 日志,不改 status、不改 sourceRefs(自动修 range 是后续项)。
+    this.#classifyDriftObserveOnly(recipeId, sourcePath, report);
+  }
+
+  /**
+   * P3 observe-only:分类 drifted 原因。缺 gitReader/baselineCommit/旧内容任一 → 静默跳过
+   * (不精判,维持粗粒度 drifted)。绝不因精判失败影响 reconcile 主流程。
+   */
+  #classifyDriftObserveOnly(recipeId: string, sourcePath: string, report: ReconcileReport): void {
+    const gitReader = this.#gitReader;
+    const baselineCommit = this.#baselineCommit;
+    if (!gitReader || !baselineCommit) {
+      return;
+    }
+    try {
+      const relPath = stripSourceRangeSuffix(sourcePath);
+      const oldContent = gitReader(baselineCommit, relPath);
+      const absPath = this.#resolveExistingSourceFile(sourcePath);
+      if (oldContent === null || !absPath) {
+        return;
+      }
+      const newContent = fs.readFileSync(absPath, 'utf8');
+      const range = parseSourceLineRange(sourcePath);
+      const classification = classifyRegionDrift(oldContent, newContent, {
+        start: range.start ?? 1,
+        end: range.end ?? range.start ?? 1,
+      });
+      if (classification.kind === 'line-shift') {
+        report.driftLineShift = (report.driftLineShift ?? 0) + 1;
+        this.#logger.info('SourceRefReconciler: drift classified as line-shift (observe-only)', {
+          recipeId,
+          sourcePath,
+          suggestedRange: classification.newRange,
+        });
+      } else if (classification.kind === 'content-change') {
+        report.driftContentChange = (report.driftContentChange ?? 0) + 1;
+        this.#logger.info(
+          'SourceRefReconciler: drift classified as content-change (observe-only)',
+          {
+            recipeId,
+            sourcePath,
+          }
+        );
+      }
+    } catch (error) {
+      // 精判是纯观测增强,任何失败静默降级(不影响已写入的 drifted)。
+      this.#logger.debug('SourceRefReconciler: drift classification skipped', {
+        recipeId,
+        sourcePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
 
   #insertSourceRef(
@@ -755,6 +829,17 @@ export function parseSourceLineRange(sourcePath: string): { start?: number; end?
     return { start, end: fragment[2] ? Number(fragment[2]) : start };
   }
   return {};
+}
+
+/**
+ * P3:剥离 sourcePath 的行区间后缀,得到 repo 相对文件路径(git pathspec 口径)。
+ * 与 parseSourceLineRange 配套:`:N`/`:N-M`(:col) 或 `#LN`/`#LN-LM` 后缀被去掉。
+ */
+export function stripSourceRangeSuffix(sourcePath: string): string {
+  return sourcePath
+    .replace(/:(\d+)(?:-(\d+))?(?::\d+)?$/, '')
+    .replace(/#L(\d+)(?:-L?(\d+))?$/i, '')
+    .replaceAll('\\', '/');
 }
 
 function sourcePathFilesystemCandidates(sourcePath: string): string[] {
