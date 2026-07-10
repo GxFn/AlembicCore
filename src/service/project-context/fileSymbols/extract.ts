@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import '../../../core/ast/index.js';
 import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
+import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import type { ExtractedFileSymbol, FileSymbolsExtractionResult } from './contracts.js';
 import { createSourceLineRange } from './ranges.js';
 
@@ -173,18 +174,10 @@ function collectExtractedSymbols(input: {
   return symbols;
 }
 
+// 解析语言判定收敛到单源 shared/parserLanguage(与 fileFlow 同修:此前私有白名单只认
+// ts/js 四型,Swift/ObjC/Kotlin 的 file-symbols 自诞生起 unavailable——2026-07-10 深审)。
 function resolveParserLanguage(filePath: string, language?: string): string | undefined {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === '.tsx') {
-    return 'tsx';
-  }
-  if (extension === '.jsx') {
-    return 'javascript';
-  }
-  if (language === 'typescript' || language === 'javascript') {
-    return language;
-  }
-  return undefined;
+  return resolveAstParserLanguage(filePath, language);
 }
 
 function normalizeClassKind(value: unknown): string {

@@ -114,6 +114,64 @@ describe('fileFlow 病态输入防线(ReDoS 回归)', () => {
   });
 });
 
+describe('Swift 模块关系能力(2026-07-10 三断点修复回归)', () => {
+  const SWIFT_SOURCE = [
+    'import AOXFoundationKit',
+    'import UIKit',
+    '',
+    'final class FeedViewModel {',
+    '    private let repository: FeedRepository',
+    '    func load() {',
+    '        repository.fetch()',
+    '    }',
+    '}',
+    '',
+  ].join('\n');
+
+  it('fileFlow 对 .swift 可用:AST 直出 imports(此前 resolveParserLanguage 白名单挡掉 swift)', async () => {
+    await withFixture({ 'Sources/Feed/FeedViewModel.swift': SWIFT_SOURCE }, async (projectRoot) => {
+      const envelope = await ProjectContext.execute({
+        kind: 'file-flow',
+        payload: { filePath: 'Sources/Feed/FeedViewModel.swift' },
+        scope: { projectRoot, repoId: 'core' },
+      });
+      const data = envelope.data as FileFlowContext;
+      // 语言不再 unavailable。
+      expect(JSON.stringify(envelope)).not.toContain('parser is unavailable');
+      // AST 直出的模块级 imports(Swift import 是模块名,解析为 unresolved 外部依赖属正常)。
+      const labels = data.imports.map((relation) => relation.to?.label ?? '');
+      expect(labels).toContain('AOXFoundationKit');
+      expect(labels).toContain('UIKit');
+      // 行号定位真实(import AOXFoundationKit 在第 1 行)。
+      const aox = data.imports.find((relation) => relation.to?.label === 'AOXFoundationKit');
+      expect(aox?.range).toMatchObject({ startLine: 1, endLine: 1 });
+    });
+  });
+
+  it('module 种子对 Swift 目录解析出 ownedFiles(此前 isSupportedModuleFile 只认 JS/TS)', async () => {
+    await withFixture(
+      {
+        'Packages/AOXFeedKit/Sources/AOXFeedKit/FeedViewModel.swift': SWIFT_SOURCE,
+        'Packages/AOXFeedKit/Sources/AOXFeedKit/FeedRepository.swift':
+          'import Foundation\n\nstruct FeedRepository {\n    func fetch() {}\n}\n',
+      },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'module',
+          payload: { modulePath: 'Packages/AOXFeedKit' },
+          scope: { projectRoot, repoId: 'core' },
+        });
+        const data = envelope.data as ModuleContext;
+        const ownedPaths = data.ownedFiles.map((file) => file.filePath);
+        // 修复前:Swift 文件被白名单挡掉 → ownedFiles 空 → 误导性报错
+        // "module payload.ownedFiles or payload.modulePath is required"。
+        expect(ownedPaths).toContain('Packages/AOXFeedKit/Sources/AOXFeedKit/FeedViewModel.swift');
+        expect(ownedPaths).toContain('Packages/AOXFeedKit/Sources/AOXFeedKit/FeedRepository.swift');
+      }
+    );
+  });
+});
+
 describe('moduleLayers 目录枚举排除(污染入口封堵)', () => {
   it('modulePath 走查跳过 .build/Pods/DerivedData 等工具目录,真实源码保留', async () => {
     await withFixture(

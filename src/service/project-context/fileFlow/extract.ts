@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import '../../../core/ast/index.js';
 import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
+import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import type {
   ExtractedFileFlowCallSite,
   ExtractedFileFlowExport,
@@ -136,10 +137,20 @@ export function extractFileFlowFromSource(input: {
     }
 
     const lines = input.text.split(/\r\n|\n|\r/);
+    // JS 家族:行级 import/export 正则为主、AST 只做 supplement(既有语义不变)。
+    // 非 JS 语言(swift/objc/kotlin/...):行级正则是 JS 语法专用、天然零匹配,
+    // imports 改为 AST 直出(walker 已产完整 ImportRecord),exports 概念不适用置空。
+    if (JS_FAMILY_LANGUAGES.has(parserLanguage)) {
+      return {
+        callSites: collectCallSites(summary.callSites, input.lineCount),
+        exports: collectExports(lines),
+        imports: collectImports(lines, summary.imports),
+      };
+    }
     return {
       callSites: collectCallSites(summary.callSites, input.lineCount),
-      exports: collectExports(lines),
-      imports: collectImports(lines, summary.imports),
+      exports: [],
+      imports: collectAstImportsDirect(lines, summary.imports),
     };
   } catch {
     return {
@@ -223,6 +234,48 @@ function collectImports(
   }
 
   return dedupeImports(imports);
+}
+
+/**
+ * 非 JS 语言的 imports 直出:AST walker(lang-swift/lang-objc/...)已产结构化 ImportRecord,
+ * 无需行级正则。行号定位:ImportRecord 不携带行号,按 specifier 在文本中找首个 import 行
+ * (确定性、便宜);找不到(理论不该发生)兜底第 1 行——range 语义降级但 specifier 仍真实。
+ */
+function collectAstImportsDirect(
+  lines: readonly string[],
+  astImports: readonly unknown[] | undefined
+): ExtractedFileFlowImport[] {
+  const imports: ExtractedFileFlowImport[] = [];
+  for (const raw of astImports ?? []) {
+    const record = readAstImportRecord(raw);
+    if (!record) {
+      continue;
+    }
+    const lineNumber = findImportLine(lines, record.specifier);
+    imports.push({
+      alias: record.alias,
+      kind: record.kind,
+      range: { endLine: lineNumber, startLine: lineNumber },
+      specifier: record.specifier,
+      statement: (lines[lineNumber - 1] ?? '').trim() || `import ${record.specifier}`,
+      symbols: record.symbols,
+      typeOnly: record.typeOnly,
+    });
+  }
+  return dedupeImports(imports);
+}
+
+/** 找首个"含 import 关键字且含 specifier"的行(1-based);超长行跳过(防线②同口径)。 */
+function findImportLine(lines: readonly string[], specifier: string): number {
+  for (const [index, line] of lines.entries()) {
+    if (line.length > MAX_PARSE_LINE_LENGTH) {
+      continue;
+    }
+    if (line.includes('import') && line.includes(specifier)) {
+      return index + 1;
+    }
+  }
+  return 1;
 }
 
 function isCommentOnlyLine(line: string): boolean {
@@ -774,18 +827,10 @@ function compareRange(
   return left.startLine - right.startLine || left.endLine - right.endLine;
 }
 
+// 解析语言判定收敛到单源 shared/parserLanguage(fileSymbols 同款白名单同修,
+// 2026-07-10 模块能力深审:适配层白名单把支持 swift/objc 等的 AstAnalyzer 挡在门外)。
 function resolveParserLanguage(filePath: string, language?: string): string | undefined {
-  const extension = path.extname(filePath).toLowerCase();
-  if (extension === '.tsx') {
-    return 'tsx';
-  }
-  if (extension === '.jsx') {
-    return 'javascript';
-  }
-  if (language === 'typescript' || language === 'javascript') {
-    return language;
-  }
-  return undefined;
+  return resolveAstParserLanguage(filePath, language);
 }
 
 function readString(value: unknown): string | undefined {

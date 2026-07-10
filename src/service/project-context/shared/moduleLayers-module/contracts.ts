@@ -391,9 +391,30 @@ function shouldSkipDirectory(
 }
 
 function isSupportedModuleFile(filePath: string): boolean {
-  return ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json'].includes(
-    path.extname(filePath).toLowerCase()
-  );
+  // 模块归属白名单与 AST 语法资产(resources/grammars)对齐——此前只认 JS/TS 家族,
+  // Swift/ObjC/Kotlin 等项目的模块 ownedFiles 恒空,map/module 种子全部解析失败
+  // (2026-07-10 BiliDili 实证:6 个种子全报 "module payload.ownedFiles or
+  // payload.modulePath is required",实为本白名单把 .swift 挡掉后的误导性报错)。
+  return [
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.mjs',
+    '.cjs',
+    '.json',
+    '.swift',
+    '.m',
+    '.mm',
+    '.h',
+    '.kt',
+    '.kts',
+    '.java',
+    '.py',
+    '.go',
+    '.rs',
+    '.dart',
+  ].includes(path.extname(filePath).toLowerCase());
 }
 
 function inferModuleName(
