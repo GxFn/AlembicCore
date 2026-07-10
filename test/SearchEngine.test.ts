@@ -534,6 +534,23 @@ describe('SearchEngine', () => {
             },
           },
         },
+        // P-D D1 回归(BiliDili 真机):同一 Recipe 的 region 命中(metadata 带
+        // recipeId 而非 entryId)必须折叠进主命中,不得以 recipe_region_* 独立占位。
+        {
+          score: 0.89,
+          item: {
+            id: 'recipe_region_r1_applicability_abcdef0123456789',
+            metadata: { recipeId: 'r1', title: 'VideoURLPreloader', kind: 'pattern' },
+          },
+        },
+        // 无 recipeId 元数据的 region 命中:靠 id 反解归并到同一 Recipe。
+        {
+          score: 0.87,
+          item: {
+            id: 'recipe_region_r1_rationale_fedcba9876543210',
+            metadata: { title: 'VideoURLPreloader', kind: 'pattern' },
+          },
+        },
       ]),
     };
     const engine = new SearchEngine(db, { vectorService: vectorService as never });
@@ -560,6 +577,10 @@ describe('SearchEngine', () => {
       scope: 'project',
       tags: ['preload', 'media'],
     });
+    // D1 断言:三条向量命中(1 chunk + 2 region)按 entryId 折叠为一条,
+    // 且结果 id 是 DB entryId 而非 recipe_region_* 向量 id。
+    expect(result.items).toHaveLength(1);
+    expect(result.items.every((item) => !String(item.id).startsWith('recipe_region_'))).toBe(true);
     expect(result.searchMeta).toEqual(
       expect.objectContaining({
         route: 'core-search-engine',

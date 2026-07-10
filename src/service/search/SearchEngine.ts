@@ -17,6 +17,7 @@ import {
   unwrapSearchDb,
 } from '../../repository/search/SearchRepoAdapter.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
+import { parseRecipeIdFromRegionVectorId } from '../vector/RecipeRegionVectorIndex.js';
 import { CoarseRanker } from './CoarseRanker.js';
 import type { SearchItem } from './contextBoost.js';
 import { contextBoost } from './contextBoost.js';
@@ -341,6 +342,9 @@ export class SearchEngine {
                   'vector_service_sparse_only';
               }
               results = rrfResults.map((r) => this.#mapVectorLikeResult(r.id, r.score, r));
+              // P-D D1:RRF 路径此前漏去重——region/chunk 命中解析为同一 entryId 后
+              // 在此折叠(keep-best),否则多 region 的 Recipe 垄断结果页。
+              results = this.#deduplicateByEntryId(results as SearchResultItem[]);
               this._supplementDetails(results as SearchResultItem[]);
               results = this.#applyMetadataFilters(results, metadataFilters);
               actualMode = rrfVectorUsed
@@ -720,8 +724,7 @@ export class SearchEngine {
             const item = vr.item as Record<string, unknown>;
             const metadata = (item.metadata || {}) as Record<string, unknown>;
             const rawId = (item.id as string) || '';
-            // 从 vector ID 提取 DB entryId: "entry_<uuid>" → "<uuid>"
-            const entryId = (metadata.entryId as string) || rawId.replace(/^entry_/, '');
+            const entryId = this.#resolveVectorEntryId(rawId, metadata);
             return {
               id: entryId,
               title: (metadata.title as string) || entryId,
@@ -810,7 +813,10 @@ export class SearchEngine {
           if (vectorResults && vectorResults.length > 0) {
             let results: SearchResultItem[] = vectorResults.map((vr: VectorHit) => {
               const rawId = vr.id || '';
-              const entryId = (vr.metadata?.entryId as string) || rawId.replace(/^entry_/, '');
+              const entryId = this.#resolveVectorEntryId(
+                rawId,
+                (vr.metadata ?? {}) as Record<string, unknown>
+              );
               return {
                 id: entryId,
                 title: (vr.metadata?.title as string) || entryId,
@@ -884,6 +890,26 @@ export class SearchEngine {
         vectorUsed: false,
       };
     }
+  }
+
+  /**
+   * vector id/metadata → DB entryId 单源解析(P-D D1,2026-07-11 BiliDili 真机):
+   * region 向量(id 前缀 recipe_region_,metadata 带 recipeId 而非 entryId)此前
+   * 三处映射都不解析 → 每个 region 当独立 entryId,top-5 被同一 Recipe 垄断,
+   * 且 _supplementDetails 按 region id 查 refs 落空(漂移标注只出现在主命中)。
+   * 解析序:metadata.entryId(chunk 向量)→ metadata.recipeId(region 向量)→
+   * region id 反解 → 'entry_' 前缀剥离兜底。
+   */
+  #resolveVectorEntryId(rawId: string, metadata: Record<string, unknown>): string {
+    const explicit = (metadata.entryId as string) || (metadata.recipeId as string);
+    if (explicit) {
+      return explicit.replace(/^entry_/, '');
+    }
+    const regionBase = parseRecipeIdFromRegionVectorId(rawId);
+    if (regionBase) {
+      return regionBase;
+    }
+    return rawId.replace(/^entry_/, '');
   }
 
   /**
@@ -1590,8 +1616,8 @@ export class SearchEngine {
     const data = (source.data as Record<string, unknown>) || {};
     const base = (data.item as Record<string, unknown>) || data || {};
     const metadata = (base.metadata as Record<string, unknown>) || {};
-    const rawId = (metadata.entryId as string) || (base.id as string) || id;
-    const entryId = rawId.replace(/^entry_/, '');
+    const rawId = (base.id as string) || id;
+    const entryId = this.#resolveVectorEntryId(rawId, metadata);
     const roundedScore = Math.round(score * 1000) / 1000;
     return {
       id: entryId,
