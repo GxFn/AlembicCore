@@ -137,7 +137,11 @@ describe('resolveEnhancementGuardRulesForProject(项目级精确 resolve)', () =
     await withFixture({ 'Package.swift': '// swift-tools-version:5.9\n' }, async (root) => {
       const result = await resolveEnhancementGuardRulesForProject(root);
       expect(result.packIds).toEqual(['swift-ios']);
-      expect(result.rules.length).toBeGreaterThanOrEqual(5);
+      // 与内置 swift 规则查重收敛后,包只带内置没有的形态(IUO 属性/Timer 循环引用)。
+      expect(result.rules.map((rule) => rule.ruleId).sort()).toEqual([
+        'swift-ios-iuo-property',
+        'swift-ios-timer-target-retain',
+      ]);
       expect(result.rules.every((rule) => rule.languages.includes('swift'))).toBe(true);
     });
   });

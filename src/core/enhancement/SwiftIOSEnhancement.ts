@@ -58,26 +58,10 @@ class SwiftIOSEnhancement extends EnhancementPack {
   }
 
   getGuardRules() {
+    // 真机复核(BiliDili HTTP guard):内置规则集已有 swift-force-cast/swift-force-try/
+    // main-thread-sync-swift 三条同语义——包规则与之双报是噪音。小步先行收敛:
+    // 只保留内置没有的形态;后续扩充前先对照内置集查重。
     return [
-      {
-        ruleId: 'swift-ios-force-cast',
-        category: 'safety',
-        dimension: 'file',
-        severity: 'warning',
-        languages: ['swift'],
-        pattern: /\bas!\s/,
-        message:
-          '强制类型转换 as! 在类型不符时直接崩溃——优先 as? + 解包分支,或在确知安全处就地注释理由',
-      },
-      {
-        ruleId: 'swift-ios-force-try',
-        category: 'safety',
-        dimension: 'file',
-        severity: 'warning',
-        languages: ['swift'],
-        pattern: /\btry!\s/,
-        message: '强制 try! 在抛错时直接崩溃——优先 do/catch 或 try? + 降级路径',
-      },
       {
         ruleId: 'swift-ios-iuo-property',
         category: 'safety',
@@ -88,16 +72,6 @@ class SwiftIOSEnhancement extends EnhancementPack {
         pattern: /\b(?:var|let)\s+\w+\s*:\s*[A-Z]\w*(?:<[^>\n]{0,80}>)?!/,
         message:
           '隐式解包可选型(Type!)属性在未初始化访问时崩溃——IBOutlet 之外优先明确 Optional 或延迟初始化(lazy)',
-      },
-      {
-        ruleId: 'swift-ios-main-sync-deadlock',
-        category: 'correctness',
-        dimension: 'file',
-        severity: 'error',
-        languages: ['swift'],
-        pattern: /DispatchQueue\.main\.sync\b/,
-        message:
-          'DispatchQueue.main.sync 在主线程调用即死锁——改 async,或先判 Thread.isMainThread 分流',
       },
       {
         ruleId: 'swift-ios-timer-target-retain',
