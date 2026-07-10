@@ -231,6 +231,42 @@ describe('repo 声明式依赖图(2026-07-10 接线:Discoverer getDependencyGrap
   });
 });
 
+describe('repo 包元数据(2026-07-10 (C) 修复:非 node 生态清单)', () => {
+  it('SPM 项目:packageSystems 含 swift-package-manager,localPackages 出真实包,无 "no package manifest" 假错误', async () => {
+    const packageSwift = [
+      '// swift-tools-version:5.9',
+      'import PackageDescription',
+      '',
+      'let package = Package(',
+      '    name: "DemoKit",',
+      '    products: [.library(name: "DemoKit", targets: ["DemoKit"])],',
+      '    targets: [',
+      '        .target(name: "DemoKit"),',
+      '    ]',
+      ')',
+    ].join('\n');
+    await withFixture(
+      {
+        'Package.swift': packageSwift,
+        'Sources/DemoKit/Demo.swift': 'import Foundation\n\nstruct Demo {}\n',
+      },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'repo',
+          payload: {},
+          scope: { projectRoot, repoId: 'spm-demo' },
+        });
+        const data = envelope.data as RepoContext;
+        // 修复前:packageSystems=[](只认 node 系清单)→ 误导性错误。
+        expect(data.packageSystems.map((system) => system.kind)).toContain('swift-package-manager');
+        expect(JSON.stringify(envelope)).not.toContain('no package manifest was found');
+        // 修复前:localPackages 只会从 package.json 派生,Swift 包恒缺。
+        expect(data.localPackages.map((pkg) => `${pkg.name}@${pkg.path}`)).toContain('DemoKit@.');
+      }
+    );
+  });
+});
+
 describe('moduleLayers 目录枚举排除(污染入口封堵)', () => {
   it('modulePath 走查跳过 .build/Pods/DerivedData 等工具目录,真实源码保留', async () => {
     await withFixture(

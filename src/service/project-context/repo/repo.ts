@@ -904,6 +904,19 @@ async function collectSourceFilesUnder(input: {
   }
 }
 
+/**
+ * 非 node 生态的"包清单型"配置文件 → 包系统 kind(2026-07-10 (C) 修复):此前只认
+ * node 系,Swift/Rust/Go/Python 项目 packageSystems 恒空 → 误导性
+ * "no package manifest found" 错误。这些文件同时保留在 buildSystems(与
+ * package.json 同时出现在两面的既有先例一致,SPM/Cargo 本就身兼两职)。
+ */
+const MANIFEST_PACKAGE_SYSTEM_KINDS: Record<string, string> = {
+  'Cargo.toml': 'cargo',
+  'go.mod': 'go-modules',
+  'Package.swift': 'swift-package-manager',
+  'pyproject.toml': 'python',
+};
+
 function createPackageSystemSummaries(input: {
   configFiles: readonly ConfigFileSummary[];
   packageJsonRef?: ProjectContextRef;
@@ -924,6 +937,10 @@ function createPackageSystemSummaries(input: {
     }
     if (file.path === 'yarn.lock' && file.ref) {
       systems.push({ kind: 'yarn', manifestRefs: [file.ref] });
+    }
+    const manifestKind = MANIFEST_PACKAGE_SYSTEM_KINDS[file.path];
+    if (manifestKind && file.ref) {
+      systems.push({ kind: manifestKind, manifestRefs: [file.ref] });
     }
   }
   return systems.sort(comparePackageSystems);
@@ -1022,6 +1039,36 @@ function createLocalPackageSummaries(input: {
       path: targetPath,
       ref: createProjectContextFileRef({
         filePath: toRepoFilePath(input.repo, path.join(targetPath, 'package.json')),
+        projectRoot: input.repo.projectRoot,
+        repoId: input.repo.repoId,
+        sourceFolder: input.repo.sourceFolder,
+      }),
+    });
+  }
+  // (C) 修复(2026-07-10):非 node 生态的包归属来自 Discoverer target 元数据——
+  // SpmDiscoverer 在每个 target 上带 packageName+packagePath(清单绝对路径)。
+  // 此前本函数只读 package.json,Swift 项目 localPackages 恒缺真实包(如
+  // BiliDili 的 Packages/AOX*)。仓外清单(如 SPM checkouts)按相对路径越界跳过。
+  for (const target of input.targets) {
+    const metadata = readRecord(target.metadata);
+    const packageName = readString(metadata?.packageName);
+    const manifestAbsolutePath = readString(metadata?.packagePath);
+    if (!packageName || !manifestAbsolutePath) {
+      continue;
+    }
+    const manifestRelativePath = path
+      .relative(input.repo.absoluteRoot, manifestAbsolutePath)
+      .split(path.sep)
+      .join('/');
+    if (manifestRelativePath.startsWith('..') || path.isAbsolute(manifestRelativePath)) {
+      continue;
+    }
+    const packageDir = path.dirname(manifestRelativePath).split(path.sep).join('/');
+    packages.push({
+      name: packageName,
+      path: packageDir === '' ? '.' : packageDir,
+      ref: createProjectContextFileRef({
+        filePath: toRepoFilePath(input.repo, manifestRelativePath),
         projectRoot: input.repo.projectRoot,
         repoId: input.repo.repoId,
         sourceFolder: input.repo.sourceFolder,
