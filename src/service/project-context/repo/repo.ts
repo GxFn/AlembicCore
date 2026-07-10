@@ -26,6 +26,9 @@ import type {
   ProjectContextUnavailableData,
   ProjectMap,
   RepoContext,
+  RepoDependencyGraphEdge,
+  RepoDependencyGraphNode,
+  RepoDependencyGraphSummary,
   RepoSummary,
   TargetSummary,
 } from '../../../domain/project-context/index.js';
@@ -133,6 +136,7 @@ interface RepoContextFacts {
   buildSystems: BuildSystemSummary[];
   commands: CommandSummary[];
   configFiles: ConfigFileSummary[];
+  dependencyGraph?: RepoDependencyGraphSummary;
   entrypoints: EntrypointSummary[];
   errors: ProjectContextQueryError[];
   localPackages: PackageSummary[];
@@ -147,6 +151,7 @@ interface RepoContextFacts {
 
 interface DiscoveryFacts {
   conflict?: ConflictResult;
+  dependencyGraph?: RepoDependencyGraphSummary;
   discovererId?: string;
   discovererName?: string;
   discovererConfidence?: number;
@@ -156,6 +161,13 @@ interface DiscoveryFacts {
   errors: ProjectContextQueryError[];
   truncated: boolean;
 }
+
+/**
+ * 声明式依赖图的防御性上限:图来自构建清单,正常项目远低于此;超限截断并打标,
+ * 防止异常清单把 repo 上下文撑爆(输出预算的前置闸)。
+ */
+const MAX_DEPENDENCY_GRAPH_NODES = 800;
+const MAX_DEPENDENCY_GRAPH_EDGES = 3_000;
 
 interface SourceFileFact {
   filePath: string;
@@ -269,6 +281,7 @@ async function collectRepoContextFacts(input: {
     buildSystems,
     commands,
     configFiles: manifestFacts.configFiles,
+    dependencyGraph: sourceFacts.discovery.dependencyGraph,
     entrypoints,
     errors,
     localPackages,
@@ -322,6 +335,7 @@ function createRepoContextData(facts: RepoContextFacts): RepoContext {
     buildSystems: facts.buildSystems,
     commands: facts.commands,
     configFiles: facts.configFiles,
+    dependencyGraph: facts.dependencyGraph,
     entrypoints: facts.entrypoints,
     languages: createLanguageSummaries(facts.sourceFiles),
     localPackages: facts.localPackages,
@@ -594,6 +608,10 @@ async function collectDiscoveryFacts(input: {
   }
 
   const targets = await readDiscovererTargets(selected, errors);
+  // 声明式依赖图(2026-07-10 链路验通补齐):各 Discoverer 的 getDependencyGraph 一直
+  // 有真实现(SPM target deps/easybox boxspec dependency/层级),但此前零消费方——
+  // 主体图 API 的 edges 恒空。这里随 repo 事实一并带出;失败只降级不阻断。
+  const dependencyGraph = await readDiscovererDependencyGraph(selected, errors);
   const sourceFiles: SourceFileFact[] = [];
   let truncated = false;
   for (const target of targets) {
@@ -626,6 +644,7 @@ async function collectDiscoveryFacts(input: {
 
   return {
     conflict,
+    dependencyGraph,
     discovererConfidence: conflict?.recommended?.confidence,
     discovererId: selected.id,
     discovererName: selected.displayName,
@@ -635,6 +654,81 @@ async function collectDiscoveryFacts(input: {
     targets,
     truncated,
   };
+}
+
+/**
+ * 读取并归一化 Discoverer 的声明式依赖图。节点兼容 string | object 双形态
+ * (ProjectDiscoverer 契约);空图返回 undefined(消费方按"无声明图"处理),
+ * 失败降级为 undefined 并登记 retryable 错误。
+ */
+async function readDiscovererDependencyGraph(
+  discoverer: { getDependencyGraph(): Promise<unknown>; id: string },
+  errors: ProjectContextQueryError[]
+): Promise<RepoDependencyGraphSummary | undefined> {
+  try {
+    const raw = (await discoverer.getDependencyGraph()) as {
+      nodes?: unknown[];
+      edges?: unknown[];
+    } | null;
+    const rawNodes = Array.isArray(raw?.nodes) ? raw.nodes : [];
+    const rawEdges = Array.isArray(raw?.edges) ? raw.edges : [];
+    const nodes: RepoDependencyGraphNode[] = [];
+    for (const entry of rawNodes) {
+      if (typeof entry === 'string' && entry.length > 0) {
+        nodes.push({ id: entry });
+        continue;
+      }
+      if (entry && typeof entry === 'object') {
+        const record = entry as Record<string, unknown>;
+        const id = typeof record.id === 'string' ? record.id : undefined;
+        if (!id) {
+          continue;
+        }
+        nodes.push({
+          id,
+          label: typeof record.label === 'string' ? record.label : undefined,
+          layer: typeof record.layer === 'string' ? record.layer : undefined,
+          type: typeof record.type === 'string' ? record.type : undefined,
+          version: typeof record.version === 'string' ? record.version : undefined,
+        });
+      }
+    }
+    const edges: RepoDependencyGraphEdge[] = [];
+    for (const entry of rawEdges) {
+      if (!entry || typeof entry !== 'object') {
+        continue;
+      }
+      const record = entry as Record<string, unknown>;
+      if (typeof record.from !== 'string' || typeof record.to !== 'string') {
+        continue;
+      }
+      edges.push({
+        from: record.from,
+        to: record.to,
+        type: typeof record.type === 'string' ? record.type : undefined,
+      });
+    }
+    if (nodes.length === 0 && edges.length === 0) {
+      return undefined;
+    }
+    const truncated =
+      nodes.length > MAX_DEPENDENCY_GRAPH_NODES || edges.length > MAX_DEPENDENCY_GRAPH_EDGES;
+    return {
+      edges: edges.slice(0, MAX_DEPENDENCY_GRAPH_EDGES),
+      nodes: nodes.slice(0, MAX_DEPENDENCY_GRAPH_NODES),
+      source: discoverer.id,
+      ...(truncated ? { truncated: true } : {}),
+    };
+  } catch (error) {
+    errors.push(
+      createQueryError({
+        code: 'query-unavailable',
+        message: `repo dependency graph failed for ${discoverer.id}: ${readErrorMessage(error)}`,
+        retryable: true,
+      })
+    );
+    return undefined;
+  }
 }
 
 async function readDiscovererTargets(

@@ -230,6 +230,37 @@ export interface SpaceContext {
   nextRefs: ProjectContextRef[];
 }
 
+/**
+ * 声明式模块依赖图节点(2026-07-10 链路验通补齐):来自构建清单的权威声明——
+ * SPM target dependencies、easybox boxspec `s.dependency`、Boxfile 层级归属等。
+ * 与 import 推导的 ProjectMap 依赖度量互补:这里是"清单说了什么",不是"代码引用了什么"。
+ */
+export interface RepoDependencyGraphNode {
+  id: string;
+  label?: string;
+  /** host/local/external 等(各 Discoverer 语义)。 */
+  type?: string;
+  /** easybox 等分层配置系的层级归属。 */
+  layer?: string;
+  version?: string;
+}
+
+export interface RepoDependencyGraphEdge {
+  from: string;
+  to: string;
+  /** depends_on/contains 等(各 Discoverer 语义)。 */
+  type?: string;
+}
+
+export interface RepoDependencyGraphSummary {
+  /** 产出该图的 Discoverer id(spm/customConfig/node/...),消费方据此解释节点语义。 */
+  source: string;
+  nodes: RepoDependencyGraphNode[];
+  edges: RepoDependencyGraphEdge[];
+  /** 超出防御性上限被截断时为 true(上限见 repo 装配处)。 */
+  truncated?: boolean;
+}
+
 export interface RepoContext {
   repo: RepoSummary;
   languages: LanguageSummary[];
@@ -242,6 +273,8 @@ export interface RepoContext {
   commands: CommandSummary[];
   topAreas: PathSummary[];
   configFiles: ConfigFileSummary[];
+  /** 声明式模块依赖图(可缺席:Discoverer 未实现/解析失败时降级为 undefined)。 */
+  dependencyGraph?: RepoDependencyGraphSummary;
   mapRef?: ProjectContextRef;
   mapSummary?: ProjectMapSummary;
   nextRefs: ProjectContextRef[];

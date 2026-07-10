@@ -14,7 +14,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ProjectContext } from '../src/project-context.js';
-import type { FileFlowContext, ModuleContext } from '../src/service/project-context/index.js';
+import type {
+  FileFlowContext,
+  ModuleContext,
+  RepoContext,
+} from '../src/service/project-context/index.js';
 
 describe('fileFlow 病态输入防线(ReDoS 回归)', () => {
   it('防线①:单行压缩 JS(jquery.min 形态)整体跳过并给出 unavailableReason,不挂死', async () => {
@@ -167,6 +171,61 @@ describe('Swift 模块关系能力(2026-07-10 三断点修复回归)', () => {
         // "module payload.ownedFiles or payload.modulePath is required"。
         expect(ownedPaths).toContain('Packages/AOXFeedKit/Sources/AOXFeedKit/FeedViewModel.swift');
         expect(ownedPaths).toContain('Packages/AOXFeedKit/Sources/AOXFeedKit/FeedRepository.swift');
+      }
+    );
+  });
+});
+
+describe('repo 声明式依赖图(2026-07-10 接线:Discoverer getDependencyGraph→repo 事实)', () => {
+  it('easybox 项目:boxspec dependency 产出 depends_on 边,层级/宿主节点带出', async () => {
+    await withFixture(
+      {
+        Boxfile: [
+          "host_app 'DemoApp', '1.0.0'",
+          '',
+          "layer 'Business' do",
+          "  box 'FeedModule', :path => 'LocalModule/FeedModule'",
+          'end',
+          '',
+          "layer 'Foundation' do",
+          "  box 'NetKit', :path => 'LocalModule/NetKit'",
+          'end',
+        ].join('\n'),
+        'LocalModule/FeedModule/Classes/FeedService.m': '@implementation FeedService\n@end\n',
+        'LocalModule/FeedModule/FeedModule.boxspec': [
+          'Box::Spec.new do |s|',
+          "  s.name = 'FeedModule'",
+          "  s.version = '1.0.0'",
+          "  s.source_files = 'Classes/**/*.{h,m}'",
+          "  s.dependency 'NetKit'",
+          'end',
+        ].join('\n'),
+        'LocalModule/NetKit/Classes/NetClient.m': '@implementation NetClient\n@end\n',
+        'LocalModule/NetKit/NetKit.boxspec': [
+          'Box::Spec.new do |s|',
+          "  s.name = 'NetKit'",
+          "  s.version = '1.2.0'",
+          "  s.source_files = 'Classes/**/*.{h,m}'",
+          'end',
+        ].join('\n'),
+      },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'repo',
+          payload: {},
+          scope: { projectRoot, repoId: 'easybox-demo' },
+        });
+        const data = envelope.data as RepoContext;
+        // 修复前:RepoContext 无 dependencyGraph,主体图 API edges 恒 []。
+        expect(data.dependencyGraph?.source).toBe('customConfig');
+        const edges = data.dependencyGraph?.edges ?? [];
+        expect(edges).toContainEqual({ from: 'FeedModule', to: 'NetKit', type: 'depends_on' });
+        expect(edges.some((edge) => edge.type === 'contains' && edge.from === 'DemoApp')).toBe(
+          true
+        );
+        const nodeIds = (data.dependencyGraph?.nodes ?? []).map((node) => node.id);
+        expect(nodeIds).toContain('FeedModule');
+        expect(nodeIds).toContain('NetKit');
       }
     );
   });

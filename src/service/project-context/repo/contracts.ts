@@ -7,6 +7,9 @@ export type {
   PackageSummary,
   PackageSystemSummary,
   RepoContext,
+  RepoDependencyGraphEdge,
+  RepoDependencyGraphNode,
+  RepoDependencyGraphSummary,
   RepoSummary,
   TargetSummary,
 } from '../../../domain/project-context/index.js';
