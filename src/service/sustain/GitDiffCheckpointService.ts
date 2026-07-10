@@ -61,6 +61,35 @@ export function createCurrentGitHeadBaselineProvider(
   return new CurrentGitHeadBaselineProvider(options);
 }
 
+export interface BuildGitDiffCheckpointScopeInput {
+  currentFolderId?: string | null;
+  projectRoot: string;
+  projectScopeId?: string | null;
+}
+
+/**
+ * checkpoint scope 归一单源(2026-07-11 下沉,P-C 登记项):
+ * folderId=trim(currentFolderId)||'root',scopeId=trim(projectScopeId)||'single-folder'。
+ * git_diff_checkpoints 是双宿主共享表(Plugin knowledge-index-rebuild/guard 推进写入,
+ * 主体 reconcile 读基线做 P3 精判)——此前两宿主各持一份声明一致的实现,
+ * 口径漂移会让同一项目的 checkpoint 行分裂,精判基线读不到对方写入的行。
+ * 修改本归一逻辑必须双宿主同步验证(读写同键才闭环)。
+ */
+export function buildGitDiffCheckpointScope(
+  input: BuildGitDiffCheckpointScopeInput
+): GitDiffCheckpointScope {
+  return {
+    folderId: normalizeGitDiffCheckpointScopeSegment(input.currentFolderId) ?? 'root',
+    projectRoot: input.projectRoot,
+    scopeId: normalizeGitDiffCheckpointScopeSegment(input.projectScopeId) ?? 'single-folder',
+  };
+}
+
+function normalizeGitDiffCheckpointScopeSegment(value: string | null | undefined): string | null {
+  const normalized = value?.trim();
+  return normalized ? normalized : null;
+}
+
 export interface EnsureGitDiffCheckpointInput extends GitDiffCheckpointScope {
   now?: number;
 }

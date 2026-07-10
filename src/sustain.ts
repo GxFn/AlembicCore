@@ -12,6 +12,7 @@ export type {
   SimilarityRecipeLike,
 } from './domain/similarity/RecipeSimilarity.js';
 export type {
+  BuildGitDiffCheckpointScopeInput,
   CandidateForConsolidation,
   ConsolidationAction,
   ConsolidationAdvice,
@@ -52,6 +53,8 @@ export {
   assessDiffImpact,
   assessFileImpact,
   assessImpactUnified,
+  // checkpoint scope 归一单源(2026-07-11 下沉):双宿主读写 git_diff_checkpoints 必须同键。
+  buildGitDiffCheckpointScope,
   ConsolidationAdvisor,
   ContentPatcher,
   CurrentGitHeadBaselineProvider,

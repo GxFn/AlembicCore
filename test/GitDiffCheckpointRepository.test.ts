@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
 import {
+  buildGitDiffCheckpointScope,
   createCurrentGitHeadBaselineProvider,
   GitDiffCheckpointService,
 } from '../src/evolution.js';
@@ -33,6 +34,31 @@ describe('Git diff checkpoint repository and service', () => {
       process.env.ALEMBIC_QUIET = oldQuiet;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // 2026-07-11 下沉:scope 归一单源——双宿主(Plugin 写/主体 reconcile 读)必须同键,
+  // 否则同项目 checkpoint 行分裂,P3 精判基线读不到对方写入的行。
+  it('normalizes checkpoint scope with root/single-folder fallbacks (shared dual-host key)', () => {
+    expect(buildGitDiffCheckpointScope({ projectRoot: '/repo' })).toStrictEqual({
+      folderId: 'root',
+      projectRoot: '/repo',
+      scopeId: 'single-folder',
+    });
+    expect(
+      buildGitDiffCheckpointScope({
+        currentFolderId: '  folder-a  ',
+        projectRoot: '/repo',
+        projectScopeId: ' scope-1 ',
+      })
+    ).toStrictEqual({ folderId: 'folder-a', projectRoot: '/repo', scopeId: 'scope-1' });
+    // 空白串等价缺省:trim 后为空 → 回退保底键(与两宿主历史行为一致)。
+    expect(
+      buildGitDiffCheckpointScope({
+        currentFolderId: '   ',
+        projectRoot: '/repo',
+        projectScopeId: '',
+      })
+    ).toStrictEqual({ folderId: 'root', projectRoot: '/repo', scopeId: 'single-folder' });
   });
 
   it('persists upserts and isolates composite project/scope/folder keys', () => {
