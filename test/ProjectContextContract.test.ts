@@ -35,10 +35,16 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       types: './dist/project-context.d.ts',
     });
     expect(Object.keys(publicModule).sort()).toEqual([
+      // P-D D6(2026-07-11):解析语言单源四符号经本门面导出,供 Plugin 图适配层
+      // 消费(替代其第 6 份 JS-only 私有白名单)。
+      'AST_PARSER_LANGUAGES',
+      'EXTENSION_PARSER_LANGUAGE',
+      'JS_FAMILY_LANGUAGES',
       'ProjectContext',
       'ProjectContextCapabilities',
       'buildProjectContextPresenterInput',
       'createProjectContextCapabilities',
+      'resolveAstParserLanguage',
     ]);
     expect(ProjectContext.execute).toBeInstanceOf(Function);
     expect(publicModule.ProjectContextCapabilities.executeFileSymbolsQuery).toBeInstanceOf(

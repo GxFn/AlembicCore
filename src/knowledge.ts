@@ -159,6 +159,9 @@ export {
   type CreateRecipeRequest,
   type CreateRecipeResult,
   computeKnowledgeHash,
+  // P-B/P-C(2026-07-11 落锚 parity):主体挖掘钩子与 drift 基线助手消费的
+  // 指纹/区间/路径剥离三件套(与 reconciler 落锚口径同源)。
+  computeSourceRegionFingerprint,
   type GatewayDeps,
   type GatewaySource,
   getGatewaySourceLabel,
@@ -173,6 +176,7 @@ export {
   normalizeGatewaySource,
   type PathRename,
   parseKnowledgeMarkdown,
+  parseSourceLineRange,
   RecipeExtractor,
   type RecipeFreshnessEntry,
   type RecipeFreshnessRecipeResult,
@@ -193,6 +197,7 @@ export {
   type SimilarRecipeInfo,
   SourceRefReconciler,
   type SyncAllReport,
+  stripSourceRangeSuffix,
 } from './service/knowledge/index.js';
 // CO2 B3: unified validator entry — composes UnifiedValidator + RecipeCandidateValidator +
 // CandidateAggregator so callers cannot accidentally pick a weaker subset. No enforcement.

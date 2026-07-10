@@ -17,6 +17,8 @@
  * @module service/sustain/ContentPatcher
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
@@ -26,6 +28,11 @@ import type {
   RecipeContentSnapshot,
   StructuredPatch,
 } from '../../types/evolution.js';
+import {
+  computeSourceRegionFingerprint,
+  parseSourceLineRange,
+  stripSourceRangeSuffix,
+} from '../knowledge/SourceRefReconciler.js';
 
 /* ────────────────────── Types ────────────────────── */
 
@@ -71,13 +78,22 @@ export class ContentPatcher {
   readonly #knowledgeRepo: KnowledgeRepositoryImpl;
   readonly #sourceRefRepo: RecipeSourceRefRepositoryImpl;
   readonly #logger = Logger.getInstance();
+  /**
+   * P-B(2026-07-11 落锚 parity):update 提案执行后 #persistRecipe 重建 refs,
+   * 此前不带 contentFp——刚更新的知识对漂移检测失明,直到下次 reconcile 才补锚。
+   * 注入 projectRoot 后 upsert 时同步算 region 指纹;未注入保持旧行为(测试/
+   * 无根场景),reconcile 兜底补锚。
+   */
+  readonly #projectRoot: string | null;
 
   constructor(
     knowledgeRepo: KnowledgeRepositoryImpl,
-    sourceRefRepo: RecipeSourceRefRepositoryImpl
+    sourceRefRepo: RecipeSourceRefRepositoryImpl,
+    options: { projectRoot?: string } = {}
   ) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#sourceRefRepo = sourceRefRepo;
+    this.#projectRoot = options.projectRoot ?? null;
   }
 
   /**
@@ -408,17 +424,43 @@ export class ContentPatcher {
       headers: safeJsonParse(recipe.headers, []),
     });
 
-    // 同步 sourceRefs 到 recipe_source_refs 表
+    // 同步 sourceRefs 到 recipe_source_refs 表(P-B:带 region 指纹落锚,
+    // 让刚更新的知识立即可被漂移检测覆盖)。
     const newPaths = safeJsonParse<string[]>(recipe.sourceRefs, []);
     const now = Math.floor(Date.now() / 1000);
     this.#sourceRefRepo.deleteByRecipeId(recipe.id);
     for (const sourcePath of newPaths) {
+      const contentFp = this.#sourceRefFingerprint(sourcePath);
       this.#sourceRefRepo.upsert({
         recipeId: recipe.id,
         sourcePath,
         status: 'active',
         verifiedAt: now,
+        ...(contentFp ? { contentFp } : {}),
       });
+    }
+  }
+
+  /**
+   * 计算 sourcePath(可带 :N-M/#LN 行区间后缀)的当前 region 指纹。
+   * 512KB 上限护栏(与 source-graph 索引器一致);任何失败返回 undefined,
+   * 由后续 reconcile 兜底补锚——落锚缺席绝不阻断提案执行。
+   */
+  #sourceRefFingerprint(sourcePath: string): string | undefined {
+    if (!this.#projectRoot) {
+      return undefined;
+    }
+    try {
+      const relFile = stripSourceRangeSuffix(sourcePath);
+      const absolute = path.isAbsolute(relFile) ? relFile : path.join(this.#projectRoot, relFile);
+      const stat = fs.statSync(absolute);
+      if (!stat.isFile() || stat.size > 512 * 1024) {
+        return undefined;
+      }
+      const content = fs.readFileSync(absolute, 'utf8');
+      return computeSourceRegionFingerprint(content, parseSourceLineRange(sourcePath));
+    } catch {
+      return undefined;
     }
   }
 
