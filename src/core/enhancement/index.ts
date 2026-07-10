@@ -55,6 +55,9 @@ export async function initEnhancementRegistry() {
     import('./GoGrpcEnhancement.js'),
     import('./RustWebEnhancement.js'),
     import('./RustTokioEnhancement.js'),
+    // 决策③(2026-07-11):iOS 生态首个内置包(小步:5 条高精度规则先行;
+    // 无 frameworks 条件 → resolve('swift', []) 即命中全部 iOS 项目)。
+    import('./SwiftIOSEnhancement.js'),
   ];
 
   const results = await Promise.allSettled(packImports);

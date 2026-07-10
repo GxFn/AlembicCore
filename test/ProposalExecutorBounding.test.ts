@@ -78,6 +78,37 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('决策①双豁免-b:drifted 修复型提案(evidence 带 sourceStatus:drifted)免 hasUsage 闸', async () => {
+    // 0-usage 目标:普通 update 会被 hasUsage 拒,drifted 修复型必须放行执行。
+    const sink = await createRecipe('r-drift-target', 'active', { guardHits: 0, searchHits: 0 });
+    seedObserving('ep-drift', 100, {
+      targetRecipeId: sink.id,
+      source: 'metabolism',
+      evidence: [
+        {
+          sourceStatus: 'drifted',
+          sourcePath: 'Sources/A.swift:10-20',
+          updateReason: 'source-region-content-drift',
+        },
+      ],
+    });
+
+    const result = await executor.checkAndExecute();
+    expect(result.rejected.map((r) => r.id)).not.toContain('ep-drift');
+    // 无 StructuredPatch 时执行层按既有语义处理(退伪成功/跳过),但绝不因 no-usage 拒。
+    const rejectedReasons = result.rejected.map((r) => r.reason).join('|');
+    expect(rejectedReasons).not.toContain('no usage during observation');
+  });
+
+  it('决策①双豁免-a:人工 executeOne 免 hasUsage(0-usage 目标不再被机器否决)', async () => {
+    const sink = await createRecipe('r-manual-target', 'active', { guardHits: 0, searchHits: 0 });
+    seedObserving('ep-manual', 100, { targetRecipeId: sink.id });
+
+    const result = await executor.executeOne('ep-manual');
+    const rejectedReasons = result.rejected.map((r) => r.reason).join('|');
+    expect(rejectedReasons).not.toContain('no usage during observation');
+  });
+
   it('P-E 观察窗口闸：窗口未满的 observing 提案 skipped 且留在 observing(BiliDili 32 秒处决回归)', async () => {
     // 真实事故:rescan 起始 sweep 把出生 32 秒的 30 个 drifted→update 提案送进
     // hasUsage 闸全灭。新鲜提案(confidence 0.8→risk low→24h 窗)必须活过 sweep。

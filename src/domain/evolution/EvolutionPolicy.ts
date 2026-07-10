@@ -123,6 +123,23 @@ export class EvolutionPolicy {
   }
 
   /**
+   * 决策①(2026-07-11 用户裁定"双豁免"):drifted 修复型 update 到期评估。
+   * "修复漂移"与"使用率证明价值"是两种语义——刚漂移的知识被检索降权(0.85×)
+   * 天然低使用,hasUsage 闸会把全部漂移修复提案饿死(BiliDili 30 提案实证)。
+   * 免 hasUsage,保留 FP 护栏;StructuredPatch 有效性由执行层退伪成功兜底(与 merge 同)。
+   */
+  static evaluateDriftRepair(metrics: { ruleFalsePositiveRate: number }): UpdateVerdict {
+    const fpOk = metrics.ruleFalsePositiveRate < UPDATE_FP_THRESHOLD;
+    if (!fpOk) {
+      return {
+        pass: false,
+        reason: `FP rate too high: ${(metrics.ruleFalsePositiveRate * 100).toFixed(0)}%`,
+      };
+    }
+    return { pass: true, reason: 'drift repair (usage gate waived)' };
+  }
+
+  /**
    * U5 #3：merge / consolidation 提案到期评估。
    * 与 evaluateUpdate 的关键区别：合并并入的是「新内容」、无观察期使用历史，故 **不要求 hasUsage**
    * （此前误用 hasUsage 闸把所有 consolidation 提案卡死）。仍保留 FP 护栏（与 update 同阈值），

@@ -268,7 +268,10 @@ export class ProposalExecutor {
       }
     }
 
-    await this.#processExpiredProposal(proposal, result);
+    // 决策①(2026-07-11 双豁免-a):executeOne 是人工执行入口(Dashboard/CLI 人点),
+    // 人审即终审——manual 旗标令 update 免 hasUsage、deprecate 免 decayScore 复核;
+    // transition Guard 与结构化补丁校验仍在。
+    await this.#processExpiredProposal(proposal, result, { manual: true });
 
     if (result.executed.length > 0 || result.rejected.length > 0) {
       this.#logger.info(
@@ -373,7 +376,8 @@ export class ProposalExecutor {
 
   async #processExpiredProposal(
     proposal: ProposalRecord,
-    result: ProposalExecutionResult
+    result: ProposalExecutionResult,
+    options: { manual?: boolean } = {}
   ): Promise<void> {
     const metrics = await this.#collectRecipeMetrics(proposal.targetRecipeId);
     const snapshot = this.#extractSnapshot(proposal);
@@ -381,12 +385,12 @@ export class ProposalExecutor {
     switch (proposal.type) {
       case 'update':
         await this.#runWithReentrancyGuard(proposal.id, () =>
-          this.#executeUpdate(proposal, metrics, result)
+          this.#executeUpdate(proposal, metrics, result, options)
         );
         break;
       case 'deprecate':
         await this.#runWithReentrancyGuard(proposal.id, () =>
-          this.#executeDeprecate(proposal, metrics, snapshot, result)
+          this.#executeDeprecate(proposal, metrics, snapshot, result, options)
         );
         break;
       default:
@@ -405,21 +409,48 @@ export class ProposalExecutor {
    * source==='consolidation'（merge = action:update + source:consolidation）→ evaluateMerge（不要求 hasUsage、保留 FP 护栏）；
    * 其余（aging / 常规 update）→ evaluateUpdate（仍要求 hasUsage）。空 mergePatch 由执行层 #4 退伪成功兜底。
    */
-  #gateUpdate(proposal: ProposalRecord, metrics: RecipeMetrics): UpdateVerdict {
+  #gateUpdate(
+    proposal: ProposalRecord,
+    metrics: RecipeMetrics,
+    options: { manual?: boolean } = {}
+  ): UpdateVerdict {
+    // 决策①(2026-07-11 双豁免-a):人工 executeOne=人审终审,机器不得以使用率否决;
+    // 执行层的 transition Guard 与结构化补丁校验仍在(坏补丁 skip 非 reject)。
+    if (options.manual) {
+      return { pass: true, reason: 'manual execution (human decision)' };
+    }
     if (proposal.source === 'consolidation') {
       return EvolutionPolicy.evaluateMerge({
+        ruleFalsePositiveRate: metrics.ruleFalsePositiveRate,
+      });
+    }
+    // 决策①(双豁免-b):drifted 修复型 update(evidence 携带 sourceStatus:'drifted',
+    // CoverageClassifier 产)免 hasUsage——修复漂移不等使用率,FP 护栏保留。
+    if (this.#isDriftRepairProposal(proposal)) {
+      return EvolutionPolicy.evaluateDriftRepair({
         ruleFalsePositiveRate: metrics.ruleFalsePositiveRate,
       });
     }
     return EvolutionPolicy.evaluateUpdate(metrics);
   }
 
+  /** drifted 修复型提案识别:evidence 任一项带 sourceStatus === 'drifted'。 */
+  #isDriftRepairProposal(proposal: ProposalRecord): boolean {
+    return (proposal.evidence ?? []).some(
+      (item) =>
+        item &&
+        typeof item === 'object' &&
+        (item as Record<string, unknown>).sourceStatus === 'drifted'
+    );
+  }
+
   async #executeUpdate(
     proposal: ProposalRecord,
     metrics: RecipeMetrics,
-    result: ProposalExecutionResult
+    result: ProposalExecutionResult,
+    options: { manual?: boolean } = {}
   ): Promise<void> {
-    const verdict = this.#gateUpdate(proposal, metrics);
+    const verdict = this.#gateUpdate(proposal, metrics, options);
 
     if (!verdict.pass) {
       this.#repo.markRejected(proposal.id, verdict.reason);
@@ -539,12 +570,16 @@ export class ProposalExecutor {
     proposal: ProposalRecord,
     metrics: RecipeMetrics,
     snapshot: RecipeMetrics | null,
-    result: ProposalExecutionResult
+    result: ProposalExecutionResult,
+    options: { manual?: boolean } = {}
   ): Promise<void> {
-    const verdict = EvolutionPolicy.evaluateDeprecate(
-      metrics.decayScore,
-      snapshot?.decayScore ?? metrics.decayScore
-    );
+    // 决策①(双豁免-a):人工执行=人已决定弃用,不再按 decayScore 机器复核。
+    const verdict = options.manual
+      ? ({ action: 'deprecated', reason: 'manual execution (human decision)' } as const)
+      : EvolutionPolicy.evaluateDeprecate(
+          metrics.decayScore,
+          snapshot?.decayScore ?? metrics.decayScore
+        );
 
     if (verdict.action === 'reject') {
       this.#repo.markRejected(proposal.id, verdict.reason);

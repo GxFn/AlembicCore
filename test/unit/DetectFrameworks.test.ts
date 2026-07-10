@@ -89,12 +89,15 @@ describe('detectProjectFrameworks(依赖清单→框架集合)', () => {
     );
   });
 
-  it('纯 Swift/SPM 项目(BiliDili 形态):无对应生态清单 → 三空集', async () => {
+  it('纯 Swift/SPM 项目(BiliDili 形态):Apple 生态检出 swift/objectivec,frameworks 留空', async () => {
+    // 决策③前置:此前三空集使 swift-ios 包永不激活;Package.swift → 语言检出。
     await withFixture(
       { 'Package.swift': '// swift-tools-version:5.9\nimport PackageDescription\n' },
       async (root) => {
         const detection = await detectProjectFrameworks(root);
-        expect(detection).toEqual({ frameworks: [], languages: [], manifests: [] });
+        expect(detection.languages).toEqual(['objectivec', 'swift']);
+        expect(detection.frameworks).toEqual([]);
+        expect(detection.manifests).toEqual(['Package.swift']);
       }
     );
   });
@@ -130,11 +133,12 @@ describe('resolveEnhancementGuardRulesForProject(项目级精确 resolve)', () =
     );
   });
 
-  it('纯 Swift 项目得到空集(此前主体 HTTP 路径无条件注入全部 54 条)', async () => {
+  it('纯 Swift 项目命中 swift-ios 包(决策③),且不再拿到 react/django 等 54 条全集', async () => {
     await withFixture({ 'Package.swift': '// swift-tools-version:5.9\n' }, async (root) => {
       const result = await resolveEnhancementGuardRulesForProject(root);
-      expect(result.packIds).toEqual([]);
-      expect(result.rules).toEqual([]);
+      expect(result.packIds).toEqual(['swift-ios']);
+      expect(result.rules.length).toBeGreaterThanOrEqual(5);
+      expect(result.rules.every((rule) => rule.languages.includes('swift'))).toBe(true);
     });
   });
 });

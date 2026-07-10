@@ -83,6 +83,7 @@ export async function detectProjectFrameworks(
   await detectGoEcosystem(projectRoot, languages, frameworks, manifests);
   await detectRustEcosystem(projectRoot, languages, frameworks, manifests);
   await detectJvmEcosystem(projectRoot, languages, frameworks, manifests);
+  await detectAppleEcosystem(projectRoot, languages, manifests);
 
   return {
     frameworks: [...frameworks].sort(),
@@ -248,6 +249,27 @@ async function detectJvmEcosystem(
   ) {
     frameworks.add('android');
     languages.add('kotlin');
+  }
+}
+
+/**
+ * 决策③前置(2026-07-11):Apple 生态语言检测。iOS 项目无 package.json 式框架清单,
+ * 此前 detectProjectFrameworks 对 SPM/Xcode 项目三空集 → swift-ios 包(仅语言条件)
+ * 永不激活。Package.swift/Podfile/Cartfile 任一存在 → swift+objectivec;
+ * frameworks 留空(包不设框架条件,语言命中即激活)。
+ */
+async function detectAppleEcosystem(
+  projectRoot: string,
+  languages: Set<string>,
+  manifests: string[]
+): Promise<void> {
+  for (const fileName of ['Package.swift', 'Podfile', 'Cartfile']) {
+    if (await manifestExists(projectRoot, fileName)) {
+      manifests.push(fileName);
+      languages.add('swift');
+      languages.add('objectivec');
+      return;
+    }
   }
 }
 
