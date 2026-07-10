@@ -61,6 +61,17 @@ export function createProjectContextModuleDependencyRollups(input: {
       fileToModule.set(file.filePath, moduleRecord);
     }
   }
+  // Track1(2026-07-10):模块名索引。Swift `import AOXFoundationKit`/ObjC
+  // `#import <NetKit/NetClient.h>` 的 specifier 是模块名而非文件路径,文件级解析
+  // 必然落空 → 此前全部被计成 external(BiliDili 实测 internal-edges:0 而
+  // external:82,其中大半是本地 AOX* 包)。文件级解析仍然优先(JS 系不受影响),
+  // 落空后按 specifier 与模块名 join(精确名,或 `Name/File.h` 的首段)。
+  const moduleByName = new Map<string, ProjectContextModuleMapModule>();
+  for (const moduleRecord of input.modules) {
+    if (moduleRecord.module.name) {
+      moduleByName.set(moduleRecord.module.name, moduleRecord);
+    }
+  }
 
   const rollups = new Map<string, MutableDependencyRollup>();
   for (const sourceModule of input.modules) {
@@ -81,7 +92,20 @@ export function createProjectContextModuleDependencyRollups(input: {
         continue;
       }
 
-      const externalName = readRelationSpecifier(relation);
+      const specifier = readRelationSpecifier(relation);
+      const namedModule = resolveModuleByImportName(specifier, moduleByName);
+      if (namedModule && namedModule.module.id !== sourceModule.module.id) {
+        addRelationToRollup(rollups, {
+          from: sourceModule.module,
+          relation,
+          relationKind: relation.kind,
+          scope: input.scope,
+          to: namedModule.module,
+        });
+        continue;
+      }
+
+      const externalName = specifier;
       if (externalName) {
         addRelationToRollup(rollups, {
           externalName,
@@ -97,6 +121,29 @@ export function createProjectContextModuleDependencyRollups(input: {
   }
 
   return [...rollups.values()].map(finalizeRollup).sort(compareRollups);
+}
+
+/**
+ * specifier → 本地模块(Track1 模块名 join)。规则刻意保守:
+ * ①精确等于模块名(Swift 模块导入);②`Name/...` 首段等于模块名(ObjC 框架头
+ * 导入形态)。相对路径(./ ../)与 npm scope(@x/y 首段带 @)天然不命中。
+ */
+function resolveModuleByImportName(
+  specifier: string | undefined,
+  moduleByName: ReadonlyMap<string, ProjectContextModuleMapModule>
+): ProjectContextModuleMapModule | undefined {
+  if (!specifier || specifier.startsWith('.') || specifier.startsWith('@')) {
+    return undefined;
+  }
+  const exact = moduleByName.get(specifier);
+  if (exact) {
+    return exact;
+  }
+  const slashIndex = specifier.indexOf('/');
+  if (slashIndex > 0) {
+    return moduleByName.get(specifier.slice(0, slashIndex));
+  }
+  return undefined;
 }
 
 export function createProjectContextFileFlowRef(input: {
