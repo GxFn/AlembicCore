@@ -29,7 +29,9 @@ interface ASTNode {
 
 // AST 相关的延迟加载 (避免 import 时强制初始化 parser)
 let _astReady = false;
-let _parseToTree: ((content: string, langId: string) => { rootNode: ASTNode } | null) | null = null;
+let _parseToTree:
+  | ((content: string, langId: string) => { rootNode: ASTNode; tree: { delete(): void } } | null)
+  | null = null;
 let _isAvailable: (() => boolean) | null = null;
 let _supportedLanguages: (() => string[]) | null = null;
 
@@ -185,90 +187,94 @@ export function chunkByAST(
   }
 
   const parsed = _parseToTree(content, langId);
-  if (!parsed?.rootNode) {
+  if (!parsed) {
     return null;
   }
 
   const rootNode = parsed.rootNode;
-  const chunks: Array<{ content: string; metadata: Record<string, unknown> }> = [];
-  let preambleLines: string[] = []; // 非声明代码 (imports, comments 等)
+  try {
+    const chunks: Array<{ content: string; metadata: Record<string, unknown> }> = [];
+    let preambleLines: string[] = []; // 非声明代码 (imports, comments 等)
 
-  // 遍历根节点的直接子节点
-  for (let i = 0; i < rootNode.childCount; i++) {
-    const child = rootNode.child(i);
-    if (!child) {
-      continue;
+    // 遍历根节点的直接子节点
+    for (let i = 0; i < rootNode.childCount; i++) {
+      const child = rootNode.child(i);
+      if (!child) {
+        continue;
+      }
+
+      const nodeText = content.slice(child.startIndex, child.endIndex);
+      const nodeTokens = estimateTokens(nodeText);
+      const isTopLevel = TOP_LEVEL_TYPES.has(child.type);
+
+      if (!isTopLevel) {
+        // 非顶层声明 → 积累到 preamble
+        preambleLines.push(nodeText);
+        continue;
+      }
+
+      // 先 flush preamble
+      if (preambleLines.length > 0) {
+        const preamble = preambleLines.join('\n');
+        if (preamble.trim().length > 0) {
+          chunks.push({
+            content: preamble,
+            metadata: {
+              ...metadata,
+              nodeType: 'preamble',
+              startLine: chunks.length === 0 ? 1 : undefined,
+            },
+          });
+        }
+        preambleLines = [];
+      }
+
+      if (nodeTokens <= maxChunkTokens) {
+        // 单个 chunk
+        chunks.push({
+          content: nodeText,
+          metadata: {
+            ...metadata,
+            nodeType: child.type,
+            name: extractNodeName(child),
+            startLine: child.startPosition.row + 1,
+            endLine: child.endPosition.row + 1,
+          },
+        });
+      } else {
+        // 超大节点: 递归拆分
+        const subChunks = splitLargeNode(child, content, metadata, maxChunkTokens);
+        chunks.push(...subChunks);
+      }
     }
 
-    const nodeText = content.slice(child.startIndex, child.endIndex);
-    const nodeTokens = estimateTokens(nodeText);
-    const isTopLevel = TOP_LEVEL_TYPES.has(child.type);
-
-    if (!isTopLevel) {
-      // 非顶层声明 → 积累到 preamble
-      preambleLines.push(nodeText);
-      continue;
-    }
-
-    // 先 flush preamble
+    // flush 剩余 preamble
     if (preambleLines.length > 0) {
       const preamble = preambleLines.join('\n');
       if (preamble.trim().length > 0) {
         chunks.push({
           content: preamble,
-          metadata: {
-            ...metadata,
-            nodeType: 'preamble',
-            startLine: chunks.length === 0 ? 1 : undefined,
-          },
+          metadata: { ...metadata, nodeType: 'epilogue' },
         });
       }
-      preambleLines = [];
     }
 
-    if (nodeTokens <= maxChunkTokens) {
-      // 单个 chunk
-      chunks.push({
-        content: nodeText,
-        metadata: {
-          ...metadata,
-          nodeType: child.type,
-          name: extractNodeName(child),
-          startLine: child.startPosition.row + 1,
-          endLine: child.endPosition.row + 1,
-        },
-      });
-    } else {
-      // 超大节点: 递归拆分
-      const subChunks = splitLargeNode(child, content, metadata, maxChunkTokens);
-      chunks.push(...subChunks);
+    // 如果 AST 没有产生任何 chunk (例如空文件), 返回 null 让 fallback 处理
+    if (chunks.length === 0) {
+      return null;
     }
-  }
 
-  // flush 剩余 preamble
-  if (preambleLines.length > 0) {
-    const preamble = preambleLines.join('\n');
-    if (preamble.trim().length > 0) {
-      chunks.push({
-        content: preamble,
-        metadata: { ...metadata, nodeType: 'epilogue' },
-      });
+    // 设置 chunkIndex 和 totalChunks
+    for (let i = 0; i < chunks.length; i++) {
+      chunks[i].metadata.chunkIndex = i;
+      chunks[i].metadata.totalChunks = chunks.length;
+      chunks[i].metadata.chunkStrategy = 'ast';
     }
-  }
 
-  // 如果 AST 没有产生任何 chunk (例如空文件), 返回 null 让 fallback 处理
-  if (chunks.length === 0) {
-    return null;
+    return chunks;
+  } finally {
+    parsed.tree.delete();
   }
-
-  // 设置 chunkIndex 和 totalChunks
-  for (let i = 0; i < chunks.length; i++) {
-    chunks[i].metadata.chunkIndex = i;
-    chunks[i].metadata.totalChunks = chunks.length;
-    chunks[i].metadata.chunkStrategy = 'ast';
-  }
-
-  return chunks;
 }
 
 /**

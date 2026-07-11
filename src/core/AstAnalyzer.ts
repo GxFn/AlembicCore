@@ -24,13 +24,14 @@ import { getParserClass, isParserReady } from './ast/parserInit.js';
 
 /** Minimal tree-sitter parser interface */
 interface TreeSitterParser {
-  parse(input: string): TreeSitterTree;
+  parse(input: string): TreeSitterTree | null;
   setLanguage(language: unknown): void;
 }
 
 /** Minimal tree-sitter tree interface */
 interface TreeSitterTree {
   rootNode: TreeSitterNode;
+  delete(): void;
 }
 
 /** Language AST plugin interface */
@@ -263,62 +264,69 @@ function analyzeFile(
   }
 
   const tree = parser.parse(source);
-  const root = tree.rootNode;
-
-  const ctx: AstWalkerContext = {
-    classes: [],
-    protocols: [],
-    categories: [],
-    methods: [],
-    properties: [],
-    patterns: [],
-    imports: [],
-    exports: [],
-    // ─── Phase 5 新增 ───
-    callSites: [],
-    references: [],
-  };
-
-  plugin.walk(root, ctx);
-
-  // Phase 5: 可选的 call site 提取 pass (post-walk extraction)
-  if (options.extractCallSites !== false) {
-    const extractor =
-      plugin.extractCallSites || getCallSiteExtractor(lang) || defaultExtractCallSites;
-    try {
-      extractor(root, ctx, lang);
-    } catch (_e: unknown) {
-      // Call site extraction failure is non-fatal — degrade gracefully
-    }
+  if (!tree) {
+    return null;
   }
+  try {
+    const root = tree.rootNode;
 
-  // 构建继承图谱
-  const inheritanceGraph = _buildInheritanceGraph(ctx.classes, ctx.protocols, ctx.categories);
+    const ctx: AstWalkerContext = {
+      classes: [],
+      protocols: [],
+      categories: [],
+      methods: [],
+      properties: [],
+      patterns: [],
+      imports: [],
+      exports: [],
+      // ─── Phase 5 新增 ───
+      callSites: [],
+      references: [],
+    };
 
-  // 检测设计模式（优先使用插件自带的检测器，否则使用通用检测器）
-  const detectedPatterns = plugin.detectPatterns
-    ? plugin.detectPatterns(root, lang, ctx.methods, ctx.properties, ctx.classes)
-    : _detectPatterns(root, lang, ctx.methods, ctx.properties, ctx.classes);
-  ctx.patterns.push(...detectedPatterns);
+    plugin.walk(root, ctx);
 
-  // 结构指标
-  const metrics = _computeMetrics(root, lang, ctx.methods);
+    // Phase 5: 可选的 call site 提取 pass (post-walk extraction)
+    if (options.extractCallSites !== false) {
+      const extractor =
+        plugin.extractCallSites || getCallSiteExtractor(lang) || defaultExtractCallSites;
+      try {
+        extractor(root, ctx, lang);
+      } catch (_e: unknown) {
+        // Call site extraction failure is non-fatal — degrade gracefully
+      }
+    }
 
-  return {
-    lang,
-    classes: ctx.classes,
-    protocols: ctx.protocols,
-    categories: ctx.categories,
-    methods: ctx.methods,
-    properties: ctx.properties,
-    patterns: ctx.patterns,
-    imports: ctx.imports,
-    exports: ctx.exports,
-    callSites: ctx.callSites,
-    references: ctx.references,
-    inheritanceGraph,
-    metrics,
-  };
+    // 构建继承图谱
+    const inheritanceGraph = _buildInheritanceGraph(ctx.classes, ctx.protocols, ctx.categories);
+
+    // 检测设计模式（优先使用插件自带的检测器，否则使用通用检测器）
+    const detectedPatterns = plugin.detectPatterns
+      ? plugin.detectPatterns(root, lang, ctx.methods, ctx.properties, ctx.classes)
+      : _detectPatterns(root, lang, ctx.methods, ctx.properties, ctx.classes);
+    ctx.patterns.push(...detectedPatterns);
+
+    // 结构指标
+    const metrics = _computeMetrics(root, lang, ctx.methods);
+
+    return {
+      lang,
+      classes: ctx.classes,
+      protocols: ctx.protocols,
+      categories: ctx.categories,
+      methods: ctx.methods,
+      properties: ctx.properties,
+      patterns: ctx.patterns,
+      imports: ctx.imports,
+      exports: ctx.exports,
+      callSites: ctx.callSites,
+      references: ctx.references,
+      inheritanceGraph,
+      metrics,
+    };
+  } finally {
+    tree.delete();
+  }
 }
 
 /**
@@ -561,17 +569,23 @@ function _getParser(lang: string): TreeSitterParser | null {
  * 解析源代码为 AST 树 (供 ASTChunker 等外部模块使用)
  * @param source 源代码
  * @param lang 语言 ID (如 'javascript', 'typescript', 'python' 等)
- * @returns | null} tree-sitter 的 rootNode, 或 null (不支持/解析失败)
+ * @returns tree-sitter 的 rootNode 与 Tree 所有权，或 null（不支持/解析失败）。
+ *          成功返回后调用方必须让 rootNode 的所有消费者完成，再对 tree 调用一次 delete()。
  */
 function parseToTree(source: string, lang: string) {
   const parser = _getParser(lang);
   if (!parser) {
     return null;
   }
+  let tree: TreeSitterTree | undefined;
   try {
-    const tree = parser.parse(source);
-    return tree?.rootNode ? { rootNode: tree.rootNode, tree } : null;
+    tree = parser.parse(source) ?? undefined;
+    if (!tree) {
+      return null;
+    }
+    return { rootNode: tree.rootNode, tree };
   } catch {
+    tree?.delete();
     return null;
   }
 }
@@ -897,49 +911,36 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
   }
 
   const tree = parser.parse(source);
-  const results: { line: number; snippet: string; enclosingClass: string | null }[] = [];
-  const lines = source.split(/\r?\n/);
+  if (!tree) {
+    return [];
+  }
+  try {
+    const results: { line: number; snippet: string; enclosingClass: string | null }[] = [];
+    const lines = source.split(/\r?\n/);
 
-  function walk(node: TreeSitterNode, enclosingClass: string | null) {
-    // 更新当前所处的类
-    let currentClass = enclosingClass;
-    if (
-      [
-        'class_declaration',
-        'struct_declaration',
-        'class_interface',
-        'class_implementation',
-      ].includes(node.type)
-    ) {
-      currentClass = _findIdentifier(node) || enclosingClass;
-    }
-
-    // 检查调用表达式
-    const isCallLike = [
-      'call_expression',
-      'message_expression',
-      'function_call_expression',
-    ].includes(node.type);
-    if (isCallLike) {
-      const nodeText = node.text || '';
-      if (nodeText.includes(targetCallee)) {
-        results.push({
-          line: node.startPosition.row + 1,
-          snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
-          enclosingClass: currentClass,
-        });
+    function walk(node: TreeSitterNode, enclosingClass: string | null) {
+      // 更新当前所处的类
+      let currentClass = enclosingClass;
+      if (
+        [
+          'class_declaration',
+          'struct_declaration',
+          'class_interface',
+          'class_implementation',
+        ].includes(node.type)
+      ) {
+        currentClass = _findIdentifier(node) || enclosingClass;
       }
-    }
 
-    // 对 Swift，也检查 member_access + call 的组合，如 URLSession.shared.data(...)
-    if (node.type === 'navigation_expression' || node.type === 'member_expression') {
-      const nodeText = node.text || '';
-      if (nodeText.includes(targetCallee)) {
-        // 只有当父节点是 call 时才算
-        const parent = node.parent;
-        if (parent && ['call_expression', 'function_call_expression'].includes(parent.type)) {
-          // 已在 call_expression 中处理，跳过避免重复
-        } else {
+      // 检查调用表达式
+      const isCallLike = [
+        'call_expression',
+        'message_expression',
+        'function_call_expression',
+      ].includes(node.type);
+      if (isCallLike) {
+        const nodeText = node.text || '';
+        if (nodeText.includes(targetCallee)) {
           results.push({
             line: node.startPosition.row + 1,
             snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
@@ -947,15 +948,35 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
           });
         }
       }
+
+      // 对 Swift，也检查 member_access + call 的组合，如 URLSession.shared.data(...)
+      if (node.type === 'navigation_expression' || node.type === 'member_expression') {
+        const nodeText = node.text || '';
+        if (nodeText.includes(targetCallee)) {
+          // 只有当父节点是 call 时才算
+          const parent = node.parent;
+          if (parent && ['call_expression', 'function_call_expression'].includes(parent.type)) {
+            // 已在 call_expression 中处理，跳过避免重复
+          } else {
+            results.push({
+              line: node.startPosition.row + 1,
+              snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
+              enclosingClass: currentClass,
+            });
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!, currentClass);
+      }
     }
 
-    for (let i = 0; i < node.childCount; i++) {
-      walk(node.child(i)!, currentClass);
-    }
+    walk(tree.rootNode, null);
+    return results;
+  } finally {
+    tree.delete();
   }
-
-  walk(tree.rootNode, null);
-  return results;
 }
 
 /**
@@ -980,86 +1001,93 @@ function findPatternInContext(
   }
 
   const tree = parser.parse(source);
-  const results: { line: number; snippet: string; context: string | null }[] = [];
-  const lines = source.split(/\r?\n/);
-
-  function getEnclosingMethodName(node: TreeSitterNode): string | null {
-    let current = node.parent;
-    while (current) {
-      if (
-        [
-          'method_definition',
-          'method_declaration',
-          'function_declaration',
-          'function_definition',
-        ].includes(current.type)
-      ) {
-        return _findIdentifier(current) || null;
-      }
-      current = current.parent;
-    }
-    return null;
+  if (!tree) {
+    return [];
   }
+  try {
+    const results: { line: number; snippet: string; context: string | null }[] = [];
+    const lines = source.split(/\r?\n/);
 
-  function getEnclosingClassName(node: TreeSitterNode): string | null {
-    let current = node.parent;
-    while (current) {
-      if (
-        [
-          'class_declaration',
-          'struct_declaration',
-          'class_interface',
-          'class_implementation',
-        ].includes(current.type)
-      ) {
-        return _findIdentifier(current) || null;
-      }
-      current = current.parent;
-    }
-    return null;
-  }
-
-  function walk(node: TreeSitterNode) {
-    const nodeText = node.text || '';
-    if (nodeText.includes(pattern) && node.childCount === 0) {
-      // 叶节点匹配
-      const methodName = getEnclosingMethodName(node);
-      const className = getEnclosingClassName(node);
-
-      if (contextFilter.forbiddenContext) {
-        // 在禁止上下文中出现 → 报告
+    function getEnclosingMethodName(node: TreeSitterNode): string | null {
+      let current = node.parent;
+      while (current) {
         if (
-          methodName === contextFilter.forbiddenContext ||
-          className === contextFilter.forbiddenContext
+          [
+            'method_definition',
+            'method_declaration',
+            'function_declaration',
+            'function_definition',
+          ].includes(current.type)
         ) {
-          results.push({
-            line: node.startPosition.row + 1,
-            snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
-            context: methodName || className,
-          });
+          return _findIdentifier(current) || null;
         }
-      } else if (contextFilter.requiredContext) {
-        // 不在要求的上下文中 → 报告
+        current = current.parent;
+      }
+      return null;
+    }
+
+    function getEnclosingClassName(node: TreeSitterNode): string | null {
+      let current = node.parent;
+      while (current) {
         if (
-          className !== contextFilter.requiredContext &&
-          methodName !== contextFilter.requiredContext
+          [
+            'class_declaration',
+            'struct_declaration',
+            'class_interface',
+            'class_implementation',
+          ].includes(current.type)
         ) {
-          results.push({
-            line: node.startPosition.row + 1,
-            snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
-            context: className || methodName,
-          });
+          return _findIdentifier(current) || null;
         }
+        current = current.parent;
+      }
+      return null;
+    }
+
+    function walk(node: TreeSitterNode) {
+      const nodeText = node.text || '';
+      if (nodeText.includes(pattern) && node.childCount === 0) {
+        // 叶节点匹配
+        const methodName = getEnclosingMethodName(node);
+        const className = getEnclosingClassName(node);
+
+        if (contextFilter.forbiddenContext) {
+          // 在禁止上下文中出现 → 报告
+          if (
+            methodName === contextFilter.forbiddenContext ||
+            className === contextFilter.forbiddenContext
+          ) {
+            results.push({
+              line: node.startPosition.row + 1,
+              snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
+              context: methodName || className,
+            });
+          }
+        } else if (contextFilter.requiredContext) {
+          // 不在要求的上下文中 → 报告
+          if (
+            className !== contextFilter.requiredContext &&
+            methodName !== contextFilter.requiredContext
+          ) {
+            results.push({
+              line: node.startPosition.row + 1,
+              snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
+              context: className || methodName,
+            });
+          }
+        }
+      }
+
+      for (let i = 0; i < node.childCount; i++) {
+        walk(node.child(i)!);
       }
     }
 
-    for (let i = 0; i < node.childCount; i++) {
-      walk(node.child(i)!);
-    }
+    walk(tree.rootNode);
+    return results;
+  } finally {
+    tree.delete();
   }
-
-  walk(tree.rootNode);
-  return results;
 }
 
 /**

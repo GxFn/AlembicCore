@@ -340,7 +340,61 @@ function buildProjectContextUnderstandingGaps(input: {
       moduleSeedCount: input.moduleSeeds.length,
     });
   }
+  gaps.push(...buildRequiredAstFactGaps(input.presenterInput));
   return gaps;
+}
+
+type RequiredAstFactKind = 'file-flow' | 'file-symbols';
+
+function buildRequiredAstFactGaps(
+  presenterInput: ProjectContextPresenterInput
+): Record<string, unknown>[] {
+  const failures = new Map<RequiredAstFactKind, { files: Set<string>; reasons: Set<string> }>();
+  for (const warning of presenterInput.warnings) {
+    const factKind = requiredAstFactKindFromFailure(warning.message);
+    if (!factKind) {
+      continue;
+    }
+    const failure = failures.get(factKind) ?? {
+      files: new Set<string>(),
+      reasons: new Set<string>(),
+    };
+    if (warning.path) {
+      failure.files.add(warning.path);
+    }
+    failure.reasons.add(warning.message);
+    failures.set(factKind, failure);
+  }
+
+  return [...failures.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([factKind, failure]) => {
+      const affectedFiles = [...failure.files].sort();
+      const reasons = [...failure.reasons].sort();
+      const omittedFact = factKind === 'file-flow' ? 'fileFlow' : 'fileSymbols';
+      return {
+        affectedFileCount: affectedFiles.length,
+        affectedFiles: affectedFiles.slice(0, 20),
+        code: `project-context-${factKind}-partial`,
+        message: `ProjectContext ${factKind} facts were incomplete because AST parsing failed.`,
+        omittedFact,
+        reasons: reasons.slice(0, 5),
+        severity: 'warning',
+      };
+    });
+}
+
+function requiredAstFactKindFromFailure(message: string): RequiredAstFactKind | undefined {
+  for (const factKind of ['file-flow', 'file-symbols'] as const) {
+    if (
+      message.startsWith(`${factKind} parser failed for `) ||
+      message === `${factKind} parser runtime is unavailable.` ||
+      message.startsWith(`${factKind} parser returned no AST summary for `)
+    ) {
+      return factKind;
+    }
+  }
+  return undefined;
 }
 
 function selectPlanModuleSeeds(repo: RepoContext | undefined): PlanModuleSeed[] {
