@@ -93,10 +93,14 @@ export class SpmDiscoverer extends ProjectDiscoverer {
     }[] = [];
     for (const { pkgPath, parsed } of this.#parsedPackages) {
       const pkgDir = dirname(pkgPath);
+      const isMainPackage =
+        this.#projectRoot !== null && pkgPath === join(this.#projectRoot, 'Package.swift');
       for (const t of parsed.targets || []) {
         targets.push({
           name: t.name,
-          path: pkgDir,
+          // RepoContext 以 DiscoveredTarget.path 作为 target ownership 真值；
+          // 只展开主包显式 path；本地子包与无 path target 保持既有包根语义。
+          path: isMainPackage && t.path ? join(pkgDir, t.path) : pkgDir,
           type: t.type || 'library',
           language: 'swift',
           metadata: {

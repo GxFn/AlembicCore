@@ -106,24 +106,53 @@ describe('ProjectContext PCQ-7 repo context', () => {
           repoId: 'bilidili',
         },
       });
+      expect(targets.get('BiliDiliTests')?.refs[0]).toMatchObject({
+        label: 'Tests/BiliDiliTests',
+        scope: { filePath: 'Tests/BiliDiliTests' },
+      });
+      expect(targets.get('Shared')?.refs[0]).toMatchObject({
+        label: '.',
+        scope: { filePath: '.' },
+      });
+      expect(targets.get('AOXFoundationKit')?.refs[0]).toMatchObject({
+        label: 'Packages/AOXFoundationKit',
+        scope: { filePath: 'Packages/AOXFoundationKit' },
+      });
+      expect(targets.get('AOXPlayer')?.refs[0]).toMatchObject({
+        label: 'Packages/AOXPlayer',
+        scope: { filePath: 'Packages/AOXPlayer' },
+      });
       expect(data.targets.map((target) => target.name)).toEqual(
         expect.arrayContaining([
           'AOXFoundationKit',
+          'AOXNetworkKit',
           'AOXPlayer',
           'BiliDiliTests',
           'Home',
+          'Shared',
           'VideoPlay',
         ])
       );
       expect(data.localPackages.map((pkg) => `${pkg.name}@${pkg.path}`)).toEqual(
         expect.arrayContaining([
           'AOXFoundationKit@Packages/AOXFoundationKit',
+          'AOXNetworkKit@Packages/AOXNetworkKit',
           'AOXPlayer@Packages/AOXPlayer',
           'BiliDili@.',
         ])
       );
+      expect(data.packageSystems.map((system) => system.kind)).toContain('swift-package-manager');
+      expect(JSON.stringify(envelope)).not.toContain('no package manifest was found');
       expect(data.sourceRoots.map((root) => root.path)).toEqual(
-        expect.arrayContaining(['Packages/AOXFoundationKit', 'Packages/AOXPlayer', 'Sources'])
+        expect.arrayContaining([
+          'Packages/AOXFoundationKit',
+          'Packages/AOXNetworkKit',
+          'Packages/AOXPlayer',
+          'Sources',
+          'Sources/Features/Home',
+          'Sources/Features/VideoPlay',
+          'Tests/BiliDiliTests',
+        ])
       );
       expect(data.entrypoints).toEqual([]);
     });
@@ -280,11 +309,13 @@ function createBiliDiliSwiftPmFixture(): Record<string, string> {
     '  name: "BiliDili",',
     '  dependencies: [',
     '    .package(path: "Packages/AOXFoundationKit"),',
+    '    .package(path: "Packages/AOXNetworkKit"),',
     '    .package(path: "Packages/AOXPlayer"),',
     '  ],',
     '  targets: [',
-    '    .target(name: "Home", path: "Sources/Features/Home"),',
+    '    .target(name: "Home", path: "./Sources/Features/Home"),',
     '    .target(name: "VideoPlay", path: "Sources/Features/VideoPlay"),',
+    '    .target(name: "Shared"),',
     '    .testTarget(name: "BiliDiliTests", path: "Tests/BiliDiliTests"),',
     '  ]',
     ')',
@@ -293,7 +324,7 @@ function createBiliDiliSwiftPmFixture(): Record<string, string> {
     [
       '// swift-tools-version: 5.9',
       'import PackageDescription',
-      `let package = Package(name: "${name}", targets: [.target(name: "${name}")])`,
+      `let package = Package(name: "${name}", targets: [.target(name: "${name}", path: "Sources/${name}")])`,
     ].join('\n');
 
   return {
@@ -301,6 +332,8 @@ function createBiliDiliSwiftPmFixture(): Record<string, string> {
     'Packages/AOXFoundationKit/Package.swift': localPackage('AOXFoundationKit'),
     'Packages/AOXFoundationKit/Sources/AOXFoundationKit/Foundation.swift':
       'public struct FoundationValue {}\n',
+    'Packages/AOXNetworkKit/Package.swift': localPackage('AOXNetworkKit'),
+    'Packages/AOXNetworkKit/Sources/AOXNetworkKit/Network.swift': 'struct Network {}\n',
     'Packages/AOXPlayer/Package.swift': localPackage('AOXPlayer'),
     'Packages/AOXPlayer/Sources/AOXPlayer/Decoder.swift': 'struct Decoder {}\n',
     'Packages/AOXPlayer/Sources/AOXPlayer/Player.swift': 'struct Player {}\n',
@@ -309,6 +342,7 @@ function createBiliDiliSwiftPmFixture(): Record<string, string> {
     'Sources/Features/Home/HomeView.swift': 'struct HomeView {}\n',
     'Sources/Features/VideoPlay/VideoPlayer.swift': 'struct VideoPlayer {}\n',
     'Sources/Features/VideoPlay/VideoView.swift': 'struct VideoView {}\n',
+    'Sources/Shared/Shared.swift': 'struct Shared {}\n',
     'Tests/BiliDiliTests/BiliDiliTests.swift': 'struct BiliDiliTests {}\n',
   };
 }
