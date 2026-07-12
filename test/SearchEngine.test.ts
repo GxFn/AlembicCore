@@ -167,6 +167,22 @@ describe('SearchEngine', () => {
     };
   }
 
+  function makeVectorTruthRepo(rows = []) {
+    return {
+      findNonDeprecatedSync: vi.fn(() => rows),
+      keywordSearchSync: vi.fn(() => []),
+      findByIdsDetailSync: vi.fn(() => rows),
+      findUpdatedSinceSync: vi.fn(() => []),
+      insert: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    };
+  }
+
+  function makeSourceRefRepo() {
+    return { findActiveByRecipeIds: vi.fn(() => []) };
+  }
+
   test('constructor should accept plain db object', () => {
     const db = makeMockDb();
     const engine = new SearchEngine(db);
@@ -591,6 +607,181 @@ describe('SearchEngine', () => {
         resultCount: 1,
       })
     );
+  });
+
+  test('semantic orphan vectors are filtered before filters and refill the live result limit', async () => {
+    const knowledgeRepo = makeVectorTruthRepo([
+      {
+        id: 'live-a',
+        title: 'Live A',
+        lifecycle: 'active',
+        scope: 'project',
+        kind: 'pattern',
+      },
+      {
+        id: 'live-filtered',
+        title: 'Filtered live row',
+        lifecycle: 'active',
+        scope: 'workspace',
+        kind: 'pattern',
+      },
+      {
+        id: 'live-b',
+        title: 'Live B',
+        lifecycle: 'active',
+        scope: 'project',
+        kind: 'pattern',
+      },
+    ]);
+    const vectorService = {
+      search: vi.fn().mockResolvedValue([
+        {
+          score: 0.99,
+          item: {
+            id: 'entry_orphan',
+            metadata: { entryId: 'orphan', title: 'Orphan', scope: 'project' },
+          },
+        },
+        {
+          score: 0.93,
+          item: {
+            id: 'entry_live-a',
+            metadata: { entryId: 'live-a', title: 'Live A', scope: 'project' },
+          },
+        },
+        {
+          score: 0.82,
+          item: {
+            id: 'entry_live-filtered',
+            metadata: {
+              entryId: 'live-filtered',
+              title: 'Filtered live row',
+              scope: 'workspace',
+            },
+          },
+        },
+        {
+          score: 0.71,
+          item: {
+            id: 'entry_live-b',
+            metadata: { entryId: 'live-b', title: 'Live B', scope: 'project' },
+          },
+        },
+      ]),
+      upsert: vi.fn(),
+      remove: vi.fn(),
+      clear: vi.fn(),
+      reconcileIndex: vi.fn(),
+    };
+    const engine = new SearchEngine(makeMockDb(), {
+      knowledgeRepo,
+      sourceRefRepo: makeSourceRefRepo(),
+      vectorService: vectorService as never,
+    });
+
+    const result = await engine.search('truthful semantic results', {
+      mode: 'semantic',
+      limit: 2,
+      rank: false,
+      scope: 'project',
+    });
+
+    expect(vectorService.search).toHaveBeenCalledWith('truthful semantic results', {
+      topK: 4,
+      filter: { scope: ['project'] },
+    });
+    expect(knowledgeRepo.findByIdsDetailSync).toHaveBeenCalledWith([
+      'orphan',
+      'live-a',
+      'live-filtered',
+      'live-b',
+    ]);
+    expect(result.items.map((item) => [item.id, item.score])).toEqual([
+      ['live-a', 0.93],
+      ['live-b', 0.71],
+    ]);
+    expect(result.searchMeta).toMatchObject({ filteredOrphanVectorCount: 1, resultCount: 2 });
+    expect(knowledgeRepo.insert).not.toHaveBeenCalled();
+    expect(knowledgeRepo.update).not.toHaveBeenCalled();
+    expect(knowledgeRepo.delete).not.toHaveBeenCalled();
+    expect(vectorService.upsert).not.toHaveBeenCalled();
+    expect(vectorService.remove).not.toHaveBeenCalled();
+    expect(vectorService.clear).not.toHaveBeenCalled();
+    expect(vectorService.reconcileIndex).not.toHaveBeenCalled();
+  });
+
+  test('auto orphan vectors are filtered before ranking without changing recall budget', async () => {
+    const knowledgeRepo = makeVectorTruthRepo([
+      { id: 'live-a', title: 'Live A', lifecycle: 'active', kind: 'pattern' },
+      { id: 'live-b', title: 'Live B', lifecycle: 'active', kind: 'pattern' },
+    ]);
+    const vectorService = {
+      hybridSearch: vi.fn().mockResolvedValue([
+        { id: 'orphan-a', score: 0.99, vectorUsed: true, semanticUsed: true },
+        { id: 'live-a', score: 0.91, vectorUsed: true, semanticUsed: true },
+        { id: 'orphan-b', score: 0.84, vectorUsed: true, semanticUsed: true },
+        { id: 'live-b', score: 0.73, vectorUsed: true, semanticUsed: true },
+      ]),
+    };
+    const engine = new SearchEngine(makeMockDb(), {
+      knowledgeRepo,
+      sourceRefRepo: makeSourceRefRepo(),
+      vectorService: vectorService as never,
+    });
+    const rankingSpy = vi
+      .spyOn(engine, '_applyRanking')
+      .mockImplementation(async (items) => items);
+
+    const result = await engine.search('how should truthful vector results be selected', {
+      mode: 'auto',
+      limit: 2,
+    });
+
+    expect(vectorService.hybridSearch).toHaveBeenCalledWith(
+      'how should truthful vector results be selected',
+      expect.objectContaining({ topK: 6 })
+    );
+    expect(rankingSpy.mock.calls[0][0].map((item) => [item.id, item.score])).toEqual([
+      ['live-a', 0.91],
+      ['live-b', 0.73],
+    ]);
+    expect(result.items.map((item) => [item.id, item.score])).toEqual([
+      ['live-a', 0.91],
+      ['live-b', 0.73],
+    ]);
+    expect(result.searchMeta).toMatchObject({ filteredOrphanVectorCount: 2, resultCount: 2 });
+  });
+
+  test('legacy semantic vector store refills an orphan slot with a live database row', async () => {
+    const knowledgeRepo = makeVectorTruthRepo([
+      { id: 'live-entry', title: 'Live entry', lifecycle: 'active', kind: 'pattern' },
+    ]);
+    const vectorStore = {
+      query: vi.fn().mockResolvedValue([
+        { id: 'orphan-entry', similarity: 0.97, metadata: { title: 'Orphan' } },
+        { id: 'live-entry', similarity: 0.81, metadata: { title: 'Live entry' } },
+      ]),
+    };
+    const engine = new SearchEngine(makeMockDb(), {
+      aiProvider: { embed: vi.fn().mockResolvedValue([0.1, 0.2]) },
+      vectorStore: vectorStore as never,
+      knowledgeRepo,
+      sourceRefRepo: makeSourceRefRepo(),
+    });
+
+    const result = await engine.search('legacy truth lookup', {
+      mode: 'semantic',
+      limit: 1,
+      rank: false,
+    });
+
+    expect(vectorStore.query).toHaveBeenCalledWith([0.1, 0.2], 2);
+    expect(knowledgeRepo.findByIdsDetailSync).toHaveBeenCalledWith([
+      'orphan-entry',
+      'live-entry',
+    ]);
+    expect(result.items.map((item) => [item.id, item.score])).toEqual([['live-entry', 0.81]]);
+    expect(result.searchMeta).toMatchObject({ filteredOrphanVectorCount: 1, resultCount: 1 });
   });
 
   test('semantic mode forwards filters and still hard-filters returned vectors', async () => {
