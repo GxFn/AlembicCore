@@ -104,8 +104,9 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       this.#db,
       `SELECT id, content, description, trigger, headers, moduleName,
                 tags, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect}, updatedAt, createdAt, quality, stats, difficulty,
-                whenClause, doClause
-         FROM knowledge_entries WHERE id IN (${placeholders})`
+                whenClause, doClause, lifecycle
+         FROM knowledge_entries
+         WHERE id IN (${placeholders}) AND lifecycle != 'deprecated'`
     ).all(...ids);
   }
 

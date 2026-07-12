@@ -284,6 +284,7 @@ export class SearchEngine {
     let fallbackReason: string | undefined;
     let semanticUsed: boolean | undefined;
     let vectorUsed: boolean | undefined;
+    let filteredOrphanVectorCount = 0;
 
     if ((!query || !query.trim()) && hasMetadataFilters) {
       results = this.#metadataFilterOnlySearch(type, limit, metadataFilters);
@@ -345,7 +346,17 @@ export class SearchEngine {
               // P-D D1:RRF 路径此前漏去重——region/chunk 命中解析为同一 entryId 后
               // 在此折叠(keep-best),否则多 region 的 Recipe 垄断结果页。
               results = this.#deduplicateByEntryId(results as SearchResultItem[]);
-              this._supplementDetails(results as SearchResultItem[]);
+              const projection = this.#projectLiveVectorCandidates(results as SearchResultItem[]);
+              if (!projection.ok) {
+                results = weightedItems;
+                actualMode = `auto(weighted-fallback,conf=${confidence})`;
+                fallbackReason = 'knowledge_truth_lookup_failed';
+                semanticUsed = false;
+                vectorUsed = false;
+                break;
+              }
+              results = projection.items;
+              filteredOrphanVectorCount += projection.filteredOrphanVectorCount;
               results = this.#applyMetadataFilters(results, metadataFilters);
               actualMode = rrfVectorUsed
                 ? `auto(rrf,conf=${confidence},α=${adaptiveAlpha.toFixed(2)})`
@@ -382,6 +393,7 @@ export class SearchEngine {
           fallbackReason = semResult.fallbackReason;
           semanticUsed = semResult.semanticUsed;
           vectorUsed = semResult.vectorUsed;
+          filteredOrphanVectorCount += semResult.filteredOrphanVectorCount ?? 0;
           break;
         }
         default:
@@ -419,6 +431,7 @@ export class SearchEngine {
       degraded: this._indexDegradedReason !== null,
       degradedReason: this._indexDegradedReason ?? undefined,
       appliedFilters: metadataFilters,
+      filteredOrphanVectorCount,
     });
     this.logger.info(
       `Search completed: mode=${actualMode} total=${results.length} time=${Math.round(tSearchEnd - tSearchStart)}ms ranked=${response.ranked} query="${query}"`
@@ -711,6 +724,7 @@ export class SearchEngine {
     fallbackReason?: string;
     semanticUsed?: boolean;
     vectorUsed?: boolean;
+    filteredOrphanVectorCount?: number;
   }> {
     // 优先使用 VectorService (统一向量服务层)
     if (this.vectorService) {
@@ -749,6 +763,17 @@ export class SearchEngine {
           });
           // 按 entryId 去重 — 同一 Recipe 的多个 chunk 只保留最高分
           results = this.#deduplicateByEntryId(results);
+          const projection = this.#projectLiveVectorCandidates(results);
+          if (!projection.ok) {
+            return {
+              items: this._scorerSearch(query, type, limit, filters),
+              actualMode: 'weighted',
+              fallbackReason: 'knowledge_truth_lookup_failed',
+              semanticUsed: false,
+              vectorUsed: false,
+            };
+          }
+          results = projection.items;
           if (type !== 'all') {
             results = results.filter((r: SearchResultItem) => {
               if (type === 'rule') {
@@ -757,10 +782,15 @@ export class SearchEngine {
               return r.type === 'recipe';
             });
           }
-          results = results.slice(0, limit);
-          this._supplementDetails(results);
           results = this.#applyMetadataFilters(results, filters);
-          return { items: results, actualMode: 'semantic', semanticUsed: true, vectorUsed: true };
+          results = results.slice(0, limit);
+          return {
+            items: results,
+            actualMode: 'semantic',
+            semanticUsed: true,
+            vectorUsed: true,
+            filteredOrphanVectorCount: projection.filteredOrphanVectorCount,
+          };
         }
       } catch (err: unknown) {
         this.logger.warn('VectorService search failed, falling back to legacy path', {
@@ -841,6 +871,17 @@ export class SearchEngine {
             });
             // 按 entryId 去重
             results = this.#deduplicateByEntryId(results);
+            const projection = this.#projectLiveVectorCandidates(results);
+            if (!projection.ok) {
+              return {
+                items: this._scorerSearch(query, type, limit, filters),
+                actualMode: 'weighted',
+                fallbackReason: 'knowledge_truth_lookup_failed',
+                semanticUsed: false,
+                vectorUsed: false,
+              };
+            }
+            results = projection.items;
             if (type !== 'all') {
               results = results.filter((r: SearchResultItem) => {
                 if (type === 'rule') {
@@ -849,10 +890,15 @@ export class SearchEngine {
                 return r.type === 'recipe';
               });
             }
-            results = results.slice(0, limit);
-            this._supplementDetails(results);
             results = this.#applyMetadataFilters(results, filters);
-            return { items: results, actualMode: 'semantic', semanticUsed: true, vectorUsed: true };
+            results = results.slice(0, limit);
+            return {
+              items: results,
+              actualMode: 'semantic',
+              semanticUsed: true,
+              vectorUsed: true,
+              filteredOrphanVectorCount: projection.filteredOrphanVectorCount,
+            };
           }
         } catch (vecErr: unknown) {
           const errorMessage = vecErr instanceof Error ? vecErr.message : String(vecErr);
@@ -1011,20 +1057,62 @@ export class SearchEngine {
   }
 
   /**
+   * Project vector-derived candidates through the request-scoped knowledge repository.
+   * Missing/deprecated rows are stale index entries, never public knowledge results.
+   * The query remains read-only and survivor order/scores are preserved.
+   */
+  #projectLiveVectorCandidates(items: SearchResultItem[]): {
+    ok: boolean;
+    items: SearchResultItem[];
+    filteredOrphanVectorCount: number;
+  } {
+    if (items.length === 0) {
+      return { ok: true, items, filteredOrphanVectorCount: 0 };
+    }
+
+    const ids = items.map((item) => item.id);
+    let rows: DbRow[];
+    try {
+      rows = this.#knowledgeRepo.findByIdsDetailSync(ids) as unknown as DbRow[];
+    } catch (err: unknown) {
+      this.logger.warn('Vector candidate truth lookup failed', {
+        candidateCount: ids.length,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { ok: false, items: [], filteredOrphanVectorCount: 0 };
+    }
+
+    const liveRows = rows.filter(
+      (row) => String(row.lifecycle ?? row.status ?? '').toLowerCase() !== 'deprecated'
+    );
+    const liveIds = new Set(liveRows.map((row) => row.id));
+    const liveItems = items.filter((item) => liveIds.has(item.id));
+    this._supplementDetails(liveItems, liveRows);
+
+    return {
+      ok: true,
+      items: liveItems,
+      filteredOrphanVectorCount: Math.min(10_000, items.length - liveItems.length),
+    };
+  }
+
+  /**
    * 补充详细字段（content / description / trigger / delivery 字段）— 批量 IN 查询
    * 用于向量搜索结果与 FieldWeighted 结果的一致性
    */
-  _supplementDetails(items: SearchResultItem[]) {
+  _supplementDetails(items: SearchResultItem[], detailRows?: DbRow[]) {
     if (!items || items.length === 0) {
       return;
     }
     try {
       const ids = items.map((it: SearchResultItem) => it.id);
-      let rows: DbRow[] = [];
-      try {
-        rows = this.#knowledgeRepo.findByIdsDetailSync(ids) as unknown as DbRow[];
-      } catch {
-        /* table may not exist */
+      let rows: DbRow[] = detailRows ?? [];
+      if (detailRows === undefined) {
+        try {
+          rows = this.#knowledgeRepo.findByIdsDetailSync(ids) as unknown as DbRow[];
+        } catch {
+          /* table may not exist */
+        }
       }
       const rowMap = new Map(rows.map((r) => [r.id, r]));
       for (const item of items) {

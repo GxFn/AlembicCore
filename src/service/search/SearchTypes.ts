@@ -255,6 +255,8 @@ export interface SearchResponseMeta {
   residentVector?: ResidentVectorMeta;
   appliedFilters?: NormalizedSearchMetadataFilters;
   unsupportedMode?: string;
+  /** Bounded count of deduplicated vector candidates rejected by request-DB truth. */
+  filteredOrphanVectorCount?: number;
   [key: string]: unknown;
 }
 
@@ -274,6 +276,7 @@ export interface BuildSearchResponseMetaInput {
   residentVector?: ResidentVectorMeta;
   appliedFilters?: NormalizedSearchMetadataFilters;
   unsupportedMode?: string;
+  filteredOrphanVectorCount?: number;
   [key: string]: unknown;
 }
 
@@ -334,6 +337,16 @@ export function buildSearchResponseMeta(
   }
   if (input.unsupportedMode) {
     meta.unsupportedMode = input.unsupportedMode;
+  }
+  if (
+    typeof input.filteredOrphanVectorCount === 'number' &&
+    Number.isFinite(input.filteredOrphanVectorCount) &&
+    input.filteredOrphanVectorCount > 0
+  ) {
+    meta.filteredOrphanVectorCount = Math.max(
+      1,
+      Math.min(10_000, Math.floor(input.filteredOrphanVectorCount))
+    );
   }
 
   return meta;

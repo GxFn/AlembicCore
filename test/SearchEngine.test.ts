@@ -728,9 +728,7 @@ describe('SearchEngine', () => {
       sourceRefRepo: makeSourceRefRepo(),
       vectorService: vectorService as never,
     });
-    const rankingSpy = vi
-      .spyOn(engine, '_applyRanking')
-      .mockImplementation(async (items) => items);
+    const rankingSpy = vi.spyOn(engine, '_applyRanking').mockImplementation(async (items) => items);
 
     const result = await engine.search('how should truthful vector results be selected', {
       mode: 'auto',
@@ -776,16 +774,64 @@ describe('SearchEngine', () => {
     });
 
     expect(vectorStore.query).toHaveBeenCalledWith([0.1, 0.2], 2);
-    expect(knowledgeRepo.findByIdsDetailSync).toHaveBeenCalledWith([
-      'orphan-entry',
-      'live-entry',
-    ]);
+    expect(knowledgeRepo.findByIdsDetailSync).toHaveBeenCalledWith(['orphan-entry', 'live-entry']);
     expect(result.items.map((item) => [item.id, item.score])).toEqual([['live-entry', 0.81]]);
     expect(result.searchMeta).toMatchObject({ filteredOrphanVectorCount: 1, resultCount: 1 });
   });
 
+  test('vector truth lookup failure falls back without exposing unverified candidates', async () => {
+    const knowledgeRepo = makeVectorTruthRepo([]);
+    knowledgeRepo.findByIdsDetailSync.mockImplementation(() => {
+      throw new Error('request database unavailable');
+    });
+    const vectorService = {
+      search: vi.fn().mockResolvedValue([
+        {
+          score: 0.96,
+          item: { id: 'entry_unverified', metadata: { entryId: 'unverified' } },
+        },
+      ]),
+    };
+    const engine = new SearchEngine(makeMockDb(), {
+      knowledgeRepo,
+      sourceRefRepo: makeSourceRefRepo(),
+      vectorService: vectorService as never,
+    });
+
+    const result = await engine.search('fail closed truth lookup', {
+      mode: 'semantic',
+      limit: 1,
+      rank: false,
+    });
+
+    expect(result.items).toEqual([]);
+    expect(result.mode).toBe('weighted');
+    expect(result.searchMeta).toMatchObject({
+      fallbackReason: 'knowledge_truth_lookup_failed',
+      semanticUsed: false,
+      vectorUsed: false,
+    });
+    expect(result.searchMeta).not.toHaveProperty('filteredOrphanVectorCount');
+  });
+
   test('semantic mode forwards filters and still hard-filters returned vectors', async () => {
     const db = makeMockDb([]);
+    const knowledgeRepo = makeVectorTruthRepo([
+      {
+        id: 'keep',
+        lifecycle: 'active',
+        kind: 'rule',
+        scope: 'project',
+        tags: '["semantic-quality"]',
+      },
+      {
+        id: 'drop',
+        lifecycle: 'active',
+        kind: 'rule',
+        scope: 'workspace',
+        tags: '["semantic-quality"]',
+      },
+    ]);
     const vectorService = {
       search: vi.fn().mockResolvedValue([
         {
@@ -824,7 +870,11 @@ describe('SearchEngine', () => {
         },
       ]),
     };
-    const engine = new SearchEngine(db, { vectorService: vectorService as never });
+    const engine = new SearchEngine(db, {
+      knowledgeRepo,
+      sourceRefRepo: makeSourceRefRepo(),
+      vectorService: vectorService as never,
+    });
 
     const result = await engine.search('semantic quality', {
       mode: 'semantic',
@@ -847,6 +897,9 @@ describe('SearchEngine', () => {
 
   test('auto searchMeta should not report vector usage for sparse-only RRF fallback', async () => {
     const db = makeMockDb([]);
+    const knowledgeRepo = makeVectorTruthRepo([
+      { id: 'sparse-only-1', lifecycle: 'active', kind: 'pattern' },
+    ]);
     const vectorService = {
       hybridSearch: vi.fn().mockResolvedValue([
         {
@@ -859,7 +912,11 @@ describe('SearchEngine', () => {
         },
       ]),
     };
-    const engine = new SearchEngine(db, { vectorService: vectorService as never });
+    const engine = new SearchEngine(db, {
+      knowledgeRepo,
+      sourceRefRepo: makeSourceRefRepo(),
+      vectorService: vectorService as never,
+    });
 
     const result = await engine.search('ambiguous resident search', {
       mode: 'auto',
@@ -890,6 +947,7 @@ describe('SearchEngine', () => {
       workspace: { projectId: 'bili', workspaceMode: 'ghost' },
       residentVector: { available: true, endpoint: '/api/v1/search' },
       timings: { embedMs: 2, vectorMs: 4, totalMs: 6 },
+      filteredOrphanVectorCount: 3,
     });
 
     expect(meta).toMatchObject({
@@ -903,7 +961,12 @@ describe('SearchEngine', () => {
       workspace: { projectId: 'bili', workspaceMode: 'ghost' },
       residentVector: { available: true, endpoint: '/api/v1/search' },
       timings: { embedMs: 2, vectorMs: 4, totalMs: 6 },
+      filteredOrphanVectorCount: 3,
     });
+
+    expect(
+      buildSearchResponseMeta({ actualMode: 'semantic', filteredOrphanVectorCount: 0 })
+    ).not.toHaveProperty('filteredOrphanVectorCount');
   });
 
   test('resolveSearchWorkspaceIdentity derives a project id from projectRoot', () => {
