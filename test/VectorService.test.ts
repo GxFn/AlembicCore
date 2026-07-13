@@ -607,6 +607,33 @@ describe('VectorService', () => {
         true
       );
     });
+
+    it('enables future event upserts after a provider is installed', async () => {
+      const newProvider = createMockEmbedProvider();
+      const svc = createService({
+        autoSyncOnCrud: true,
+        embedProvider: null,
+        syncDebounceMs: 60_000,
+      });
+      await svc.initialize();
+      await svc.migrateDimension(newProvider as never);
+
+      eventBus.emit('knowledge:changed', {
+        action: 'update',
+        entryId: 'live',
+        entry: {
+          id: 'live',
+          title: 'Live Recipe',
+          lifecycle: 'active',
+          content: { markdown: 'Current content' },
+          kind: 'pattern',
+        },
+      });
+      await svc.destroy();
+
+      expect(newProvider.embed).toHaveBeenCalled();
+      expect(vectorStore.batchUpsert).toHaveBeenCalled();
+    });
   });
 
   // ── destroy ──
