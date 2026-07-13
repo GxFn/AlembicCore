@@ -549,6 +549,29 @@ describe('SyncCoordinator', () => {
       expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
     });
 
+    it('does not report a missing vector as synced when embedding fails after availability', async () => {
+      const failingProvider = createMockEmbedProvider();
+      failingProvider.embed.mockRejectedValue(new Error('model unavailable'));
+      vectorStore.listIds = vi.fn().mockResolvedValue([]);
+      const db = createMockDb([
+        { id: 'live', title: 'Missing live vector', content: 'data', kind: 'recipe' },
+      ]);
+
+      const coord = createCoordinator({
+        debounceMs: 50,
+        embedProvider: failingProvider,
+      });
+      const result = await coord.reconcile(db as never);
+
+      expect(result).toMatchObject({
+        missingSynced: 0,
+        missingDeferred: 1,
+        degradedReason: 'vector-sync-incomplete',
+      });
+      expect(failingProvider.embed).toHaveBeenCalled();
+      expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
+    });
+
     it('should handle empty DB gracefully', async () => {
       vectorStore.listIds = vi.fn().mockResolvedValue(['entry_abc']);
       const db = createMockDb([]);
