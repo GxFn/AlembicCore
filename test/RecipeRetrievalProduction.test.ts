@@ -466,6 +466,9 @@ describe('Recipe retrieval profile persistence and active transition', () => {
   let connection: DatabaseConnection;
   let repository: KnowledgeRepositoryImpl;
   let service: KnowledgeService;
+  let auditEvents: Array<Record<string, unknown>>;
+  let emittedEvents: Array<{ event: string | symbol; payload: unknown }>;
+  let afterPublishCalls: number;
 
   beforeEach(async () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-retrieval-profile-'));
@@ -475,9 +478,31 @@ describe('Recipe retrieval profile persistence and active transition', () => {
     await connection.connect();
     await connection.runMigrations();
     repository = new KnowledgeRepositoryImpl(connection);
-    service = new KnowledgeService(repository, { log: async () => {} }, null, null, {
-      fileWriter: new KnowledgeFileWriter(tmpDir),
-    });
+    auditEvents = [];
+    emittedEvents = [];
+    afterPublishCalls = 0;
+    service = new KnowledgeService(
+      repository,
+      {
+        log: async (entry) => {
+          auditEvents.push(entry);
+        },
+      },
+      null,
+      null,
+      {
+        fileWriter: new KnowledgeFileWriter(tmpDir),
+        eventBus: {
+          emit: (event, payload) => {
+            emittedEvents.push({ event, payload });
+            return true;
+          },
+        },
+        afterPublish: async () => {
+          afterPublishCalls += 1;
+        },
+      }
+    );
   });
 
   afterEach(() => {
@@ -494,6 +519,185 @@ describe('Recipe retrieval profile persistence and active transition', () => {
 
     expect(created?.retrievalProfile).toEqual(entry.retrievalProfile);
     expect(fetched?.retrievalProfile).toEqual(entry.retrievalProfile);
+  });
+
+  it('updates a legacy null profile through SQLite, Markdown, API wire, readiness, and projection', async () => {
+    const source = recipeSource({
+      id: 'profile-only-update',
+      title: 'Profile-only edits use the canonical Recipe update path',
+    });
+    const created = await service.create(source, { userId: 'producer' });
+    const original = created.toJSON();
+    const profile = nativeProfile(source);
+    profile.summary.primary =
+      'Profile-only Recipe edits persist through the canonical update path.';
+
+    emittedEvents = [];
+    auditEvents = [];
+    const updated = await service.update(
+      created.id,
+      { retrievalProfile: profile },
+      { userId: 'reviewer' }
+    );
+    const reloaded = await repository.findById(created.id);
+    const markdown = parseKnowledgeMarkdown(
+      fs.readFileSync(path.join(tmpDir, reloaded?.sourceFile ?? ''), 'utf8')
+    );
+    const readiness = await service.evaluateRetrievalReadiness(created.id);
+    const projection = projectRecipeRetrievalDocumentSet(reloaded!);
+
+    expect(original.retrievalProfile).toBeNull();
+    expect(updated.toJSON().retrievalProfile).toEqual(profile);
+    expect(reloaded?.retrievalProfile).toEqual(profile);
+    expect(markdown.retrievalProfile).toEqual(profile);
+    expect(readiness.ready).toBe(true);
+    expect(readiness.documentSetHash).toBe(projection.documentSetHash);
+    expect(projection.documents.find(({ role }) => role === 'intent')?.text).toContain(
+      profile.summary.primary
+    );
+    expect(reloaded).toMatchObject({
+      lifecycle: original.lifecycle,
+      lifecycleHistory: original.lifecycleHistory,
+      title: original.title,
+      content: original.content,
+    });
+    expect(emittedEvents).toEqual([
+      {
+        event: 'knowledge:changed',
+        payload: expect.objectContaining({
+          action: 'update',
+          entryId: created.id,
+          entry: expect.objectContaining({ retrievalProfile: profile }),
+        }),
+      },
+    ]);
+    expect(auditEvents).toHaveLength(1);
+    expect(afterPublishCalls).toBe(0);
+  });
+
+  it('updates a staging profile with another field while preserving unseen truth and lifecycle', async () => {
+    const originalSource = recipeSource({
+      id: 'mixed-profile-update',
+      title: 'Mixed Recipe edits preserve staging truth',
+      description: 'Original description remains replaceable without lifecycle mutation.',
+    });
+    const created = await service.create(
+      { ...originalSource, retrievalProfile: nativeProfile(originalSource) },
+      { userId: 'producer' }
+    );
+    const staged = await service.stage(created.id, { userId: 'reviewer' });
+    const original = staged.toJSON();
+    const nextDescription = 'Mixed updates persist both the edited field and retrieval profile.';
+    const nextSource = { ...originalSource, description: nextDescription };
+    const nextProfile = nativeProfile(nextSource);
+    nextProfile.summary.primary = 'Mixed Recipe edits preserve all unedited staging truth.';
+
+    emittedEvents = [];
+    const updated = await service.update(
+      created.id,
+      { description: nextDescription, retrievalProfile: nextProfile },
+      { userId: 'reviewer' }
+    );
+    const reloaded = await repository.findById(created.id);
+    const markdown = parseKnowledgeMarkdown(
+      fs.readFileSync(path.join(tmpDir, reloaded?.sourceFile ?? ''), 'utf8')
+    );
+
+    expect(updated.description).toBe(nextDescription);
+    expect(updated.retrievalProfile).toEqual(nextProfile);
+    expect(reloaded?.toJSON()).toMatchObject({
+      description: nextDescription,
+      retrievalProfile: nextProfile,
+      lifecycle: original.lifecycle,
+      lifecycleHistory: original.lifecycleHistory,
+      content: original.content,
+      reasoning: original.reasoning,
+      publishedAt: original.publishedAt,
+      publishedBy: original.publishedBy,
+    });
+    expect(markdown).toMatchObject({
+      description: nextDescription,
+      retrievalProfile: nextProfile,
+      lifecycle: 'staging',
+    });
+    expect((await service.evaluateRetrievalReadiness(created.id)).ready).toBe(true);
+    expect(emittedEvents.map(({ event }) => event)).toEqual(['knowledge:changed']);
+    expect(afterPublishCalls).toBe(0);
+  });
+
+  it('rejects malformed or unsupported profiles before Markdown, SQLite, audit, or events change', async () => {
+    const source = recipeSource({
+      id: 'invalid-profile-update',
+      title: 'Invalid profile edits never mutate Recipe truth',
+    });
+    const profile = nativeProfile(source);
+    const created = await service.create(
+      { ...source, retrievalProfile: profile },
+      { userId: 'producer' }
+    );
+    const before = (await repository.findById(created.id))!;
+    const filePath = path.join(tmpDir, before.sourceFile ?? '');
+    const markdownBefore = fs.readFileSync(filePath, 'utf8');
+    const invalidProfiles = [
+      { ...profile, schemaVersion: '2' },
+      { ...profile, scenarios: [{ text: 'Missing structured fact fields.' }] },
+    ];
+
+    emittedEvents = [];
+    auditEvents = [];
+    for (const invalidProfile of invalidProfiles) {
+      await expect(
+        service.update(created.id, { retrievalProfile: invalidProfile } as never, {
+          userId: 'reviewer',
+        })
+      ).rejects.toMatchObject({
+        code: 'VALIDATION_ERROR',
+        details: { reason: 'retrieval-profile-invalid' },
+      });
+    }
+
+    expect((await repository.findById(created.id))?.toJSON()).toEqual(before.toJSON());
+    expect(fs.readFileSync(filePath, 'utf8')).toBe(markdownBefore);
+    expect(emittedEvents).toEqual([]);
+    expect(auditEvents).toEqual([]);
+    expect(afterPublishCalls).toBe(0);
+  });
+
+  it('edits an active profile without a new active transition or automatic publish', async () => {
+    const source = recipeSource({
+      id: 'active-profile-update',
+      title: 'Active Recipe profile edits do not republish',
+    });
+    const created = await service.create(
+      { ...source, retrievalProfile: nativeProfile(source) },
+      { userId: 'producer' }
+    );
+    const active = await service.publish(created.id, { userId: 'publisher' });
+    await Promise.resolve();
+    const publishedHookCount = afterPublishCalls;
+    const original = active.toJSON();
+    const nextProfile = nativeProfile(source);
+    nextProfile.summary.primary = 'Active profile edits emit change without republishing.';
+
+    emittedEvents = [];
+    const updated = await service.update(
+      created.id,
+      { retrievalProfile: nextProfile },
+      { userId: 'reviewer' }
+    );
+    await Promise.resolve();
+    const reloaded = await repository.findById(created.id);
+
+    expect(updated.retrievalProfile).toEqual(nextProfile);
+    expect(reloaded?.toJSON()).toMatchObject({
+      lifecycle: 'active',
+      lifecycleHistory: original.lifecycleHistory,
+      publishedAt: original.publishedAt,
+      publishedBy: original.publishedBy,
+      retrievalProfile: nextProfile,
+    });
+    expect(emittedEvents.map(({ event }) => event)).toEqual(['knowledge:changed']);
+    expect(afterPublishCalls).toBe(publishedHookCount);
   });
 
   it('preserves malformed authored facts but blocks publish and filters them from projection', async () => {
