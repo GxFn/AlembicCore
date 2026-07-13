@@ -384,7 +384,12 @@ describe('V1 SyncCoordinator reconcile', () => {
 
     const result = await coordinator.reconcile(db);
 
-    expect(result).toEqual({ orphansRemoved: 0, missingSynced: 0, errors: [] });
+    expect(result).toEqual({
+      orphansRemoved: 0,
+      recipeRegionOrphansRemoved: 0,
+      missingSynced: 0,
+      errors: [],
+    });
     const dbWarning = warnSpy.mock.calls.find(
       (call) =>
         (call[1] as Record<string, unknown> | undefined)?.code ===

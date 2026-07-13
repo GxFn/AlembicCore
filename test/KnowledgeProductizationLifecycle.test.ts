@@ -1,10 +1,11 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
+import { EventBus } from '../src/infrastructure/event/EventBus.js';
 import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { LifecycleEventRepository } from '../src/repository/evolution/LifecycleEventRepository.js';
 import { ProposalRepository } from '../src/repository/evolution/ProposalRepository.js';
@@ -24,6 +25,7 @@ describe('Knowledge productization lifecycle', () => {
   let eventRepo: LifecycleEventRepository;
   let stagingManager: StagingManager;
   let knowledgeService: KnowledgeService;
+  let eventBus: EventBus;
   let oldQuiet: string | undefined;
 
   beforeEach(async () => {
@@ -42,9 +44,11 @@ describe('Knowledge productization lifecycle', () => {
     const signalBus = new SignalBus();
     const lifecycle = new LifecycleStateMachine(knowledgeRepo, eventRepo, signalBus, proposalRepo);
     stagingManager = new StagingManager(knowledgeRepo, { signalBus, lifecycle });
+    eventBus = new EventBus();
     knowledgeService = new KnowledgeService(knowledgeRepo, { log: async () => {} }, null, null, {
       confidenceRouter: new ConfidenceRouter(),
       fileWriter: new KnowledgeFileWriter(tmpDir),
+      eventBus,
     });
   });
 
@@ -148,6 +152,90 @@ describe('Knowledge productization lifecycle', () => {
         trigger: 'grace-period-expire',
         operator_id: 'StagingManager',
       },
+    ]);
+  });
+
+  it('deprecates an orphan for an empty corpus and awaits authoritative vector maintenance', async () => {
+    const created = await knowledgeService.create(
+      {
+        title: 'Recipe whose source is removed',
+        description: 'Fixture for direct sync orphan maintenance.',
+        language: 'typescript',
+        category: 'architecture',
+        knowledgeType: 'code-pattern',
+        source: 'host-agent',
+        content: { markdown: 'A source-backed recipe.' },
+        reasoning: { whyStandard: 'Fixture', sources: ['src/example.ts:1'] },
+      },
+      { userId: 'host-agent' }
+    );
+    fs.rmSync(path.join(tmpDir, 'Alembic'), { recursive: true, force: true });
+
+    let releaseMaintenance!: () => void;
+    const reconcileAuthoritativeCorpus = vi.fn(
+      () =>
+        new Promise<{ recipeRegionOrphansRemoved: number }>((resolve) => {
+          releaseMaintenance = () => resolve({ recipeRegionOrphansRemoved: 2 });
+        })
+    );
+    const sync = new KnowledgeSyncService(tmpDir, {
+      vectorMaintenance: { reconcileAuthoritativeCorpus },
+    });
+    let settled = false;
+    const syncPromise = sync.syncAll(connection.getDb()).then((report) => {
+      settled = true;
+      return report;
+    });
+
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    releaseMaintenance();
+    const report = await syncPromise;
+
+    expect(report.orphaned).toEqual([created.id]);
+    expect(report.vectorMaintenanceStatus).toBe('completed');
+    expect(report.vectorMaintenanceReport).toEqual({ recipeRegionOrphansRemoved: 2 });
+    expect(reconcileAuthoritativeCorpus).toHaveBeenCalledOnce();
+    const row = connection
+      .getDb()
+      .prepare('SELECT lifecycle FROM knowledge_entries WHERE id = ?')
+      .get(created.id) as { lifecycle: string };
+    expect(row.lifecycle).toBe('deprecated');
+  });
+
+  it('emits current DB truth for publish, deprecate, and reactivate vector maintenance', async () => {
+    const transitions: Array<Record<string, unknown>> = [];
+    eventBus.on('lifecycle:transition', (payload) => {
+      transitions.push(payload as Record<string, unknown>);
+    });
+    const created = await knowledgeService.create(
+      {
+        title: 'Lifecycle vector event recipe',
+        description: 'Carries current DB truth through lifecycle events.',
+        language: 'typescript',
+        category: 'architecture',
+        knowledgeType: 'code-pattern',
+        source: 'host-agent',
+        content: { markdown: 'Valid recipe body.' },
+        reasoning: { whyStandard: 'Fixture', sources: ['src/lifecycle.ts:1'] },
+      },
+      { userId: 'host-agent' }
+    );
+
+    await knowledgeService.publish(created.id, { userId: 'publisher' });
+    await knowledgeService.deprecate(created.id, 'obsolete fixture', { userId: 'publisher' });
+    await knowledgeService.reactivate(created.id, { userId: 'publisher' });
+
+    expect(
+      transitions.map((transition) => ({
+        to: transition.to,
+        entryLifecycle: (transition.entry as { lifecycle: string }).lifecycle,
+        entryId: (transition.entry as { id: string }).id,
+      }))
+    ).toEqual([
+      { to: 'active', entryLifecycle: 'active', entryId: created.id },
+      { to: 'deprecated', entryLifecycle: 'deprecated', entryId: created.id },
+      { to: 'pending', entryLifecycle: 'pending', entryId: created.id },
     ]);
   });
 });

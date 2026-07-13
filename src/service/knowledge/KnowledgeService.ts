@@ -268,7 +268,7 @@ export class KnowledgeService {
         this._eventBus.emit('knowledge:changed', {
           action: 'create',
           entryId: saved.id,
-          entry: { id: saved.id, title: saved.title, content: saved.content, kind: saved.kind },
+          entry: saved.toJSON(),
         });
       }
 
@@ -461,12 +461,7 @@ export class KnowledgeService {
         this._eventBus.emit('knowledge:changed', {
           action: 'update',
           entryId: id,
-          entry: {
-            id: updated.id,
-            title: updated.title,
-            content: updated.content,
-            kind: updated.kind,
-          },
+          entry: updated.toJSON(),
         });
       }
 
@@ -939,6 +934,7 @@ export class KnowledgeService {
           to: entry.lifecycle,
           method,
           actor: context.userId,
+          entry: updated.toJSON(),
         });
       }
 

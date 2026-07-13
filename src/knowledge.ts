@@ -172,6 +172,7 @@ export {
   KnowledgeGraphService,
   KnowledgeService,
   KnowledgeSyncService,
+  type KnowledgeVectorMaintenance,
   type MergedRecipeInfo,
   normalizeGatewaySource,
   type PathRename,

@@ -4,7 +4,7 @@ export * from './driftClassifier.js';
 export * from './KnowledgeFileWriter.js';
 export * from './KnowledgeGraphService.js';
 export * from './KnowledgeService.js';
-export type { SyncAllReport } from './KnowledgeSyncService.js';
+export type { KnowledgeVectorMaintenance, SyncAllReport } from './KnowledgeSyncService.js';
 export { KnowledgeSyncService } from './KnowledgeSyncService.js';
 export * from './RecipeExtractor.js';
 export * from './RecipeFreshnessService.js';

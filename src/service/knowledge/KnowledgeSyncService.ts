@@ -47,6 +47,11 @@ export interface SourceRefReconciler {
   reconcile?(opts?: { force?: boolean }): Promise<ReconcileReport>;
 }
 
+/** Awaitable boundary for derived vector repair after direct file→DB writes. */
+export interface KnowledgeVectorMaintenance {
+  reconcileAuthoritativeCorpus(): Promise<unknown>;
+}
+
 export interface SyncAllReport {
   synced: number;
   created: number;
@@ -57,6 +62,8 @@ export interface SyncAllReport {
   reconcileReport?: ReconcileReport;
   repairReport?: RepairReport;
   applyReport?: ApplyReport;
+  vectorMaintenanceStatus: 'completed' | 'not-configured' | 'skipped-dry-run';
+  vectorMaintenanceReport?: unknown;
 }
 
 export class KnowledgeSyncService {
@@ -65,13 +72,21 @@ export class KnowledgeSyncService {
   projectRoot: string;
   recipesDir: string;
   #sourceRefReconciler: SourceRefReconciler | null;
+  #vectorMaintenance: KnowledgeVectorMaintenance | null;
 
-  constructor(projectRoot: string, options?: { sourceRefReconciler?: SourceRefReconciler }) {
+  constructor(
+    projectRoot: string,
+    options?: {
+      sourceRefReconciler?: SourceRefReconciler;
+      vectorMaintenance?: KnowledgeVectorMaintenance;
+    }
+  ) {
     this.projectRoot = projectRoot;
     this.recipesDir = path.join(projectRoot, RECIPES_DIR);
     this.candidatesDir = path.join(projectRoot, CANDIDATES_DIR);
     this.logger = Logger.getInstance();
     this.#sourceRefReconciler = options?.sourceRefReconciler ?? null;
+    this.#vectorMaintenance = options?.vectorMaintenance ?? null;
   }
 
   /**
@@ -90,7 +105,31 @@ export class KnowledgeSyncService {
     // 1. .md → DB 同步
     const syncReport = this.sync(db, opts);
 
-    const report: SyncAllReport = { ...syncReport };
+    const report: SyncAllReport = {
+      ...syncReport,
+      vectorMaintenanceStatus: opts.dryRun ? 'skipped-dry-run' : 'not-configured',
+    };
+
+    // KnowledgeSyncService writes through a raw repository adapter, so it
+    // cannot rely on KnowledgeService lifecycle events. The canonical async
+    // entrypoint therefore exposes one awaited authoritative maintenance
+    // boundary after all direct writes/deprecations have completed.
+    if (!opts.dryRun && this.#vectorMaintenance) {
+      report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
+      report.vectorMaintenanceStatus = 'completed';
+    } else if (
+      !opts.dryRun &&
+      (report.created > 0 || report.updated > 0 || report.orphaned.length > 0)
+    ) {
+      this.logger.warn(
+        'KnowledgeSyncService: vector maintenance not configured after direct DB mutations',
+        {
+          created: report.created,
+          updated: report.updated,
+          orphaned: report.orphaned.length,
+        }
+      );
+    }
 
     // sourceRef 全量扫描已移除 — 路径检测由 ReactiveEvolutionService 实时处理
     // SourceRefReconciler 仍保留用于 knowledge:changed 事件中的单条 sourceRef 填充
@@ -128,8 +167,7 @@ export class KnowledgeSyncService {
     ];
 
     if (mdFiles.length === 0) {
-      this.logger.info('KnowledgeSyncService: no .md files found');
-      return report;
+      this.logger.info('KnowledgeSyncService: no .md files found; checking DB orphans');
     }
 
     // ── 2. 创建仓储适配器 ──
@@ -407,12 +445,22 @@ export class KnowledgeSyncService {
       const rows = repo.findActiveEntriesWithSourceFile();
 
       for (const row of rows) {
-        if (!syncedIds.has(row.id)) {
+        if (syncedIds.has(row.id)) {
+          continue;
+        }
+        if (dryRun) {
           orphanIds.push(row.id);
-          if (!dryRun) {
-            const now = Math.floor(Date.now() / 1000);
-            repo.deprecateEntry(row.id, '源文件已删除（孤儿条目）', now);
-          }
+          continue;
+        }
+        try {
+          const now = Math.floor(Date.now() / 1000);
+          repo.deprecateEntry(row.id, '源文件已删除（孤儿条目）', now);
+          orphanIds.push(row.id);
+        } catch (err: unknown) {
+          this.logger.warn('KnowledgeSyncService: orphan deprecation failed', {
+            entryId: row.id,
+            error: err instanceof Error ? err.message : String(err),
+          });
         }
       }
     } catch (err: unknown) {

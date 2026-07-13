@@ -135,8 +135,8 @@ describe('SyncCoordinator', () => {
       await vi.advanceTimersByTimeAsync(250);
 
       // Should have batched all 3 upserts together
-      expect(embedProvider.embed).toHaveBeenCalledOnce();
-      expect(vectorStore.batchUpsert).toHaveBeenCalledOnce();
+      expect(embedProvider.embed).toHaveBeenCalledTimes(2);
+      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(2);
       const batchArgs = vectorStore.batchUpsert.mock.calls[0]?.[0] as Array<{ id: string }>;
       expect(batchArgs).toHaveLength(3);
     });
@@ -158,7 +158,7 @@ describe('SyncCoordinator', () => {
 
       await vi.advanceTimersByTimeAsync(250);
 
-      expect(vectorStore.batchUpsert).toHaveBeenCalledOnce();
+      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(2);
       const batch = vectorStore.batchUpsert.mock.calls[0]?.[0] as Array<{
         id: string;
         content: string;
@@ -197,9 +197,7 @@ describe('SyncCoordinator', () => {
       await vi.advanceTimersByTimeAsync(100);
 
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_42');
-      expect(vectorStore.remove).toHaveBeenCalledWith(
-        'recipe_region_42_identity_0000000000000001'
-      );
+      expect(vectorStore.remove).toHaveBeenCalledWith('recipe_region_42_identity_0000000000000001');
       expect(vectorStore.remove).toHaveBeenCalledWith(
         'recipe_region_42_rationale_0000000000000002'
       );
@@ -217,6 +215,51 @@ describe('SyncCoordinator', () => {
       await vi.advanceTimersByTimeAsync(100);
 
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_99');
+    });
+  });
+
+  describe('lifecycle:transition event', () => {
+    it('removes both vector families when a recipe becomes deprecated', async () => {
+      vectorStore.listIds.mockResolvedValue([
+        'entry_42',
+        'recipe_region_42_identity_0000000000000001',
+      ]);
+      const coord = createCoordinator({ debounceMs: 50 });
+      coord.bindEventBus(eventBus as never);
+
+      eventBus.emit('lifecycle:transition', { entryId: '42', to: 'deprecated' });
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_42');
+      expect(vectorStore.remove).toHaveBeenCalledWith('recipe_region_42_identity_0000000000000001');
+    });
+
+    it('regenerates entry and region vectors from the current live entry', async () => {
+      const coord = createCoordinator({ debounceMs: 50 });
+      coord.bindEventBus(eventBus as never);
+
+      eventBus.emit('lifecycle:transition', {
+        entryId: '42',
+        from: 'deprecated',
+        to: 'active',
+        entry: {
+          id: '42',
+          title: 'Reactivated Recipe',
+          lifecycle: 'active',
+          trigger: '@reactivated',
+          content: { markdown: 'Current DB truth' },
+          kind: 'pattern',
+        },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      const batches = vectorStore.batchUpsert.mock.calls.map(
+        (call) => call[0] as Array<{ id: string }>
+      );
+      expect(batches.some((batch) => batch.some((item) => item.id === 'entry_42'))).toBe(true);
+      expect(
+        batches.some((batch) => batch.some((item) => item.id.startsWith('recipe_region_42_')))
+      ).toBe(true);
     });
   });
 
@@ -262,12 +305,33 @@ describe('SyncCoordinator', () => {
 
       await coord.flush();
 
-      expect(vectorStore.batchUpsert).toHaveBeenCalledOnce();
+      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(2);
     });
 
     it('should be safe to call with no pending changes', async () => {
       const coord = createCoordinator();
       await coord.flush(); // should not throw
+    });
+
+    it('drains a removal queued while another removal is in flight', async () => {
+      let releaseFirst!: () => void;
+      vectorStore.remove.mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseFirst = resolve;
+          })
+      );
+      const coord = createCoordinator({ debounceMs: 60_000 });
+      coord.bindEventBus(eventBus as never);
+      eventBus.emit('knowledge:deleted', { entryId: 'first' });
+
+      const flush = coord.flush();
+      await vi.waitFor(() => expect(vectorStore.remove).toHaveBeenCalledWith('entry_first'));
+      eventBus.emit('knowledge:deleted', { entryId: 'second' });
+      releaseFirst();
+      await flush;
+
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_second');
     });
   });
 
@@ -384,12 +448,14 @@ describe('SyncCoordinator', () => {
     });
 
     it('counts and removes recipe regions absent from authoritative DB truth', async () => {
-      vectorStore.listIds = vi.fn().mockResolvedValue([
-        'entry_live',
-        'recipe_region_live_identity_0000000000000001',
-        'recipe_region_absent_identity_0000000000000002',
-        'recipe_region_absent_rationale_0000000000000003',
-      ]);
+      vectorStore.listIds = vi
+        .fn()
+        .mockResolvedValue([
+          'entry_live',
+          'recipe_region_live_identity_0000000000000001',
+          'recipe_region_absent_identity_0000000000000002',
+          'recipe_region_absent_rationale_0000000000000003',
+        ]);
       const db = createMockDb([{ id: 'live', title: 'Keep', content: 'data', kind: 'recipe' }]);
 
       const coord = createCoordinator({ debounceMs: 50 });

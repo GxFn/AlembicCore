@@ -95,6 +95,16 @@ export interface RecipeRegionSyncOptions {
   sourceRefsBridgeByRecipeId?: Record<string, RecipeSourceRefsBridge>;
   removeStale?: boolean;
   maxRegionChars?: number;
+  /**
+   * Omitted means a fail-safe subset refresh: only obsolete chunks belonging
+   * to entries in this call may be removed. Authoritative maintenance must
+   * carry the complete non-deprecated Recipe id set explicitly; callers that
+   * batch entries pass the same complete set to every batch.
+   */
+  maintenanceScope?: {
+    kind: 'authoritative-corpus';
+    nonDeprecatedRecipeIds: readonly string[];
+  };
   /** true = 全量重建（禁用"id 已存在跳过"加速），用于显式 rebuild 场景 */
   force?: boolean;
 }
@@ -617,6 +627,19 @@ export async function syncRecipeSemanticRegionVectors(
     })
   );
   const expectedIds = new Set(chunks.map((chunk) => chunk.id));
+  const batchRecipeIds = new Set(entries.map((entry) => entry.id));
+  const authoritativeRecipeIds = options.maintenanceScope
+    ? new Set(options.maintenanceScope.nonDeprecatedRecipeIds)
+    : null;
+
+  if (
+    authoritativeRecipeIds &&
+    [...batchRecipeIds].some((recipeId) => !authoritativeRecipeIds.has(recipeId))
+  ) {
+    result.status = 'failed';
+    result.errors.push('authoritative-corpus-missing-batch-recipe-id');
+    return result;
+  }
 
   result.generated = chunks.length;
   result.generatedMetadata = chunks.map((chunk) => chunk.metadata);
@@ -635,58 +658,74 @@ export async function syncRecipeSemanticRegionVectors(
     }
   }
 
-  if (options.removeStale !== false) {
-    try {
-      const recipeIds = new Set(entries.map((entry) => entry.id));
-      const vectorIds = existingIds ? [...existingIds] : await vectorStore.listIds();
-      for (const id of vectorIds) {
-        if (!id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
-          continue;
-        }
-        const recipeId = parseRecipeIdFromRegionVectorId(id);
-        if (recipeId && recipeIds.has(recipeId) && !expectedIds.has(id)) {
-          await vectorStore.remove(id);
-          result.removed++;
-        }
-      }
-    } catch (err: unknown) {
-      result.errors.push(
-        `stale-cleanup-failed:${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }
-
   const pendingChunks = existingIds ? chunks.filter((chunk) => !existingIds.has(chunk.id)) : chunks;
   result.skippedExisting = chunks.length - pendingChunks.length;
 
-  if (pendingChunks.length === 0) {
-    return result;
-  }
-
-  if (!embedProvider) {
+  if (pendingChunks.length > 0 && !embedProvider) {
     result.status = 'degraded';
     result.degradedReason = 'embed-provider-unavailable';
     result.skipped = pendingChunks.length;
     return result;
   }
 
-  try {
-    const embedResult = await embedProvider.embed(pendingChunks.map((chunk) => chunk.content));
-    const vectors = Array.isArray(embedResult[0])
-      ? (embedResult as number[][])
-      : [embedResult as number[]];
-    const items = pendingChunks.map((chunk, index) => ({
-      id: chunk.id,
-      content: chunk.content,
-      vector: vectors[index] ?? [],
-      metadata: { ...chunk.metadata },
-    }));
-    await vectorStore.batchUpsert(items);
-    result.embedded = vectors.length;
-    result.upserted = items.length;
-  } catch (err: unknown) {
-    result.status = 'failed';
-    result.errors.push(`embed-upsert-failed:${err instanceof Error ? err.message : String(err)}`);
+  if (pendingChunks.length > 0) {
+    try {
+      const embedResult = await embedProvider!.embed(pendingChunks.map((chunk) => chunk.content));
+      const vectors = Array.isArray(embedResult[0])
+        ? (embedResult as number[][])
+        : [embedResult as number[]];
+      const items = pendingChunks.map((chunk, index) => ({
+        id: chunk.id,
+        content: chunk.content,
+        vector: vectors[index] ?? [],
+        metadata: { ...chunk.metadata },
+      }));
+      await vectorStore.batchUpsert(items);
+      result.embedded = vectors.length;
+      result.upserted = items.length;
+    } catch (err: unknown) {
+      result.status = 'failed';
+      result.errors.push(`embed-upsert-failed:${err instanceof Error ? err.message : String(err)}`);
+      // Replacement safety: stale live chunks are removed only after their
+      // new siblings were embedded and persisted successfully.
+      return result;
+    }
+  }
+
+  if (options.removeStale !== false) {
+    let vectorIds: string[];
+    try {
+      vectorIds = existingIds ? [...existingIds] : await vectorStore.listIds();
+    } catch (err: unknown) {
+      result.errors.push(`stale-list-failed:${err instanceof Error ? err.message : String(err)}`);
+      return result;
+    }
+
+    for (const id of vectorIds) {
+      if (!id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
+        continue;
+      }
+      const recipeId = parseRecipeIdFromRegionVectorId(id);
+      if (!recipeId) {
+        continue;
+      }
+      const obsoleteForBatch = batchRecipeIds.has(recipeId) && !expectedIds.has(id);
+      const absentFromAuthority =
+        authoritativeRecipeIds !== null && !authoritativeRecipeIds.has(recipeId);
+      if (!obsoleteForBatch && !absentFromAuthority) {
+        continue;
+      }
+      try {
+        await vectorStore.remove(id);
+        result.removed++;
+      } catch (err: unknown) {
+        if (result.errors.length < 100) {
+          result.errors.push(
+            `stale-remove-failed:${id}:${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    }
   }
 
   return result;

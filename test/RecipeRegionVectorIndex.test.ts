@@ -672,9 +672,7 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
     expect(after.filter((id) => id.startsWith('entry_'))).toHaveLength(75);
     expect(
       new Set(
-        after
-          .filter((id) => id.startsWith('recipe_region_live-'))
-          .map((id) => id.split('_')[2])
+        after.filter((id) => id.startsWith('recipe_region_live-')).map((id) => id.split('_')[2])
       ).size
     ).toBe(75);
   });
@@ -685,7 +683,9 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
     const first = createRecipe({ id: 'first' });
     const unrelated = createRecipe({ id: 'unrelated' });
     await syncRecipeSemanticRegionVectors(store, embed as never, [first, unrelated]);
-    const unrelatedBefore = (await store.listIds()).filter((id) => id.startsWith('recipe_region_unrelated_'));
+    const unrelatedBefore = (await store.listIds()).filter((id) =>
+      id.startsWith('recipe_region_unrelated_')
+    );
 
     await syncRecipeSemanticRegionVectors(store, embed as never, [
       { ...first, doClause: 'changed subset content' },
@@ -696,19 +696,52 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
     expect(unrelatedBefore.every((id) => after.has(id))).toBe(true);
   });
 
+  it('requires explicit authority and supports an authoritative empty corpus', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    await syncRecipeSemanticRegionVectors(store, embed as never, [
+      createRecipe({ id: 'removed-from-empty-corpus' }),
+    ]);
+
+    const subset = await syncRecipeSemanticRegionVectors(store, embed as never, []);
+    expect(subset.removed).toBe(0);
+
+    const authoritative = await syncRecipeSemanticRegionVectors(store, embed as never, [], {
+      maintenanceScope: { kind: 'authoritative-corpus', nonDeprecatedRecipeIds: [] },
+    });
+    expect(authoritative.removed).toBeGreaterThan(0);
+    expect((await store.listIds()).filter((id) => id.startsWith('recipe_region_'))).toEqual([]);
+  });
+
+  it('fails closed when a batch recipe is missing from the declared authority set', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+
+    const result = await syncRecipeSemanticRegionVectors(
+      store,
+      embed as never,
+      [createRecipe({ id: 'undeclared' })],
+      { maintenanceScope: { kind: 'authoritative-corpus', nonDeprecatedRecipeIds: [] } }
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.errors).toContain('authoritative-corpus-missing-batch-recipe-id');
+    expect(await store.listIds()).toEqual([]);
+  });
+
   it('keeps old live chunks when replacement embedding fails', async () => {
     const store = makeStore();
     const embed = makeEmbed();
     const base = createRecipe({ id: 'replace-safely' });
     await syncRecipeSemanticRegionVectors(store, embed as never, [base]);
-    const before = (await store.listIds()).filter((id) => id.startsWith('recipe_region_replace-safely_'));
+    const before = (await store.listIds()).filter((id) =>
+      id.startsWith('recipe_region_replace-safely_')
+    );
     embed.embed.mockRejectedValueOnce(new Error('embedding unavailable'));
 
-    const result = await syncRecipeSemanticRegionVectors(
-      store,
-      embed as never,
-      [{ ...base, doClause: 'replacement that cannot be embedded' }]
-    );
+    const result = await syncRecipeSemanticRegionVectors(store, embed as never, [
+      { ...base, doClause: 'replacement that cannot be embedded' },
+    ]);
 
     const after = new Set(await store.listIds());
     expect(result.status).toBe('failed');

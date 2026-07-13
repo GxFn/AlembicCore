@@ -615,6 +615,25 @@ description: "包含冒号：和引号的描述"
 /* ═══ KnowledgeSyncService ═══ */
 
 describe('KnowledgeSyncService', () => {
+  it('does not report direct orphan deprecation failures as successful maintenance', () => {
+    const syncService = new KnowledgeSyncService('/tmp/test');
+    const repo = {
+      findActiveEntriesWithSourceFile: vi
+        .fn()
+        .mockReturnValue([{ id: 'failed' }, { id: 'succeeded' }]),
+      deprecateEntry: vi.fn((id: string) => {
+        if (id === 'failed') {
+          throw new Error('write failed');
+        }
+      }),
+    };
+
+    const orphaned = syncService._detectOrphans(repo as never, new Set(), false);
+
+    expect(orphaned).toEqual(['succeeded']);
+    expect(repo.deprecateEntry).toHaveBeenCalledTimes(2);
+  });
+
   describe('_buildDbRow', () => {
     it('should map parsed wire format to DB row correctly', () => {
       const syncService = new KnowledgeSyncService('/tmp/test');

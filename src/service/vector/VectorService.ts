@@ -830,7 +830,7 @@ export class VectorService {
   }
 
   /**
-   * 公开的索引对账入口（孤儿 entry 向量清理 + 缺失 entry 向量排队补索引）。
+   * 公开的索引对账入口（孤儿 entry/Recipe-region 清理 + 缺失 entry 补索引）。
    *
    * 背景（2026-07-06 真机定案）：UiStartupTasks Stage 3 此前访问
    * `vectorService.syncCoordinator`——但 #syncCoordinator 是私有字段，外部永远
@@ -841,6 +841,7 @@ export class VectorService {
    */
   async reconcileIndex(): Promise<{
     orphansRemoved: number;
+    recipeRegionOrphansRemoved: number;
     missingSynced: number;
     errors: string[];
   } | null> {
@@ -853,10 +854,10 @@ export class VectorService {
 
   // ═══ 生命周期 ═══
 
-  /** 销毁: 清理 SyncCoordinator 的定时器和事件监听 */
-  destroy(): void {
+  /** 销毁: 解绑事件并等待 SyncCoordinator 排空已确认的变更。 */
+  async destroy(): Promise<void> {
     if (this.#syncCoordinator) {
-      this.#syncCoordinator.destroy();
+      await this.#syncCoordinator.destroy();
       this.#syncCoordinator = null;
     }
     this.#initialized = false;
