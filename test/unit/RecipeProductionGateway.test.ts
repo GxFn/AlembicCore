@@ -7,6 +7,8 @@ import { GenerateDedup } from '../../src/service/bootstrap/GenerateDedup.js';
 import {
   type CreateRecipeItem,
   type GatewayDeps,
+  type ProducerContext,
+  type RecipeProducerCapability,
   RecipeProductionGateway,
 } from '../../src/service/knowledge/RecipeProductionGateway.js';
 
@@ -87,6 +89,85 @@ function makeDeps(overrides: Partial<GatewayDeps> = {}): GatewayDeps {
 /* ═══════════════════ Tests ═══════════════════ */
 
 describe('RecipeProductionGateway', () => {
+  describe('RecipeProductionPort — producer admission', () => {
+    const capabilities: RecipeProducerCapability[] = [
+      'cold-start',
+      'incremental',
+      'module-scan',
+      'knowledge-submit',
+    ];
+
+    it.each(capabilities)('admits %s and preserves it in result evidence', async (capability) => {
+      const gateway = new RecipeProductionGateway(makeDeps());
+
+      const result = await gateway.createOrStage(
+        {
+          items: [makeItem()],
+          options: { skipSimilarityCheck: true, skipConsolidation: true },
+        },
+        { source: 'host-agent', userId: 'producer', capability }
+      );
+
+      expect(result.created).toHaveLength(1);
+      expect(result.production).toEqual({ capability, source: 'host-agent' });
+    });
+
+    it('rejects a missing capability at runtime before persistence', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      await expect(
+        gateway.createOrStage({ items: [makeItem()] }, {
+          source: 'host-agent',
+          userId: 'producer',
+        } as ProducerContext)
+      ).rejects.toThrow('recipe-production-capability-missing');
+      expect(deps.knowledgeService.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown capability at runtime before persistence', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      await expect(
+        gateway.createOrStage({ items: [makeItem()] }, {
+          source: 'host-agent',
+          userId: 'producer',
+          capability: 'dashboard-create',
+        } as unknown as ProducerContext)
+      ).rejects.toThrow('recipe-production-capability-invalid');
+      expect(deps.knowledgeService.create).not.toHaveBeenCalled();
+    });
+
+    it('keeps batch-import on the internal Gateway path even with a legal capability', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      await expect(
+        gateway.createOrStage({ items: [makeItem()] }, {
+          source: 'batch-import',
+          userId: 'producer',
+          capability: 'incremental',
+        } as unknown as ProducerContext)
+      ).rejects.toThrow('recipe-production-source-prohibited');
+      expect(deps.knowledgeService.create).not.toHaveBeenCalled();
+    });
+
+    it('rejects an unknown Gateway source before persistence', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+
+      await expect(
+        gateway.createOrStage({ items: [makeItem()] }, {
+          source: 'dashboard-create',
+          userId: 'producer',
+          capability: 'module-scan',
+        } as unknown as ProducerContext)
+      ).rejects.toThrow('recipe-production-source-invalid');
+      expect(deps.knowledgeService.create).not.toHaveBeenCalled();
+    });
+  });
+
   describe('create — validation', () => {
     it('应通过验证并创建有效 Recipe', async () => {
       const deps = makeDeps();

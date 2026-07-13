@@ -81,6 +81,19 @@ export interface RetrievalReadinessDiagnostics {
 
 type DraftDocument = Omit<RecipeRetrievalDocument, 'documentSetHash'>;
 const DEFAULT_ONLY_RETRIEVAL_CONCEPTS = new Set(['utility', 'general', 'default']);
+const PLACEHOLDER_RETRIEVAL_CONCEPTS = new Set([
+  '',
+  '-',
+  'n/a',
+  'na',
+  'none',
+  'null',
+  'undefined',
+  'unknown',
+  'todo',
+  'tbd',
+]);
+type MeaninglessRetrievalConceptKind = 'placeholder' | 'default-only';
 
 /**
  * Recipe 源事实的确定性 hash。时间、运行时 handle、质量台账与本地路径均不参与，
@@ -396,11 +409,16 @@ export function evaluateRecipeRetrievalReadiness(
       for (const [index, fact] of facts.entries()) {
         const value = 'term' in fact ? fact.term : fact.text;
         const normalized = comparable(value);
-        if (bucket === 'concepts' && isDefaultOnlyRetrievalConcept(value)) {
+        const meaninglessKind =
+          bucket === 'concepts' ? classifyMeaninglessRetrievalConcept(value) : null;
+        if (meaninglessKind) {
           violations.push({
-            code: 'retrieval.profile.concept-default-only',
+            code: `retrieval.profile.concept-${meaninglessKind}`,
             field: `retrievalProfile.${bucket}.${index}`,
-            message: 'Default-only topic, category, or module labels are not retrieval concepts.',
+            message:
+              meaninglessKind === 'placeholder'
+                ? 'Placeholder labels are not retrieval concepts.'
+                : 'Default-only topic, category, or module labels are not retrieval concepts.',
             provenanceRefs: fact.provenanceRefs,
           });
         }
@@ -550,7 +568,7 @@ function addDocument(
   }
 ): void {
   const lines = distinctStrings(input.values.map(text)).filter(
-    (value) => !isPlaceholder(value) && !isDefaultOnlyRetrievalConcept(value)
+    (value) => !classifyMeaninglessRetrievalConcept(value)
   );
   if (lines.length === 0 && !input.required) {
     return;
@@ -703,14 +721,17 @@ function isEnglishText(value: string): boolean {
   return letters >= 4 && letters > cjk;
 }
 
-function isPlaceholder(value: string): boolean {
-  return new Set(['', '-', 'n/a', 'na', 'none', 'null', 'undefined', 'unknown', 'todo', 'tbd']).has(
-    comparable(value)
-  );
-}
-
-function isDefaultOnlyRetrievalConcept(value: unknown): boolean {
-  return DEFAULT_ONLY_RETRIEVAL_CONCEPTS.has(comparable(value));
+function classifyMeaninglessRetrievalConcept(
+  value: unknown
+): MeaninglessRetrievalConceptKind | null {
+  const normalized = comparable(value);
+  if (PLACEHOLDER_RETRIEVAL_CONCEPTS.has(normalized)) {
+    return 'placeholder';
+  }
+  if (DEFAULT_ONLY_RETRIEVAL_CONCEPTS.has(normalized)) {
+    return 'default-only';
+  }
+  return null;
 }
 
 function firstNonEmpty(...values: unknown[]): string {
@@ -750,9 +771,7 @@ function stringArray(value: unknown): string[] {
 }
 
 function distinctFacts(values: string[]): string[] {
-  return distinctStrings(values).filter(
-    (value) => !isPlaceholder(value) && !isDefaultOnlyRetrievalConcept(value)
-  );
+  return distinctStrings(values).filter((value) => !classifyMeaninglessRetrievalConcept(value));
 }
 
 function distinctStrings(values: unknown[]): string[] {

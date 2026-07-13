@@ -17,9 +17,11 @@ import type { RecipeRetrievalProfile } from '../../domain/knowledge/RecipeRetrie
 import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
 import { RELATION_BUCKETS } from '../../domain/knowledge/values/Relations.js';
 import {
+  type CanonicalGatewaySource,
   type GatewaySource,
   getGatewaySourceLabel,
   getGatewaySourceUserId,
+  normalizeGatewaySource,
 } from '../../shared/sourceContracts.js';
 import type { StructuredPatch } from '../../types/evolution.js';
 import type { CandidateSummary, GenerateDedup } from '../bootstrap/GenerateDedup.js';
@@ -172,15 +174,52 @@ export type RecipeProducerCapability =
   | 'module-scan'
   | 'knowledge-submit';
 
+export type RecipeProductionSource = Exclude<GatewaySource, 'batch-import'>;
+
+const RECIPE_PRODUCER_CAPABILITIES = new Set<RecipeProducerCapability>([
+  'cold-start',
+  'incremental',
+  'module-scan',
+  'knowledge-submit',
+]);
+
+const RECIPE_PRODUCTION_SOURCES = new Set<RecipeProductionSource>([
+  'agent-tool',
+  'mcp-external',
+  'host-agent',
+  'alembic-agent',
+  'ide-agent',
+]);
+
+function admitRecipeProducerCapability(value: unknown): RecipeProducerCapability {
+  if (value === undefined || value === null || value === '') {
+    throw new Error('recipe-production-capability-missing');
+  }
+  if (!RECIPE_PRODUCER_CAPABILITIES.has(value as RecipeProducerCapability)) {
+    throw new Error('recipe-production-capability-invalid');
+  }
+  return value as RecipeProducerCapability;
+}
+
+function admitRecipeProductionSource(value: unknown): RecipeProductionSource {
+  if (value === 'batch-import') {
+    throw new Error('recipe-production-source-prohibited');
+  }
+  if (!RECIPE_PRODUCTION_SOURCES.has(value as RecipeProductionSource)) {
+    throw new Error('recipe-production-source-invalid');
+  }
+  return value as RecipeProductionSource;
+}
+
 export interface RecipeProductionInput {
   items: CreateRecipeItem[];
   options?: Omit<NonNullable<CreateRecipeRequest['options']>, 'userId'>;
 }
 
 export interface ProducerContext {
-  source: GatewaySource;
+  source: RecipeProductionSource;
   userId: string;
-  capability?: RecipeProducerCapability;
+  capability: RecipeProducerCapability;
 }
 
 export interface PublishContext {
@@ -195,7 +234,14 @@ export interface RecipeProductionRecord {
   retrievalProfile?: RecipeRetrievalProfile | null;
 }
 
-export type RecipeProductionResult = CreateRecipeResult;
+export interface RecipeProductionEvidence {
+  capability: RecipeProducerCapability;
+  source: Exclude<CanonicalGatewaySource, 'batch-import'>;
+}
+
+export interface RecipeProductionResult extends CreateRecipeResult {
+  production: RecipeProductionEvidence;
+}
 
 /** Consumer-facing production boundary shared by every Recipe producer. */
 export interface RecipeProductionPort {
@@ -348,11 +394,20 @@ export class RecipeProductionGateway implements RecipeProductionPort {
     input: RecipeProductionInput,
     context: ProducerContext
   ): Promise<RecipeProductionResult> {
-    return this.create({
-      source: context.source,
+    const capability = admitRecipeProducerCapability(context.capability);
+    const source = admitRecipeProductionSource(context.source);
+    const result = await this.create({
+      source,
       items: input.items,
       options: { ...input.options, userId: context.userId },
     });
+    return {
+      ...result,
+      production: {
+        capability,
+        source: normalizeGatewaySource(source) as Exclude<CanonicalGatewaySource, 'batch-import'>,
+      },
+    };
   }
 
   async evaluateReadiness(recipeId: string): Promise<RetrievalReadinessReport> {

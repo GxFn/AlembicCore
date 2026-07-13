@@ -219,16 +219,48 @@ describe('Recipe retrieval profile truth and readiness', () => {
     ]);
   });
 
-  it('allows meaningful phrases that merely contain default-label words', () => {
+  it('reports stable hard violations for every persisted placeholder concept', () => {
+    const source = recipeSource();
+    const profile = nativeProfile(source);
+    const placeholders = ['-', 'n/a', 'na', 'none', 'null', 'undefined', 'unknown', 'todo', 'tbd'];
+    profile.concepts.push(
+      ...placeholders.map((term) => ({
+        term,
+        language: 'en',
+        provenanceRefs: ['field:description'],
+      }))
+    );
+
+    const report = evaluateRecipeRetrievalReadiness(
+      new KnowledgeEntry({ ...source, retrievalProfile: profile })
+    );
+
+    expect(report.ready).toBe(false);
+    expect(
+      report.violations
+        .filter((violation) => violation.code === 'retrieval.profile.concept-placeholder')
+        .map((violation) => violation.field)
+    ).toEqual(placeholders.map((_, index) => `retrievalProfile.concepts.${index + 2}`).sort());
+  });
+
+  it('allows meaningful phrases that merely contain placeholder or default-label words', () => {
     const source = recipeSource({
-      tags: ['shared utility module', 'general-purpose retry', 'default export boundary'],
+      tags: [
+        'shared utility module',
+        'general-purpose retry',
+        'default export boundary',
+        'unknown enum case handling',
+        'TODO comment lifecycle',
+      ],
     });
     const profile = nativeProfile(source);
     profile.provenance.sourceFieldRefs.push('field:tags');
     profile.concepts.push(
       { term: 'shared utility module', language: 'en', provenanceRefs: ['field:tags'] },
       { term: 'general-purpose retry', language: 'en', provenanceRefs: ['field:tags'] },
-      { term: 'default export boundary', language: 'en', provenanceRefs: ['field:tags'] }
+      { term: 'default export boundary', language: 'en', provenanceRefs: ['field:tags'] },
+      { term: 'unknown enum case handling', language: 'en', provenanceRefs: ['field:tags'] },
+      { term: 'TODO comment lifecycle', language: 'en', provenanceRefs: ['field:tags'] }
     );
 
     const report = evaluateRecipeRetrievalReadiness(
@@ -237,6 +269,9 @@ describe('Recipe retrieval profile truth and readiness', () => {
 
     expect(report.violations.map((violation) => violation.code)).not.toContain(
       'retrieval.profile.concept-default-only'
+    );
+    expect(report.violations.map((violation) => violation.code)).not.toContain(
+      'retrieval.profile.concept-placeholder'
     );
   });
 
@@ -411,11 +446,12 @@ describe('Recipe retrieval profile persistence and active transition', () => {
         items: [{ ...item, retrievalProfile: profile }],
         options: { skipSimilarityCheck: true, skipConsolidation: true },
       },
-      { source: 'batch-import', userId: 'producer' }
+      { source: 'host-agent', userId: 'producer', capability: 'module-scan' }
     );
 
     expect(staged.rejected).toEqual([]);
     expect(staged.created).toHaveLength(1);
+    expect(staged.production).toEqual({ capability: 'module-scan', source: 'host-agent' });
     const recipeId = staged.created[0].id;
     const persisted = await repository.findById(recipeId);
     expect(persisted?.retrievalProfile).toEqual(profile);
