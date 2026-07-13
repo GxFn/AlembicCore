@@ -747,4 +747,45 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
     expect(result.status).toBe('failed');
     expect(before.every((id) => after.has(id))).toBe(true);
   });
+
+  it('prunes absent authoritative regions without a provider while retaining live old chunks', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const base = createRecipe({ id: 'live-without-provider' });
+    await syncRecipeSemanticRegionVectors(store, embed as never, [base]);
+    await store.batchUpsert([
+      {
+        id: 'recipe_region_absent-without-provider_identity_0000000000000001',
+        content: 'orphan region',
+        vector: [0.3, 0.4],
+        metadata: { recipeId: 'absent-without-provider' },
+      },
+    ]);
+    const oldLiveIds = (await store.listIds()).filter((id) =>
+      id.startsWith('recipe_region_live-without-provider_')
+    );
+
+    const result = await syncRecipeSemanticRegionVectors(
+      store,
+      null,
+      [{ ...base, doClause: 'changed content requiring a replacement embedding' }],
+      {
+        maintenanceScope: {
+          kind: 'authoritative-corpus',
+          nonDeprecatedRecipeIds: [base.id],
+        },
+      }
+    );
+
+    const after = new Set(await store.listIds());
+    expect(result).toMatchObject({
+      status: 'degraded',
+      degradedReason: 'embed-provider-unavailable',
+      removed: 1,
+    });
+    expect(after.has('recipe_region_absent-without-provider_identity_0000000000000001')).toBe(
+      false
+    );
+    expect(oldLiveIds.every((id) => after.has(id))).toBe(true);
+  });
 });
