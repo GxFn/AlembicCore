@@ -56,7 +56,7 @@ export interface SyncCoordinatorReconcileResult {
   missingSynced: number;
   /** Missing live vectors deliberately deferred because generation is unavailable. */
   missingDeferred?: number;
-  degradedReason?: 'embed-provider-unavailable';
+  degradedReason?: 'embed-provider-unavailable' | 'vector-sync-incomplete';
   errors: string[];
 }
 
@@ -295,13 +295,30 @@ export class SyncCoordinator {
             kind: entry.kind,
             timestamp: Date.now(),
           });
-          result.missingSynced++;
         }
       }
 
-      // 立即处理缺失的
-      if (result.missingSynced > 0) {
+      // 立即处理缺失的，并从 store truth 验证实际写入；入队不等于同步成功。
+      if (generationAvailable && missingEntries.length > 0) {
         await this.flush();
+        try {
+          const reconciledVectorIds = new Set(await this.#vectorStore.listIds());
+          for (const entry of missingEntries) {
+            if (reconciledVectorIds.has(`entry_${entry.id}`)) {
+              result.missingSynced++;
+            } else {
+              result.missingDeferred = (result.missingDeferred ?? 0) + 1;
+            }
+          }
+        } catch (err: unknown) {
+          result.missingDeferred = (result.missingDeferred ?? 0) + missingEntries.length;
+          result.errors.push(
+            `missing-sync-verify-failed:${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+        if ((result.missingDeferred ?? 0) > 0) {
+          result.degradedReason = 'vector-sync-incomplete';
+        }
       }
 
       this.#logger.info('[SyncCoordinator] Reconciliation complete', {
@@ -454,6 +471,9 @@ export class SyncCoordinator {
 
     const upserts: PendingChange[] = [];
     const removes: string[] = [];
+    let upsertedCount = 0;
+    let deferredUpsertCount = 0;
+    let failedUpsertCount = 0;
 
     for (const change of batch.values()) {
       if (change.type === 'remove') {
@@ -483,6 +503,7 @@ export class SyncCoordinator {
     // explicitly deferred and never fabricates vector success.
     const embedProvider = this.#embedProvider;
     if (upserts.length > 0 && !embedProvider) {
+      deferredUpsertCount = upserts.length;
       this.#logger.warn('[SyncCoordinator] vector upserts deferred — embed provider unavailable', {
         count: upserts.length,
       });
@@ -531,6 +552,7 @@ export class SyncCoordinator {
           });
 
           await this.#vectorStore.batchUpsert(items);
+          upsertedCount = items.length;
 
           const regionEntries = validUpserts.map((change) =>
             change.entry
@@ -553,6 +575,7 @@ export class SyncCoordinator {
             });
           }
         } catch (err: unknown) {
+          failedUpsertCount = validUpserts.length;
           this.#logger.warn('[SyncCoordinator] batch embed/upsert failed', {
             count: validUpserts.length,
             error: err instanceof Error ? err.message : String(err),
@@ -562,7 +585,9 @@ export class SyncCoordinator {
     }
 
     this.#logger.info('[SyncCoordinator] Batch processed', {
-      upserted: upserts.length,
+      upserted: upsertedCount,
+      deferredUpserts: deferredUpsertCount,
+      failedUpserts: failedUpsertCount,
       removed: removes.length,
     });
   }

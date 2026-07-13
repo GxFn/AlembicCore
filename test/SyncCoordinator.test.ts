@@ -477,7 +477,10 @@ describe('SyncCoordinator', () => {
 
     it('should queue missing entries for sync', async () => {
       // vector index has entry_abc, but DB has abc and new_one
-      vectorStore.listIds = vi.fn().mockResolvedValue(['entry_abc']);
+      vectorStore.listIds = vi
+        .fn()
+        .mockResolvedValueOnce(['entry_abc'])
+        .mockResolvedValue(['entry_abc', 'entry_new_one']);
       const db = createMockDb([
         { id: 'abc', title: 'Existing', content: 'data1' },
         { id: 'new_one', title: 'New Entry', content: 'data2', kind: 'recipe' },

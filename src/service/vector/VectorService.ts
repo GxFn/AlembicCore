@@ -838,14 +838,15 @@ export class VectorService {
    * 读到 undefined → 启动对账从未运行过；叠加 bootstrap fullReset 只清
    * knowledge_entries 不清向量索引，索引里累积了 100% 陈旧向量而 live 条目
    * 零向量。此方法是对账的唯一公开面；coordinator 缺席（embed 不可用等）时
-   * 返回 null 并留痕，调用方按可降级能力处理。
+   * 返回 null 并留痕，调用方按可降级能力处理。Embed provider 缺席时
+   * coordinator 仍存在，以便执行 provider-independent removal/reconcile。
    */
   async reconcileIndex(): Promise<{
     orphansRemoved: number;
     recipeRegionOrphansRemoved: number;
     missingSynced: number;
     missingDeferred?: number;
-    degradedReason?: 'embed-provider-unavailable';
+    degradedReason?: 'embed-provider-unavailable' | 'vector-sync-incomplete';
     errors: string[];
   } | null> {
     if (!this.#syncCoordinator) {
