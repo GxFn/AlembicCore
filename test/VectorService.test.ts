@@ -545,6 +545,37 @@ describe('VectorService', () => {
       await svc.initialize();
       await svc.initialize(); // second call is a no-op
     });
+
+    it('removes deleted and deprecated Recipe vectors when the embed provider is unavailable', async () => {
+      vectorStore.listIds.mockResolvedValue([
+        'entry_deleted',
+        'recipe_region_deleted_identity_0000000000000001',
+        'entry_deprecated',
+        'recipe_region_deprecated_rationale_0000000000000002',
+      ]);
+      const svc = createService({
+        autoSyncOnCrud: true,
+        embedProvider: null,
+        syncDebounceMs: 60_000,
+      });
+      await svc.initialize();
+
+      eventBus.emit('knowledge:deleted', { entryId: 'deleted' });
+      eventBus.emit('lifecycle:transition', {
+        entryId: 'deprecated',
+        to: 'deprecated',
+      });
+      await svc.destroy();
+
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_deleted');
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_deleted_identity_0000000000000001'
+      );
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_deprecated');
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_deprecated_rationale_0000000000000002'
+      );
+    });
   });
 
   // ── migrateDimension ──
