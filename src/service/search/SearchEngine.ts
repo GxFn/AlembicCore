@@ -5,6 +5,7 @@
  * 从 V1 SearchServiceV2 迁移，适配 V2 架构
  */
 
+import type { RecipeRetrievalProfile } from '../../domain/knowledge/RecipeRetrievalProfile.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type {
   SearchDb as CoreSearchDb,
@@ -17,6 +18,10 @@ import {
   unwrapSearchDb,
 } from '../../repository/search/SearchRepoAdapter.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
+import {
+  projectRecipeRetrievalDocumentSet,
+  serializeRecipeRetrievalDocumentSetForSparse,
+} from '../knowledge/RecipeRetrieval.js';
 import { parseRecipeIdFromRegionVectorId } from '../vector/RecipeRegionVectorIndex.js';
 import { CoarseRanker } from './CoarseRanker.js';
 import type { SearchItem } from './contextBoost.js';
@@ -85,6 +90,38 @@ export { tokenize } from './tokenizer.js';
 // G-C P1:源锚漂移的检索降权因子(乘性)。0.85=温和降权——漂移不等于错误,
 // 只在同分附近让 active 上浮,不把漂移知识挤出结果(降级消费而非排除)。
 const DRIFTED_SOURCE_REF_SCORE_FACTOR = 0.85;
+
+function parseJsonObject(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value !== 'string' || !value) {
+    return {};
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function parseJsonArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is string => typeof item === 'string');
+  }
+  if (typeof value !== 'string' || !value) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === 'string')
+      : [];
+  } catch {
+    return [];
+  }
+}
 
 /**
  * SearchEngine - 完整搜索服务
@@ -642,13 +679,22 @@ export class SearchEngine {
     // 补充排序信号字段（whenClause/doClause/tags 等），与 scorer/semantic 路径一致
     this._supplementDetails(results);
 
-    // 当 SQL LIKE 无结果时，降级到 FieldWeighted 搜索
-    // 这让自然语言查询（如 "如何处理网络错误"）在 keyword 模式下也能返回结果
-    if (results.length === 0) {
-      this.ensureIndex();
-      const scorerResults = this._scorerSearch(query, type, limit, filters);
-      return scorerResults;
+    // Canonical sparse documents carry profile-only facts that SQL LIKE does
+    // not materialize as columns. Merge them on every keyword request so SQL
+    // never becomes an independent, narrower Recipe fact set.
+    this.ensureIndex();
+    const scorerResults = this._scorerSearch(query, type, rowLimit, filters);
+    const byId = new Map(results.map((item) => [item.id, item]));
+    for (const scorerResult of scorerResults) {
+      const existing = byId.get(scorerResult.id);
+      if (!existing) {
+        results.push(scorerResult);
+        byId.set(scorerResult.id, scorerResult);
+      } else if ((scorerResult.score ?? 0) > (existing.score ?? 0)) {
+        Object.assign(existing, scorerResult);
+      }
     }
+    results.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
     return results.slice(0, limit);
   }
@@ -1458,48 +1504,17 @@ export class SearchEngine {
    * 注：FieldWeightedScorer 内部已有字段权重机制，此文本用于兼容通用 scorer 输入。
    */
   _buildDocText(r: DbRow) {
-    let contentText = '';
-    try {
-      const content = JSON.parse(r.content || '{}');
-      contentText = [content.pattern, content.rationale, content.markdown]
-        .filter(Boolean)
-        .join(' ');
-    } catch {
-      /* ignore */
-    }
-    let tagText = '';
-    try {
-      tagText = JSON.parse(r.tags || '[]').join(' ');
-    } catch {
-      /* ignore */
-    }
-    // Field boosting via token repetition:
-    // title ×2, trigger ×2, description ×1, others ×1
-    // 使用较温和的 boost 避免长文档 avgLength 膨胀导致 content 匹配被过度稀释
-    const title = r.title || '';
-    const trigger = r.trigger || '';
-    const desc = r.description || '';
-    const fields = [
-      title,
-      title, // ×2 boost
-      trigger,
-      trigger, // ×2 boost
-      desc, // ×1 (no boost — description already contributes naturally)
-      r.language,
-      r.dimensionId,
-      r.category,
-      r.knowledgeType,
-      r.kind,
-      r.scope,
-      tagText,
-      // when/do/don't 是权威 Recipe 对“何时用、必须做、禁止做”的高密度检索语义。
-      // 它们进入既有 sparse 文本，不改变 tokenizer、字段权重或 RRF。
-      r.whenClause,
-      r.doClause,
-      r.dontClause,
-      contentText,
-    ];
-    return fields.filter(Boolean).join(' ');
+    return serializeRecipeRetrievalDocumentSetForSparse(
+      projectRecipeRetrievalDocumentSet({
+        ...r,
+        content: parseJsonObject(r.content),
+        reasoning: parseJsonObject(r.reasoning),
+        retrievalProfile: r.retrievalProfile
+          ? (parseJsonObject(r.retrievalProfile) as unknown as RecipeRetrievalProfile)
+          : null,
+        tags: parseJsonArray(r.tags),
+      })
+    );
   }
 
   /**
@@ -1528,22 +1543,7 @@ export class SearchEngine {
       /* ignore */
     }
     // 提取 description 和 contentText 供 FieldWeightedScorer 字段级评分使用
-    let contentText = '';
-    try {
-      const content = JSON.parse(r.content || '{}');
-      contentText = [
-        r.whenClause,
-        r.doClause,
-        r.dontClause,
-        content.pattern,
-        content.rationale,
-        content.markdown,
-      ]
-        .filter(Boolean)
-        .join(' ');
-    } catch {
-      /* ignore */
-    }
+    const contentText = this._buildDocText(r);
     return {
       type: 'knowledge',
       title: r.title,

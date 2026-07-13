@@ -1,11 +1,15 @@
 import { KnowledgeEntry, type KnowledgeEntryProps } from '../../domain/knowledge/KnowledgeEntry.js';
 import type { KnowledgeRepository } from '../../domain/knowledge/KnowledgeRepository.js';
-import { inferKind, Lifecycle } from '../../domain/knowledge/Lifecycle.js';
+import { inferKind, isValidTransition, Lifecycle } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { KnowledgeFileWriter } from '../../service/knowledge/KnowledgeFileWriter.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
 import type { ConfidenceRouter } from './ConfidenceRouter.js';
 import type { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import {
+  evaluateRecipeRetrievalReadiness,
+  type RetrievalReadinessReport,
+} from './RecipeRetrieval.js';
 
 interface AuditLoggerLike {
   log(entry: Record<string, unknown>): Promise<void>;
@@ -31,6 +35,7 @@ interface EventBusLike {
 }
 
 type AfterPublishHook = () => void | Promise<void>;
+type RetrievalReadinessEvaluator = (entry: KnowledgeEntry) => RetrievalReadinessReport;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -70,6 +75,8 @@ interface KnowledgeServiceOptions {
   afterPublish?: AfterPublishHook | null;
   /** P0/C7: 宿主注入的接地投影 port；未注入则深度覆盖退化为 0(向后兼容)。 */
   groundedSourcePaths?: GroundedSourcePathsPort | null;
+  /** Recipe active-transition gate. Inject only for deterministic diagnostic decoration. */
+  retrievalReadinessEvaluator?: RetrievalReadinessEvaluator;
 }
 
 interface ServiceContext {
@@ -115,6 +122,7 @@ export class KnowledgeService {
   _afterPublish: AfterPublishHook | null;
   /** P0/C7: 接地投影 port(宿主注入)；null 时评分退化为旧行为。 */
   _groundedSourcePaths: GroundedSourcePathsPort | null;
+  _retrievalReadinessEvaluator: RetrievalReadinessEvaluator;
   auditLogger: AuditLoggerLike;
   gateway: unknown;
   logger: ReturnType<typeof Logger.getInstance>;
@@ -139,6 +147,8 @@ export class KnowledgeService {
     this._proposalRepo = options.proposalRepo || null;
     this._afterPublish = options.afterPublish || null;
     this._groundedSourcePaths = options.groundedSourcePaths || null;
+    this._retrievalReadinessEvaluator =
+      options.retrievalReadinessEvaluator ?? evaluateRecipeRetrievalReadiness;
     this.logger = Logger.getInstance();
   }
 
@@ -860,6 +870,19 @@ export class KnowledgeService {
       const entry = await this._findOrThrow(id);
       const prevLifecycle = entry.lifecycle;
 
+      if (
+        (method === 'publish' || method === 'restore') &&
+        isRecipeRetrievalSubject(entry) &&
+        isValidTransition(entry.lifecycle, Lifecycle.ACTIVE)
+      ) {
+        const readiness = this._retrievalReadinessEvaluator(entry);
+        if (!readiness.ready) {
+          throw new ValidationError('Recipe retrieval readiness blocks active transition', {
+            readiness,
+          });
+        }
+      }
+
       const entityArgs = options.entityArgs || [];
       const result = (
         entry as unknown as Record<
@@ -1354,6 +1377,10 @@ export class KnowledgeService {
       });
     }
   }
+}
+
+function isRecipeRetrievalSubject(entry: KnowledgeEntry): boolean {
+  return entry.knowledgeType !== 'boundary-constraint' && entry.category !== 'guard';
 }
 
 export default KnowledgeService;

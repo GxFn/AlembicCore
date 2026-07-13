@@ -300,9 +300,8 @@ describe('Recipe freshness primitives', () => {
       refs: ['src/live.ts'],
       status: 'active',
     });
-    expect(vectorService.syncEntry).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'r1', title: 'Live source rule' })
-    );
+    expect(vectorService.syncEntry).not.toHaveBeenCalled();
+    expect(result.recipes[0]?.vector.entrySyncStatus).toBe('retired');
     expect(vectorService.syncRecipeSemanticRegions).toHaveBeenCalledWith(
       [expect.objectContaining({ id: 'r1' })],
       { sourceRefsBridgeByRecipeId: { r1: { refs: ['src/live.ts'], status: 'active' } } }

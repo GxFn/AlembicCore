@@ -105,6 +105,11 @@ export interface SearchResultItem {
   whenClause?: string;
   doClause?: string;
   dontClause?: string;
+  topicHint?: string;
+  coreCode?: string;
+  usageGuide?: string;
+  reasoning?: string;
+  retrievalProfile?: string | null;
   rankerScore?: number;
   coarseScore?: number;
   contextScore?: number;

@@ -20,7 +20,6 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import { queryNonDeprecatedEntries } from '../../repository/search/SearchRepoAdapter.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
-import { asEmbeddingPort } from './EmbeddingPort.js';
 import type { VectorChunkEnricher } from './EnrichmentTypes.js';
 import {
   parseRecipeIdFromRegionVectorId,
@@ -28,6 +27,10 @@ import {
   type RecipeRegionSourceEntry,
   syncRecipeSemanticRegionVectors,
 } from './RecipeRegionVectorIndex.js';
+import {
+  inspectRecipeVectorGeneration,
+  type RecipeVectorGenerationInspection,
+} from './RecipeVectorGeneration.js';
 import type { VectorIndexReader, VectorIndexWriter } from './VectorIndexPorts.js';
 import type { EmbedProvider } from './VectorService.js';
 
@@ -62,6 +65,10 @@ class LifecycleVectorStoreBridge extends VectorStore {
     return this.#reader.listIds();
   }
 
+  getById(id: string): Promise<Record<string, unknown> | null> {
+    return this.#reader.getById(id);
+  }
+
   remove(id: string): Promise<void> {
     return this.#writer.remove(id);
   }
@@ -89,6 +96,9 @@ export interface SyncCoordinatorReconcileResult {
   missingDeferred?: number;
   degradedReason?: 'embed-provider-unavailable' | 'vector-sync-incomplete';
   errors: string[];
+  legacyEntryVectorsRemoved?: number;
+  initialInspection?: RecipeVectorGenerationInspection;
+  finalInspection?: RecipeVectorGenerationInspection;
 }
 
 // ── Coordinator ──
@@ -239,26 +249,21 @@ export class VectorLifecycleCoordinator {
 
     try {
       // 1. 获取向量索引中所有 ID
-      const vectorIds = new Set(await this.#reader.listIds());
+      const vectorIds = await this.#reader.listIds();
 
       // 2. 获取 DB 中所有 active 知识条目 ID
-      let dbEntries: Array<{ id: string; title?: string; content?: string; kind?: string }> = [];
+      let dbEntries: RecipeRegionSourceEntry[] = [];
       try {
         if (this.#drizzle) {
           // Drizzle 类型安全查询
           dbEntries = this.#drizzle
-            .select({
-              id: knowledgeEntries.id,
-              title: knowledgeEntries.title,
-              content: knowledgeEntries.content,
-              kind: knowledgeEntries.kind,
-            })
+            .select()
             .from(knowledgeEntries)
             .where(ne(knowledgeEntries.lifecycle, 'deprecated'))
-            .all() as Array<{ id: string; title?: string; content?: string; kind?: string }>;
+            .all() as unknown as RecipeRegionSourceEntry[];
         } else if (db) {
           // 向后兼容: 测试时可传入 mock db
-          dbEntries = queryNonDeprecatedEntries(db);
+          dbEntries = queryNonDeprecatedEntries(db) as RecipeRegionSourceEntry[];
         } else {
           return result;
         }
@@ -271,15 +276,20 @@ export class VectorLifecycleCoordinator {
         return result;
       }
 
-      const dbIdSet = new Set(dbEntries.map((e) => `entry_${e.id}`));
       const authoritativeRecipeIds = new Set(dbEntries.map((entry) => entry.id));
+      result.initialInspection = await inspectRecipeVectorGeneration(
+        this.#recipeRegionStore,
+        dbEntries,
+        null
+      );
 
-      // 3. 找孤儿向量 (在索引中但 DB 无对应的 entry_ 前缀记录)
+      // Retire every generic Recipe competitor. Removal needs no provider.
       for (const vectorId of vectorIds) {
-        if ((vectorId as string).startsWith('entry_') && !dbIdSet.has(vectorId as string)) {
+        if (vectorId.startsWith('entry_')) {
           try {
-            await this.#writer.remove(vectorId as string);
+            await this.#writer.remove(vectorId);
             result.orphansRemoved++;
+            result.legacyEntryVectorsRemoved = (result.legacyEntryVectorsRemoved ?? 0) + 1;
           } catch (err: unknown) {
             // CO3 V1: a failed orphan removal used to vanish — it is now
             // counted in the contract result and logged with a stable code.
@@ -294,19 +304,17 @@ export class VectorLifecycleCoordinator {
         }
       }
 
-      // Region vectors are derived from the same non-deprecated DB corpus.
-      // Count them separately so repair evidence cannot confuse entry-vector
-      // health with semantic-region health.
+      // Parent-orphan canonical documents are also provider-independent truth removals.
       for (const vectorId of vectorIds) {
-        if (!(vectorId as string).startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
+        if (!vectorId.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
           continue;
         }
-        const recipeId = parseRecipeIdFromRegionVectorId(vectorId as string);
+        const recipeId = parseRecipeIdFromRegionVectorId(vectorId);
         if (!recipeId || authoritativeRecipeIds.has(recipeId)) {
           continue;
         }
         try {
-          await this.#writer.remove(vectorId as string);
+          await this.#writer.remove(vectorId);
           result.recipeRegionOrphansRemoved++;
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -318,47 +326,50 @@ export class VectorLifecycleCoordinator {
         }
       }
 
-      // 4. 找缺失向量 (在 DB 中但索引无对应)
-      const missingEntries = dbEntries.filter((entry) => !vectorIds.has(`entry_${entry.id}`));
-      const generationAvailable =
-        missingEntries.length === 0 || (await this.#isEmbedProviderAvailable());
-      for (const entry of missingEntries) {
-        if (!generationAvailable) {
-          result.missingDeferred = (result.missingDeferred ?? 0) + 1;
-          result.degradedReason = 'embed-provider-unavailable';
+      const afterTruthCleanup = await inspectRecipeVectorGeneration(
+        this.#recipeRegionStore,
+        dbEntries,
+        null
+      );
+      if (!afterTruthCleanup.healthy) {
+        const generationAvailable = await this.#isEmbedProviderAvailable();
+        if (generationAvailable) {
+          const sync = await syncRecipeSemanticRegionVectors(
+            this.#recipeRegionStore,
+            this.#embedProvider,
+            dbEntries,
+            {
+              force: true,
+              maintenanceScope: {
+                kind: 'authoritative-corpus',
+                nonDeprecatedRecipeIds: dbEntries.map((entry) => entry.id),
+              },
+              removeStale: true,
+            }
+          );
+          result.errors.push(...sync.errors);
         } else {
-          this.#enqueue({
-            type: 'upsert',
-            entryId: entry.id,
-            title: entry.title,
-            content: entry.content,
-            kind: entry.kind,
-            timestamp: Date.now(),
-          });
+          result.degradedReason = 'embed-provider-unavailable';
         }
       }
 
-      // 立即处理缺失的，并从 store truth 验证实际写入；入队不等于同步成功。
-      if (generationAvailable && missingEntries.length > 0) {
-        await this.flush();
-        try {
-          const reconciledVectorIds = new Set(await this.#reader.listIds());
-          for (const entry of missingEntries) {
-            if (reconciledVectorIds.has(`entry_${entry.id}`)) {
-              result.missingSynced++;
-            } else {
-              result.missingDeferred = (result.missingDeferred ?? 0) + 1;
-            }
-          }
-        } catch (err: unknown) {
-          result.missingDeferred = (result.missingDeferred ?? 0) + missingEntries.length;
-          result.errors.push(
-            `missing-sync-verify-failed:${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-        if ((result.missingDeferred ?? 0) > 0) {
-          result.degradedReason = 'vector-sync-incomplete';
-        }
+      result.finalInspection = await inspectRecipeVectorGeneration(
+        this.#recipeRegionStore,
+        dbEntries,
+        null
+      );
+      result.missingSynced = Math.max(
+        0,
+        result.initialInspection.missingIds.length - result.finalInspection.missingIds.length
+      );
+      if (!result.finalInspection.healthy) {
+        result.missingDeferred =
+          result.finalInspection.missingIds.length +
+          result.finalInspection.partialIds.length +
+          result.finalInspection.hashMismatchIds.length +
+          result.finalInspection.staleIds.length +
+          result.finalInspection.duplicateIds.length;
+        result.degradedReason ??= 'vector-sync-incomplete';
       }
 
       this.#logger.info('[SyncCoordinator] Reconciliation complete', {
@@ -366,6 +377,7 @@ export class VectorLifecycleCoordinator {
         recipeRegionOrphansRemoved: result.recipeRegionOrphansRemoved,
         missingSynced: result.missingSynced,
         missingDeferred: result.missingDeferred ?? 0,
+        exactSetHealthy: result.finalInspection.healthy,
         degradedReason: result.degradedReason,
       });
     } catch (err: unknown) {
@@ -560,52 +572,35 @@ export class VectorLifecycleCoordinator {
         // entry 向量全部灭掉（与 type:'all' 哨兵同型缝）。批处理时按 id 从 DB
         // 一次回查补全（单点覆盖 reconcile 与 knowledge:changed 两个入队来源）；
         // drizzle 缺席时容缺降级为原有字段。
-        const hydrated = this.#hydrateEntryFields(validUpserts.map((u) => u.entryId));
-        const texts = validUpserts.map((u) => this.#extractText(u));
+        const hydrated = this.#hydrateEntries(validUpserts.map((u) => u.entryId));
         try {
-          const vectors = await asEmbeddingPort(embedProvider).embedDocuments(texts);
-
-          const items = validUpserts.map((u, i) => {
-            const extra = hydrated.get(u.entryId);
-            return {
-              id: `entry_${u.entryId}`,
-              content: texts[i],
-              vector: vectors[i] || [],
-              metadata: {
-                entryId: u.entryId,
-                title: u.title || '',
-                kind: u.kind || extra?.kind || 'unknown',
-                // 'recipe' 对齐查询侧 type 语义（region 向量为 recipe-semantic-region，
-                // 两类向量靠 type 值天然互斥，显式 type:'recipe' 过滤命中 entry 域）。
-                type: 'recipe',
-                language: extra?.language ?? '',
-                category: extra?.category ?? '',
-                dimensionId: extra?.dimensionId ?? '',
-                knowledgeType: extra?.knowledgeType ?? '',
-                source: 'event_sync',
-                updatedAt: Date.now(),
-              },
-            };
-          });
-
-          await this.#writer.batchUpsert(items);
-          upsertedCount = items.length;
-
-          const regionEntries = validUpserts.map((change) =>
-            change.entry
-              ? change.entry
-              : {
-                  id: change.entryId,
-                  title: change.title,
-                  content: change.content,
-                  kind: change.kind,
-                }
-          );
+          const regionEntries = validUpserts.map((change) => ({
+            ...(hydrated.get(change.entryId) ?? {}),
+            ...(change.entry ?? {}),
+            id: change.entryId,
+            title: change.entry?.title ?? change.title ?? hydrated.get(change.entryId)?.title,
+            content:
+              change.entry?.content ?? change.content ?? hydrated.get(change.entryId)?.content,
+            kind: change.entry?.kind ?? change.kind ?? hydrated.get(change.entryId)?.kind,
+          }));
           const regionResult = await syncRecipeSemanticRegionVectors(
             this.#recipeRegionStore,
             embedProvider,
             regionEntries
           );
+          upsertedCount = regionResult.upserted;
+          if (regionResult.status === 'completed') {
+            for (const change of validUpserts) {
+              try {
+                await this.#writer.remove(`entry_${change.entryId}`);
+              } catch (err: unknown) {
+                this.#logger.warn('[SyncCoordinator] legacy entry vector retirement failed', {
+                  entryId: change.entryId,
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              }
+            }
+          }
           if (regionResult.errors.length > 0) {
             this.#logger.warn('[SyncCoordinator] recipe region refresh had errors', {
               errors: regionResult.errors.slice(0, 20),
@@ -683,57 +678,19 @@ export class VectorLifecycleCoordinator {
    * knowledgeType/kind）。drizzle 缺席或查询失败时返回空 Map——调用方容缺
    * 降级为入队自带字段，写出仍成功（可观测面留 warn）。
    */
-  #hydrateEntryFields(entryIds: string[]): Map<
-    string,
-    {
-      kind: string;
-      language: string;
-      category: string;
-      dimensionId: string;
-      knowledgeType: string;
-    }
-  > {
-    const map = new Map<
-      string,
-      {
-        kind: string;
-        language: string;
-        category: string;
-        dimensionId: string;
-        knowledgeType: string;
-      }
-    >();
+  #hydrateEntries(entryIds: string[]): Map<string, RecipeRegionSourceEntry> {
+    const map = new Map<string, RecipeRegionSourceEntry>();
     if (!this.#drizzle || entryIds.length === 0) {
       return map;
     }
     try {
       const rows = this.#drizzle
-        .select({
-          id: knowledgeEntries.id,
-          kind: knowledgeEntries.kind,
-          language: knowledgeEntries.language,
-          category: knowledgeEntries.category,
-          dimensionId: knowledgeEntries.dimensionId,
-          knowledgeType: knowledgeEntries.knowledgeType,
-        })
+        .select()
         .from(knowledgeEntries)
         .where(inArray(knowledgeEntries.id, entryIds))
-        .all() as Array<{
-        id: string;
-        kind: string | null;
-        language: string | null;
-        category: string | null;
-        dimensionId: string | null;
-        knowledgeType: string | null;
-      }>;
+        .all();
       for (const row of rows) {
-        map.set(row.id, {
-          kind: row.kind ?? '',
-          language: row.language ?? '',
-          category: row.category ?? '',
-          dimensionId: row.dimensionId ?? '',
-          knowledgeType: row.knowledgeType ?? '',
-        });
+        map.set(row.id, row as unknown as RecipeRegionSourceEntry);
       }
     } catch (err: unknown) {
       this.#logger.warn('[SyncCoordinator] metadata hydrate failed (degraded to queue fields)', {
@@ -742,25 +699,6 @@ export class VectorLifecycleCoordinator {
       });
     }
     return map;
-  }
-
-  #extractText(change: PendingChange): string {
-    const parts: string[] = [];
-    if (change.title) {
-      parts.push(change.title);
-    }
-    if (typeof change.content === 'string') {
-      parts.push(change.content);
-    } else if (change.content && typeof change.content === 'object') {
-      const c = change.content as Record<string, unknown>;
-      if (typeof c.body === 'string') {
-        parts.push(c.body);
-      }
-      if (typeof c.code === 'string') {
-        parts.push(c.code);
-      }
-    }
-    return parts.join('\n\n') || change.entryId;
   }
 }
 

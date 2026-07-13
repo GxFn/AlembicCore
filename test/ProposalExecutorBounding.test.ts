@@ -54,7 +54,20 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     proposalRepo = new ProposalRepository(drizzle);
     const eventRepo = new LifecycleEventRepository(drizzle);
     signalBus = new SignalBus();
-    const lifecycle = new LifecycleStateMachine(knowledgeRepo, eventRepo, signalBus, proposalRepo);
+    const lifecycle = new LifecycleStateMachine(
+      knowledgeRepo,
+      eventRepo,
+      signalBus,
+      proposalRepo,
+      () => ({
+        ready: true,
+        schemaVersion: '1',
+        profileHash: null,
+        documentSetHash: null,
+        violations: [],
+        warnings: [],
+      })
+    );
     const sourceRefRepo = new RecipeSourceRefRepositoryImpl(drizzle);
     const contentPatcher = new ContentPatcher(knowledgeRepo, sourceRefRepo);
     const edgeRepo = new KnowledgeEdgeRepositoryImpl(drizzle);

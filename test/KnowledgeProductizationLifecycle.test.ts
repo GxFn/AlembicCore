@@ -42,13 +42,34 @@ describe('Knowledge productization lifecycle', () => {
     eventRepo = new LifecycleEventRepository(connection.getDrizzle());
     const proposalRepo = new ProposalRepository(connection.getDrizzle());
     const signalBus = new SignalBus();
-    const lifecycle = new LifecycleStateMachine(knowledgeRepo, eventRepo, signalBus, proposalRepo);
+    const lifecycle = new LifecycleStateMachine(
+      knowledgeRepo,
+      eventRepo,
+      signalBus,
+      proposalRepo,
+      () => ({
+        ready: true,
+        schemaVersion: '1',
+        profileHash: null,
+        documentSetHash: null,
+        violations: [],
+        warnings: [],
+      })
+    );
     stagingManager = new StagingManager(knowledgeRepo, { signalBus, lifecycle });
     eventBus = new EventBus();
     knowledgeService = new KnowledgeService(knowledgeRepo, { log: async () => {} }, null, null, {
       confidenceRouter: new ConfidenceRouter(),
       fileWriter: new KnowledgeFileWriter(tmpDir),
       eventBus,
+      retrievalReadinessEvaluator: () => ({
+        ready: true,
+        schemaVersion: '1',
+        profileHash: null,
+        documentSetHash: null,
+        violations: [],
+        warnings: [],
+      }),
     });
   });
 

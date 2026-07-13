@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
+import {
+  projectRecipeRetrievalDocumentSet,
+  type RecipeRetrievalDocumentRole,
+} from '../knowledge/RecipeRetrieval.js';
 import { asEmbeddingPort } from './EmbeddingPort.js';
 import type { EmbedProvider } from './VectorService.js';
 
@@ -43,6 +47,10 @@ export interface RecipeRegionSourceEntry {
   usageGuide?: string;
   content?: unknown;
   reasoning?: unknown;
+  retrievalProfile?:
+    | import('../../domain/knowledge/RecipeRetrievalProfile.js').RecipeRetrievalProfile
+    | null;
+  quality?: unknown;
   sourceFile?: string | null;
   moduleName?: string;
   contentHash?: string | null;
@@ -63,6 +71,16 @@ export interface RecipeRegionVectorMetadata {
   type: typeof RECIPE_SEMANTIC_REGION_METADATA_TYPE;
   recipeId: string;
   regionClass: RecipeSemanticRegionClass;
+  /** Canonical role. regionClass remains as a reader compatibility alias. */
+  documentRole: RecipeRetrievalDocumentRole;
+  candidateEligible: boolean;
+  documentSetHash: string;
+  profileHash: string;
+  sourceContentHash: string;
+  sourceFields: string[];
+  provenanceRefs: string[];
+  sourceFile: string;
+  quality: Record<string, unknown>;
   regionHash: string;
   contentHash: string;
   sourceHash: string;
@@ -116,6 +134,8 @@ export interface RecipeRegionSyncResult {
   generated: number;
   embedded: number;
   upserted: number;
+  /** Newly written chunks whose content, hashes, role, and vector were read back successfully. */
+  verified: number;
   removed: number;
   skipped: number;
   /** id 已在索引（内容未变）而跳过 embed/upsert 的 chunk 数（2026-07-06 启动加速） */
@@ -189,39 +209,9 @@ export interface RecipeRegionGenerationTestReport {
   };
 }
 
-interface NormalizedContent {
-  pattern: string;
-  markdown: string;
-  rationale: string;
-  verification: string;
-}
-
 interface NormalizedReasoning {
   whyStandard: string;
   sources: string[];
-}
-
-interface RecipeRegionSourceSnapshot {
-  id: string;
-  title: string;
-  trigger: string;
-  description: string;
-  lifecycle: string;
-  language: string;
-  dimensionId: string;
-  kind: string;
-  knowledgeType: string;
-  tags: string[];
-  whenClause: string;
-  doClause: string;
-  dontClause: string;
-  moduleName: string;
-  sourceFile: string;
-  content: Pick<NormalizedContent, 'pattern' | 'rationale' | 'verification'>;
-  reasoning: NormalizedReasoning;
-  sourceRefs: string[];
-  contentHash: string;
-  updatedAt: number | string | null;
 }
 
 interface RecipeRegionGenerationFilterProofState {
@@ -252,6 +242,13 @@ function compactString(value: unknown): string {
 }
 
 function compactStringArray(value: unknown): string[] {
+  if (typeof value === 'string') {
+    try {
+      return compactStringArray(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
   if (!Array.isArray(value)) {
     return [];
   }
@@ -280,174 +277,12 @@ function parseRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function normalizeContent(content: unknown): NormalizedContent {
-  const record = parseRecord(content);
-  const verificationRecord = parseRecord(record.verification);
-  return {
-    pattern: compactString(record.pattern),
-    markdown: compactString(record.markdown),
-    rationale: compactString(record.rationale),
-    verification: [
-      compactString(verificationRecord.method),
-      compactString(verificationRecord.expected_result),
-      compactString(verificationRecord.test_code),
-    ]
-      .filter(Boolean)
-      .join('\n'),
-  };
-}
-
 function normalizeReasoning(reasoning: unknown): NormalizedReasoning {
   const record = parseRecord(reasoning);
   return {
     whyStandard: compactString(record.whyStandard),
     sources: compactStringArray(record.sources),
   };
-}
-
-function clipRegionText(value: string, maxChars: number): string {
-  const normalized = value
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .join('\n');
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-  return normalized.slice(0, maxChars).trim();
-}
-
-function section(title: string, value: string): string {
-  return value ? `${title}: ${value}` : '';
-}
-
-function isGenericRegionContent(value: string): boolean {
-  const semanticText = value
-    .split('\n')
-    .map((line) => {
-      const separatorIndex = line.indexOf(':');
-      return separatorIndex >= 0 ? line.slice(separatorIndex + 1) : line;
-    })
-    .join(' ')
-    .trim()
-    .toLowerCase();
-  return ['', '-', 'n/a', 'na', 'none', 'null', 'undefined', 'unknown', 'todo', 'tbd'].includes(
-    semanticText
-  );
-}
-
-function regionContentFor(
-  entry: RecipeRegionSourceEntry,
-  regionClass: RecipeSemanticRegionClass,
-  content: NormalizedContent,
-  reasoning: NormalizedReasoning,
-  sourceRefs: string[]
-): string {
-  switch (regionClass) {
-    case 'identity':
-      return [
-        section('Title', compactString(entry.title)),
-        section('Trigger', compactString(entry.trigger)),
-        section('Description', compactString(entry.description)),
-        section('Dimension', compactString(entry.dimensionId)),
-        section('Kind', compactString(entry.kind)),
-        section('Knowledge type', compactString(entry.knowledgeType)),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'applicability':
-      return [
-        section('When', compactString(entry.whenClause)),
-        section('Scenario', compactString(entry.description)),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'patternPurpose':
-      return [
-        section('Do', compactString(entry.doClause)),
-        section('Purpose', content.rationale || reasoning.whyStandard),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'architectureConvention':
-      return [
-        section('Convention', content.pattern),
-        section('Architecture rule', compactString(entry.doClause)),
-        section('Boundary', compactString(entry.dontClause)),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'integrationBoundary':
-      return [
-        section('Sources', sourceRefs.join('\n')),
-        section('Module', compactString(entry.moduleName)),
-        section('Source file', compactString(entry.sourceFile)),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'qualityConcern':
-      return [
-        section('Quality tags', qualityTags(entry.tags).join(', ')),
-        section('Verification', content.verification),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'negativeBoundary':
-      return section('Do not', compactString(entry.dontClause));
-    case 'rationale':
-      return [
-        section('Rationale', content.rationale),
-        section('Why standard', reasoning.whyStandard),
-      ]
-        .filter(Boolean)
-        .join('\n');
-    case 'evidence':
-      return [
-        section('Reasoning sources', reasoning.sources.join('\n')),
-        section('Bridge refs', sourceRefs.join('\n')),
-      ]
-        .filter(Boolean)
-        .join('\n');
-  }
-}
-
-function qualityTags(tags: unknown): string[] {
-  const qualityWords = [
-    'boundary',
-    'compatibility',
-    'concurrency',
-    'error',
-    'logging',
-    'observability',
-    'performance',
-    'persistence',
-    'quality',
-    'retry',
-    'safety',
-    'security',
-    'testing',
-    'validation',
-  ];
-  return compactStringArray(tags).filter((tag) =>
-    qualityWords.some((word) => tag.toLowerCase().includes(word))
-  );
-}
-
-function anchorRegionContent(
-  entry: RecipeRegionSourceEntry,
-  regionClass: RecipeSemanticRegionClass,
-  regionContent: string
-): string {
-  if (regionClass === 'identity') {
-    return regionContent;
-  }
-  return [
-    section('Recipe title', compactString(entry.title)),
-    section('Recipe trigger', compactString(entry.trigger)),
-    regionContent,
-  ]
-    .filter(Boolean)
-    .join('\n');
 }
 
 function normalizeBridge(
@@ -465,47 +300,6 @@ function normalizeBridge(
     return { status: 'partial', refs: [] };
   }
   return { status: 'missing', refs: [] };
-}
-
-function recipeRegionSourceSnapshot(
-  entry: RecipeRegionSourceEntry,
-  content: NormalizedContent,
-  reasoning: NormalizedReasoning,
-  sourceRefs: string[]
-): RecipeRegionSourceSnapshot {
-  return {
-    id: entry.id,
-    title: compactString(entry.title),
-    trigger: compactString(entry.trigger),
-    description: compactString(entry.description),
-    lifecycle: compactString(entry.lifecycle),
-    language: compactString(entry.language),
-    dimensionId: compactString(entry.dimensionId),
-    kind: compactString(entry.kind),
-    knowledgeType: compactString(entry.knowledgeType),
-    tags: compactStringArray(entry.tags),
-    whenClause: compactString(entry.whenClause),
-    doClause: compactString(entry.doClause),
-    dontClause: compactString(entry.dontClause),
-    moduleName: compactString(entry.moduleName),
-    sourceFile: compactString(entry.sourceFile),
-    content: {
-      pattern: content.pattern,
-      rationale: content.rationale,
-      verification: content.verification,
-    },
-    reasoning,
-    sourceRefs,
-    contentHash: compactString(entry.contentHash),
-    updatedAt: entry.updatedAt ?? null,
-  };
-}
-
-function sourceHashFor(sourceSnapshot: RecipeRegionSourceSnapshot): string {
-  return stableHash({
-    schemaVersion: 1,
-    sourceSnapshot,
-  });
 }
 
 function emptyRegionClassCounts(): Record<RecipeSemanticRegionClass, number> {
@@ -526,48 +320,49 @@ export function buildRecipeSemanticRegionChunks(
   entry: RecipeRegionSourceEntry,
   options: RecipeRegionBuildOptions = {}
 ): RecipeSemanticRegionChunk[] {
-  const maxRegionChars = options.maxRegionChars ?? 1600;
-  const content = normalizeContent(entry.content);
   const reasoning = normalizeReasoning(entry.reasoning);
   const bridge = normalizeBridge(options.sourceRefsBridge, reasoning.sources);
   const sourceRefs = bridge.refs.length > 0 ? bridge.refs : reasoning.sources;
-  const sourceHash = sourceHashFor(
-    recipeRegionSourceSnapshot(entry, content, reasoning, sourceRefs)
-  );
   const tags = compactStringArray(entry.tags);
   const deprecated = compactString(entry.lifecycle).toLowerCase() === 'deprecated';
-  const chunks: RecipeSemanticRegionChunk[] = [];
 
   if (deprecated) {
-    return chunks;
+    return [];
   }
 
-  for (const regionClass of RECIPE_SEMANTIC_REGION_CLASSES) {
-    const rawContent = regionContentFor(entry, regionClass, content, reasoning, sourceRefs);
-    const clippedRawContent = clipRegionText(rawContent, maxRegionChars);
-    if (!clippedRawContent) {
-      continue;
-    }
-    if (regionClass !== 'identity' && isGenericRegionContent(clippedRawContent)) {
-      continue;
-    }
-    const regionContent =
-      regionClass === 'identity'
-        ? clippedRawContent
-        : clipRegionText(
-            anchorRegionContent(entry, regionClass, clippedRawContent),
-            maxRegionChars
-          );
-
-    const regionHash = stableHash({ recipeId: entry.id, regionClass, regionContent });
-    const contentHash = stableHash({ regionContent });
+  const parsedProfile = parseRecord(entry.retrievalProfile);
+  const documentSet = projectRecipeRetrievalDocumentSet({
+    ...entry,
+    content: parseRecord(entry.content),
+    reasoning: parseRecord(entry.reasoning),
+    retrievalProfile:
+      Object.keys(parsedProfile).length > 0
+        ? (parsedProfile as unknown as import('../../domain/knowledge/RecipeRetrievalProfile.js').RecipeRetrievalProfile)
+        : null,
+  });
+  return documentSet.documents.map((document) => {
+    const regionClass = compatibilityRegionClass(document.role);
+    const regionHash = stableHash({
+      documentRole: document.role,
+      recipeId: entry.id,
+      text: document.text,
+    });
     const metadata: RecipeRegionVectorMetadata = {
       type: RECIPE_SEMANTIC_REGION_METADATA_TYPE,
       recipeId: entry.id,
       regionClass,
+      documentRole: document.role,
+      candidateEligible: document.candidateEligible,
+      documentSetHash: documentSet.documentSetHash,
+      profileHash: documentSet.profileHash,
+      sourceContentHash: documentSet.sourceContentHash,
+      sourceFields: document.sourceFields,
+      provenanceRefs: document.provenanceRefs,
+      sourceFile: compactString(entry.sourceFile),
+      quality: parseRecord(entry.quality),
       regionHash,
-      contentHash,
-      sourceHash,
+      contentHash: document.contentHash,
+      sourceHash: documentSet.sourceContentHash,
       title: compactString(entry.title),
       trigger: compactString(entry.trigger),
       lifecycle: compactString(entry.lifecycle),
@@ -594,14 +389,25 @@ export function buildRecipeSemanticRegionChunks(
       metadata.weakTopicHint = weakTopicHint;
     }
 
-    chunks.push({
+    return {
       id: recipeRegionVectorId(entry.id, regionClass, regionHash),
-      content: regionContent,
+      content: document.text,
       metadata,
-    });
-  }
+    };
+  });
+}
 
-  return chunks;
+function compatibilityRegionClass(role: RecipeRetrievalDocumentRole): RecipeSemanticRegionClass {
+  switch (role) {
+    case 'intent':
+      return 'identity';
+    case 'guidance':
+      return 'applicability';
+    case 'implementation':
+      return 'architectureConvention';
+    case 'rationale':
+      return 'rationale';
+  }
 }
 
 export async function syncRecipeSemanticRegionVectors(
@@ -616,6 +422,7 @@ export async function syncRecipeSemanticRegionVectors(
     generated: 0,
     embedded: 0,
     upserted: 0,
+    verified: 0,
     removed: 0,
     skipped: 0,
     errors: [],
@@ -723,6 +530,16 @@ export async function syncRecipeSemanticRegionVectors(
       await vectorStore.batchUpsert(items);
       result.embedded = vectors.length;
       result.upserted = items.length;
+      for (const item of items) {
+        const stored = await vectorStore.getById(item.id);
+        const readbackError = recipeRegionReadbackError(stored, item);
+        if (readbackError) {
+          result.status = 'failed';
+          result.errors.push(`replacement-readback-failed:${item.id}:${readbackError}`);
+          return result;
+        }
+        result.verified++;
+      }
     } catch (err: unknown) {
       result.status = 'failed';
       result.errors.push(`embed-upsert-failed:${err instanceof Error ? err.message : String(err)}`);
@@ -741,6 +558,37 @@ export async function syncRecipeSemanticRegionVectors(
   }
 
   return result;
+}
+
+function recipeRegionReadbackError(
+  stored: Record<string, unknown> | null,
+  expected: {
+    content: string;
+    vector: number[];
+    metadata: RecipeRegionVectorMetadata;
+  }
+): string | null {
+  if (!stored) {
+    return 'missing';
+  }
+  const metadata = parseRecord(stored.metadata);
+  if (
+    stored.content !== expected.content ||
+    metadata.contentHash !== expected.metadata.contentHash ||
+    metadata.documentSetHash !== expected.metadata.documentSetHash ||
+    metadata.sourceContentHash !== expected.metadata.sourceContentHash ||
+    metadata.documentRole !== expected.metadata.documentRole
+  ) {
+    return 'content-or-metadata-mismatch';
+  }
+  if (
+    !Array.isArray(stored.vector) ||
+    stored.vector.length === 0 ||
+    stored.vector.length !== expected.vector.length
+  ) {
+    return 'vector-dimension-mismatch';
+  }
+  return null;
 }
 
 export async function testRecipeSemanticRegionGeneration(

@@ -33,6 +33,10 @@ import {
   syncRecipeSemanticRegionVectors,
   testRecipeSemanticRegionGeneration,
 } from './RecipeRegionVectorIndex.js';
+import type {
+  RecipeVectorGenerationBuildResult,
+  RecipeVectorGenerationManager,
+} from './RecipeVectorGeneration.js';
 import type { VectorLifecycleCoordinator } from './SyncCoordinator.js';
 
 // ── Types ──
@@ -49,6 +53,7 @@ export interface VectorServiceConfig {
   autoSyncOnCrud: boolean;
   syncDebounceMs: number;
   drizzle?: DrizzleDB;
+  recipeGenerationManager?: RecipeVectorGenerationManager | null;
 }
 
 export interface BuildResult {
@@ -134,6 +139,7 @@ export class VectorService {
   #autoSyncOnCrud: boolean;
   #syncDebounceMs: number;
   #drizzle: DrizzleDB | null;
+  #recipeGenerationManager: RecipeVectorGenerationManager | null;
   #logger = Logger.getInstance();
   #initialized = false;
 
@@ -154,6 +160,7 @@ export class VectorService {
     this.#autoSyncOnCrud = config.autoSyncOnCrud;
     this.#syncDebounceMs = config.syncDebounceMs;
     this.#drizzle = config.drizzle ?? null;
+    this.#recipeGenerationManager = config.recipeGenerationManager ?? null;
   }
 
   // ═══ Lifecycle ═══
@@ -516,40 +523,19 @@ export class VectorService {
 
   // ═══ 同步 ═══
 
-  /**
-   * 手动同步单个知识条目到向量索引
-   * 用于 KnowledgeService CRUD 后的即时同步
-   */
-  async syncEntry(entry: {
-    id: string;
-    title: string;
-    content: unknown;
-    kind?: string;
-  }): Promise<void> {
+  /** @deprecated Compatibility name; Recipe generation uses the canonical document set. */
+  async syncEntry(entry: RecipeRegionSourceEntry): Promise<void> {
     if (!this.#embedProvider) {
       return;
     }
 
     try {
-      const text = this.#extractText(entry);
-      if (!text) {
-        return;
+      const result = await syncRecipeSemanticRegionVectors(this.#vectorStore, this.#embedProvider, [
+        entry,
+      ]);
+      if (result.status === 'completed') {
+        await this.#vectorStore.remove(`entry_${entry.id}`);
       }
-
-      const vector = (await this.#embeddingPort!.embedDocuments([text]))[0] ?? [];
-
-      await this.#vectorStore.upsert({
-        id: `entry_${entry.id}`,
-        content: text,
-        vector,
-        metadata: {
-          entryId: entry.id,
-          title: entry.title,
-          kind: entry.kind || 'unknown',
-          source: 'crud_sync',
-          updatedAt: Date.now(),
-        },
-      });
     } catch (err: unknown) {
       this.#logger.warn('[VectorService] syncEntry failed', {
         entryId: entry.id,
@@ -606,6 +592,38 @@ export class VectorService {
     });
 
     return result;
+  }
+
+  /**
+   * Authoritative full-corpus build. The manager owns shadow storage,
+   * exact-set readback verification, atomic activation and rollback history.
+   */
+  async buildRecipeRetrievalGeneration(
+    entries: RecipeRegionSourceEntry[]
+  ): Promise<RecipeVectorGenerationBuildResult> {
+    if (!this.#recipeGenerationManager) {
+      return {
+        status: 'failed',
+        generationId: null,
+        previous: null,
+        active: null,
+        manifest: null,
+        inspection: null,
+        errors: ['recipe-generation-manager-not-configured'],
+      };
+    }
+    if (!this.#embedProvider) {
+      return {
+        status: 'failed',
+        generationId: null,
+        previous: null,
+        active: null,
+        manifest: null,
+        inspection: null,
+        errors: ['embed-provider-unavailable'],
+      };
+    }
+    return this.#recipeGenerationManager.buildAndActivate(entries, this.#embedProvider);
   }
 
   /**

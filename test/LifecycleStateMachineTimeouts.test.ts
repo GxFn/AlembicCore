@@ -50,7 +50,20 @@ describe('LifecycleStateMachine.checkTimeouts cap bounding (P2)', () => {
     eventRepo = new LifecycleEventRepository(connection.getDrizzle());
     const proposalRepo = new ProposalRepository(connection.getDrizzle());
     const signalBus = new SignalBus();
-    lifecycle = new LifecycleStateMachine(knowledgeRepo, eventRepo, signalBus, proposalRepo);
+    lifecycle = new LifecycleStateMachine(
+      knowledgeRepo,
+      eventRepo,
+      signalBus,
+      proposalRepo,
+      () => ({
+        ready: true,
+        schemaVersion: '1',
+        profileHash: null,
+        documentSetHash: null,
+        violations: [],
+        warnings: [],
+      })
+    );
   });
 
   afterEach(() => {

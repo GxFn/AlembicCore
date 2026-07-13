@@ -62,6 +62,7 @@ const SCALAR_FIELDS = [
   'doClause',
   'dontClause',
   'coreCode',
+  'usageGuide',
   'createdBy',
   'createdAt',
   'updatedAt',
@@ -133,6 +134,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       ['_quality', json.quality],
       ['_stats', json.stats],
       ['_lifecycleHistory', json.lifecycleHistory],
+      ['_retrievalProfile', json.retrievalProfile],
     ];
     for (const [key, val] of JSON_FIELDS) {
       if (val && typeof val === 'object') {

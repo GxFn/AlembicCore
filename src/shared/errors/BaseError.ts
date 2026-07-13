@@ -44,6 +44,10 @@ export class ValidationError extends BaseError {
     super(message, 'VALIDATION_ERROR', 400);
     this.details = details;
   }
+
+  override toJSON() {
+    return { ...super.toJSON(), details: this.details };
+  }
 }
 
 /** NotFoundError - 资源未找到错误 */

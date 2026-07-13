@@ -55,6 +55,12 @@ export {
 } from './domain/knowledge/index.js';
 export type { KnowledgeEntryProps } from './domain/knowledge/KnowledgeEntry.js';
 export type {
+  RecipeRetrievalFact,
+  RecipeRetrievalProfile,
+  RecipeRetrievalProvenance,
+  RecipeRetrievalSummary,
+} from './domain/knowledge/RecipeRetrievalProfile.js';
+export type {
   DepthDimension,
   DepthReviewInput,
   DepthReviewResult,

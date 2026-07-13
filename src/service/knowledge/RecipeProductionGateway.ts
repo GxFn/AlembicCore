@@ -13,6 +13,7 @@
  *   7. Audit — 统一审计
  */
 
+import type { RecipeRetrievalProfile } from '../../domain/knowledge/RecipeRetrievalProfile.js';
 import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
 import { RELATION_BUCKETS } from '../../domain/knowledge/values/Relations.js';
 import {
@@ -54,6 +55,7 @@ export interface CreateRecipeItem {
   reasoning?: { whyStandard?: string; sources?: string[]; confidence?: number };
   headers?: string[];
   usageGuide?: string;
+  retrievalProfile?: RecipeRetrievalProfile | null;
   scope?: string;
   complexity?: string;
   sourceFile?: string;
@@ -781,7 +783,7 @@ export class RecipeProductionGateway {
       whenClause: item.whenClause || '',
       doClause: item.doClause || '',
       dontClause: item.dontClause || '',
-      coreCode: item.coreCode || (contentObj.pattern as string) || '',
+      coreCode: item.coreCode || '',
       sourceRefs: item.sourceRefs || [],
       content: contentObj,
       relations: item.relations ?? metadata.relations ?? {},
@@ -791,6 +793,7 @@ export class RecipeProductionGateway {
       moduleName: this.#deriveModuleName(item, metadata),
       includeHeaders: item.includeHeaders ?? this.#readBoolean(metadata.includeHeaders) ?? false,
       usageGuide: item.usageGuide || '',
+      retrievalProfile: item.retrievalProfile ?? null,
       scope: item.scope || '',
       complexity: item.complexity || '',
       sourceFile: item.sourceFile || this.#readString(metadata.sourceFile) || '',

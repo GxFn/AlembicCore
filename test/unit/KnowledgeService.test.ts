@@ -186,6 +186,16 @@ function createService(overrides = {}) {
   const confidenceRouter = overrides.confidenceRouter || null;
   const qualityScorer = overrides.qualityScorer || null;
   const edgeRepo = overrides.edgeRepo || null;
+  const retrievalReadinessEvaluator =
+    overrides.retrievalReadinessEvaluator ||
+    (() => ({
+      ready: true,
+      schemaVersion: '1',
+      profileHash: null,
+      documentSetHash: null,
+      violations: [],
+      warnings: [],
+    }));
 
   const service = new KnowledgeService(repo, audit, gateway, graph, {
     fileWriter,
@@ -193,6 +203,7 @@ function createService(overrides = {}) {
     confidenceRouter,
     qualityScorer,
     edgeRepo,
+    retrievalReadinessEvaluator,
   });
 
   return { service, repo, audit, gateway, graph, fileWriter, skillHooks };

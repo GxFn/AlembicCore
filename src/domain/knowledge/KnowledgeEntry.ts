@@ -12,6 +12,7 @@ import {
   Lifecycle,
   normalizeLifecycle,
 } from './Lifecycle.js';
+import type { RecipeRetrievalProfile } from './RecipeRetrievalProfile.js';
 import type { Guard } from './values/Constraints.js';
 import { Constraints, Content, Quality, Reasoning, Relations, Stats } from './values/index.js';
 
@@ -48,6 +49,7 @@ export interface KnowledgeEntryProps {
   dontClause?: string;
   coreCode?: string;
   usageGuide?: string;
+  retrievalProfile?: RecipeRetrievalProfile | null;
   content?: unknown;
   relations?: unknown;
   constraints?: unknown;
@@ -105,6 +107,7 @@ export class KnowledgeEntry {
   dontClause: string;
   coreCode: string;
   usageGuide: string;
+  retrievalProfile: RecipeRetrievalProfile | null;
 
   // Value objects
   content: Content;
@@ -172,6 +175,7 @@ export class KnowledgeEntry {
     this.dontClause = props.dontClause || '';
     this.coreCode = props.coreCode || '';
     this.usageGuide = props.usageGuide || '';
+    this.retrievalProfile = cloneRetrievalProfile(props.retrievalProfile);
 
     // ── 值对象 ──
     this.content = Content.from(props.content);
@@ -385,6 +389,7 @@ export class KnowledgeEntry {
       dontClause: this.dontClause,
       coreCode: this.coreCode,
       usageGuide: this.usageGuide,
+      retrievalProfile: cloneRetrievalProfile(this.retrievalProfile),
       content: this.content.toJSON(),
       relations: this.relations.toJSON(),
       constraints: this.constraints.toJSON(),
@@ -449,3 +454,10 @@ export class KnowledgeEntry {
 }
 
 export default KnowledgeEntry;
+
+function cloneRetrievalProfile(value: unknown): RecipeRetrievalProfile | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return JSON.parse(JSON.stringify(value)) as RecipeRetrievalProfile;
+}

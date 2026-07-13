@@ -64,6 +64,8 @@ export const knowledgeEntries = sqliteTable(
     doClause: text('doClause').default(''),
     dontClause: text('dontClause').default(''),
     coreCode: text('coreCode').default(''),
+    usageGuide: text('usageGuide').default(''),
+    retrievalProfile: text('retrievalProfile'),
 
     // 值对象 (JSON)
     content: text('content').default('{}'),

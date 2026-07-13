@@ -80,6 +80,7 @@ export {
   syncRecipeSemanticRegionVectors,
   testRecipeSemanticRegionGeneration,
 } from './service/vector/RecipeRegionVectorIndex.js';
+export * from './service/vector/RecipeVectorGeneration.js';
 export type {
   SyncCoordinatorConfig,
   VectorLifecycleCoordinatorConfig,

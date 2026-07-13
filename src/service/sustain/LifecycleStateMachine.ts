@@ -35,6 +35,10 @@ import type {
   TransitionRequest,
   TransitionResult,
 } from '../../types/evolution.js';
+import {
+  evaluateRecipeRetrievalReadiness,
+  type RetrievalReadinessReport,
+} from '../knowledge/RecipeRetrieval.js';
 
 /* ────────────────────── Constants ────────────────────── */
 
@@ -77,17 +81,24 @@ export class LifecycleStateMachine {
   readonly #signalBus: SignalBus;
   readonly #proposalRepo: ProposalRepository;
   readonly #logger = Logger.getInstance();
+  readonly #retrievalReadinessEvaluator: (
+    entry: NonNullable<Awaited<ReturnType<KnowledgeRepositoryImpl['findById']>>>
+  ) => RetrievalReadinessReport;
 
   constructor(
     knowledgeRepo: KnowledgeRepositoryImpl,
     eventRepo: LifecycleEventRepository,
     signalBus: SignalBus,
-    proposalRepo: ProposalRepository
+    proposalRepo: ProposalRepository,
+    retrievalReadinessEvaluator: (
+      entry: NonNullable<Awaited<ReturnType<KnowledgeRepositoryImpl['findById']>>>
+    ) => RetrievalReadinessReport = evaluateRecipeRetrievalReadiness
   ) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#eventRepo = eventRepo;
     this.#signalBus = signalBus;
     this.#proposalRepo = proposalRepo;
+    this.#retrievalReadinessEvaluator = retrievalReadinessEvaluator;
   }
 
   /* ═══════════════════ Core Transition ═══════════════════ */
@@ -112,7 +123,7 @@ export class LifecycleStateMachine {
     const opId = operatorId ?? 'system';
 
     // 1. 获取当前状态
-    const current = await this.#getRecipeState(recipeId);
+    const current = await this.#knowledgeRepo.findById(recipeId);
     if (!current) {
       return {
         success: false,
@@ -135,6 +146,23 @@ export class LifecycleStateMachine {
         toState: targetState,
         error: `Invalid transition: ${fromState} → ${targetState}`,
       };
+    }
+
+    if (
+      targetState === 'active' &&
+      current.knowledgeType !== 'boundary-constraint' &&
+      current.category !== 'guard'
+    ) {
+      const readiness = this.#retrievalReadinessEvaluator(current);
+      if (!readiness.ready) {
+        return {
+          success: false,
+          fromState,
+          toState: targetState,
+          error: 'Recipe retrieval readiness blocks active transition',
+          details: { readiness },
+        };
+      }
     }
 
     // 3. Exit Action
@@ -461,13 +489,6 @@ export class LifecycleStateMachine {
         contentPatchRate: 0,
       };
     }
-  }
-
-  /* ═══════════════════ DB Helpers ═══════════════════ */
-
-  async #getRecipeState(recipeId: string): Promise<{ lifecycle: string } | null> {
-    const entry = await this.#knowledgeRepo.findById(recipeId);
-    return entry ? { lifecycle: entry.lifecycle } : null;
   }
 
   async #getRecipeAge(recipeId: string, now: number): Promise<number> {

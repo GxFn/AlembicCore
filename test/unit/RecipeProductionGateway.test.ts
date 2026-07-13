@@ -545,6 +545,40 @@ describe('RecipeProductionGateway', () => {
       expect(data.sourceFile).toBe('');
     });
 
+    it('透传原生 retrievalProfile 且不从 content.pattern 合成 coreCode', async () => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+      const retrievalProfile = {
+        schemaVersion: '1',
+        primaryLanguage: 'zh',
+        summary: { primary: '异步消息流', technicalEnglish: 'Typed asynchronous message stream' },
+        concepts: [],
+        scenarios: [],
+        exclusions: [],
+        provenance: {
+          evidenceRefs: ['Sources/Networking/WebSocketClient.swift:45-60'],
+          sourceFieldRefs: ['field:description'],
+          sourceContentHash: 'producer-hash',
+          generator: 'producer-test',
+        },
+      };
+
+      await gateway.create({
+        source: 'agent-tool',
+        items: [makeItem({ coreCode: undefined, retrievalProfile })],
+        options: {
+          skipSimilarityCheck: true,
+          skipConsolidation: true,
+          systemInjectedFields: ['coreCode'],
+        },
+      });
+
+      const data = (deps.knowledgeService.create as ReturnType<typeof vi.fn>).mock
+        .calls[0][0] as Record<string, unknown>;
+      expect(data.retrievalProfile).toEqual(retrievalProfile);
+      expect(data.coreCode).toBe('');
+    });
+
     it('应透传关系、模块和宿主分析元数据到 KnowledgeService', async () => {
       const deps = makeDeps();
       const gateway = new RecipeProductionGateway(deps);

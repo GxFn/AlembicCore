@@ -55,16 +55,27 @@ function createRecipe(overrides: Partial<RecipeRegionSourceEntry> = {}): RecipeR
 }
 
 function createMockVectorStore() {
+  const items = new Map<string, Record<string, unknown>>();
   return {
-    upsert: vi.fn().mockResolvedValue(undefined),
-    batchUpsert: vi.fn().mockResolvedValue(undefined),
-    remove: vi.fn().mockResolvedValue(undefined),
-    clear: vi.fn().mockResolvedValue(undefined),
-    getById: vi.fn().mockResolvedValue(null),
+    upsert: vi.fn(async (item: { id: string }) => {
+      items.set(item.id, item);
+    }),
+    batchUpsert: vi.fn(async (batch: Array<{ id: string }>) => {
+      for (const item of batch) {
+        items.set(item.id, item);
+      }
+    }),
+    remove: vi.fn(async (id: string) => {
+      items.delete(id);
+    }),
+    clear: vi.fn(async () => {
+      items.clear();
+    }),
+    getById: vi.fn(async (id: string) => items.get(id) ?? null),
     getStats: vi.fn().mockResolvedValue({ count: 0, dimension: 2, indexSize: 0 }),
     searchVector: vi.fn().mockResolvedValue([]),
     searchByFilter: vi.fn().mockResolvedValue([]),
-    listIds: vi.fn().mockResolvedValue([]),
+    listIds: vi.fn(async () => [...items.keys()]),
   };
 }
 
@@ -120,19 +131,12 @@ describe('Recipe semantic-region vector index', () => {
     expect(JSON.stringify(recipe)).toBe(before);
     expect(chunks.map((chunk) => chunk.id)).toEqual(repeated.map((chunk) => chunk.id));
     expect(new Set(chunks.map((chunk) => chunk.id)).size).toBe(chunks.length);
-    expect(chunks.map((chunk) => chunk.metadata.regionClass)).toEqual(
-      expect.arrayContaining([
-        'identity',
-        'applicability',
-        'patternPurpose',
-        'architectureConvention',
-        'integrationBoundary',
-        'qualityConcern',
-        'negativeBoundary',
-        'rationale',
-        'evidence',
-      ])
-    );
+    expect(chunks.map((chunk) => chunk.metadata.regionClass)).toEqual([
+      'identity',
+      'applicability',
+      'architectureConvention',
+      'rationale',
+    ]);
     expect(
       chunks.every(
         (chunk) =>
@@ -181,8 +185,8 @@ describe('Recipe semantic-region vector index', () => {
     });
 
     expect(chunks.map((chunk) => chunk.metadata.regionClass)).toEqual(['identity']);
-    expect(chunks[0].content).toContain('Title: Only title');
-    expect(chunks[0].content).toContain('Trigger: @only-title');
+    expect(chunks[0].content).toContain('Only title');
+    expect(chunks[0].content).toContain('@only-title');
     expect(chunks.some((chunk) => chunk.content === 'Recipe title: Only title')).toBe(false);
     expect(chunks.some((chunk) => chunk.content.includes('Recipe trigger: @only-title'))).toBe(
       false
@@ -229,9 +233,9 @@ describe('Recipe semantic-region vector index', () => {
   });
 
   it('marks source refs bridge gaps as partial instead of trusted bridge-backed evidence', () => {
-    const [evidence] = buildRecipeSemanticRegionChunks(createRecipe(), {
+    const evidence = buildRecipeSemanticRegionChunks(createRecipe(), {
       sourceRefsBridge: { status: 'partial', refs: [] },
-    }).filter((chunk) => chunk.metadata.regionClass === 'evidence');
+    }).find((chunk) => chunk.metadata.regionClass === 'identity')!;
 
     expect(evidence.metadata.sourceRefsBridge).toBe('partial');
     expect(evidence.metadata.bridgeRefCount).toBe(0);
@@ -745,6 +749,28 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
 
     const after = new Set(await store.listIds());
     expect(result.status).toBe('failed');
+    expect(before.every((id) => after.has(id))).toBe(true);
+  });
+
+  it('keeps old live chunks when replacement persistence cannot be read back', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const base = createRecipe({ id: 'replace-with-readback' });
+    await syncRecipeSemanticRegionVectors(store, embed as never, [base]);
+    const before = (await store.listIds()).filter((id) =>
+      id.startsWith('recipe_region_replace-with-readback_')
+    );
+    vi.spyOn(store, 'batchUpsert').mockResolvedValueOnce(undefined);
+
+    const result = await syncRecipeSemanticRegionVectors(store, embed as never, [
+      { ...base, doClause: 'replacement that the storage silently drops' },
+    ]);
+
+    const after = new Set(await store.listIds());
+    expect(result.status).toBe('failed');
+    expect(result.errors.some((error) => error.startsWith('replacement-readback-failed:'))).toBe(
+      true
+    );
     expect(before.every((id) => after.has(id))).toBe(true);
   });
 

@@ -28,6 +28,7 @@ const EXPECTED_VERSIONS = [
   '014_recipe_source_refs_content_fp',
   '015_coverage_ledger',
   '016_deep_mining_rounds_rescan_id',
+  '017_recipe_retrieval_profile',
 ];
 
 describe('Migrations re-run / idempotency (fresh DB)', () => {

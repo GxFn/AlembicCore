@@ -5,13 +5,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // ── Mock 工厂 ──
 
 function createMockVectorStore() {
+  const items = new Map<string, Record<string, unknown>>();
   return {
-    upsert: vi.fn().mockResolvedValue(undefined),
-    batchUpsert: vi.fn().mockResolvedValue(undefined),
-    remove: vi.fn().mockResolvedValue(undefined),
-    clear: vi.fn().mockResolvedValue(undefined),
-    getById: vi.fn().mockResolvedValue(null),
-    listIds: vi.fn().mockResolvedValue([]),
+    upsert: vi.fn(async (item: { id: string }) => {
+      items.set(item.id, item);
+    }),
+    batchUpsert: vi.fn(async (batch: Array<{ id: string }>) => {
+      for (const item of batch) {
+        items.set(item.id, item);
+      }
+    }),
+    remove: vi.fn(async (id: string) => {
+      items.delete(id);
+    }),
+    clear: vi.fn(async () => {
+      items.clear();
+    }),
+    getById: vi.fn(async (id: string) => items.get(id) ?? null),
+    listIds: vi.fn(async () => [...items.keys()]),
   };
 }
 
@@ -180,8 +191,8 @@ describe('SyncCoordinator', () => {
       await vi.advanceTimersByTimeAsync(250);
 
       // Should have batched all 3 upserts together
-      expect(embedProvider.embed).toHaveBeenCalledTimes(2);
-      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(2);
+      expect(embedProvider.embed).toHaveBeenCalledTimes(1);
+      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(1);
       const batchArgs = vectorStore.batchUpsert.mock.calls[0]?.[0] as Array<{ id: string }>;
       expect(batchArgs).toHaveLength(3);
     });
@@ -203,7 +214,7 @@ describe('SyncCoordinator', () => {
 
       await vi.advanceTimersByTimeAsync(250);
 
-      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(2);
+      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(1);
       const batch = vectorStore.batchUpsert.mock.calls[0]?.[0] as Array<{
         id: string;
         content: string;
@@ -301,7 +312,7 @@ describe('SyncCoordinator', () => {
       const batches = vectorStore.batchUpsert.mock.calls.map(
         (call) => call[0] as Array<{ id: string }>
       );
-      expect(batches.some((batch) => batch.some((item) => item.id === 'entry_42'))).toBe(true);
+      expect(batches.some((batch) => batch.some((item) => item.id === 'entry_42'))).toBe(false);
       expect(
         batches.some((batch) => batch.some((item) => item.id.startsWith('recipe_region_42_')))
       ).toBe(true);
@@ -350,7 +361,7 @@ describe('SyncCoordinator', () => {
 
       await coord.flush();
 
-      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(2);
+      expect(vectorStore.batchUpsert).toHaveBeenCalledTimes(1);
     });
 
     it('should be safe to call with no pending changes', async () => {
@@ -486,8 +497,10 @@ describe('SyncCoordinator', () => {
       const coord = createCoordinator({ debounceMs: 50 });
       const result = await coord.reconcile(db as never);
 
-      expect(result.orphansRemoved).toBe(1);
+      expect(result.orphansRemoved).toBe(2);
+      expect(result.legacyEntryVectorsRemoved).toBe(2);
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_abc');
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_def');
       // chunk_ prefix should not be touched
       expect(vectorStore.remove).not.toHaveBeenCalledWith('chunk_0');
     });
@@ -513,7 +526,7 @@ describe('SyncCoordinator', () => {
       expect(vectorStore.remove).toHaveBeenCalledWith(
         'recipe_region_absent_rationale_0000000000000003'
       );
-      expect(vectorStore.remove).not.toHaveBeenCalledWith(
+      expect(vectorStore.remove).toHaveBeenCalledWith(
         'recipe_region_live_identity_0000000000000001'
       );
     });
@@ -532,9 +545,10 @@ describe('SyncCoordinator', () => {
       const coord = createCoordinator({ debounceMs: 50 });
       const result = await coord.reconcile(db as never);
 
-      expect(result.missingSynced).toBe(1);
-      // flush should have been called, triggering batch processing
+      expect(result.initialInspection?.missingIds.length).toBeGreaterThan(0);
+      // canonical document generation is attempted; static mocks deliberately fail readback.
       expect(vectorStore.batchUpsert).toHaveBeenCalled();
+      expect(result.finalInspection?.healthy).toBe(false);
     });
 
     it('removes orphans but defers missing live vectors without an embed provider', async () => {
@@ -556,7 +570,7 @@ describe('SyncCoordinator', () => {
         orphansRemoved: 1,
         recipeRegionOrphansRemoved: 1,
         missingSynced: 0,
-        missingDeferred: 1,
+        missingDeferred: 2,
         degradedReason: 'embed-provider-unavailable',
       });
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_orphan');

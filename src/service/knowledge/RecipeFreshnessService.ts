@@ -31,7 +31,7 @@ export interface RecipeFreshnessSourceRefSummary extends ReconcileReport {
 export interface RecipeFreshnessVectorSummary {
   status: 'completed' | 'degraded' | 'failed' | 'skipped' | 'not-configured';
   availability: VectorAvailability | null;
-  entrySyncStatus: 'completed' | 'failed' | 'skipped';
+  entrySyncStatus: 'retired' | 'skipped';
   regionSyncStatus: RecipeRegionSyncResult['status'] | 'skipped';
   regionSync?: RecipeRegionSyncResult;
   degradedReason?: string;
@@ -61,7 +61,8 @@ export interface RecipeFreshnessRefreshResult {
 
 export interface RecipeFreshnessVectorService {
   getAvailability(): Promise<VectorAvailability>;
-  syncEntry(entry: { id: string; title: string; content: unknown; kind?: string }): Promise<void>;
+  /** @deprecated Recipe refresh uses the canonical document-set generator only. */
+  syncEntry?(entry: { id: string; title: string; content: unknown; kind?: string }): Promise<void>;
   syncRecipeSemanticRegions(
     entries: RecipeRegionSourceEntry[],
     opts?: RecipeRegionSyncOptions
@@ -105,7 +106,6 @@ export class RecipeFreshnessService {
     const retrievalMayBeStale =
       sourceRefs.status !== 'completed' ||
       vector.status !== 'completed' ||
-      vector.entrySyncStatus !== 'completed' ||
       vector.regionSyncStatus !== 'completed';
 
     return {
@@ -247,21 +247,9 @@ export class RecipeFreshnessService {
     }
 
     const errors: string[] = [];
-    let entrySyncStatus: RecipeFreshnessVectorSummary['entrySyncStatus'] = 'completed';
+    const entrySyncStatus: RecipeFreshnessVectorSummary['entrySyncStatus'] = 'retired';
     let regionSyncStatus: RecipeFreshnessVectorSummary['regionSyncStatus'] = 'skipped';
     let regionSync: RecipeRegionSyncResult | undefined;
-
-    try {
-      await this.#vectorService.syncEntry({
-        content: entry.content,
-        id: entry.id,
-        kind: entry.kind,
-        title: entry.title ?? '',
-      });
-    } catch (error) {
-      entrySyncStatus = 'failed';
-      errors.push(error instanceof Error ? error.message : String(error));
-    }
 
     try {
       regionSync = await this.#vectorService.syncRecipeSemanticRegions([entry], {
@@ -274,7 +262,7 @@ export class RecipeFreshnessService {
       errors.push(error instanceof Error ? error.message : String(error));
     }
 
-    const failed = entrySyncStatus === 'failed' || regionSyncStatus === 'failed';
+    const failed = regionSyncStatus === 'failed';
     const degraded = regionSyncStatus === 'degraded';
     return {
       availability,

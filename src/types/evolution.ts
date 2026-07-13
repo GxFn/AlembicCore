@@ -111,6 +111,7 @@ export interface TransitionResult {
   toState: string;
   event?: TransitionEvent;
   error?: string;
+  details?: Record<string, unknown>;
 }
 
 /** 超时检查结果 */

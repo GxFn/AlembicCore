@@ -18,6 +18,32 @@ export type KnowledgeLifecycle =
   | 'deprecated';
 export type KnowledgeKind = 'rule' | 'pattern' | 'fact';
 
+/** Recipe 内嵌的可追溯检索事实；它是知识真相的一部分，不是派生索引状态。 */
+export interface RecipeRetrievalFactWire {
+  term?: string;
+  text?: string;
+  language: string;
+  provenanceRefs: string[];
+}
+
+export interface RecipeRetrievalProfileWire {
+  schemaVersion: string;
+  primaryLanguage: string;
+  summary: {
+    primary: string;
+    technicalEnglish: string;
+  };
+  concepts: Array<RecipeRetrievalFactWire & { term: string }>;
+  scenarios: Array<RecipeRetrievalFactWire & { text: string }>;
+  exclusions: Array<RecipeRetrievalFactWire & { text: string }>;
+  provenance: {
+    evidenceRefs: string[];
+    sourceFieldRefs: string[];
+    sourceContentHash: string;
+    generator: string;
+  };
+}
+
 // ──────────────────────────────────────────────────────────────────
 // 子对象 Wire Format
 // ──────────────────────────────────────────────────────────────────
@@ -123,6 +149,7 @@ export interface KnowledgeEntryWire {
   dontClause: string;
   coreCode: string;
   usageGuide: string;
+  retrievalProfile: RecipeRetrievalProfileWire | null;
 
   // ── 结构化子对象 ──
   content: KnowledgeContentWire;

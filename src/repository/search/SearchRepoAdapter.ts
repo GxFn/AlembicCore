@@ -67,12 +67,24 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   #db: SearchDb;
   #dimensionIdSelect: string;
   #scopeSelect: string;
+  #retrievalSelect: string;
   constructor(db: SearchDb) {
     this.#db = db;
     this.#dimensionIdSelect = hasKnowledgeColumn(db, 'dimensionId')
       ? 'dimensionId'
       : "'' AS dimensionId";
     this.#scopeSelect = hasKnowledgeColumn(db, 'scope') ? 'scope' : "'' AS scope";
+    this.#retrievalSelect = [
+      hasKnowledgeColumn(db, 'topicHint') ? 'topicHint' : "'' AS topicHint",
+      hasKnowledgeColumn(db, 'whenClause') ? 'whenClause' : "'' AS whenClause",
+      hasKnowledgeColumn(db, 'doClause') ? 'doClause' : "'' AS doClause",
+      hasKnowledgeColumn(db, 'dontClause') ? 'dontClause' : "'' AS dontClause",
+      hasKnowledgeColumn(db, 'coreCode') ? 'coreCode' : "'' AS coreCode",
+      hasKnowledgeColumn(db, 'usageGuide') ? 'usageGuide' : "'' AS usageGuide",
+      hasKnowledgeColumn(db, 'moduleName') ? 'moduleName' : "'' AS moduleName",
+      hasKnowledgeColumn(db, 'reasoning') ? 'reasoning' : "'{}' AS reasoning",
+      hasKnowledgeColumn(db, 'retrievalProfile') ? 'retrievalProfile' : 'NULL AS retrievalProfile',
+    ].join(', ');
   }
 
   findNonDeprecatedSync() {
@@ -80,7 +92,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       this.#db,
       `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
-                whenClause, doClause, dontClause, updatedAt, createdAt
+                ${this.#retrievalSelect}, updatedAt, createdAt
          FROM knowledge_entries WHERE lifecycle != 'deprecated'`
     ).all();
   }
@@ -115,7 +127,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       this.#db,
       `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
-                whenClause, doClause, dontClause, updatedAt, createdAt
+                ${this.#retrievalSelect}, updatedAt, createdAt
          FROM knowledge_entries WHERE updatedAt > ?`
     ).all(sinceIso);
   }
