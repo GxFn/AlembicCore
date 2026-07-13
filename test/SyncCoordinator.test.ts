@@ -100,6 +100,7 @@ describe('SyncCoordinator', () => {
 
       expect(eventBus.on).toHaveBeenCalledWith('knowledge:changed', expect.any(Function));
       expect(eventBus.on).toHaveBeenCalledWith('knowledge:deleted', expect.any(Function));
+      expect(eventBus.on).toHaveBeenCalledWith('lifecycle:transition', expect.any(Function));
     });
   });
 
@@ -180,6 +181,31 @@ describe('SyncCoordinator', () => {
       await vi.advanceTimersByTimeAsync(100);
 
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_42');
+    });
+
+    it('removes entry and every recipe region for the deleted id only', async () => {
+      vectorStore.listIds.mockResolvedValue([
+        'entry_42',
+        'recipe_region_42_identity_0000000000000001',
+        'recipe_region_42_rationale_0000000000000002',
+        'recipe_region_420_identity_0000000000000003',
+      ]);
+      const coord = createCoordinator({ debounceMs: 50 });
+      coord.bindEventBus(eventBus as never);
+
+      eventBus.emit('knowledge:deleted', { entryId: '42' });
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_42');
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_42_identity_0000000000000001'
+      );
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_42_rationale_0000000000000002'
+      );
+      expect(vectorStore.remove).not.toHaveBeenCalledWith(
+        'recipe_region_420_identity_0000000000000003'
+      );
     });
 
     it('should handle entryId in id field', async () => {
@@ -268,6 +294,16 @@ describe('SyncCoordinator', () => {
       coord.destroy();
       coord.destroy(); // should not throw
     });
+
+    it('awaits a queued removal before destruction completes', async () => {
+      const coord = createCoordinator({ debounceMs: 60_000 });
+      coord.bindEventBus(eventBus as never);
+      eventBus.emit('knowledge:deleted', { entryId: 'queued' });
+
+      await coord.destroy();
+
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_queued');
+    });
   });
 
   // ── Edge Cases ──
@@ -345,6 +381,30 @@ describe('SyncCoordinator', () => {
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_abc');
       // chunk_ prefix should not be touched
       expect(vectorStore.remove).not.toHaveBeenCalledWith('chunk_0');
+    });
+
+    it('counts and removes recipe regions absent from authoritative DB truth', async () => {
+      vectorStore.listIds = vi.fn().mockResolvedValue([
+        'entry_live',
+        'recipe_region_live_identity_0000000000000001',
+        'recipe_region_absent_identity_0000000000000002',
+        'recipe_region_absent_rationale_0000000000000003',
+      ]);
+      const db = createMockDb([{ id: 'live', title: 'Keep', content: 'data', kind: 'recipe' }]);
+
+      const coord = createCoordinator({ debounceMs: 50 });
+      const result = await coord.reconcile(db as never);
+
+      expect(result.recipeRegionOrphansRemoved).toBe(2);
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_absent_identity_0000000000000002'
+      );
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_absent_rationale_0000000000000003'
+      );
+      expect(vectorStore.remove).not.toHaveBeenCalledWith(
+        'recipe_region_live_identity_0000000000000001'
+      );
     });
 
     it('should queue missing entries for sync', async () => {

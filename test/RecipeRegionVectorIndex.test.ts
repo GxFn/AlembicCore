@@ -628,4 +628,90 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
     expect(second.skippedExisting).toBeGreaterThan(0);
     expect(second.removed).toBeGreaterThan(0);
   });
+
+  it('authoritative corpus prunes all 595 regions for 72 recipes absent from 75 live ids', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const liveEntries = Array.from({ length: 75 }, (_, index) =>
+      createRecipe({ id: `live-${index + 1}`, title: `Live recipe ${index + 1}` })
+    );
+
+    await syncRecipeSemanticRegionVectors(store, embed as never, liveEntries);
+    await store.batchUpsert([
+      ...liveEntries.map((entry) => ({
+        id: `entry_${entry.id}`,
+        content: entry.title ?? entry.id,
+        vector: [0.2, 0.1],
+        metadata: { entryId: entry.id },
+      })),
+      ...Array.from({ length: 72 }, (_, recipeIndex) => {
+        const regionCount = recipeIndex < 19 ? 9 : 8;
+        return Array.from({ length: regionCount }, (_, regionIndex) => ({
+          id: `recipe_region_absent-${recipeIndex + 1}_identity_${String(regionIndex).padStart(16, '0')}`,
+          content: `orphan ${recipeIndex + 1}/${regionIndex + 1}`,
+          vector: [0.3, 0.4],
+          metadata: { recipeId: `absent-${recipeIndex + 1}` },
+        }));
+      }).flat(),
+    ]);
+
+    const before = await store.listIds();
+    expect(before.filter((id) => id.startsWith('entry_'))).toHaveLength(75);
+    expect(before.filter((id) => id.startsWith('recipe_region_absent-'))).toHaveLength(595);
+
+    const result = await syncRecipeSemanticRegionVectors(store, embed as never, liveEntries, {
+      maintenanceScope: {
+        kind: 'authoritative-corpus',
+        nonDeprecatedRecipeIds: liveEntries.map((entry) => entry.id),
+      },
+    } as never);
+
+    const after = await store.listIds();
+    expect(result.removed).toBe(595);
+    expect(after.filter((id) => id.startsWith('recipe_region_absent-'))).toHaveLength(0);
+    expect(after.filter((id) => id.startsWith('entry_'))).toHaveLength(75);
+    expect(
+      new Set(
+        after
+          .filter((id) => id.startsWith('recipe_region_live-'))
+          .map((id) => id.split('_')[2])
+      ).size
+    ).toBe(75);
+  });
+
+  it('subset refresh never removes regions belonging to recipes outside the batch', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const first = createRecipe({ id: 'first' });
+    const unrelated = createRecipe({ id: 'unrelated' });
+    await syncRecipeSemanticRegionVectors(store, embed as never, [first, unrelated]);
+    const unrelatedBefore = (await store.listIds()).filter((id) => id.startsWith('recipe_region_unrelated_'));
+
+    await syncRecipeSemanticRegionVectors(store, embed as never, [
+      { ...first, doClause: 'changed subset content' },
+    ]);
+
+    const after = new Set(await store.listIds());
+    expect(unrelatedBefore.length).toBeGreaterThan(0);
+    expect(unrelatedBefore.every((id) => after.has(id))).toBe(true);
+  });
+
+  it('keeps old live chunks when replacement embedding fails', async () => {
+    const store = makeStore();
+    const embed = makeEmbed();
+    const base = createRecipe({ id: 'replace-safely' });
+    await syncRecipeSemanticRegionVectors(store, embed as never, [base]);
+    const before = (await store.listIds()).filter((id) => id.startsWith('recipe_region_replace-safely_'));
+    embed.embed.mockRejectedValueOnce(new Error('embedding unavailable'));
+
+    const result = await syncRecipeSemanticRegionVectors(
+      store,
+      embed as never,
+      [{ ...base, doClause: 'replacement that cannot be embedded' }]
+    );
+
+    const after = new Set(await store.listIds());
+    expect(result.status).toBe('failed');
+    expect(before.every((id) => after.has(id))).toBe(true);
+  });
 });
