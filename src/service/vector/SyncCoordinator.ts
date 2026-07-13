@@ -33,7 +33,7 @@ import type { EmbedProvider } from './VectorService.js';
 
 export interface SyncCoordinatorConfig {
   vectorStore: VectorStore;
-  embedProvider: EmbedProvider;
+  embedProvider: EmbedProvider | null;
   contextualEnricher: VectorChunkEnricher | null;
   debounceMs: number;
   maxBatchSize?: number;
@@ -54,7 +54,7 @@ interface PendingChange {
 
 export class SyncCoordinator {
   #vectorStore: VectorStore;
-  #embedProvider: EmbedProvider;
+  #embedProvider: EmbedProvider | null;
   #contextualEnricher: VectorChunkEnricher | null;
   #debounceMs: number;
   #maxBatchSize: number;
@@ -462,8 +462,17 @@ export class SyncCoordinator {
       await this.#removeRecipeRegions(entryId);
     }
 
+    // Removal stays available without an embed provider. Generation is
+    // explicitly deferred and never fabricates vector success.
+    const embedProvider = this.#embedProvider;
+    if (upserts.length > 0 && !embedProvider) {
+      this.#logger.warn('[SyncCoordinator] vector upserts deferred — embed provider unavailable', {
+        count: upserts.length,
+      });
+    }
+
     // 处理 upsert: 提取文本 → embed → upsert
-    if (upserts.length > 0) {
+    if (upserts.length > 0 && embedProvider) {
       const validUpserts = upserts.filter((u) => u.title || u.content);
 
       if (validUpserts.length > 0) {
@@ -476,7 +485,7 @@ export class SyncCoordinator {
         const hydrated = this.#hydrateEntryFields(validUpserts.map((u) => u.entryId));
         const texts = validUpserts.map((u) => this.#extractText(u));
         try {
-          const embedResult = await this.#embedProvider.embed(texts);
+          const embedResult = await embedProvider.embed(texts);
           const vectors = Array.isArray(embedResult[0])
             ? (embedResult as number[][])
             : [embedResult as number[]];
@@ -518,7 +527,7 @@ export class SyncCoordinator {
           );
           const regionResult = await syncRecipeSemanticRegionVectors(
             this.#vectorStore,
-            this.#embedProvider,
+            embedProvider,
             regionEntries
           );
           if (regionResult.errors.length > 0) {

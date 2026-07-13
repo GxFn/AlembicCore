@@ -165,7 +165,7 @@ export class VectorService {
     }
 
     // 延迟 import SyncCoordinator 避免循环依赖
-    if (this.#autoSyncOnCrud && this.#eventBus && this.#embedProvider) {
+    if (this.#autoSyncOnCrud && this.#eventBus) {
       const { SyncCoordinator: SC } = await import('./SyncCoordinator.js');
       this.#syncCoordinator = new SC({
         vectorStore: this.#vectorStore,
