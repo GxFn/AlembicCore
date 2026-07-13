@@ -219,10 +219,22 @@ describe('Recipe retrieval profile truth and readiness', () => {
     ]);
   });
 
-  it('reports stable hard violations for every persisted placeholder concept', () => {
+  it('reports stable hard violations at raw source indices for blank and placeholder concepts', () => {
     const source = recipeSource();
     const profile = nativeProfile(source);
-    const placeholders = ['-', 'n/a', 'na', 'none', 'null', 'undefined', 'unknown', 'todo', 'tbd'];
+    const placeholders = [
+      '',
+      '   \t',
+      '-',
+      'n/a',
+      'na',
+      'none',
+      'null',
+      'undefined',
+      'unknown',
+      'todo',
+      'tbd',
+    ];
     profile.concepts.push(
       ...placeholders.map((term) => ({
         term,
@@ -241,6 +253,86 @@ describe('Recipe retrieval profile truth and readiness', () => {
         .filter((violation) => violation.code === 'retrieval.profile.concept-placeholder')
         .map((violation) => violation.field)
     ).toEqual(placeholders.map((_, index) => `retrievalProfile.concepts.${index + 2}`).sort());
+  });
+
+  it('reports indexed structural violations across every raw fact bucket', () => {
+    const source = recipeSource();
+    const profile = nativeProfile(source);
+    (profile.concepts as unknown[]).splice(1, 0, {
+      term: 42,
+      language: 'en',
+      provenanceRefs: ['field:description'],
+    });
+    (profile.concepts as unknown[]).push({
+      term: 'typed contract',
+      language: '   ',
+      provenanceRefs: ['field:description'],
+    });
+    (profile.scenarios as unknown[]).splice(0, 0, {
+      text: '  \n ',
+      language: 'en',
+      provenanceRefs: ['field:whenClause'],
+    });
+    (profile.scenarios as unknown[]).push(null);
+    (profile.exclusions as unknown[])[0] = {
+      text: 'Do not publish malformed facts.',
+      language: 'en',
+      provenanceRefs: 'field:dontClause',
+    };
+
+    const report = evaluateRecipeRetrievalReadiness(
+      new KnowledgeEntry({ ...source, retrievalProfile: profile })
+    );
+    const indexed = report.violations.map(({ code, field }) => ({ code, field }));
+
+    expect(report.ready).toBe(false);
+    expect(indexed).toEqual(
+      expect.arrayContaining([
+        {
+          code: 'retrieval.profile.fact-value-invalid',
+          field: 'retrievalProfile.concepts.1.term',
+        },
+        {
+          code: 'retrieval.profile.fact-language-invalid',
+          field: 'retrievalProfile.concepts.3.language',
+        },
+        {
+          code: 'retrieval.profile.fact-value-empty',
+          field: 'retrievalProfile.scenarios.0.text',
+        },
+        {
+          code: 'retrieval.profile.fact-structure-invalid',
+          field: 'retrievalProfile.scenarios.2',
+        },
+        {
+          code: 'retrieval.profile.fact-provenance-invalid',
+          field: 'retrievalProfile.exclusions.0.provenanceRefs',
+        },
+      ])
+    );
+  });
+
+  it('rejects non-array raw fact buckets before normalization can erase them', () => {
+    const source = recipeSource();
+    const profile = nativeProfile(source);
+    (profile as unknown as Record<string, unknown>).concepts = { term: 'not-an-array' };
+    (profile as unknown as Record<string, unknown>).scenarios = 'not-an-array';
+    (profile as unknown as Record<string, unknown>).exclusions = null;
+
+    const report = evaluateRecipeRetrievalReadiness(
+      new KnowledgeEntry({ ...source, retrievalProfile: profile })
+    );
+
+    expect(report.ready).toBe(false);
+    expect(
+      report.violations
+        .filter((violation) => violation.code === 'retrieval.profile.fact-bucket-invalid')
+        .map((violation) => violation.field)
+    ).toEqual([
+      'retrievalProfile.concepts',
+      'retrievalProfile.exclusions',
+      'retrievalProfile.scenarios',
+    ]);
   });
 
   it('allows meaningful phrases that merely contain placeholder or default-label words', () => {
@@ -402,6 +494,73 @@ describe('Recipe retrieval profile persistence and active transition', () => {
 
     expect(created?.retrievalProfile).toEqual(entry.retrievalProfile);
     expect(fetched?.retrievalProfile).toEqual(entry.retrievalProfile);
+  });
+
+  it('preserves malformed authored facts but blocks publish and filters them from projection', async () => {
+    const source = recipeSource({
+      id: 'raw-profile-structural-violations',
+      title: 'Raw profile facts are validated before deterministic projection',
+    });
+    const profile = nativeProfile(source);
+    (profile.concepts as unknown[]).push({
+      term: 'leaked invalid concept',
+      language: '   ',
+      provenanceRefs: ['field:description'],
+    });
+    (profile.scenarios as unknown[]).push({
+      text: 'leaked invalid scenario',
+      language: 'en',
+      provenanceRefs: 'field:whenClause',
+    });
+    (profile.exclusions as unknown[]).push({
+      text: ' \n\t ',
+      language: 'en',
+      provenanceRefs: ['field:dontClause'],
+    });
+
+    const created = await service.create(
+      { ...source, retrievalProfile: profile },
+      {
+        userId: 'producer',
+      }
+    );
+    expect(['pending', 'staging']).toContain(created.lifecycle);
+    const fetched = await repository.findById(created.id);
+    expect(fetched?.retrievalProfile).toEqual(profile);
+    const candidatePath = path.join(tmpDir, fetched?.sourceFile ?? '');
+    expect(parseKnowledgeMarkdown(fs.readFileSync(candidatePath, 'utf8')).retrievalProfile).toEqual(
+      profile
+    );
+
+    const readiness = await service.evaluateRetrievalReadiness(created.id);
+    expect(readiness.ready).toBe(false);
+    expect(readiness.violations.map(({ code, field }) => ({ code, field }))).toEqual(
+      expect.arrayContaining([
+        {
+          code: 'retrieval.profile.fact-language-invalid',
+          field: 'retrievalProfile.concepts.2.language',
+        },
+        {
+          code: 'retrieval.profile.fact-provenance-invalid',
+          field: 'retrievalProfile.scenarios.1.provenanceRefs',
+        },
+        {
+          code: 'retrieval.profile.fact-value-empty',
+          field: 'retrievalProfile.exclusions.1.text',
+        },
+      ])
+    );
+    const projectedText = projectRecipeRetrievalDocumentSet(fetched!)
+      .documents.map((document) => document.text)
+      .join('\n');
+    expect(projectedText).not.toContain('leaked invalid concept');
+    expect(projectedText).not.toContain('leaked invalid scenario');
+
+    await expect(service.publish(created.id, { userId: 'reviewer' })).rejects.toMatchObject({
+      code: 'VALIDATION_ERROR',
+      details: { readiness: { ready: false } },
+    });
+    expect((await repository.findById(created.id))?.lifecycle).toBe(created.lifecycle);
   });
 
   it('runs the consumer-facing production port through real persistence, projection, and publish', async () => {

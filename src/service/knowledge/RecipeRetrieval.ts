@@ -335,9 +335,10 @@ export function evaluateRecipeRetrievalReadiness(
 ): RetrievalReadinessReport {
   const violations: RetrievalReadinessViolation[] = [];
   const warnings: Array<{ code: string; message: string }> = [];
-  const nativeProfile = source.retrievalProfile ? normalizeProfile(source.retrievalProfile) : null;
+  const rawNativeProfile = source.retrievalProfile;
+  const nativeProfile = rawNativeProfile ? normalizeProfile(rawNativeProfile) : null;
 
-  if (!nativeProfile) {
+  if (!rawNativeProfile || !nativeProfile) {
     violations.push({
       code: 'retrieval.profile.missing',
       field: 'retrievalProfile',
@@ -400,49 +401,7 @@ export function evaluateRecipeRetrievalReadiness(
       ...nativeProfile.provenance.evidenceRefs,
       ...nativeProfile.provenance.sourceFieldRefs,
     ]);
-    for (const [bucket, facts] of [
-      ['concepts', nativeProfile.concepts],
-      ['scenarios', nativeProfile.scenarios],
-      ['exclusions', nativeProfile.exclusions],
-    ] as const) {
-      const seen = new Set<string>();
-      for (const [index, fact] of facts.entries()) {
-        const value = 'term' in fact ? fact.term : fact.text;
-        const normalized = comparable(value);
-        const meaninglessKind =
-          bucket === 'concepts' ? classifyMeaninglessRetrievalConcept(value) : null;
-        if (meaninglessKind) {
-          violations.push({
-            code: `retrieval.profile.concept-${meaninglessKind}`,
-            field: `retrievalProfile.${bucket}.${index}`,
-            message:
-              meaninglessKind === 'placeholder'
-                ? 'Placeholder labels are not retrieval concepts.'
-                : 'Default-only topic, category, or module labels are not retrieval concepts.',
-            provenanceRefs: fact.provenanceRefs,
-          });
-        }
-        if (seen.has(normalized)) {
-          violations.push({
-            code: 'retrieval.profile.fact-duplicate',
-            field: `retrievalProfile.${bucket}.${index}`,
-            message: 'Retrieval facts must be semantically distinct.',
-          });
-        }
-        seen.add(normalized);
-        if (
-          fact.provenanceRefs.length === 0 ||
-          fact.provenanceRefs.some((ref) => !allowedRefs.has(ref))
-        ) {
-          violations.push({
-            code: 'retrieval.profile.fact-ungrounded',
-            field: `retrievalProfile.${bucket}.${index}`,
-            message: 'Every retrieval fact must resolve to profile evidence or source fields.',
-            provenanceRefs: fact.provenanceRefs,
-          });
-        }
-      }
-    }
+    violations.push(...validateRawRetrievalFactSemantics(rawNativeProfile, allowedRefs));
 
     const expectedSourceHash = computeRecipeSourceContentHash(source);
     const legacySourceHash = computeLegacyRecipeSourceContentHash(source);
@@ -623,6 +582,122 @@ function normalizeProfile(profile: RecipeRetrievalProfile): RecipeRetrievalProfi
   };
 }
 
+/**
+ * Readiness 必须审原始 authored facts；若先走 normalizeFacts，空值会被过滤、后续索引会前移，
+ * 既无法阻止发布，也无法把诊断稳定指回 Markdown/SQLite 中的真实位置。
+ */
+function validateRawRetrievalFactSemantics(
+  profile: RecipeRetrievalProfile,
+  allowedRefs: Set<string>
+): RetrievalReadinessViolation[] {
+  const violations: RetrievalReadinessViolation[] = [];
+  for (const [bucket, valueKey] of [
+    ['concepts', 'term'],
+    ['scenarios', 'text'],
+    ['exclusions', 'text'],
+  ] as const) {
+    const rawFacts: unknown = profile[bucket];
+    if (!Array.isArray(rawFacts)) {
+      violations.push({
+        code: 'retrieval.profile.fact-bucket-invalid',
+        field: `retrievalProfile.${bucket}`,
+        message: `Retrieval profile ${bucket} must be an array.`,
+      });
+      continue;
+    }
+    const facts = rawFacts;
+    const seen = new Set<string>();
+    for (const [index, rawFact] of facts.entries()) {
+      const factPath = `retrievalProfile.${bucket}.${index}`;
+      if (!isPlainRecord(rawFact)) {
+        violations.push({
+          code: 'retrieval.profile.fact-structure-invalid',
+          field: factPath,
+          message: 'Retrieval facts must be structured objects.',
+        });
+        continue;
+      }
+      const rawValue = rawFact[valueKey];
+      const value = text(rawValue);
+      const normalized = comparable(value);
+      const rawProvenanceRefs = rawFact.provenanceRefs;
+      const provenanceShapeValid =
+        Array.isArray(rawProvenanceRefs) &&
+        rawProvenanceRefs.every((ref) => typeof ref === 'string' && text(ref).length > 0);
+      const provenanceRefs = provenanceShapeValid ? distinctStrings(rawProvenanceRefs) : [];
+
+      if (typeof rawValue !== 'string') {
+        violations.push({
+          code: 'retrieval.profile.fact-value-invalid',
+          field: `${factPath}.${valueKey}`,
+          message: `Retrieval fact ${valueKey} must be a string.`,
+        });
+      } else if (!value) {
+        violations.push({
+          code:
+            bucket === 'concepts'
+              ? 'retrieval.profile.concept-placeholder'
+              : 'retrieval.profile.fact-value-empty',
+          field: bucket === 'concepts' ? factPath : `${factPath}.${valueKey}`,
+          message:
+            bucket === 'concepts'
+              ? 'Placeholder labels are not retrieval concepts.'
+              : `Retrieval fact ${valueKey} must not be blank.`,
+          provenanceRefs,
+        });
+      } else {
+        const meaninglessKind =
+          bucket === 'concepts' ? classifyMeaninglessRetrievalConcept(value) : null;
+        if (meaninglessKind) {
+          violations.push({
+            code: `retrieval.profile.concept-${meaninglessKind}`,
+            field: factPath,
+            message:
+              meaninglessKind === 'placeholder'
+                ? 'Placeholder labels are not retrieval concepts.'
+                : 'Default-only topic, category, or module labels are not retrieval concepts.',
+            provenanceRefs,
+          });
+        }
+        if (seen.has(normalized)) {
+          violations.push({
+            code: 'retrieval.profile.fact-duplicate',
+            field: factPath,
+            message: 'Retrieval facts must be semantically distinct.',
+          });
+        }
+        seen.add(normalized);
+      }
+
+      if (typeof rawFact.language !== 'string' || !text(rawFact.language)) {
+        violations.push({
+          code: 'retrieval.profile.fact-language-invalid',
+          field: `${factPath}.language`,
+          message: 'Retrieval fact language must be a non-empty string.',
+        });
+      }
+      if (!provenanceShapeValid) {
+        violations.push({
+          code: 'retrieval.profile.fact-provenance-invalid',
+          field: `${factPath}.provenanceRefs`,
+          message: 'Retrieval fact provenanceRefs must be an array of non-empty strings.',
+        });
+      } else if (
+        provenanceRefs.length === 0 ||
+        provenanceRefs.some((ref) => !allowedRefs.has(ref))
+      ) {
+        violations.push({
+          code: 'retrieval.profile.fact-ungrounded',
+          field: factPath,
+          message: 'Every retrieval fact must resolve to profile evidence or source fields.',
+          provenanceRefs,
+        });
+      }
+    }
+  }
+  return violations;
+}
+
 function normalizeFacts<T extends 'term' | 'text'>(
   facts: unknown,
   valueKey: T
@@ -630,19 +705,27 @@ function normalizeFacts<T extends 'term' | 'text'>(
   if (!Array.isArray(facts)) {
     return [];
   }
-  return facts
-    .map((fact) => plainRecord(fact))
-    .map(
-      (fact) =>
-        ({
-          [valueKey]: text(fact[valueKey]),
-          language: text(fact.language),
-          provenanceRefs: distinctStrings(
-            Array.isArray(fact.provenanceRefs) ? fact.provenanceRefs : []
-          ),
-        }) as { language: string; provenanceRefs: string[] } & Record<T, string>
-    )
-    .filter((fact) => Boolean(fact[valueKey]));
+  const normalized: Array<{ language: string; provenanceRefs: string[] } & Record<T, string>> = [];
+  for (const fact of facts) {
+    if (
+      !isPlainRecord(fact) ||
+      typeof fact[valueKey] !== 'string' ||
+      !text(fact[valueKey]) ||
+      typeof fact.language !== 'string' ||
+      !text(fact.language) ||
+      !Array.isArray(fact.provenanceRefs) ||
+      fact.provenanceRefs.length === 0 ||
+      fact.provenanceRefs.some((ref) => typeof ref !== 'string' || !text(ref))
+    ) {
+      continue;
+    }
+    normalized.push({
+      [valueKey]: text(fact[valueKey]),
+      language: text(fact.language),
+      provenanceRefs: distinctStrings(fact.provenanceRefs),
+    } as { language: string; provenanceRefs: string[] } & Record<T, string>);
+  }
+  return normalized;
 }
 
 function existingSourceFieldRefs(
@@ -736,6 +819,10 @@ function classifyMeaninglessRetrievalConcept(
 
 function firstNonEmpty(...values: unknown[]): string {
   return values.map(text).find(Boolean) ?? '';
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function plainRecord(value: unknown): Record<string, unknown> {
