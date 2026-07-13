@@ -323,7 +323,7 @@ describe('SyncCoordinator', () => {
             releaseFirst = resolve;
           })
       );
-      const coord = createCoordinator({ debounceMs: 60_000 });
+      const coord = createCoordinator({ debounceMs: 60_000, embedProvider: null });
       coord.bindEventBus(eventBus as never);
       eventBus.emit('knowledge:deleted', { entryId: 'first' });
 
@@ -492,11 +492,13 @@ describe('SyncCoordinator', () => {
     });
 
     it('removes orphans but defers missing live vectors without an embed provider', async () => {
-      vectorStore.listIds = vi.fn().mockResolvedValue([
-        'entry_orphan',
-        'recipe_region_orphan_identity_0000000000000001',
-        'recipe_region_live_identity_0000000000000002',
-      ]);
+      vectorStore.listIds = vi
+        .fn()
+        .mockResolvedValue([
+          'entry_orphan',
+          'recipe_region_orphan_identity_0000000000000001',
+          'recipe_region_live_identity_0000000000000002',
+        ]);
       const db = createMockDb([
         { id: 'live', title: 'Missing live vector', content: 'data', kind: 'recipe' },
       ]);
@@ -518,6 +520,32 @@ describe('SyncCoordinator', () => {
       expect(vectorStore.remove).not.toHaveBeenCalledWith(
         'recipe_region_live_identity_0000000000000002'
       );
+      expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
+    });
+
+    it('defers missing vectors when the configured provider reports unavailable', async () => {
+      const unavailableProvider = {
+        ...createMockEmbedProvider(),
+        isAvailable: vi.fn().mockResolvedValue(false),
+      };
+      vectorStore.listIds = vi.fn().mockResolvedValue([]);
+      const db = createMockDb([
+        { id: 'live', title: 'Missing live vector', content: 'data', kind: 'recipe' },
+      ]);
+
+      const coord = createCoordinator({
+        debounceMs: 50,
+        embedProvider: unavailableProvider,
+      });
+      const result = await coord.reconcile(db as never);
+
+      expect(result).toMatchObject({
+        missingSynced: 0,
+        missingDeferred: 1,
+        degradedReason: 'embed-provider-unavailable',
+      });
+      expect(unavailableProvider.isAvailable).toHaveBeenCalledOnce();
+      expect(unavailableProvider.embed).not.toHaveBeenCalled();
       expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
     });
 

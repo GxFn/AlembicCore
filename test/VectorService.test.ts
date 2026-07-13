@@ -559,6 +559,10 @@ describe('VectorService', () => {
         syncDebounceMs: 60_000,
       });
       await svc.initialize();
+      expect(await svc.getStats()).toMatchObject({
+        autoSyncEnabled: true,
+        embedProviderAvailable: false,
+      });
 
       eventBus.emit('knowledge:deleted', { entryId: 'deleted' });
       eventBus.emit('lifecycle:transition', {
