@@ -50,6 +50,16 @@ interface PendingChange {
   timestamp: number;
 }
 
+export interface SyncCoordinatorReconcileResult {
+  orphansRemoved: number;
+  recipeRegionOrphansRemoved: number;
+  missingSynced: number;
+  /** Missing live vectors deliberately deferred because generation is unavailable. */
+  missingDeferred?: number;
+  degradedReason?: 'embed-provider-unavailable';
+  errors: string[];
+}
+
 // ── Coordinator ──
 
 export class SyncCoordinator {
@@ -174,13 +184,8 @@ export class SyncCoordinator {
         ...args: unknown[]
       ): Array<{ id: string; title?: string; content?: string; kind?: string }>;
     };
-  }): Promise<{
-    orphansRemoved: number;
-    recipeRegionOrphansRemoved: number;
-    missingSynced: number;
-    errors: string[];
-  }> {
-    const result = {
+  }): Promise<SyncCoordinatorReconcileResult> {
+    const result: SyncCoordinatorReconcileResult = {
       orphansRemoved: 0,
       recipeRegionOrphansRemoved: 0,
       missingSynced: 0,
@@ -269,9 +274,14 @@ export class SyncCoordinator {
       }
 
       // 4. 找缺失向量 (在 DB 中但索引无对应)
-      for (const entry of dbEntries) {
-        const expectedId = `entry_${entry.id}`;
-        if (!vectorIds.has(expectedId)) {
+      const missingEntries = dbEntries.filter((entry) => !vectorIds.has(`entry_${entry.id}`));
+      const generationAvailable =
+        missingEntries.length === 0 || (await this.#isEmbedProviderAvailable());
+      for (const entry of missingEntries) {
+        if (!generationAvailable) {
+          result.missingDeferred = (result.missingDeferred ?? 0) + 1;
+          result.degradedReason = 'embed-provider-unavailable';
+        } else {
           this.#enqueue({
             type: 'upsert',
             entryId: entry.id,
@@ -293,6 +303,8 @@ export class SyncCoordinator {
         orphansRemoved: result.orphansRemoved,
         recipeRegionOrphansRemoved: result.recipeRegionOrphansRemoved,
         missingSynced: result.missingSynced,
+        missingDeferred: result.missingDeferred ?? 0,
+        degradedReason: result.degradedReason,
       });
     } catch (err: unknown) {
       // Contract: unexpected reconcile failures are returned in errors[]
@@ -576,6 +588,23 @@ export class SyncCoordinator {
           });
         }
       }
+    }
+  }
+
+  async #isEmbedProviderAvailable(): Promise<boolean> {
+    if (!this.#embedProvider) {
+      return false;
+    }
+    if (typeof this.#embedProvider.isAvailable !== 'function') {
+      return true;
+    }
+    try {
+      return await this.#embedProvider.isAvailable();
+    } catch (err: unknown) {
+      this.#logger.warn('[SyncCoordinator] embed provider availability probe failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
     }
   }
 

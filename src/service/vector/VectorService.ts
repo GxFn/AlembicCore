@@ -843,6 +843,8 @@ export class VectorService {
     orphansRemoved: number;
     recipeRegionOrphansRemoved: number;
     missingSynced: number;
+    missingDeferred?: number;
+    degradedReason?: 'embed-provider-unavailable';
     errors: string[];
   } | null> {
     if (!this.#syncCoordinator) {
