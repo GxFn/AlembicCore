@@ -87,6 +87,11 @@ export class SyncCoordinator {
     this.#drizzle = config.drizzle ?? null;
   }
 
+  /** Keep event generation aligned when VectorService installs or replaces a provider. */
+  setEmbedProvider(embedProvider: EmbedProvider | null): void {
+    this.#embedProvider = embedProvider;
+  }
+
   /** 绑定 EventBus，开始监听知识变更事件 */
   bindEventBus(eventBus: EventBus): void {
     this.#eventBus = eventBus;

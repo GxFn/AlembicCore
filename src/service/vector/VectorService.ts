@@ -811,6 +811,7 @@ export class VectorService {
 
     // 2. 切换 provider
     this.#embedProvider = newProvider;
+    this.#syncCoordinator?.setEmbedProvider(newProvider);
     this.#indexingPipeline.setAiProvider(newProvider);
     opts.onProgress?.({ phase: 'migrate', detail: 'Provider switched' });
 
