@@ -55,6 +55,7 @@ export type {
 } from './service/vector/EnrichmentTypes.js';
 export type {
   RecipeRegionBuildOptions,
+  RecipeRegionGenerationIdentity,
   RecipeRegionGenerationTestOptions,
   RecipeRegionGenerationTestReport,
   RecipeRegionGenerationTestRetrievalSample,

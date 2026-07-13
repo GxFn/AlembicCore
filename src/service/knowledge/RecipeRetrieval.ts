@@ -80,15 +80,20 @@ export interface RetrievalReadinessDiagnostics {
 }
 
 type DraftDocument = Omit<RecipeRetrievalDocument, 'documentSetHash'>;
+const DEFAULT_ONLY_RETRIEVAL_CONCEPTS = new Set(['utility', 'general', 'default']);
 
 /**
  * Recipe 源事实的确定性 hash。时间、运行时 handle、质量台账与本地路径均不参与，
  * 因而 event/full/reconcile 三条派生链可以得到相同 identity。
  */
 export function computeRecipeSourceContentHash(source: RecipeRetrievalSource): string {
+  return stableHash(recipeSourceContentIdentity(source));
+}
+
+function recipeSourceContentIdentity(source: RecipeRetrievalSource): Record<string, unknown> {
   const content = plainRecord(source.content);
   const reasoning = plainRecord(source.reasoning);
-  return stableHash({
+  return {
     category: text(source.category),
     content: {
       markdown: text(content.markdown),
@@ -100,7 +105,6 @@ export function computeRecipeSourceContentHash(source: RecipeRetrievalSource): s
     dimensionId: text(source.dimensionId),
     doClause: text(source.doClause),
     dontClause: text(source.dontClause),
-    id: text(source.id),
     kind: text(source.kind),
     knowledgeType: text(source.knowledgeType),
     language: text(source.language),
@@ -115,7 +119,11 @@ export function computeRecipeSourceContentHash(source: RecipeRetrievalSource): s
     trigger: text(source.trigger),
     usageGuide: text(source.usageGuide),
     whenClause: text(source.whenClause),
-  });
+  };
+}
+
+function computeLegacyRecipeSourceContentHash(source: RecipeRetrievalSource): string {
+  return stableHash({ ...recipeSourceContentIdentity(source), id: text(source.id) });
 }
 
 /**
@@ -388,6 +396,14 @@ export function evaluateRecipeRetrievalReadiness(
       for (const [index, fact] of facts.entries()) {
         const value = 'term' in fact ? fact.term : fact.text;
         const normalized = comparable(value);
+        if (bucket === 'concepts' && isDefaultOnlyRetrievalConcept(value)) {
+          violations.push({
+            code: 'retrieval.profile.concept-default-only',
+            field: `retrievalProfile.${bucket}.${index}`,
+            message: 'Default-only topic, category, or module labels are not retrieval concepts.',
+            provenanceRefs: fact.provenanceRefs,
+          });
+        }
         if (seen.has(normalized)) {
           violations.push({
             code: 'retrieval.profile.fact-duplicate',
@@ -411,7 +427,11 @@ export function evaluateRecipeRetrievalReadiness(
     }
 
     const expectedSourceHash = computeRecipeSourceContentHash(source);
-    if (nativeProfile.provenance.sourceContentHash !== expectedSourceHash) {
+    const legacySourceHash = computeLegacyRecipeSourceContentHash(source);
+    if (
+      nativeProfile.provenance.sourceContentHash !== expectedSourceHash &&
+      nativeProfile.provenance.sourceContentHash !== legacySourceHash
+    ) {
       violations.push({
         code: 'retrieval.profile.source-hash-mismatch',
         field: 'retrievalProfile.provenance.sourceContentHash',
@@ -529,7 +549,9 @@ function addDocument(
     required?: boolean;
   }
 ): void {
-  const lines = distinctStrings(input.values.map(text)).filter((value) => !isPlaceholder(value));
+  const lines = distinctStrings(input.values.map(text)).filter(
+    (value) => !isPlaceholder(value) && !isDefaultOnlyRetrievalConcept(value)
+  );
   if (lines.length === 0 && !input.required) {
     return;
   }
@@ -687,6 +709,10 @@ function isPlaceholder(value: string): boolean {
   );
 }
 
+function isDefaultOnlyRetrievalConcept(value: unknown): boolean {
+  return DEFAULT_ONLY_RETRIEVAL_CONCEPTS.has(comparable(value));
+}
+
 function firstNonEmpty(...values: unknown[]): string {
   return values.map(text).find(Boolean) ?? '';
 }
@@ -724,7 +750,9 @@ function stringArray(value: unknown): string[] {
 }
 
 function distinctFacts(values: string[]): string[] {
-  return distinctStrings(values).filter((value) => !isPlaceholder(value));
+  return distinctStrings(values).filter(
+    (value) => !isPlaceholder(value) && !isDefaultOnlyRetrievalConcept(value)
+  );
 }
 
 function distinctStrings(values: unknown[]): string[] {

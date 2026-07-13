@@ -3,7 +3,11 @@ import type { RecipeRetrievalProfile } from '../src/domain/knowledge/RecipeRetri
 import { VectorStore } from '../src/infrastructure/vector/VectorStore.js';
 import { computeRecipeSourceContentHash } from '../src/service/knowledge/RecipeRetrieval.js';
 import type { EmbeddingPort } from '../src/service/vector/EmbeddingPort.js';
-import type { RecipeRegionSourceEntry } from '../src/service/vector/RecipeRegionVectorIndex.js';
+import {
+  buildRecipeSemanticRegionChunks,
+  parseRecipeIdFromRegionVectorId,
+  type RecipeRegionSourceEntry,
+} from '../src/service/vector/RecipeRegionVectorIndex.js';
 import {
   inspectRecipeVectorGeneration,
   RecipeVectorGenerationManager,
@@ -16,6 +20,7 @@ import {
 
 class MemoryVectorStore extends VectorStore {
   readonly items = new Map<string, Record<string, unknown>>();
+  readonly unreadableIds = new Set<string>();
 
   override async upsert(item: {
     id: string;
@@ -37,6 +42,9 @@ class MemoryVectorStore extends VectorStore {
   }
 
   override async getById(id: string): Promise<Record<string, unknown> | null> {
+    if (this.unreadableIds.has(id)) {
+      return null;
+    }
     return this.items.get(id) ?? null;
   }
 
@@ -50,6 +58,7 @@ class MemoryGenerationRuntime
 {
   readonly stores = new Map<string, MemoryVectorStore>();
   readonly manifests = new Map<string, RecipeVectorGenerationManifest>();
+  readonly manifestWrites: RecipeVectorGenerationManifest[] = [];
   active: RecipeVectorGenerationRoute | null = null;
 
   async createShadow(generationId: string): Promise<MemoryVectorStore> {
@@ -71,6 +80,11 @@ class MemoryGenerationRuntime
     manifest: RecipeVectorGenerationManifest
   ): Promise<void> {
     this.manifests.set(generationId, manifest);
+    this.manifestWrites.push(structuredClone(manifest));
+  }
+
+  async readManifest(generationId: string): Promise<RecipeVectorGenerationManifest | null> {
+    return this.manifests.get(generationId) ?? null;
   }
 
   async removeGeneration(generationId: string): Promise<void> {
@@ -144,11 +158,11 @@ function entry(): RecipeRegionSourceEntry {
   return { ...source, retrievalProfile: profile };
 }
 
-function provider(fail = false): EmbeddingPort {
+function provider(options: { fail?: boolean; model?: string } = {}): EmbeddingPort {
   return {
     describeCapabilities: () => ({
       provider: 'test-provider',
-      model: 'test-model',
+      model: options.model ?? 'test-model',
       dimension: 3,
       inputKinds: ['query', 'document'],
       batchSupported: true,
@@ -157,7 +171,7 @@ function provider(fail = false): EmbeddingPort {
     }),
     embedQuery: async () => [1, 0, 0],
     embedDocuments: async (texts) => {
-      if (fail) {
+      if (options.fail) {
         throw new Error('provider-build-failed');
       }
       return texts.map(() => [1, 0, 0]);
@@ -166,6 +180,23 @@ function provider(fail = false): EmbeddingPort {
 }
 
 describe('Recipe vector generation lifecycle', () => {
+  it('makes projection schema, canonical role, and content identity explicit in vector IDs', () => {
+    const schema1 = buildRecipeSemanticRegionChunks(entry(), { projectionSchemaVersion: '1' });
+    const schema2 = buildRecipeSemanticRegionChunks(entry(), { projectionSchemaVersion: '2' });
+
+    expect(schema1[0].id).toContain(
+      `_ps1_${schema1[0].metadata.documentRole}_${schema1[0].metadata.contentHash.slice(0, 24)}`
+    );
+    expect(schema2[0].id).not.toBe(schema1[0].id);
+    expect(parseRecipeIdFromRegionVectorId(schema1[0].id)).toBe(entry().id);
+    expect(parseRecipeIdFromRegionVectorId('recipe_region_legacy_recipe_identity_deadbeef')).toBe(
+      'legacy_recipe'
+    );
+    expect(
+      parseRecipeIdFromRegionVectorId('recipe_region_legacy_ps_recipe_identity_deadbeef')
+    ).toBe('legacy_ps_recipe');
+  });
+
   it('activates only a fully verified shadow generation and can atomically roll back', async () => {
     const runtime = new MemoryGenerationRuntime();
     const oldStore = await runtime.createShadow('old-generation');
@@ -179,11 +210,31 @@ describe('Recipe vector generation lifecycle', () => {
     expect(result.inspection?.healthy).toBe(true);
     expect(runtime.active?.generationId).toBe(result.generationId);
     expect(result.manifest).toMatchObject({
+      manifestVersion: 1,
+      generationId: result.generationId,
+      status: 'ready',
+      createdFrom: 'full-build',
       provider: 'test-provider',
       model: 'test-model',
       dimension: 3,
       formatProfile: 'asymmetric',
       recipeCount: 1,
+    });
+    expect(result.manifest?.corpusFingerprint).toBeTruthy();
+    expect(result.manifest?.expectedIdsByRecipe[entry().id]).toHaveLength(
+      result.manifest?.documentCount
+    );
+    expect(runtime.manifestWrites.map((manifest) => manifest.status)).toEqual([
+      'building',
+      'ready',
+    ]);
+    const alreadyActive = await manager.buildAndActivate([entry()], provider(), {
+      createdFrom: 'incremental',
+    });
+    expect(alreadyActive).toMatchObject({
+      status: 'already-active',
+      generationId: result.generationId,
+      manifest: { createdFrom: 'full-build', status: 'ready' },
     });
     expect(
       await manager.rollback({ generationId: 'old-generation', manifestHash: 'old-manifest' })
@@ -200,27 +251,77 @@ describe('Recipe vector generation lifecycle', () => {
 
     const result = await new RecipeVectorGenerationManager(runtime, runtime).buildAndActivate(
       [entry()],
-      provider(true)
+      provider({ fail: true })
     );
 
     expect(result.status).toBe('failed');
+    expect(result.manifest).toMatchObject({ status: 'failed', createdFrom: 'full-build' });
+    expect(runtime.stores.has(result.generationId!)).toBe(false);
+    expect(runtime.manifests.has(result.generationId!)).toBe(false);
     expect(result.active).toEqual({ generationId: 'old-generation', manifestHash: 'old-manifest' });
     expect(await oldStore.getById('old-sentinel')).not.toBeNull();
   });
 
-  it('reports exact-set corruption and removes deleted Recipe vectors without a provider', async () => {
+  it('rebuilds for same-dimension model and projection-schema changes, then rolls back a real generation', async () => {
+    const runtime = new MemoryGenerationRuntime();
+    const manager = new RecipeVectorGenerationManager(runtime, runtime);
+    const modelA = await manager.buildAndActivate([entry()], provider({ model: 'model-a' }));
+    const modelB = await manager.buildAndActivate([entry()], provider({ model: 'model-b' }));
+    const schema2 = await manager.buildAndActivate([entry()], provider({ model: 'model-b' }), {
+      projectionSchemaVersion: '2',
+      createdFrom: 'migration',
+    });
+
+    expect(modelB.generationId).not.toBe(modelA.generationId);
+    expect(modelB.manifest?.manifestHash).not.toBe(modelA.manifest?.manifestHash);
+    expect(schema2.generationId).not.toBe(modelB.generationId);
+    expect(schema2.manifest).toMatchObject({
+      projectionSchemaVersion: '2',
+      createdFrom: 'migration',
+    });
+    expect(schema2.manifest?.manifestHash).not.toBe(modelB.manifest?.manifestHash);
+    expect(await manager.rollback(modelA.active!)).toBe(true);
+    expect(runtime.active).toEqual(modelA.active);
+    expect((await runtime.open(modelA.generationId!)).items.size).toBeGreaterThan(0);
+  });
+
+  it('reports missing, partial, logical duplicate, hash, orphan, stale, and stale-generation state', async () => {
     const runtime = new MemoryGenerationRuntime();
     const manager = new RecipeVectorGenerationManager(runtime, runtime);
     const built = await manager.buildAndActivate([entry()], provider());
     const store = await runtime.open(built.generationId!);
-    const [firstId] = await store.listIds();
-    const first = (await store.getById(firstId))!;
+    const ids = await store.listIds();
+    expect(ids.length).toBeGreaterThanOrEqual(4);
+
+    await store.remove(ids[0]);
+    store.unreadableIds.add(ids[1]);
+    const corrupted = store.items.get(ids[2])!;
     await store.upsert({
-      ...(first as never),
-      id: firstId,
+      ...(corrupted as never),
+      id: ids[2],
       content: 'corrupted',
       vector: [1, 0],
-      metadata: first.metadata as Record<string, unknown>,
+      metadata: corrupted.metadata as Record<string, unknown>,
+    });
+    const duplicateSource = store.items.get(ids[3])!;
+    await store.upsert({
+      ...(duplicateSource as never),
+      id: `${ids[3]}_duplicate`,
+      metadata: duplicateSource.metadata as Record<string, unknown>,
+    });
+    await store.upsert({
+      ...(duplicateSource as never),
+      id: ids[3],
+      metadata: {
+        ...(duplicateSource.metadata as Record<string, unknown>),
+        generationId: 'retired-generation',
+      },
+    });
+    await store.upsert({
+      id: 'recipe_region_recipe-generation-1_identity_deadbeef',
+      content: 'stale projection',
+      vector: [1, 0, 0],
+      metadata: { recipeId: 'recipe-generation-1' },
     });
     await store.upsert({
       id: 'recipe_region_orphan_identity_deadbeef',
@@ -229,25 +330,40 @@ describe('Recipe vector generation lifecycle', () => {
       metadata: {},
     });
 
-    const inspection = await inspectRecipeVectorGeneration(store, [entry()], 3);
+    const inspection = await inspectRecipeVectorGeneration(store, [entry()], {
+      dimension: 3,
+      generationId: built.generationId!,
+      manifestHash: built.manifest!.manifestHash,
+      provider: built.manifest!.provider,
+      model: built.manifest!.model,
+      projectionSchemaVersion: built.manifest!.projectionSchemaVersion,
+    });
     expect(inspection.healthy).toBe(false);
-    expect(inspection.hashMismatchIds).toContain(firstId);
-    expect(inspection.dimensionMismatchIds).toContain(firstId);
+    expect(inspection.missingIds).toContain(ids[0]);
+    expect(inspection.partialIds).toContain(ids[1]);
+    expect(inspection.hashMismatchIds).toContain(ids[2]);
+    expect(inspection.dimensionMismatchIds).toContain(ids[2]);
+    expect(inspection.duplicateIds).toContain(`${ids[3]}_duplicate`);
     expect(inspection.orphanIds).toContain('recipe_region_orphan_identity_deadbeef');
+    expect(inspection.staleIds).toContain('recipe_region_recipe-generation-1_identity_deadbeef');
+    expect(inspection.staleGenerationIds).toContain(ids[3]);
 
     const repaired = await manager.buildAndActivate([entry()], provider());
     expect(repaired.status).toBe('activated');
     expect(repaired.generationId).not.toBe(built.generationId);
     expect(repaired.inspection?.healthy).toBe(true);
 
-    await store.upsert({
+    const repairedStore = await runtime.open(repaired.generationId!);
+    await repairedStore.upsert({
       id: 'entry_recipe-generation-1',
       content: 'legacy competitor',
       vector: [1, 0, 0],
       metadata: {},
     });
-    const removed = await removeRecipeVectorsByTruth(store, 'recipe-generation-1');
+    const removed = await removeRecipeVectorsByTruth(repairedStore, 'recipe-generation-1');
     expect(removed.errors).toEqual([]);
-    expect((await store.listIds()).some((id) => id.includes('recipe-generation-1'))).toBe(false);
+    expect((await repairedStore.listIds()).some((id) => id.includes('recipe-generation-1'))).toBe(
+      false
+    );
   });
 });

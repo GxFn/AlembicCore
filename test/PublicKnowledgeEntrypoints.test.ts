@@ -6,6 +6,7 @@ import {
   recipeDimensionIdOrUnknown,
   resolveRecipeDimensionId,
 } from '../src/dimensions.js';
+import type { RecipeProductionPort } from '../src/knowledge.js';
 import {
   buildProducerStyleGuide,
   CodeEntityGraph,
@@ -70,7 +71,15 @@ describe('stable knowledge and dimension entrypoints', () => {
   });
 
   it('exposes production gateway and knowledge service as stable service contracts', () => {
+    const productionPort: Pick<
+      RecipeProductionPort,
+      'createOrStage' | 'evaluateReadiness' | 'publish'
+    > = RecipeProductionGateway.prototype;
+
     expect(RecipeProductionGateway).toBeDefined();
+    expect(productionPort.createOrStage).toBeTypeOf('function');
+    expect(productionPort.evaluateReadiness).toBeTypeOf('function');
+    expect(productionPort.publish).toBeTypeOf('function');
     expect(KnowledgeService).toBeDefined();
   });
 

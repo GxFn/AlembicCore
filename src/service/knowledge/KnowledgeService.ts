@@ -301,6 +301,11 @@ export class KnowledgeService {
     return entry;
   }
 
+  /** Producer-facing view of the exact readiness report used by active transitions. */
+  async evaluateRetrievalReadiness(id: string): Promise<RetrievalReadinessReport> {
+    return this._evaluateRetrievalReadiness(await this._findOrThrow(id));
+  }
+
   /**
    * 更新知识条目（仅允许白名单字段）
    * @param data 部分字段（camelCase）
@@ -875,7 +880,7 @@ export class KnowledgeService {
         isRecipeRetrievalSubject(entry) &&
         isValidTransition(entry.lifecycle, Lifecycle.ACTIVE)
       ) {
-        const readiness = this._retrievalReadinessEvaluator(entry);
+        const readiness = this._evaluateRetrievalReadiness(entry);
         if (!readiness.ready) {
           throw new ValidationError('Recipe retrieval readiness blocks active transition', {
             readiness,
@@ -933,6 +938,9 @@ export class KnowledgeService {
       // ── file-first: 先迁移 .md 文件，再更新 DB lifecycle（文件=真相源） ──
       if (this._fileWriter) {
         this._fileWriter.moveOnLifecycleChange(entry);
+        if (entry.sourceFile) {
+          dbUpdates.sourceFile = entry.sourceFile;
+        }
       }
 
       const updated = await this.repository.update(id, dbUpdates);
@@ -978,6 +986,10 @@ export class KnowledgeService {
       throw new NotFoundError('Knowledge entry not found', 'knowledge', id);
     }
     return entry;
+  }
+
+  _evaluateRetrievalReadiness(entry: KnowledgeEntry): RetrievalReadinessReport {
+    return this._retrievalReadinessEvaluator(entry);
   }
 
   /** 验证创建输入 */

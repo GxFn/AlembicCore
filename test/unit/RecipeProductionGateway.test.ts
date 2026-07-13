@@ -67,6 +67,12 @@ function makeMockKnowledgeService() {
       ...data,
     })),
     updateQuality: vi.fn(async () => ({ score: 0.85 })),
+    evaluateRetrievalReadiness: vi.fn(async () => ({ ready: true })),
+    publish: vi.fn(async (id: string) => ({
+      id,
+      title: `published-${id}`,
+      lifecycle: 'active',
+    })),
   };
 }
 

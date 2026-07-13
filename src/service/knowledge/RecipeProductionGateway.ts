@@ -23,6 +23,7 @@ import {
 } from '../../shared/sourceContracts.js';
 import type { StructuredPatch } from '../../types/evolution.js';
 import type { CandidateSummary, GenerateDedup } from '../bootstrap/GenerateDedup.js';
+import type { RetrievalReadinessReport } from './RecipeRetrieval.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
 interface GatewayLogger {
@@ -165,6 +166,47 @@ export interface CreateRecipeResult {
   }>;
 }
 
+export type RecipeProducerCapability =
+  | 'cold-start'
+  | 'incremental'
+  | 'module-scan'
+  | 'knowledge-submit';
+
+export interface RecipeProductionInput {
+  items: CreateRecipeItem[];
+  options?: Omit<NonNullable<CreateRecipeRequest['options']>, 'userId'>;
+}
+
+export interface ProducerContext {
+  source: GatewaySource;
+  userId: string;
+  capability?: RecipeProducerCapability;
+}
+
+export interface PublishContext {
+  userId: string;
+}
+
+export interface RecipeProductionRecord {
+  id: string;
+  title: string;
+  lifecycle: string;
+  sourceFile?: string | null;
+  retrievalProfile?: RecipeRetrievalProfile | null;
+}
+
+export type RecipeProductionResult = CreateRecipeResult;
+
+/** Consumer-facing production boundary shared by every Recipe producer. */
+export interface RecipeProductionPort {
+  createOrStage(
+    input: RecipeProductionInput,
+    context: ProducerContext
+  ): Promise<RecipeProductionResult>;
+  evaluateReadiness(recipeId: string): Promise<RetrievalReadinessReport>;
+  publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord>;
+}
+
 /* ═══════════════════ Dependencies ═══════════════════ */
 
 interface GatewayKnowledgeService {
@@ -190,6 +232,8 @@ interface GatewayKnowledgeService {
     [key: string]: unknown;
   }>;
   updateQuality(id: string, context: { userId: string }): Promise<unknown>;
+  evaluateRetrievalReadiness?(id: string): Promise<RetrievalReadinessReport>;
+  publish?(id: string, context: { userId: string }): Promise<RecipeProductionRecord>;
 }
 
 interface GatewayConsolidationAdvisor {
@@ -277,7 +321,7 @@ export interface GatewayDeps {
 
 /* ═══════════════════ Gateway ═══════════════════ */
 
-export class RecipeProductionGateway {
+export class RecipeProductionGateway implements RecipeProductionPort {
   readonly #knowledgeService: GatewayKnowledgeService;
   readonly #projectRoot: string;
   readonly #logger?: GatewayLogger;
@@ -298,6 +342,31 @@ export class RecipeProductionGateway {
     this.#findSimilarRecipes = deps.findSimilarRecipes ?? null;
     this.#knownModuleNames = deps.knownModuleNames ? new Set(deps.knownModuleNames) : null;
     this.#resolveModuleFromSourceRefs = deps.resolveModuleFromSourceRefs ?? null;
+  }
+
+  async createOrStage(
+    input: RecipeProductionInput,
+    context: ProducerContext
+  ): Promise<RecipeProductionResult> {
+    return this.create({
+      source: context.source,
+      items: input.items,
+      options: { ...input.options, userId: context.userId },
+    });
+  }
+
+  async evaluateReadiness(recipeId: string): Promise<RetrievalReadinessReport> {
+    if (!this.#knowledgeService.evaluateRetrievalReadiness) {
+      throw new Error('recipe-production-readiness-unavailable');
+    }
+    return this.#knowledgeService.evaluateRetrievalReadiness(recipeId);
+  }
+
+  async publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord> {
+    if (!this.#knowledgeService.publish) {
+      throw new Error('recipe-production-publish-unavailable');
+    }
+    return this.#knowledgeService.publish(recipeId, context);
   }
 
   /**

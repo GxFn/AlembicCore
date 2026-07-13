@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import {
   projectRecipeRetrievalDocumentSet,
+  RECIPE_RETRIEVAL_PROJECTION_SCHEMA_VERSION,
   type RecipeRetrievalDocumentRole,
 } from '../knowledge/RecipeRetrieval.js';
 import { asEmbeddingPort } from './EmbeddingPort.js';
@@ -9,7 +10,7 @@ import type { EmbedProvider } from './VectorService.js';
 
 export const RECIPE_SEMANTIC_REGION_METADATA_TYPE = 'recipe-semantic-region';
 export const RECIPE_REGION_VECTOR_ID_PREFIX = 'recipe_region_';
-export const RECIPE_REGION_VECTOR_SCHEMA_VERSION = 1;
+export const RECIPE_REGION_VECTOR_SCHEMA_VERSION = 2;
 
 export const RECIPE_SEMANTIC_REGION_CLASSES = [
   'identity',
@@ -65,6 +66,18 @@ export interface RecipeSourceRefsBridge {
 export interface RecipeRegionBuildOptions {
   sourceRefsBridge?: RecipeSourceRefsBridge;
   maxRegionChars?: number;
+  projectionSchemaVersion?: string;
+}
+
+export interface RecipeRegionGenerationIdentity {
+  generationId: string;
+  manifestHash: string;
+  provider: string;
+  model: string;
+  dimension: number;
+  formatProfile: string;
+  normalization: string;
+  corpusFingerprint: string;
 }
 
 export interface RecipeRegionVectorMetadata {
@@ -92,6 +105,7 @@ export interface RecipeRegionVectorMetadata {
   kind: string;
   knowledgeType: string;
   schemaVersion: typeof RECIPE_REGION_VECTOR_SCHEMA_VERSION;
+  projectionSchemaVersion: string;
   tags: string[];
   weakCategory?: string;
   weakTopicHint?: string;
@@ -102,6 +116,14 @@ export interface RecipeRegionVectorMetadata {
   generatedFrom: 'knowledge-entry-row';
   generationScope: 'rebuild-refresh-sync';
   deprecated: boolean;
+  generationId?: string;
+  generationManifestHash?: string;
+  generationProvider?: string;
+  generationModel?: string;
+  generationDimension?: number;
+  generationFormatProfile?: string;
+  generationNormalization?: string;
+  generationCorpusFingerprint?: string;
 }
 
 export interface RecipeSemanticRegionChunk {
@@ -114,6 +136,8 @@ export interface RecipeRegionSyncOptions {
   sourceRefsBridgeByRecipeId?: Record<string, RecipeSourceRefsBridge>;
   removeStale?: boolean;
   maxRegionChars?: number;
+  projectionSchemaVersion?: string;
+  generationIdentity?: RecipeRegionGenerationIdentity;
   /**
    * Omitted means a fail-safe subset refresh: only obsolete chunks belonging
    * to entries in this call may be removed. Authoritative maintenance must
@@ -311,9 +335,12 @@ function emptyRegionClassCounts(): Record<RecipeSemanticRegionClass, number> {
 function recipeRegionVectorId(
   recipeId: string,
   regionClass: RecipeSemanticRegionClass,
-  regionHash: string
+  projectionSchemaVersion: string,
+  documentRole: RecipeRetrievalDocumentRole,
+  contentHash: string
 ): string {
-  return `${RECIPE_REGION_VECTOR_ID_PREFIX}${recipeId}_${regionClass}_${regionHash.slice(0, 16)}`;
+  const schemaToken = projectionSchemaVersion.replace(/[^a-zA-Z0-9.-]/g, '-');
+  return `${RECIPE_REGION_VECTOR_ID_PREFIX}${recipeId}_${regionClass}_ps${schemaToken}_${documentRole}_${contentHash.slice(0, 24)}`;
 }
 
 export function buildRecipeSemanticRegionChunks(
@@ -325,6 +352,8 @@ export function buildRecipeSemanticRegionChunks(
   const sourceRefs = bridge.refs.length > 0 ? bridge.refs : reasoning.sources;
   const tags = compactStringArray(entry.tags);
   const deprecated = compactString(entry.lifecycle).toLowerCase() === 'deprecated';
+  const projectionSchemaVersion =
+    compactString(options.projectionSchemaVersion) || RECIPE_RETRIEVAL_PROJECTION_SCHEMA_VERSION;
 
   if (deprecated) {
     return [];
@@ -371,6 +400,7 @@ export function buildRecipeSemanticRegionChunks(
       kind: compactString(entry.kind),
       knowledgeType: compactString(entry.knowledgeType),
       schemaVersion: RECIPE_REGION_VECTOR_SCHEMA_VERSION,
+      projectionSchemaVersion,
       tags,
       sourceRefs,
       sourceRefCount: sourceRefs.length,
@@ -390,7 +420,13 @@ export function buildRecipeSemanticRegionChunks(
     }
 
     return {
-      id: recipeRegionVectorId(entry.id, regionClass, regionHash),
+      id: recipeRegionVectorId(
+        entry.id,
+        regionClass,
+        projectionSchemaVersion,
+        document.role,
+        document.contentHash
+      ),
       content: document.text,
       metadata,
     };
@@ -428,12 +464,34 @@ export async function syncRecipeSemanticRegionVectors(
     errors: [],
     generatedMetadata: [],
   };
-  const chunks = entries.flatMap((entry) =>
-    buildRecipeSemanticRegionChunks(entry, {
-      maxRegionChars: options.maxRegionChars,
-      sourceRefsBridge: options.sourceRefsBridgeByRecipeId?.[entry.id],
-    })
-  );
+  const chunks = entries
+    .flatMap((entry) =>
+      buildRecipeSemanticRegionChunks(entry, {
+        maxRegionChars: options.maxRegionChars,
+        projectionSchemaVersion: options.projectionSchemaVersion,
+        sourceRefsBridge: options.sourceRefsBridgeByRecipeId?.[entry.id],
+      })
+    )
+    .map((chunk) => {
+      const generation = options.generationIdentity;
+      if (!generation) {
+        return chunk;
+      }
+      return {
+        ...chunk,
+        metadata: {
+          ...chunk.metadata,
+          generationId: generation.generationId,
+          generationManifestHash: generation.manifestHash,
+          generationProvider: generation.provider,
+          generationModel: generation.model,
+          generationDimension: generation.dimension,
+          generationFormatProfile: generation.formatProfile,
+          generationNormalization: generation.normalization,
+          generationCorpusFingerprint: generation.corpusFingerprint,
+        },
+      };
+    });
   const expectedIds = new Set(chunks.map((chunk) => chunk.id));
   const batchRecipeIds = new Set(entries.map((entry) => entry.id));
   const authoritativeRecipeIds = options.maintenanceScope
@@ -452,8 +510,8 @@ export async function syncRecipeSemanticRegionVectors(
   result.generated = chunks.length;
   result.generatedMetadata = chunks.map((chunk) => chunk.metadata);
 
-  // 已存在跳过（2026-07-06 启动同步加速）：chunk id 内嵌 regionHash（recipeId+
-  // regionClass+regionContent 的稳定哈希），id 在索引中即内容未变——重复 embed
+  // 已存在跳过（2026-07-06 启动同步加速）：chunk id 内嵌 projection schema、
+  // canonical role 和 content hash，id 在索引中即投影身份与内容未变——重复 embed
   // 纯属浪费（真机 76 条 ≈656 chunk 全量 re-embed ~86s/每次启动）。内容变化 →
   // regionHash 变 → id 不同 → 自然走生成+旧 id 由 removeStale 清理。
   // options.force 显式全量重建时不跳过。
@@ -577,7 +635,10 @@ function recipeRegionReadbackError(
     metadata.contentHash !== expected.metadata.contentHash ||
     metadata.documentSetHash !== expected.metadata.documentSetHash ||
     metadata.sourceContentHash !== expected.metadata.sourceContentHash ||
-    metadata.documentRole !== expected.metadata.documentRole
+    metadata.documentRole !== expected.metadata.documentRole ||
+    metadata.projectionSchemaVersion !== expected.metadata.projectionSchemaVersion ||
+    metadata.generationId !== expected.metadata.generationId ||
+    metadata.generationManifestHash !== expected.metadata.generationManifestHash
   ) {
     return 'content-or-metadata-mismatch';
   }
@@ -921,6 +982,20 @@ export function parseRecipeIdFromRegionVectorId(id: string): string | null {
     return null;
   }
   const rest = id.slice(RECIPE_REGION_VECTOR_ID_PREFIX.length);
+  for (const regionClass of RECIPE_SEMANTIC_REGION_CLASSES) {
+    const marker = `_${regionClass}_ps`;
+    const markerIndex = rest.lastIndexOf(marker);
+    if (markerIndex > 0) {
+      const suffix = rest.slice(markerIndex + marker.length);
+      if (
+        /^[a-zA-Z0-9.-]+_(?:intent|guidance|implementation|rationale)_[0-9a-f]{24}(?:_.*)?$/.test(
+          suffix
+        )
+      ) {
+        return rest.slice(0, markerIndex);
+      }
+    }
+  }
   for (const regionClass of RECIPE_SEMANTIC_REGION_CLASSES) {
     const marker = `_${regionClass}_`;
     const markerIndex = rest.lastIndexOf(marker);

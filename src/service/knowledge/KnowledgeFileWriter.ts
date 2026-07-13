@@ -275,6 +275,9 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       // 清理旧文件（lifecycle 切换或 category 变更场景）
       this._cleanupOldFile(entry, filePath);
 
+      // sourceFile is part of persisted truth, so set the destination before
+      // serializing frontmatter rather than repairing it after the write.
+      entry.sourceFile = path.relative(this.projectRoot, filePath);
       const markdown = this.serialize(entry);
       if (this.#wz) {
         const rel = dir.replace(this.#wz.dataRoot, '').replace(/^\//, '');
@@ -288,9 +291,6 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
         }
         fs.writeFileSync(filePath, markdown, 'utf8');
       }
-
-      // 更新 entry 的 sourceFile 溯源
-      entry.sourceFile = path.relative(this.projectRoot, filePath);
 
       this.logger.info('Knowledge entry persisted to file', {
         entryId: entry.id,

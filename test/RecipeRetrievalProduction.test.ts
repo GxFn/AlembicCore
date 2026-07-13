@@ -17,6 +17,10 @@ import {
 } from '../src/service/knowledge/KnowledgeFileWriter.js';
 import { KnowledgeService } from '../src/service/knowledge/KnowledgeService.js';
 import {
+  RecipeProductionGateway,
+  type RecipeProductionPort,
+} from '../src/service/knowledge/RecipeProductionGateway.js';
+import {
   computeRecipeSourceContentHash,
   evaluateRecipeRetrievalReadiness,
   projectCompatibilityRecipeRetrievalProfile,
@@ -157,6 +161,85 @@ describe('Recipe retrieval profile truth and readiness', () => {
     ).not.toMatch(/[A-Za-z]{4}/);
   });
 
+  it('keeps default-only topic, category, and module labels out of retrieval facts', () => {
+    const legacy = new KnowledgeEntry(
+      recipeSource({
+        language: 'en',
+        category: 'general',
+        topicHint: 'Utility',
+        moduleName: 'default',
+        tags: [],
+      })
+    );
+
+    const compatibility = projectCompatibilityRecipeRetrievalProfile(legacy);
+    const intent = projectRecipeRetrievalDocumentSet(legacy).documents.find(
+      (document) => document.role === 'intent'
+    );
+
+    expect(compatibility.concepts.map((concept) => concept.term.toLowerCase())).not.toEqual(
+      expect.arrayContaining(['utility', 'general', 'default'])
+    );
+    expect(intent?.text.split('\n').map((line) => line.toLowerCase())).not.toEqual(
+      expect.arrayContaining(['utility', 'general', 'default'])
+    );
+  });
+
+  it('reports stable hard violations when default-only labels masquerade as native concepts', () => {
+    const source = recipeSource({
+      category: 'general',
+      topicHint: 'Utility',
+      moduleName: 'default',
+    });
+    const profile = nativeProfile(source);
+    profile.provenance.sourceFieldRefs.push(
+      'field:category',
+      'field:topicHint',
+      'field:moduleName'
+    );
+    profile.concepts.push(
+      { term: 'Utility', language: 'en', provenanceRefs: ['field:topicHint'] },
+      { term: 'general', language: 'en', provenanceRefs: ['field:category'] },
+      { term: 'default', language: 'en', provenanceRefs: ['field:moduleName'] }
+    );
+
+    const report = evaluateRecipeRetrievalReadiness(
+      new KnowledgeEntry({ ...source, retrievalProfile: profile })
+    );
+
+    expect(report.ready).toBe(false);
+    expect(
+      report.violations
+        .filter((violation) => violation.code === 'retrieval.profile.concept-default-only')
+        .map((violation) => violation.field)
+    ).toEqual([
+      'retrievalProfile.concepts.2',
+      'retrievalProfile.concepts.3',
+      'retrievalProfile.concepts.4',
+    ]);
+  });
+
+  it('allows meaningful phrases that merely contain default-label words', () => {
+    const source = recipeSource({
+      tags: ['shared utility module', 'general-purpose retry', 'default export boundary'],
+    });
+    const profile = nativeProfile(source);
+    profile.provenance.sourceFieldRefs.push('field:tags');
+    profile.concepts.push(
+      { term: 'shared utility module', language: 'en', provenanceRefs: ['field:tags'] },
+      { term: 'general-purpose retry', language: 'en', provenanceRefs: ['field:tags'] },
+      { term: 'default export boundary', language: 'en', provenanceRefs: ['field:tags'] }
+    );
+
+    const report = evaluateRecipeRetrievalReadiness(
+      new KnowledgeEntry({ ...source, retrievalProfile: profile })
+    );
+
+    expect(report.violations.map((violation) => violation.code)).not.toContain(
+      'retrieval.profile.concept-default-only'
+    );
+  });
+
   it('keeps readiness deterministic when the provider is offline', () => {
     const entry = makeNativeEntry();
     const online = evaluateRecipeRetrievalReadiness(entry, { providerAvailable: true });
@@ -184,6 +267,20 @@ describe('Recipe retrieval profile truth and readiness', () => {
         'retrieval.ranking.metrics-missing',
       ])
     );
+  });
+
+  it('accepts the first-generation source hash that included persisted Recipe identity', () => {
+    const source = recipeSource();
+    const profile = nativeProfile(source);
+    profile.provenance.sourceContentHash =
+      '0dc4a0c70d0d8c165d5972ca37c3b6ea9ada7363ca3e28a0d71d604dc7915faf';
+
+    const report = evaluateRecipeRetrievalReadiness(
+      new KnowledgeEntry({ ...source, retrievalProfile: profile })
+    );
+
+    expect(report.ready).toBe(true);
+    expect(report.violations).toEqual([]);
   });
 
   it('reports stable hard violations for ungrounded facts and whole-file code evidence', () => {
@@ -270,6 +367,84 @@ describe('Recipe retrieval profile persistence and active transition', () => {
 
     expect(created?.retrievalProfile).toEqual(entry.retrievalProfile);
     expect(fetched?.retrievalProfile).toEqual(entry.retrievalProfile);
+  });
+
+  it('runs the consumer-facing production port through real persistence, projection, and publish', async () => {
+    const item = recipeSource({
+      title: 'Production ports persist retrieval truth before active publication',
+      trigger: '@recipe-production-port',
+      topicHint: 'retrieval-production',
+      moduleName: 'Knowledge',
+      dimensionId: 'architecture',
+      headers: [],
+      usageGuide:
+        '### Usage\nCall createOrStage, inspect the deterministic readiness report, then publish only when ready.',
+      coreCode: [
+        'const staged = await port.createOrStage(input, context);',
+        'const readiness = await port.evaluateReadiness(staged.created[0].id);',
+        'await port.publish(staged.created[0].id, context);',
+      ].join('\n'),
+      content: {
+        pattern: 'await port.createOrStage(input, context);',
+        markdown: [
+          'A producer sends one evidence-grounded Recipe through the shared production port.',
+          'The port must use the same Gateway validation and KnowledgeService persistence as every other producer.',
+          '```ts',
+          'const staged = await port.createOrStage(input, context);',
+          'const report = await port.evaluateReadiness(staged.created[0].id);',
+          'if (report.ready) await port.publish(staged.created[0].id, context);',
+          '```',
+          'Source: src/service/knowledge/RecipeProductionGateway.ts:280-360',
+        ].join('\n'),
+        rationale:
+          'One consumer-facing port prevents producers from bypassing persistence or readiness.',
+      },
+    });
+    const profile = nativeProfile(item);
+    const port: RecipeProductionPort = new RecipeProductionGateway({
+      knowledgeService: service,
+      projectRoot: tmpDir,
+    });
+
+    const staged = await port.createOrStage(
+      {
+        items: [{ ...item, retrievalProfile: profile }],
+        options: { skipSimilarityCheck: true, skipConsolidation: true },
+      },
+      { source: 'batch-import', userId: 'producer' }
+    );
+
+    expect(staged.rejected).toEqual([]);
+    expect(staged.created).toHaveLength(1);
+    const recipeId = staged.created[0].id;
+    const persisted = await repository.findById(recipeId);
+    expect(persisted?.retrievalProfile).toEqual(profile);
+    const candidatePath = path.join(tmpDir, persisted?.sourceFile ?? '');
+    expect(fs.existsSync(candidatePath)).toBe(true);
+    expect(parseKnowledgeMarkdown(fs.readFileSync(candidatePath, 'utf8')).retrievalProfile).toEqual(
+      profile
+    );
+
+    const readiness = await port.evaluateReadiness(recipeId);
+    expect(readiness.ready).toBe(true);
+    expect(readiness.documentSetHash).toBe(
+      projectRecipeRetrievalDocumentSet(persisted!).documentSetHash
+    );
+
+    const published = await port.publish(recipeId, { userId: 'reviewer' });
+    expect(published.lifecycle).toBe('active');
+    const active = await repository.findById(recipeId);
+    expect(active?.lifecycle).toBe('active');
+    expect(active?.sourceFile).toContain('/recipes/');
+    expect(fs.existsSync(candidatePath)).toBe(false);
+    const activePath = path.join(tmpDir, active?.sourceFile ?? '');
+    expect(fs.existsSync(activePath)).toBe(true);
+    const activeMarkdown = parseKnowledgeMarkdown(fs.readFileSync(activePath, 'utf8'));
+    expect(activeMarkdown.lifecycle).toBe('active');
+    expect(activeMarkdown.retrievalProfile).toEqual(profile);
+    expect(projectRecipeRetrievalDocumentSet(active!).documentSetHash).toBe(
+      readiness.documentSetHash
+    );
   });
 
   it('allows repairable pending truth but blocks every active transition on the same readiness report', async () => {
