@@ -84,7 +84,9 @@ describe('SyncCoordinator', () => {
   function createCoordinator(overrides: Record<string, unknown> = {}) {
     return new SyncCoordinator({
       vectorStore: vectorStore as never,
-      embedProvider: embedProvider as never,
+      embedProvider: ('embedProvider' in overrides
+        ? overrides.embedProvider
+        : embedProvider) as never,
       contextualEnricher: null,
       debounceMs: (overrides.debounceMs as number) ?? 100,
       maxBatchSize: (overrides.maxBatchSize as number) ?? 20,
@@ -487,6 +489,36 @@ describe('SyncCoordinator', () => {
       expect(result.missingSynced).toBe(1);
       // flush should have been called, triggering batch processing
       expect(vectorStore.batchUpsert).toHaveBeenCalled();
+    });
+
+    it('removes orphans but defers missing live vectors without an embed provider', async () => {
+      vectorStore.listIds = vi.fn().mockResolvedValue([
+        'entry_orphan',
+        'recipe_region_orphan_identity_0000000000000001',
+        'recipe_region_live_identity_0000000000000002',
+      ]);
+      const db = createMockDb([
+        { id: 'live', title: 'Missing live vector', content: 'data', kind: 'recipe' },
+      ]);
+
+      const coord = createCoordinator({ debounceMs: 50, embedProvider: null });
+      const result = await coord.reconcile(db as never);
+
+      expect(result).toMatchObject({
+        orphansRemoved: 1,
+        recipeRegionOrphansRemoved: 1,
+        missingSynced: 0,
+        missingDeferred: 1,
+        degradedReason: 'embed-provider-unavailable',
+      });
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_orphan');
+      expect(vectorStore.remove).toHaveBeenCalledWith(
+        'recipe_region_orphan_identity_0000000000000001'
+      );
+      expect(vectorStore.remove).not.toHaveBeenCalledWith(
+        'recipe_region_live_identity_0000000000000002'
+      );
+      expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
     });
 
     it('should handle empty DB gracefully', async () => {
