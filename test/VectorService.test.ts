@@ -569,6 +569,16 @@ describe('VectorService', () => {
         entryId: 'deprecated',
         to: 'deprecated',
       });
+      eventBus.emit('knowledge:changed', {
+        action: 'update',
+        entryId: 'live',
+        entry: {
+          id: 'live',
+          title: 'Live Recipe',
+          lifecycle: 'active',
+          content: { markdown: 'Replacement requires embedding' },
+        },
+      });
       await svc.destroy();
 
       expect(vectorStore.remove).toHaveBeenCalledWith('entry_deleted');
@@ -579,6 +589,7 @@ describe('VectorService', () => {
       expect(vectorStore.remove).toHaveBeenCalledWith(
         'recipe_region_deprecated_rationale_0000000000000002'
       );
+      expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
     });
   });
 
