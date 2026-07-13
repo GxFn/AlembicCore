@@ -5,6 +5,7 @@ import {
   KnowledgeRetrievalPolicy,
   KnowledgeTruthProjector,
 } from '../src/service/search/KnowledgeRetrieval.js';
+import { FieldWeightedScorer } from '../src/service/search/SearchEngine.js';
 
 const TARGET = 'eed49092-3cc8-4a2a-9a5d-29ead96e267b';
 const FROZEN_QUERIES = [
@@ -98,46 +99,132 @@ describe('KnowledgeRetrievalPolicy', () => {
   });
 
   it('keeps the frozen eight-query matrix deterministic with the target in Top 3', async () => {
-    const corpus = [
+    const recipes = [
       {
         id: TARGET,
-        text: 'clean architecture rules layered dependencies Swift packages modular boundaries app feature service core independently removable coupling UI shared modules importing feature directly',
+        text: 'layered dependencies between project layers feature modules independently removable coupling SwiftPM packages Core import directly',
+        title: '分层依赖方向强制约束',
+        tags: ['architecture'],
+        kind: 'rule',
+        knowledgeType: 'boundary-constraint',
       },
-      { id: 'testing', text: 'unit testing async network mocks and deterministic fixtures' },
-      { id: 'persistence', text: 'database migrations storage schema and transaction boundaries' },
-      { id: 'ui', text: 'UI layout animation accessibility and view rendering' },
+      {
+        id: 'surface-swift-app',
+        text: 'Swift app module lifecycle',
+        title: 'Swift app module lifecycle',
+        tags: ['swift'],
+        kind: 'pattern',
+        knowledgeType: 'code-pattern',
+      },
+      {
+        id: 'surface-navigation',
+        text: 'SwiftUI navigation architecture rule',
+        title: 'NavigationStack architecture rule',
+        tags: ['architecture'],
+        kind: 'rule',
+        knowledgeType: 'boundary-constraint',
+      },
+      {
+        id: 'surface-startup',
+        text: 'application startup architecture modules',
+        title: 'Application startup architecture',
+        tags: ['architecture'],
+        kind: 'pattern',
+        knowledgeType: 'architecture',
+      },
+      ...Array.from({ length: 12 }, (_, index) => ({
+        id: `surface-${index}`,
+        text: `Swift app module integration ${index}`,
+        title: `Swift app module integration ${index}`,
+        tags: ['swift'],
+        kind: 'pattern',
+        knowledgeType: 'code-pattern',
+      })),
     ];
+    const scorer = new FieldWeightedScorer();
+    for (const recipe of recipes) {
+      scorer.addDocument(recipe.id, recipe.text, {
+        contentText: recipe.text,
+        kind: recipe.kind,
+        knowledgeType: recipe.knowledgeType,
+        tags: recipe.tags,
+        title: recipe.title,
+      });
+    }
+    const targetRawRanks = [1, 7, 1, 1, 1, 3, 1, 1] as const;
+    const denseByQuery = FROZEN_QUERIES.map((_query, queryIndex) => {
+      const before = Array.from({ length: targetRawRanks[queryIndex] - 1 }, (_, index) => {
+        // Reproduce region-heavy raw ranks: several higher chunks belong to
+        // one superficial Recipe and must collapse before Recipe-level fusion.
+        const recipeId = 'surface-swift-app';
+        return {
+          id: `recipe_region_${recipeId}_identity_${queryIndex}-${index}`,
+          item: {
+            id: `recipe_region_${recipeId}_identity_${queryIndex}-${index}`,
+            metadata: { recipeId, regionClass: 'identity' },
+          },
+          score: 0.9 - index / 100,
+        };
+      });
+      return [
+        ...before,
+        {
+          id: `recipe_region_${TARGET}_architectureConvention_${queryIndex}`,
+          item: {
+            id: `recipe_region_${TARGET}_architectureConvention_${queryIndex}`,
+            metadata: { recipeId: TARGET, regionClass: 'architectureConvention' },
+          },
+          score: 0.8,
+        },
+        {
+          id: 'surface-startup',
+          item: { id: 'surface-startup' },
+          score: 0.7,
+        },
+      ];
+    });
     const policy = new KnowledgeRetrievalPolicy(
       new HybridCandidateRetriever({
-        embedding: null,
-        reader: null,
-        sparse: async (query) => {
-          const terms = new Set(query.toLowerCase().match(/[a-z]+/g) ?? []);
-          return corpus
-            .map((item) => ({
-              id: item.id,
-              score: (item.text.toLowerCase().match(/[a-z]+/g) ?? []).filter((term) =>
-                terms.has(term)
-              ).length,
-            }))
-            .filter((item) => item.score > 0)
-            .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+        embedding: {
+          describeCapabilities: () => ({
+            batchSupported: true,
+            formatProfile: 'asymmetric',
+            inputKinds: ['query', 'document'],
+            normalization: 'provider-defined',
+            provider: 'fixture',
+          }),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async (query) => [
+            FROZEN_QUERIES.indexOf(query as (typeof FROZEN_QUERIES)[number]),
+          ]),
         },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: 256, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector: vi.fn(async (vector, options) =>
+            denseByQuery[vector[0]].slice(0, options?.topK)
+          ),
+        },
+        sparse: async (query, options) => scorer.search(query, options.limit),
       }),
       new KnowledgeTruthProjector({
-        findByIds: async (ids) => ids.map((id) => ({ id, lifecycle: 'active' })),
+        findByIds: async (ids) =>
+          recipes
+            .filter((recipe) => ids.includes(recipe.id))
+            .map((recipe) => ({ ...recipe, lifecycle: 'active' })),
       })
     );
 
     for (const query of FROZEN_QUERIES) {
       const result = await policy.retrieve({ query, topK: 3 });
       expect(result.candidates.length).toBeGreaterThan(0);
-      expect(result.candidates.map((candidate) => candidate.recipeId).indexOf(TARGET)).toBeLessThan(
-        3
-      );
-      expect(
-        result.candidates.find((candidate) => candidate.recipeId === TARGET)?.rrfContribution.sparse
-      ).toBeGreaterThan(0);
+      const candidateIds = result.candidates.map((candidate) => candidate.recipeId);
+      expect(candidateIds.includes(TARGET), `${query}: ${candidateIds.join(',')}`).toBe(true);
+      expect(candidateIds.indexOf(TARGET)).toBeLessThan(3);
+      const target = result.candidates.find((candidate) => candidate.recipeId === TARGET);
+      expect(target, query).toBeDefined();
+      expect(target?.rrfContribution.sparse, query).toBeGreaterThan(0);
     }
   });
 

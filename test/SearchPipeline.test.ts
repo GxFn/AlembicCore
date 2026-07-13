@@ -148,6 +148,33 @@ describe('Integration: Search Pipeline', () => {
       expect(resultIds).not.toContain('r2');
     });
 
+    it('keeps an exact rare topic tag from being diluted by a long natural-language query', () => {
+      scorer.addDocument('architecture-rule', '分层依赖方向强制约束', {
+        kind: 'rule',
+        knowledgeType: 'boundary-constraint',
+        title: '分层依赖方向强制约束',
+        tags: ['architecture'],
+      });
+      for (let index = 0; index < 8; index++) {
+        scorer.addDocument(`surface-${index}`, `Swift app module rule ${index}`, {
+          kind: 'pattern',
+          knowledgeType: 'code-pattern',
+          title: `Swift app module rule ${index}`,
+          tags: ['swift'],
+        });
+      }
+
+      const results = scorer.search(
+        'What architecture rules should guide modular boundaries in a Swift app?'
+      );
+
+      expect(results[0]?.id).toBe('architecture-rule');
+      expect(scorer.search('Swift app module rule')[0]?.id).toBe('surface-0');
+      expect(tokenize('rules boundaries')).toEqual(expect.arrayContaining(['rules', 'boundaries']));
+      expect(tokenize('rules boundaries')).not.toContain('rule');
+      expect(tokenize('rules boundaries')).not.toContain('boundary');
+    });
+
     it('无匹配时返回空', () => {
       scorer.addDocument('r1', 'Swift class');
       const results = scorer.search('Python Django');

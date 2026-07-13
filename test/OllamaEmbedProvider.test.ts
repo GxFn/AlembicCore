@@ -36,6 +36,56 @@ function routeFetch(routes: { embed?: FetchResponseLike; tags?: FetchResponseLik
 }
 
 describe('OllamaEmbedProvider — embed', () => {
+  it('formats Qwen3 retrieval queries without changing document or legacy ingestion text', async () => {
+    const requestBodies: Array<{ input: string[]; model: string }> = [];
+    const provider = new OllamaEmbedProvider({
+      fetchImpl: async (_url, init) => {
+        requestBodies.push(JSON.parse(init?.body ?? '{}') as { input: string[]; model: string });
+        return jsonResponse({ embeddings: [[1]] });
+      },
+      model: 'qwen3-embedding:0.6b',
+    });
+
+    await provider.embedQuery('How should package boundaries be enforced?');
+    await provider.embedDocuments(['document one']);
+    await provider.embed('legacy document');
+
+    expect(requestBodies).toEqual([
+      {
+        input: [
+          'Instruct: Retrieve relevant software project knowledge that answers the query.\nQuery:How should package boundaries be enforced?',
+        ],
+        model: 'qwen3-embedding:0.6b',
+      },
+      { input: ['document one'], model: 'qwen3-embedding:0.6b' },
+      { input: ['legacy document'], model: 'qwen3-embedding:0.6b' },
+    ]);
+    expect(provider.describeCapabilities()).toEqual({
+      batchSupported: true,
+      formatProfile: 'asymmetric',
+      inputKinds: ['query', 'document'],
+      model: 'qwen3-embedding:0.6b',
+      normalization: 'provider-defined',
+      provider: 'ollama',
+    });
+  });
+
+  it('keeps non-Qwen embedding models symmetric and sends query text unchanged', async () => {
+    const inputs: string[][] = [];
+    const provider = new OllamaEmbedProvider({
+      fetchImpl: async (_url, init) => {
+        inputs.push((JSON.parse(init?.body ?? '{}') as { input: string[] }).input);
+        return jsonResponse({ embeddings: [[1]] });
+      },
+      model: 'nomic-embed-text:latest',
+    });
+
+    await provider.embedQuery('unchanged query');
+
+    expect(inputs).toEqual([['unchanged query']]);
+    expect(provider.describeCapabilities().formatProfile).toBe('symmetric');
+  });
+
   it('embeds a single string into a flat vector', async () => {
     const provider = new OllamaEmbedProvider({
       fetchImpl: routeFetch({ embed: jsonResponse({ embeddings: [[1, 2, 3]] }) }),

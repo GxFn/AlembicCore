@@ -36,12 +36,15 @@ interface FieldWeightedDocument {
     language: string;
     category: string;
     knowledgeType: string;
+    kind: string;
   };
   tokenizedFields: {
     trigger: string[];
     title: string[];
     description: string[];
     content: string[];
+    kind: Set<string>;
+    topics: Set<string>;
     allUnique: Set<string>;
   };
   meta: Record<string, unknown>;
@@ -55,6 +58,7 @@ interface FieldWeightedDocument {
 export class FieldWeightedScorer implements Scorer {
   avgLength: number;
   docFreq: Record<string, number>;
+  topicDocFreq: Record<string, number>;
   documents: (FieldWeightedDocument | null)[];
   totalDocs: number;
   _idIndex: Map<string, number>;
@@ -64,6 +68,7 @@ export class FieldWeightedScorer implements Scorer {
     this.documents = [];
     this.totalDocs = 0;
     this.docFreq = {};
+    this.topicDocFreq = {};
     this._idIndex = new Map();
     this._totalLength = 0;
     this.avgLength = 0;
@@ -83,6 +88,7 @@ export class FieldWeightedScorer implements Scorer {
     const language = (meta.language as string) || '';
     const category = (meta.category as string) || '';
     const knowledgeType = (meta.knowledgeType as string) || '';
+    const kind = (meta.kind as string) || '';
     const contentText = (meta.contentText as string) || '';
 
     // 独立分词每个字段
@@ -91,6 +97,10 @@ export class FieldWeightedScorer implements Scorer {
     const descTokens = tokenize(description);
     // contentText 优先；若 meta 无 contentText 则用拼接文本 text 作为回退
     const contentTokens = tokenize(contentText || text);
+    const kindTokens = new Set(tokenize(kind).map(normalizeTopicToken));
+    const topicTokens = new Set(
+      tokenize([...tags, knowledgeType, kind].filter(Boolean).join(' ')).map(normalizeTopicToken)
+    );
 
     // 合并所有唯一 token 用于 DF 计算
     const allUnique = new Set<string>();
@@ -114,12 +124,14 @@ export class FieldWeightedScorer implements Scorer {
 
     const doc: FieldWeightedDocument = {
       id,
-      fields: { trigger, title, description, tags, language, category, knowledgeType },
+      fields: { trigger, title, description, tags, language, category, knowledgeType, kind },
       tokenizedFields: {
         trigger: triggerTokens,
         title: titleTokens,
         description: descTokens,
         content: contentTokens,
+        kind: kindTokens,
+        topics: topicTokens,
         allUnique,
       },
       meta,
@@ -131,6 +143,9 @@ export class FieldWeightedScorer implements Scorer {
 
     for (const token of allUnique) {
       this.docFreq[token] = (this.docFreq[token] || 0) + 1;
+    }
+    for (const token of topicTokens) {
+      this.topicDocFreq[token] = (this.topicDocFreq[token] || 0) + 1;
     }
 
     this.totalDocs = this._idIndex.size;
@@ -158,6 +173,14 @@ export class FieldWeightedScorer implements Scorer {
         this.docFreq[token]--;
         if (this.docFreq[token] <= 0) {
           delete this.docFreq[token];
+        }
+      }
+    }
+    for (const token of doc.tokenizedFields.topics) {
+      if (this.topicDocFreq[token]) {
+        this.topicDocFreq[token]--;
+        if (this.topicDocFreq[token] <= 0) {
+          delete this.topicDocFreq[token];
         }
       }
     }
@@ -191,6 +214,7 @@ export class FieldWeightedScorer implements Scorer {
   clear() {
     this.documents = [];
     this.docFreq = {};
+    this.topicDocFreq = {};
     this.totalDocs = 0;
     this._totalLength = 0;
     this.avgLength = 0;
@@ -215,6 +239,7 @@ export class FieldWeightedScorer implements Scorer {
     }
 
     const scores: ScorerResult[] = [];
+    const queryTopicTokens = [...new Set(queryTokens.map(normalizeTopicToken))];
 
     for (const doc of this.documents) {
       if (!doc) {
@@ -235,6 +260,13 @@ export class FieldWeightedScorer implements Scorer {
 
       // 3. Tags 评分 — 分类标记
       totalScore += TAG_WEIGHT * this._tagScore(queryTokens, doc.fields.tags);
+      totalScore +=
+        TAG_WEIGHT *
+        this._semanticTopicCoverage(
+          queryTopicTokens,
+          doc.tokenizedFields.topics,
+          doc.tokenizedFields.kind
+        );
 
       // 4. Description 评分 — IDF 加权 token overlap
       totalScore +=
@@ -321,13 +353,22 @@ export class FieldWeightedScorer implements Scorer {
       return 0;
     }
     let score = 0;
+    let exactTopicSpecificity = 0;
     const qtSet = new Set(queryTokens);
+    const maxIdf = Math.log2(1 + this.totalDocs);
 
     for (const tag of tags) {
       const lowTag = tag.toLowerCase();
       // 精确 token 匹配
       if (qtSet.has(lowTag)) {
         score += 1.0;
+        // Tags are curated topic metadata. Preserve the existing overlap score,
+        // then restore exact, corpus-discriminative topic evidence that would
+        // otherwise disappear as a natural-language query grows longer.
+        exactTopicSpecificity = Math.max(
+          exactTopicSpecificity,
+          maxIdf > 0 ? this._idf(lowTag) / maxIdf : 0
+        );
         continue;
       }
       // 部分匹配：query token 包含 tag 或 tag 包含 query token
@@ -350,7 +391,34 @@ export class FieldWeightedScorer implements Scorer {
         }
       }
     }
-    return Math.min(score / queryTokens.length, 1.0);
+    return Math.min(score / queryTokens.length, 1.0) + exactTopicSpecificity;
+  }
+
+  /**
+   * Query-explicit Recipe kind plus one additional semantic metadata match.
+   * This separates project-knowledge intent from incidental title/language hits.
+   * English plural folding is deliberately confined to metadata comparison;
+   * the shared full-text tokenizer and its sparse evidence remain unchanged.
+   */
+  _semanticTopicCoverage(
+    queryTopics: string[],
+    documentTopics: Set<string>,
+    documentKind: Set<string>
+  ): number {
+    const usableTopics = queryTopics.filter((token) => (this.topicDocFreq[token] || 0) > 0);
+    if (!usableTopics.some((token) => documentKind.has(token))) {
+      return 0;
+    }
+    const matchedTopics = usableTopics.filter((token) => documentTopics.has(token));
+    if (matchedTopics.length < 2) {
+      return 0;
+    }
+    const totalIdf = usableTopics.reduce((sum, token) => sum + this._topicIdf(token), 0);
+    if (totalIdf <= 0) {
+      return 0;
+    }
+    const matchedIdf = matchedTopics.reduce((sum, token) => sum + this._topicIdf(token), 0);
+    return matchedIdf / totalIdf;
   }
 
   /** Facet 匹配评分（language / category / knowledgeType） */
@@ -383,4 +451,19 @@ export class FieldWeightedScorer implements Scorer {
     const df = this.docFreq[token] || 0;
     return Math.log2(1 + this.totalDocs / (df + 1));
   }
+
+  _topicIdf(token: string): number {
+    const df = this.topicDocFreq[token] || 0;
+    return Math.log2(1 + this.totalDocs / (df + 1));
+  }
+}
+
+function normalizeTopicToken(token: string): string {
+  if (token.endsWith('ies') && token.length > 4) {
+    return `${token.slice(0, -3)}y`;
+  }
+  if (token.endsWith('s') && !token.endsWith('ss') && token.length > 3) {
+    return token.slice(0, -1);
+  }
+  return token;
 }

@@ -346,6 +346,51 @@ describe('SearchEngine', () => {
     expect(engine.getStats().cacheSize).toBe(1);
   });
 
+  test('indexes authoritative when/do/dont directives for candidate quality', async () => {
+    const rows = [
+      {
+        id: 'surface-swift-app',
+        title: 'Swift app module lifecycle',
+        description: 'Generic application module integration',
+        lifecycle: 'active',
+        language: 'swift',
+        category: 'architecture',
+        knowledgeType: 'guide',
+        kind: 'guide',
+        content: '{}',
+        tags: '[]',
+        trigger: '',
+      },
+      {
+        id: 'layer-boundary-rule',
+        title: '分层依赖方向强制约束',
+        description: '功能层之间保持单向依赖',
+        lifecycle: 'active',
+        language: 'swift',
+        category: 'architecture',
+        knowledgeType: 'boundary-constraint',
+        kind: 'rule',
+        content: '{}',
+        tags: '["architecture"]',
+        trigger: '@layered-dependency-direction',
+        whenClause: 'When adding dependencies between feature modules',
+        doClause: 'Keep feature modules independent and dependencies layered',
+        dontClause: 'Do not import one feature module from another feature directly',
+      },
+    ];
+    const engine = new SearchEngine(makeMockDb(), {
+      knowledgeRepo: makeVectorTruthRepo(rows),
+      sourceRefRepo: makeSourceRefRepo(),
+    });
+
+    const result = await engine.search(
+      'What prevents one feature module from importing another feature directly?',
+      { limit: 2, mode: 'weighted', rank: false }
+    );
+
+    expect(result.items.map((item) => item.id)).toContain('layer-boundary-rule');
+  });
+
   test('metadata filters narrow results with AND across fields', async () => {
     const rows = [
       {

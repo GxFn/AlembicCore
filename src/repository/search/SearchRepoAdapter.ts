@@ -80,7 +80,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       this.#db,
       `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
-                updatedAt, createdAt
+                whenClause, doClause, dontClause, updatedAt, createdAt
          FROM knowledge_entries WHERE lifecycle != 'deprecated'`
     ).all();
   }
@@ -104,7 +104,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       this.#db,
       `SELECT id, content, description, trigger, headers, moduleName,
                 tags, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect}, updatedAt, createdAt, quality, stats, difficulty,
-                whenClause, doClause, lifecycle
+                whenClause, doClause, dontClause, lifecycle
          FROM knowledge_entries
          WHERE id IN (${placeholders}) AND lifecycle != 'deprecated'`
     ).all(...ids);
@@ -115,7 +115,7 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
       this.#db,
       `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
-                updatedAt, createdAt
+                whenClause, doClause, dontClause, updatedAt, createdAt
          FROM knowledge_entries WHERE updatedAt > ?`
     ).all(sinceIso);
   }

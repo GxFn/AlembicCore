@@ -459,6 +459,21 @@ describe('FieldWeightedScorer incremental', () => {
     expect(scorer.docFreq.vue).toBeUndefined();
   });
 
+  test('removeDocument updates semantic topic frequencies', () => {
+    scorer.addDocument('topic', 'architecture boundary rule', {
+      kind: 'rule',
+      knowledgeType: 'boundary-constraint',
+      tags: ['architecture'],
+    });
+    expect(scorer.topicDocFreq.architecture).toBe(1);
+    expect(scorer.topicDocFreq.rule).toBe(1);
+
+    scorer.removeDocument('topic');
+
+    expect(scorer.topicDocFreq.architecture).toBeUndefined();
+    expect(scorer.topicDocFreq.rule).toBeUndefined();
+  });
+
   test('search correctly skips tombstones', () => {
     scorer.removeDocument('d1');
     const result = scorer.search('react', 10);

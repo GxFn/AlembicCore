@@ -1492,6 +1492,11 @@ export class SearchEngine {
       r.kind,
       r.scope,
       tagText,
+      // when/do/don't 是权威 Recipe 对“何时用、必须做、禁止做”的高密度检索语义。
+      // 它们进入既有 sparse 文本，不改变 tokenizer、字段权重或 RRF。
+      r.whenClause,
+      r.doClause,
+      r.dontClause,
       contentText,
     ];
     return fields.filter(Boolean).join(' ');
@@ -1526,7 +1531,14 @@ export class SearchEngine {
     let contentText = '';
     try {
       const content = JSON.parse(r.content || '{}');
-      contentText = [content.pattern, content.rationale, content.markdown]
+      contentText = [
+        r.whenClause,
+        r.doClause,
+        r.dontClause,
+        content.pattern,
+        content.rationale,
+        content.markdown,
+      ]
         .filter(Boolean)
         .join(' ');
     } catch {

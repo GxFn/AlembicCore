@@ -104,6 +104,7 @@ export interface SearchResultItem {
   createdAt?: string | null;
   whenClause?: string;
   doClause?: string;
+  dontClause?: string;
   rankerScore?: number;
   coarseScore?: number;
   contextScore?: number;
@@ -143,6 +144,7 @@ export interface DbRow {
   moduleName?: string;
   whenClause?: string;
   doClause?: string;
+  dontClause?: string;
   [key: string]: unknown;
 }
 

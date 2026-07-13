@@ -55,6 +55,8 @@ export interface OllamaProbeResult {
 const DEFAULT_ENDPOINT = 'http://127.0.0.1:11434';
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_IN_FLIGHT = 2;
+const QWEN3_PROJECT_KNOWLEDGE_INSTRUCTION =
+  'Retrieve relevant software project knowledge that answers the query.';
 
 const defaultFetch: FetchLike = (input, init) =>
   (
@@ -94,7 +96,16 @@ export class OllamaEmbedProvider implements EmbeddingPort, LegacyEmbedProvider {
   }
 
   async embedQuery(text: string, context?: EmbeddingExecutionContext): Promise<number[]> {
-    return (await this.#embedBatch([text], context?.signal))[0] ?? [];
+    const input = isQwen3EmbeddingModel(this.model) ? formatQwen3Query(text) : text;
+    if (input !== text) {
+      // 模型格式只属于 provider adapter；日志不得泄露用户查询正文。
+      this.#logger.debug('[OllamaEmbedProvider] applying asymmetric query format', {
+        formatProfile: 'qwen3-retrieval',
+        inputKind: 'query',
+        model: this.model,
+      });
+    }
+    return (await this.#embedBatch([input], context?.signal))[0] ?? [];
   }
 
   async embedDocuments(
@@ -107,7 +118,7 @@ export class OllamaEmbedProvider implements EmbeddingPort, LegacyEmbedProvider {
   describeCapabilities(): EmbeddingCapabilityDescriptor {
     return {
       batchSupported: true,
-      formatProfile: 'symmetric',
+      formatProfile: isQwen3EmbeddingModel(this.model) ? 'asymmetric' : 'symmetric',
       inputKinds: ['query', 'document'],
       model: this.model,
       normalization: 'provider-defined',
@@ -242,6 +253,16 @@ export class OllamaEmbedProvider implements EmbeddingPort, LegacyEmbedProvider {
       clearTimeout(timer);
     }
   }
+}
+
+/** Qwen3-Embedding requires an instruction only on retrieval queries. */
+function formatQwen3Query(query: string): string {
+  return `Instruct: ${QWEN3_PROJECT_KNOWLEDGE_INSTRUCTION}\nQuery:${query}`;
+}
+
+function isQwen3EmbeddingModel(model: string): boolean {
+  const family = (model.split('/').at(-1) ?? model).split(':')[0]?.toLowerCase();
+  return family === 'qwen3-embedding' || family?.startsWith('qwen3-embedding-') === true;
 }
 
 /** Match an installed model name against a requested one, tolerating tags. */
