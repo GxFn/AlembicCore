@@ -661,6 +661,46 @@ export async function syncRecipeSemanticRegionVectors(
   const pendingChunks = existingIds ? chunks.filter((chunk) => !existingIds.has(chunk.id)) : chunks;
   result.skippedExisting = chunks.length - pendingChunks.length;
 
+  let cleanupVectorIds = existingIds ? [...existingIds] : null;
+  const removeRegionVectors = async (
+    shouldRemove: (id: string, recipeId: string) => boolean
+  ): Promise<void> => {
+    if (!cleanupVectorIds) {
+      try {
+        cleanupVectorIds = await vectorStore.listIds();
+      } catch (err: unknown) {
+        result.errors.push(`stale-list-failed:${err instanceof Error ? err.message : String(err)}`);
+        return;
+      }
+    }
+    for (const id of cleanupVectorIds) {
+      if (!id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
+        continue;
+      }
+      const recipeId = parseRecipeIdFromRegionVectorId(id);
+      if (!recipeId || !shouldRemove(id, recipeId)) {
+        continue;
+      }
+      try {
+        await vectorStore.remove(id);
+        result.removed++;
+      } catch (err: unknown) {
+        if (result.errors.length < 100) {
+          result.errors.push(
+            `stale-remove-failed:${id}:${err instanceof Error ? err.message : String(err)}`
+          );
+        }
+      }
+    }
+  };
+
+  // Authority proves these Recipe ids no longer exist, so their derived
+  // regions can be removed without embedding. Live Recipe chunks are not
+  // touched in this phase.
+  if (options.removeStale !== false && authoritativeRecipeIds) {
+    await removeRegionVectors((_id, recipeId) => !authoritativeRecipeIds.has(recipeId));
+  }
+
   if (pendingChunks.length > 0 && !embedProvider) {
     result.status = 'degraded';
     result.degradedReason = 'embed-provider-unavailable';
@@ -693,39 +733,11 @@ export async function syncRecipeSemanticRegionVectors(
   }
 
   if (options.removeStale !== false) {
-    let vectorIds: string[];
-    try {
-      vectorIds = existingIds ? [...existingIds] : await vectorStore.listIds();
-    } catch (err: unknown) {
-      result.errors.push(`stale-list-failed:${err instanceof Error ? err.message : String(err)}`);
-      return result;
-    }
-
-    for (const id of vectorIds) {
-      if (!id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX)) {
-        continue;
-      }
-      const recipeId = parseRecipeIdFromRegionVectorId(id);
-      if (!recipeId) {
-        continue;
-      }
-      const obsoleteForBatch = batchRecipeIds.has(recipeId) && !expectedIds.has(id);
-      const absentFromAuthority =
-        authoritativeRecipeIds !== null && !authoritativeRecipeIds.has(recipeId);
-      if (!obsoleteForBatch && !absentFromAuthority) {
-        continue;
-      }
-      try {
-        await vectorStore.remove(id);
-        result.removed++;
-      } catch (err: unknown) {
-        if (result.errors.length < 100) {
-          result.errors.push(
-            `stale-remove-failed:${id}:${err instanceof Error ? err.message : String(err)}`
-          );
-        }
-      }
-    }
+    // Obsolete chunks for live Recipes are safe to remove only after every
+    // required replacement in this batch was embedded and upserted.
+    await removeRegionVectors(
+      (id, recipeId) => batchRecipeIds.has(recipeId) && !expectedIds.has(id)
+    );
   }
 
   return result;
