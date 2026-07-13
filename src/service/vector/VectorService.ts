@@ -37,7 +37,7 @@ import type {
   RecipeVectorGenerationBuildResult,
   RecipeVectorGenerationManager,
 } from './RecipeVectorGeneration.js';
-import type { VectorLifecycleCoordinator } from './SyncCoordinator.js';
+import type { RecipeVectorTruthRemover, VectorLifecycleCoordinator } from './SyncCoordinator.js';
 
 // ── Types ──
 
@@ -54,6 +54,8 @@ export interface VectorServiceConfig {
   syncDebounceMs: number;
   drizzle?: DrizzleDB;
   recipeGenerationManager?: RecipeVectorGenerationManager | null;
+  /** Terminal Recipe cleanup owned by a base + all-generation storage implementation. */
+  recipeVectorTruthRemover?: RecipeVectorTruthRemover;
 }
 
 export interface BuildResult {
@@ -140,6 +142,7 @@ export class VectorService {
   #syncDebounceMs: number;
   #drizzle: DrizzleDB | null;
   #recipeGenerationManager: RecipeVectorGenerationManager | null;
+  #recipeVectorTruthRemover: RecipeVectorTruthRemover | undefined;
   #logger = Logger.getInstance();
   #initialized = false;
 
@@ -161,6 +164,7 @@ export class VectorService {
     this.#syncDebounceMs = config.syncDebounceMs;
     this.#drizzle = config.drizzle ?? null;
     this.#recipeGenerationManager = config.recipeGenerationManager ?? null;
+    this.#recipeVectorTruthRemover = config.recipeVectorTruthRemover;
   }
 
   // ═══ Lifecycle ═══
@@ -182,6 +186,7 @@ export class VectorService {
         contextualEnricher: this.#contextualEnricher,
         debounceMs: this.#syncDebounceMs,
         drizzle: this.#drizzle ?? undefined,
+        recipeVectorTruthRemover: this.#recipeVectorTruthRemover,
       });
       this.#syncCoordinator.bindEventBus(this.#eventBus);
       this.#logger.info('[VectorService] SyncCoordinator bound to EventBus');

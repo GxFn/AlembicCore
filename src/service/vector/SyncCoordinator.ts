@@ -36,6 +36,18 @@ import type { EmbedProvider } from './VectorService.js';
 
 // ── Types ──
 
+/**
+ * Storage-owned terminal Recipe removal contract.
+ *
+ * The Recipe id is authoritative terminal intent. Implementations must not
+ * infer it from current-reader visibility or one canonical vector id. The
+ * promise may resolve only after base residue and every known generation no
+ * longer contain that Recipe; incomplete cleanup must reject.
+ */
+export interface RecipeVectorTruthRemover {
+  removeRecipeByIdentity(recipeId: string): Promise<void>;
+}
+
 export interface VectorLifecycleCoordinatorConfig {
   /** @deprecated Compatibility aggregate; new wiring supplies reader + writer separately. */
   vectorStore?: VectorStore;
@@ -46,6 +58,11 @@ export interface VectorLifecycleCoordinatorConfig {
   debounceMs: number;
   maxBatchSize?: number;
   drizzle?: DrizzleDB;
+  /**
+   * Multi-generation runtimes inject their storage implementation here.
+   * Single-store callers keep the provider-independent compatibility adapter.
+   */
+  recipeVectorTruthRemover?: RecipeVectorTruthRemover;
 }
 
 /** @deprecated Use VectorLifecycleCoordinatorConfig. */
@@ -75,6 +92,46 @@ class LifecycleVectorStoreBridge extends VectorStore {
 
   batchUpsert(items: Parameters<VectorIndexWriter['batchUpsert']>[0]): Promise<void> {
     return this.#writer.batchUpsert(items);
+  }
+}
+
+class SingleStoreRecipeVectorTruthRemover implements RecipeVectorTruthRemover {
+  readonly #store: Pick<VectorStore, 'listIds' | 'remove'>;
+
+  constructor(store: Pick<VectorStore, 'listIds' | 'remove'>) {
+    this.#store = store;
+  }
+
+  async removeRecipeByIdentity(recipeId: string): Promise<void> {
+    const errors: string[] = [];
+    try {
+      // 保持历史 writer 契约：即使 reader 未回显 legacy id，也执行一次幂等删除。
+      await this.#store.remove(`entry_${recipeId}`);
+    } catch (error: unknown) {
+      errors.push(`entry_${recipeId}:${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    const ids = await this.#store.listIds();
+    for (const id of ids) {
+      if (
+        !id.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX) ||
+        parseRecipeIdFromRegionVectorId(id) !== recipeId
+      ) {
+        continue;
+      }
+      try {
+        await this.#store.remove(id);
+      } catch (error: unknown) {
+        errors.push(`${id}:${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (errors.length === 0) {
+      return;
+    }
+    throw new Error(
+      `${CORE_DIAGNOSTIC_CODES.vectorRecipeTruthRemoveFailed}:${recipeId}:${errors.join('|')}`
+    );
   }
 }
 
@@ -112,6 +169,7 @@ export class VectorLifecycleCoordinator {
   #debounceMs: number;
   #maxBatchSize: number;
   #drizzle: DrizzleDB | null;
+  #recipeVectorTruthRemover: RecipeVectorTruthRemover;
   #pendingChanges: Map<string, PendingChange> = new Map();
   #debounceTimer: ReturnType<typeof setTimeout> | null = null;
   #processingPromise: Promise<void> | null = null;
@@ -130,6 +188,9 @@ export class VectorLifecycleCoordinator {
     this.#reader = reader;
     this.#writer = writer;
     this.#recipeRegionStore = config.vectorStore ?? new LifecycleVectorStoreBridge(reader, writer);
+    this.#recipeVectorTruthRemover =
+      config.recipeVectorTruthRemover ??
+      new SingleStoreRecipeVectorTruthRemover(this.#recipeRegionStore);
     this.#embedProvider = config.embedProvider;
     this.#contextualEnricher = config.contextualEnricher;
     this.#debounceMs = config.debounceMs;
@@ -522,33 +583,39 @@ export class VectorLifecycleCoordinator {
     this.#pendingChanges.clear();
 
     const upserts: PendingChange[] = [];
-    const removes: string[] = [];
+    const removes: PendingChange[] = [];
     let upsertedCount = 0;
     let deferredUpsertCount = 0;
     let failedUpsertCount = 0;
 
     for (const change of batch.values()) {
       if (change.type === 'remove') {
-        removes.push(change.entryId);
+        removes.push(change);
       } else {
         upserts.push(change);
       }
     }
 
-    // 处理删除
-    for (const entryId of removes) {
+    // 终态删除必须按 Recipe identity 交给存储实现；它和 live upsert/reconcile
+    // 中的 entry_* 兼容退休是两条不同语义的路径。
+    for (const [index, change] of removes.entries()) {
       try {
-        await this.#writer.remove(`entry_${entryId}`);
+        await this.#recipeVectorTruthRemover.removeRecipeByIdentity(change.entryId);
       } catch (err: unknown) {
-        // Removal failure does not block the batch, but it is no longer
-        // silent — reconcile() repairs leftovers (CO3 V1 diagnostics).
-        this.#logger.warn('[SyncCoordinator] vector removal failed in batch', {
-          code: CORE_DIAGNOSTIC_CODES.vectorBatchRemoveFailed,
-          entryId,
+        // 事件是 at-most-once。失败时必须保留尚未完成的 identity/变更，且不能
+        // 覆盖处理期间新到达的同 ID 事件；下一次显式 flush/destroy 才重试。
+        for (const pending of [...removes.slice(index), ...upserts]) {
+          if (!this.#pendingChanges.has(pending.entryId)) {
+            this.#pendingChanges.set(pending.entryId, pending);
+          }
+        }
+        this.#logger.warn('[SyncCoordinator] terminal Recipe truth removal failed', {
+          code: CORE_DIAGNOSTIC_CODES.vectorRecipeTruthRemoveFailed,
+          entryId: change.entryId,
           error: err instanceof Error ? err.message : String(err),
         });
+        throw err;
       }
-      await this.#removeRecipeRegions(entryId);
     }
 
     // Removal stays available without an embed provider. Generation is
@@ -622,35 +689,6 @@ export class VectorLifecycleCoordinator {
       failedUpserts: failedUpsertCount,
       removed: removes.length,
     });
-  }
-
-  async #removeRecipeRegions(entryId: string): Promise<void> {
-    let vectorIds: string[];
-    try {
-      vectorIds = await this.#reader.listIds();
-    } catch (err: unknown) {
-      this.#logger.warn('[SyncCoordinator] recipe region list failed during removal', {
-        entryId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return;
-    }
-    for (const vectorId of vectorIds) {
-      if (
-        vectorId.startsWith(RECIPE_REGION_VECTOR_ID_PREFIX) &&
-        parseRecipeIdFromRegionVectorId(vectorId) === entryId
-      ) {
-        try {
-          await this.#writer.remove(vectorId);
-        } catch (err: unknown) {
-          this.#logger.warn('[SyncCoordinator] recipe region removal failed in batch', {
-            entryId,
-            vectorId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
-    }
   }
 
   async #isEmbedProviderAvailable(): Promise<boolean> {

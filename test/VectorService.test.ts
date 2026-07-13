@@ -134,6 +134,7 @@ describe('VectorService', () => {
         : null) as never,
       autoSyncOnCrud: (overrides.autoSyncOnCrud ?? false) as boolean,
       syncDebounceMs: (overrides.syncDebounceMs ?? 2000) as number,
+      recipeVectorTruthRemover: overrides.recipeVectorTruthRemover as never,
     });
   }
 
@@ -597,6 +598,30 @@ describe('VectorService', () => {
         'recipe_region_deprecated_rationale_0000000000000002'
       );
       expect(vectorStore.batchUpsert).not.toHaveBeenCalled();
+    });
+
+    it('passes terminal Recipe identity removal through the public service configuration', async () => {
+      const recipeVectorTruthRemover = {
+        removeRecipeByIdentity: vi.fn(async (_recipeId: string) => undefined),
+      };
+      const svc = createService({
+        autoSyncOnCrud: true,
+        embedProvider: null,
+        syncDebounceMs: 60_000,
+        recipeVectorTruthRemover,
+      });
+      await svc.initialize();
+
+      eventBus.emit('knowledge:deleted', { entryId: 'deleted' });
+      eventBus.emit('lifecycle:transition', {
+        entryId: 'deprecated',
+        to: 'deprecated',
+      });
+      await svc.destroy();
+
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledTimes(2);
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledWith('deleted');
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledWith('deprecated');
     });
   });
 

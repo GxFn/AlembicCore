@@ -41,6 +41,7 @@
     "core.diagnostic.vector.reconcile-db-unavailable",
     "core.diagnostic.vector.reconcile-failed",
     "core.diagnostic.vector.batch-remove-failed",
+    "core.diagnostic.vector.recipe-truth-remove-failed",
     "core.diagnostic.similarity.walk-truncated",
     "core.diagnostic.db.sqlite-busy",
     "core.diagnostic.signal.window-overflow",

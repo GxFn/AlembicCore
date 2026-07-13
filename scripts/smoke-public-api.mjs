@@ -405,6 +405,7 @@ const requiredTypeDeclarations = {
     'WorkflowSkillHooks',
   ],
   '@alembic/core/vector': [
+    'RecipeVectorTruthRemover',
     'VectorAvailability',
     'VectorAvailabilityProbeStatus',
     'VectorAvailabilityReason',

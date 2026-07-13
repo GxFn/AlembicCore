@@ -28,6 +28,8 @@ export const CORE_DIAGNOSTIC_CODES = {
   vectorReconcileFailed: 'core.diagnostic.vector.reconcile-failed',
   /** V1: a queued vector removal failed during batch processing. */
   vectorBatchRemoveFailed: 'core.diagnostic.vector.batch-remove-failed',
+  /** Terminal Recipe truth could not be removed from every storage generation. */
+  vectorRecipeTruthRemoveFailed: 'core.diagnostic.vector.recipe-truth-remove-failed',
   /** C6: similarity recipe walk stopped at the depth limit — results may be partial. */
   similarityWalkTruncated: 'core.diagnostic.similarity.walk-truncated',
   /** C7: a SQLite operation failed with SQLITE_BUSY despite busy_timeout (contention evidence). */

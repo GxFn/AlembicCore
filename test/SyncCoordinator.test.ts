@@ -144,6 +144,7 @@ describe('SyncCoordinator', () => {
       contextualEnricher: null,
       debounceMs: (overrides.debounceMs as number) ?? 100,
       maxBatchSize: (overrides.maxBatchSize as number) ?? 20,
+      recipeVectorTruthRemover: overrides.recipeVectorTruthRemover as never,
     });
   }
 
@@ -316,6 +317,156 @@ describe('SyncCoordinator', () => {
       expect(
         batches.some((batch) => batch.some((item) => item.id.startsWith('recipe_region_42_')))
       ).toBe(true);
+    });
+  });
+
+  describe('RecipeVectorTruthRemover terminal contract', () => {
+    const belongsToRecipe = (vectorId: string, recipeId: string) =>
+      vectorId === `entry_${recipeId}` || vectorId.startsWith(`recipe_region_${recipeId}_`);
+
+    it.each([
+      ['knowledge deletion', 'knowledge:deleted', { entryId: 'target' }],
+      ['deprecated transition', 'lifecycle:transition', { entryId: 'target', to: 'deprecated' }],
+    ])('removes provider-offline terminal truth across base and rollback generations after %s', async (_label, eventName, payload) => {
+      await vectorStore.upsert({ id: 'entry_target' });
+      await vectorStore.upsert({
+        id: 'recipe_region_target_identity_basehash',
+      });
+      await vectorStore.upsert({ id: 'entry_unrelated' });
+
+      const generations = new Map([
+        ['current-generation', new Set(['recipe_region_unrelated_identity_currenthash'])],
+        [
+          'rollback-generation',
+          new Set([
+            'recipe_region_target_identity_oldhash',
+            'recipe_region_unrelated_identity_oldhash',
+          ]),
+        ],
+      ]);
+      let activeGeneration = 'current-generation';
+      const recipeVectorTruthRemover = {
+        removeRecipeByIdentity: vi.fn(async (recipeId: string) => {
+          for (const vectorId of await vectorStore.listIds()) {
+            if (belongsToRecipe(vectorId, recipeId)) {
+              await vectorStore.remove(vectorId);
+            }
+          }
+          for (const vectors of generations.values()) {
+            for (const vectorId of [...vectors]) {
+              if (belongsToRecipe(vectorId, recipeId)) {
+                vectors.delete(vectorId);
+              }
+            }
+          }
+        }),
+      };
+      const coord = createCoordinator({
+        debounceMs: 60_000,
+        embedProvider: null,
+        recipeVectorTruthRemover,
+      });
+      coord.bindEventBus(eventBus as never);
+
+      eventBus.emit(eventName as string, payload);
+      await coord.flush();
+
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledOnce();
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledWith('target');
+      expect((await vectorStore.listIds()).some((id) => belongsToRecipe(id, 'target'))).toBe(false);
+      expect(
+        [...generations.values()].some((vectors) =>
+          [...vectors].some((id) => belongsToRecipe(id, 'target'))
+        )
+      ).toBe(false);
+
+      activeGeneration = 'rollback-generation';
+      expect(activeGeneration).toBe('rollback-generation');
+      expect(
+        [...generations.get(activeGeneration)!].some((id) => belongsToRecipe(id, 'target'))
+      ).toBe(false);
+      expect(generations.get(activeGeneration)).toContain(
+        'recipe_region_unrelated_identity_oldhash'
+      );
+    });
+
+    it('keeps live upsert replacement separate from terminal truth removal', async () => {
+      await vectorStore.upsert({ id: 'entry_live' });
+      const recipeVectorTruthRemover = {
+        removeRecipeByIdentity: vi.fn(async () => undefined),
+      };
+      const coord = createCoordinator({ debounceMs: 60_000, recipeVectorTruthRemover });
+      coord.bindEventBus(eventBus as never);
+
+      eventBus.emit('knowledge:changed', {
+        action: 'update',
+        entryId: 'live',
+        entry: {
+          id: 'live',
+          title: 'Live replacement',
+          lifecycle: 'active',
+          content: { markdown: 'Keep the canonical replacement live.' },
+        },
+      });
+      await coord.flush();
+
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).not.toHaveBeenCalled();
+      expect(vectorStore.remove).toHaveBeenCalledWith('entry_live');
+      expect((await vectorStore.listIds()).some((id) => id.startsWith('recipe_region_live_'))).toBe(
+        true
+      );
+    });
+
+    it('awaits terminal removal before flush resolves', async () => {
+      let releaseRemoval!: () => void;
+      const recipeVectorTruthRemover = {
+        removeRecipeByIdentity: vi.fn(
+          () =>
+            new Promise<void>((resolve) => {
+              releaseRemoval = resolve;
+            })
+        ),
+      };
+      const coord = createCoordinator({ debounceMs: 60_000, recipeVectorTruthRemover });
+      coord.bindEventBus(eventBus as never);
+      eventBus.emit('knowledge:deleted', { entryId: 'awaited' });
+
+      let settled = false;
+      const flush = coord.flush().then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledWith('awaited');
+      expect(settled).toBe(false);
+      releaseRemoval();
+      await flush;
+      expect(settled).toBe(true);
+    });
+
+    it('surfaces terminal removal failure and retries the preserved Recipe identity', async () => {
+      const recipeVectorTruthRemover = {
+        removeRecipeByIdentity: vi
+          .fn()
+          .mockRejectedValueOnce(new Error('generation-cleanup-failed'))
+          .mockResolvedValueOnce(undefined),
+      };
+      const coord = createCoordinator({ debounceMs: 60_000, recipeVectorTruthRemover });
+      coord.bindEventBus(eventBus as never);
+      eventBus.emit('knowledge:deleted', { entryId: 'retryable' });
+
+      await expect(coord.flush()).rejects.toThrow('generation-cleanup-failed');
+      await coord.flush();
+
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenCalledTimes(2);
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenNthCalledWith(
+        1,
+        'retryable'
+      );
+      expect(recipeVectorTruthRemover.removeRecipeByIdentity).toHaveBeenNthCalledWith(
+        2,
+        'retryable'
+      );
     });
   });
 

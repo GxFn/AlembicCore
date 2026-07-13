@@ -83,6 +83,7 @@ export {
 } from './service/vector/RecipeRegionVectorIndex.js';
 export * from './service/vector/RecipeVectorGeneration.js';
 export type {
+  RecipeVectorTruthRemover,
   SyncCoordinatorConfig,
   VectorLifecycleCoordinatorConfig,
 } from './service/vector/SyncCoordinator.js';
