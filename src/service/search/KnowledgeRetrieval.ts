@@ -472,6 +472,7 @@ export class KnowledgeRetrievalPolicy implements KnowledgeRetrievalPort {
       sparse: [],
       sparseExhausted: true,
     };
+    let rankingStable = false;
 
     while (true) {
       request.signal?.throwIfAborted();
@@ -502,7 +503,15 @@ export class KnowledgeRetrievalPolicy implements KnowledgeRetrievalPort {
       const exhausted =
         (finalBatch.denseExhausted && finalBatch.sparseExhausted) ||
         (session.knownIndexSize !== undefined && window >= session.knownIndexSize);
-      if (finalProjection.candidates.length >= topK || exhausted || window >= knownBudget) {
+      rankingStable = hasStableTopKRanking({
+        alpha: request.alpha ?? 0.5,
+        candidates: finalProjection.candidates,
+        denseExhausted: finalBatch.denseExhausted,
+        rrfK: this.#rrfK,
+        sparseExhausted: finalBatch.sparseExhausted,
+        topK,
+      });
+      if (rankingStable || exhausted || window >= knownBudget) {
         break;
       }
       const nextWindow = Math.min(knownBudget, window * 2);
@@ -518,7 +527,7 @@ export class KnowledgeRetrievalPolicy implements KnowledgeRetrievalPort {
       (session.knownIndexSize !== undefined && window >= session.knownIndexSize);
     const candidateBudgetReached =
       window >= configuredBudget &&
-      finalProjection.candidates.length < topK &&
+      !rankingStable &&
       !(session.knownIndexSize !== undefined && session.knownIndexSize <= configuredBudget) &&
       !(finalBatch.denseExhausted && finalBatch.sparseExhausted);
     const diagnostics: KnowledgeRetrievalDiagnostics = {
@@ -543,6 +552,62 @@ export class KnowledgeRetrievalPolicy implements KnowledgeRetrievalPort {
     }));
     return { candidates, diagnostics };
   }
+}
+
+interface TopKStabilityInput {
+  alpha: number;
+  candidates: readonly KnowledgeRetrievalCandidate[];
+  denseExhausted: boolean;
+  rrfK: number;
+  sparseExhausted: boolean;
+  topK: number;
+}
+
+/**
+ * 只有当前 Top-K 的成员和顺序都不可能被未见 lane 证据改变时才提前停止。
+ *
+ * 上界使用 truth 投影后的下一 unique-live Recipe rank，而不是 raw hit 数；因此重复 region、
+ * orphan、deprecated 与 metadata-filtered 命中不会伪造“已经看得够深”。扩窗结果按 ranked
+ * prefix 消费，这是 VectorIndexReader / sparse retriever 的 topK 读取合同。
+ */
+function hasStableTopKRanking(input: TopKStabilityInput): boolean {
+  if (
+    input.candidates.length < input.topK ||
+    !Number.isFinite(input.alpha) ||
+    input.alpha < 0 ||
+    input.alpha > 1 ||
+    !Number.isFinite(input.rrfK) ||
+    input.rrfK < 0
+  ) {
+    return false;
+  }
+
+  const nextDenseRank =
+    input.candidates.reduce((max, candidate) => Math.max(max, candidate.denseRank ?? 0), 0) + 1;
+  const nextSparseRank =
+    input.candidates.reduce((max, candidate) => Math.max(max, candidate.sparseRank ?? 0), 0) + 1;
+  const unseenDenseContribution =
+    input.denseExhausted || input.alpha === 0 ? 0 : input.alpha / (input.rrfK + nextDenseRank);
+  const sparseWeight = 1 - input.alpha;
+  const unseenSparseContribution =
+    input.sparseExhausted || sparseWeight === 0 ? 0 : sparseWeight / (input.rrfK + nextSparseRank);
+  const unseenRecipeUpperBound = unseenDenseContribution + unseenSparseContribution;
+  const candidateUpperBound = (candidate: KnowledgeRetrievalCandidate): number =>
+    candidate.score +
+    (candidate.denseLaneUsed ? 0 : unseenDenseContribution) +
+    (candidate.sparseLaneUsed ? 0 : unseenSparseContribution);
+
+  // 反向维护后缀最大上界：每个 Top-K 前缀的末项都必须严格压过所有后置挑战者。
+  // 相等仍不稳定，因为完全未见 Recipe 的 id tie-break 尚不可知。
+  let challengerUpperBound = unseenRecipeUpperBound;
+  for (let index = input.candidates.length - 1; index >= 0; index--) {
+    const candidate = input.candidates[index];
+    if (index < input.topK && candidate.score <= challengerUpperBound) {
+      return false;
+    }
+    challengerUpperBound = Math.max(challengerUpperBound, candidateUpperBound(candidate));
+  }
+  return true;
 }
 
 function resolveRecipeId(rawId: string, item: Record<string, unknown>): string {

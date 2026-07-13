@@ -20,6 +20,343 @@ const FROZEN_QUERIES = [
 ] as const;
 
 describe('KnowledgeRetrievalPolicy', () => {
+  it('refills when missing dense evidence can reorder a full Top-K projection', async () => {
+    const denseOnly = ['dense-one', 'dense-two'];
+    const dualLane = ['dual-c', 'dual-d', 'dual-e'];
+    const sparseOnly = ['sparse-one', 'sparse-two'];
+    const denseLeaders = [...denseOnly, ...dualLane];
+    const dense = [
+      ...denseLeaders.map((recipeId, index) => ({
+        id: `recipe_region_${recipeId}_identity_leader`,
+        item: {
+          id: `recipe_region_${recipeId}_identity_leader`,
+          metadata: { recipeId, regionClass: 'identity' },
+        },
+        score: 1 - index / 100,
+      })),
+      ...Array.from({ length: 36 }, (_, index) => {
+        const recipeId = denseLeaders[index % denseLeaders.length];
+        return {
+          id: `recipe_region_${recipeId}_guidance_duplicate-${index}`,
+          item: {
+            id: `recipe_region_${recipeId}_guidance_duplicate-${index}`,
+            metadata: { recipeId, regionClass: 'guidance' },
+          },
+          score: 0.9 - index / 1000,
+        };
+      }),
+      {
+        id: `recipe_region_${TARGET}_architectureConvention_late`,
+        item: {
+          id: `recipe_region_${TARGET}_architectureConvention_late`,
+          metadata: { recipeId: TARGET, regionClass: 'architectureConvention' },
+        },
+        score: 0.8,
+      },
+    ];
+    const sparse = [
+      ...sparseOnly.map((id, index) => ({ id, score: 10 - index })),
+      { id: TARGET, score: 8 },
+      ...dualLane.map((id, index) => ({ id, score: 7 - index })),
+    ];
+    const liveIds = new Set([...denseLeaders, ...sparseOnly, TARGET]);
+    const windows: number[] = [];
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: () => ({
+            batchSupported: true,
+            formatProfile: 'asymmetric',
+            inputKinds: ['query', 'document'],
+            normalization: 'provider-defined',
+            provider: 'fixture',
+          }),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async () => [1]),
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: dense.length, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector: vi.fn(async (_vector, options) => {
+            const window = options?.topK ?? 0;
+            windows.push(window);
+            return dense.slice(0, window);
+          }),
+        },
+        sparse: async (_query, options) => sparse.slice(0, options.limit),
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: async (ids) =>
+          ids.filter((id) => liveIds.has(id)).map((id) => ({ id, lifecycle: 'active' })),
+      })
+    );
+
+    const result = await policy.retrieve({
+      query: 'What architecture rules should guide modular boundaries in a Swift app?',
+      topK: 8,
+    });
+    const targetRank = result.candidates.findIndex(({ recipeId }) => recipeId === TARGET) + 1;
+    const target = result.candidates.find(({ recipeId }) => recipeId === TARGET);
+
+    expect(windows).toEqual([32, 64]);
+    expect(targetRank).toBeGreaterThan(0);
+    expect(targetRank).toBeLessThanOrEqual(3);
+    expect(target).toMatchObject({
+      denseLaneUsed: true,
+      denseRank: 6,
+      sparseLaneUsed: true,
+      sparseRank: 3,
+    });
+    expect(result.diagnostics).toMatchObject({
+      candidateBudgetReached: false,
+      candidateWindow: 64,
+      exhausted: true,
+      refillRounds: 1,
+    });
+    expect(result.diagnostics.aggregatedRegionCount).toBeGreaterThan(0);
+  });
+
+  it('stops at the first window when every Top-K prefix is strictly stable', async () => {
+    const liveIds = ['stable-a', 'stable-b'];
+    const dense = Array.from({ length: 64 }, (_, index) => {
+      const recipeId = liveIds[index % liveIds.length];
+      return {
+        id: `recipe_region_${recipeId}_guidance_${index}`,
+        item: {
+          id: `recipe_region_${recipeId}_guidance_${index}`,
+          metadata: { recipeId, regionClass: 'guidance' },
+        },
+        score: 1 - index / 100,
+      };
+    });
+    const sparse = Array.from({ length: 64 }, (_, index) => ({
+      id: liveIds[index % liveIds.length],
+      score: 64 - index,
+    }));
+    const windows: number[] = [];
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: vi.fn(),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async () => [1]),
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: dense.length, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector: vi.fn(async (_vector, options) => {
+            const window = options?.topK ?? 0;
+            windows.push(window);
+            return dense.slice(0, window);
+          }),
+        },
+        sparse: async (_query, options) => sparse.slice(0, options.limit),
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: async (ids) =>
+          ids.filter((id) => liveIds.includes(id)).map((id) => ({ id, lifecycle: 'active' })),
+      })
+    );
+
+    const result = await policy.retrieve({ query: 'stable architecture', topK: 2 });
+
+    expect(windows).toEqual([32]);
+    expect(result.candidates.map(({ recipeId }) => recipeId)).toEqual(liveIds);
+    expect(result.diagnostics).toMatchObject({
+      candidateBudgetReached: false,
+      candidateWindow: 32,
+      exhausted: false,
+      refillRounds: 0,
+    });
+  });
+
+  it('reports the budget fallback when a full Top-K remains unstable', async () => {
+    const dense = Array.from({ length: 64 }, (_, index) => ({
+      id: `dense-${index}`,
+      item: { id: `dense-${index}` },
+      score: 1 - index / 100,
+    }));
+    const sparse = Array.from({ length: 64 }, (_, index) => ({
+      id: `sparse-${index}`,
+      score: 64 - index,
+    }));
+    const windows: number[] = [];
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: vi.fn(),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async () => [1]),
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: dense.length, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector: vi.fn(async (_vector, options) => {
+            const window = options?.topK ?? 0;
+            windows.push(window);
+            return dense.slice(0, window);
+          }),
+        },
+        sparse: async (_query, options) => sparse.slice(0, options.limit),
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: async (ids) => ids.map((id) => ({ id, lifecycle: 'active' })),
+      })
+    );
+
+    const result = await policy.retrieve({
+      candidateBudget: 32,
+      query: 'bounded architecture',
+      topK: 2,
+    });
+
+    expect(windows).toEqual([32]);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.diagnostics).toMatchObject({
+      candidateBudgetReached: true,
+      candidateWindow: 32,
+      exhausted: false,
+      fallbackReason: 'candidate-budget-exhausted',
+      refillRounds: 0,
+    });
+  });
+
+  it('uses truth-aware unique live ranks when bounding an unseen lane', async () => {
+    const activeIds = ['live-a', 'live-b', 'live-c'];
+    const orphanIds = Array.from({ length: 15 }, (_, index) => `orphan-${index}`);
+    const deprecatedIds = Array.from({ length: 15 }, (_, index) => `deprecated-${index}`);
+    const denseIds = ['live-a', 'live-b', ...orphanIds, ...deprecatedIds, 'live-c'];
+    const dense = denseIds.map((id, index) => ({
+      id,
+      item: { id },
+      score: 1 - index / 100,
+    }));
+    const sparse = ['live-c', 'live-a', 'live-b'].map((id, index) => ({
+      id,
+      score: 3 - index,
+    }));
+    const windows: number[] = [];
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: vi.fn(),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async () => [1]),
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: dense.length, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector: vi.fn(async (_vector, options) => {
+            const window = options?.topK ?? 0;
+            windows.push(window);
+            return dense.slice(0, window);
+          }),
+        },
+        sparse: async (_query, options) => sparse.slice(0, options.limit),
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: async (ids) => [
+          ...ids.filter((id) => activeIds.includes(id)).map((id) => ({ id, lifecycle: 'active' })),
+          ...ids
+            .filter((id) => deprecatedIds.includes(id))
+            .map((id) => ({ id, lifecycle: 'deprecated' })),
+        ],
+      })
+    );
+
+    const result = await policy.retrieve({ query: 'truth-aware architecture', topK: 2 });
+
+    expect(windows).toEqual([32, 64]);
+    expect(result.candidates.map(({ recipeId }) => recipeId)).toEqual(['live-a', 'live-c']);
+    expect(result.candidates[1]).toMatchObject({ denseRank: 3, sparseRank: 1 });
+    expect(result.diagnostics).toMatchObject({
+      candidateBudgetReached: false,
+      candidateWindow: 64,
+      exhausted: true,
+      filteredDeprecatedCount: 15,
+      filteredOrphanCount: 15,
+      refillRounds: 1,
+    });
+  });
+
+  it('stops when both candidate lanes are exhausted below Top-K', async () => {
+    const dense = [{ id: 'dense-only', item: { id: 'dense-only' }, score: 1 }];
+    const sparse = [{ id: 'sparse-only', score: 1 }];
+    const searchVector = vi.fn(async () => dense);
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: vi.fn(),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async () => [1]),
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: 64, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector,
+        },
+        sparse: async () => sparse,
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: async (ids) => ids.map((id) => ({ id, lifecycle: 'active' })),
+      })
+    );
+
+    const result = await policy.retrieve({ query: 'exhausted architecture', topK: 5 });
+
+    expect(searchVector).toHaveBeenCalledTimes(1);
+    expect(result.candidates).toHaveLength(2);
+    expect(result.diagnostics).toMatchObject({
+      candidateBudgetReached: false,
+      candidateWindow: 32,
+      exhausted: true,
+      refillRounds: 0,
+    });
+  });
+
+  it('propagates AbortSignal cancellation during candidate collection', async () => {
+    const controller = new AbortController();
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: vi.fn(),
+          embedDocuments: vi.fn(),
+          embedQuery: vi.fn(async () => [1]),
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(async () => ({ count: 64, indexSize: 1 })),
+          listIds: vi.fn(),
+          searchVector: vi.fn(async () => {
+            controller.abort('stop-refill');
+            return Array.from({ length: 32 }, (_, index) => ({
+              id: `candidate-${index}`,
+              item: { id: `candidate-${index}` },
+              score: 1 - index / 100,
+            }));
+          }),
+        },
+        sparse: async () =>
+          Array.from({ length: 32 }, (_, index) => ({
+            id: `sparse-${index}`,
+            score: 32 - index,
+          })),
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: vi.fn(async () => []),
+      })
+    );
+
+    await expect(
+      policy.retrieve({ query: 'cancel architecture', signal: controller.signal, topK: 2 })
+    ).rejects.toBe('stop-refill');
+  });
+
   it('refills beyond an orphan-heavy first window until distinct live truth fills topK', async () => {
     const raw = Array.from({ length: 32 }, (_, index) => ({
       id: `orphan-${index}`,
