@@ -14,11 +14,11 @@
  * @module infrastructure/vector/BatchEmbedder
  */
 
+import type { EmbeddingPort, LegacyEmbedProvider } from '../../service/vector/EmbeddingPort.js';
 import { createLimit } from '../../shared/concurrency.js';
 import Logger from '../logging/Logger.js';
 
-export interface EmbeddingProvider {
-  embed(text: string | string[]): Promise<number[] | number[][]>;
+export interface EmbeddingProvider extends LegacyEmbedProvider {
   /**
    * Optional transport capacity hint (AD5; AlembicAgent 637d094 contract):
    * mirrors the provider's live request gate so Core batches at the exact
@@ -32,16 +32,16 @@ export interface EmbeddingProvider {
 }
 
 export class BatchEmbedder {
-  #embeddingProvider;
+  #embeddingPort: EmbeddingPort | null;
   #batchSize;
   #maxConcurrency;
 
   /** @param embeddingProvider 外部注入的 embedding provider, Core 不拥有具体 provider 或密钥 */
   constructor(
-    embeddingProvider: EmbeddingProvider,
+    embeddingProvider: EmbeddingPort | EmbeddingProvider | null,
     options: { batchSize?: number; maxConcurrency?: number } = {}
   ) {
-    this.#embeddingProvider = embeddingProvider;
+    this.#embeddingPort = embeddingProvider ? toEmbeddingPort(embeddingProvider) : null;
     this.#batchSize = options.batchSize || 32;
     // Concurrency resolution (AD5 provider-aware upgrade): explicit option
     // wins; otherwise the injected provider's transport capacity hint;
@@ -49,7 +49,9 @@ export class BatchEmbedder {
     // source are logged once per embedder so throttling stays observable.
     let concurrency = 2;
     let concurrencySource = 'default';
-    const hint = embeddingProvider?.getEmbeddingCapacityHint?.();
+    const hint = (
+      embeddingProvider as Partial<EmbeddingProvider> | null
+    )?.getEmbeddingCapacityHint?.();
     if (typeof hint?.maxInFlightEmbeddings === 'number' && hint.maxInFlightEmbeddings >= 1) {
       concurrency = Math.floor(hint.maxInFlightEmbeddings);
       concurrencySource = `provider-hint(${hint.provider}/${hint.source})`;
@@ -77,10 +79,9 @@ export class BatchEmbedder {
     items: Array<{ id: string; content: string }>,
     onProgress?: (embedded: number, total: number) => void
   ) {
-    if (!this.#embeddingProvider || typeof this.#embeddingProvider.embed !== 'function') {
+    if (!this.#embeddingPort) {
       return new Map();
     }
-
     const results = new Map();
     const batches = this.#chunkArray(items, this.#batchSize);
     const limit = createLimit(this.#maxConcurrency);
@@ -112,7 +113,7 @@ export class BatchEmbedder {
     try {
       // 截断过长文本 (8K 字符限制)
       const texts = items.map((item) => (item.content || '').slice(0, 8000));
-      const vectors = await this.#embeddingProvider.embed(texts);
+      const vectors = await this.#embeddingPort!.embedDocuments(texts);
 
       // 批量 provider 返回 number[][]; 单条 provider 可能返回 number[]。
       if (Array.isArray(vectors) && Array.isArray(vectors[0])) {
@@ -130,10 +131,8 @@ export class BatchEmbedder {
           // provider 不支持批量, 降级到串行
           for (const item of items) {
             try {
-              const vec = await this.#embeddingProvider.embed(item.content.slice(0, 8000));
-              if (Array.isArray(vec)) {
-                result.set(item.id, vec);
-              }
+              const vec = await this.#embeddingPort!.embedDocuments([item.content.slice(0, 8000)]);
+              result.set(item.id, vec[0]);
             } catch {
               /* skip failed embed */
             }
@@ -144,11 +143,9 @@ export class BatchEmbedder {
       // 整批失败, 降级到逐条
       for (const item of items) {
         try {
-          const vec = await this.#embeddingProvider.embed(item.content.slice(0, 8000));
-          if (Array.isArray(vec)) {
-            // 可能返回 [number[]] (批量格式包装的单条)
-            const vector = Array.isArray(vec[0]) ? vec[0] : vec;
-            result.set(item.id, vector);
+          const vec = await this.#embeddingPort!.embedDocuments([item.content.slice(0, 8000)]);
+          if (vec[0]) {
+            result.set(item.id, vec[0]);
           }
         } catch {
           /* skip */
@@ -167,4 +164,50 @@ export class BatchEmbedder {
     }
     return chunks;
   }
+}
+
+function toEmbeddingPort(provider: EmbeddingPort | EmbeddingProvider): EmbeddingPort {
+  if (
+    'embedDocuments' in provider &&
+    typeof provider.embedDocuments === 'function' &&
+    'embedQuery' in provider &&
+    typeof provider.embedQuery === 'function'
+  ) {
+    return provider;
+  }
+  const legacy = provider as EmbeddingProvider;
+  return {
+    describeCapabilities: () => ({
+      batchSupported: true,
+      formatProfile: 'symmetric',
+      inputKinds: ['query', 'document'],
+      normalization: 'provider-defined',
+      provider: legacy.getEmbeddingCapacityHint?.().provider ?? 'legacy',
+    }),
+    embedDocuments: async (texts) => {
+      try {
+        const result = await legacy.embed([...texts]);
+        if (Array.isArray(result[0])) {
+          return result as number[][];
+        }
+        if (texts.length === 1) {
+          return [result as number[]];
+        }
+      } catch {
+        // Single-only legacy transports are serialized below.
+      }
+      const vectors: number[][] = [];
+      for (const text of texts) {
+        const result = await legacy.embed(text);
+        vectors.push(
+          Array.isArray(result[0]) ? ((result as number[][])[0] ?? []) : (result as number[])
+        );
+      }
+      return vectors;
+    },
+    embedQuery: async (text) => {
+      const result = await legacy.embed(text);
+      return Array.isArray(result[0]) ? ((result as number[][])[0] ?? []) : (result as number[]);
+    },
+  };
 }

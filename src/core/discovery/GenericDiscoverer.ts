@@ -7,13 +7,15 @@
  * 按顶层目录分 Target。
  */
 
-import { existsSync, readdirSync } from 'node:fs';
+import fs from 'node:fs/promises';
 import { basename, extname, join, relative } from 'node:path';
 import { LanguageService } from '../../shared/LanguageService.js';
 import {
   type DiscoveredFile,
   type DiscoveredTarget,
   ProjectDiscoverer,
+  type ProjectDiscoveryExecutionContext,
+  throwIfProjectDiscoveryAborted,
 } from './ProjectDiscoverer.js';
 import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
@@ -33,22 +35,25 @@ export class GenericDiscoverer extends ProjectDiscoverer {
     return 'Generic (directory scan)';
   }
 
-  async detect(projectRoot: string) {
+  async detect(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
+    throwIfProjectDiscoveryAborted(context);
     // 始终匹配
     return { match: true, confidence: 0.1, reason: 'Generic fallback discoverer' };
   }
 
-  async load(projectRoot: string) {
+  async load(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
+    throwIfProjectDiscoveryAborted(context);
     this.#projectRoot = projectRoot;
     this.#targets = [];
 
     // 统计语言分布
     const langStats: Record<string, number> = {};
-    this.#scanLangStats(projectRoot, langStats, 0);
+    await this.#scanLangStats(projectRoot, langStats, 0, context);
 
     // 找到主语言
     let maxCount = 0;
     for (const [lang, count] of Object.entries(langStats)) {
+      throwIfProjectDiscoveryAborted(context);
       if (count > maxCount) {
         maxCount = count;
         this.#primaryLang = lang;
@@ -60,8 +65,10 @@ export class GenericDiscoverer extends ProjectDiscoverer {
     let foundTargets = false;
 
     try {
-      const entries = readdirSync(projectRoot, { withFileTypes: true });
+      const entries = await fs.readdir(projectRoot, { withFileTypes: true });
+      throwIfProjectDiscoveryAborted(context);
       for (const entry of entries) {
+        throwIfProjectDiscoveryAborted(context);
         if (!entry.isDirectory()) {
           continue;
         }
@@ -80,7 +87,10 @@ export class GenericDiscoverer extends ProjectDiscoverer {
           foundTargets = true;
         }
       }
-    } catch {
+    } catch (_error) {
+      if (context?.signal?.aborted) {
+        throwIfProjectDiscoveryAborted(context);
+      }
       /* skip */
     }
 
@@ -95,39 +105,50 @@ export class GenericDiscoverer extends ProjectDiscoverer {
     }
   }
 
-  async listTargets() {
+  async listTargets(context?: ProjectDiscoveryExecutionContext) {
+    throwIfProjectDiscoveryAborted(context);
     return this.#targets;
   }
 
-  async getTargetFiles(target: DiscoveredTarget) {
+  async getTargetFiles(target: DiscoveredTarget, context?: ProjectDiscoveryExecutionContext) {
+    throwIfProjectDiscoveryAborted(context);
     const targetPath =
       typeof target === 'string'
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await pathExists(targetPath))) {
       return [];
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectFiles(targetPath, targetPath, files);
+    await this.#collectFiles(targetPath, targetPath, files, 0, context);
     return files;
   }
 
-  async getDependencyGraph() {
+  async getDependencyGraph(context?: ProjectDiscoveryExecutionContext) {
+    throwIfProjectDiscoveryAborted(context);
     // GenericDiscoverer 无法推断依赖图
     return { nodes: this.#targets.map((t) => t.name), edges: [] };
   }
 
   // ── 内部实现 ──
 
-  #scanLangStats(dir: string, stats: Record<string, number>, depth: number) {
+  async #scanLangStats(
+    dir: string,
+    stats: Record<string, number>,
+    depth: number,
+    context?: ProjectDiscoveryExecutionContext
+  ): Promise<void> {
+    throwIfProjectDiscoveryAborted(context);
     if (depth > 5) {
       return; // 限制深度, 只采样
     }
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      throwIfProjectDiscoveryAborted(context);
       for (const entry of entries) {
+        throwIfProjectDiscoveryAborted(context);
         if (entry.name.startsWith('.')) {
           continue;
         }
@@ -136,7 +157,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
         }
 
         if (entry.isDirectory()) {
-          this.#scanLangStats(join(dir, entry.name), stats, depth + 1);
+          await this.#scanLangStats(join(dir, entry.name), stats, depth + 1, context);
         } else if (entry.isFile()) {
           const ext = extname(entry.name);
           if (SOURCE_EXTENSIONS.has(ext)) {
@@ -145,18 +166,30 @@ export class GenericDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (_error) {
+      if (context?.signal?.aborted) {
+        throwIfProjectDiscoveryAborted(context);
+      }
       /* skip */
     }
   }
 
-  #collectFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectFiles(
+    dir: string,
+    rootDir: string,
+    files: DiscoveredFile[],
+    depth = 0,
+    context?: ProjectDiscoveryExecutionContext
+  ): Promise<void> {
+    throwIfProjectDiscoveryAborted(context);
     if (depth > 15) {
       return;
     }
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      throwIfProjectDiscoveryAborted(context);
       for (const entry of entries) {
+        throwIfProjectDiscoveryAborted(context);
         if (entry.name.startsWith('.')) {
           continue;
         }
@@ -166,7 +199,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
 
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
-          this.#collectFiles(fullPath, rootDir, files, depth + 1);
+          await this.#collectFiles(fullPath, rootDir, files, depth + 1, context);
         } else if (entry.isFile()) {
           const ext = extname(entry.name);
           if (SOURCE_EXTENSIONS.has(ext)) {
@@ -180,8 +213,20 @@ export class GenericDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (_error) {
+      if (context?.signal?.aborted) {
+        throwIfProjectDiscoveryAborted(context);
+      }
       /* skip */
     }
+  }
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
   }
 }

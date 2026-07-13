@@ -7,6 +7,7 @@
 import type {
   ProjectContext as ProjectContextContract,
   ProjectContextEnvelope,
+  ProjectContextExecutionContext,
   ProjectContextRequest,
   ProjectContextResult,
 } from '../../domain/project-context/index.js';
@@ -29,34 +30,44 @@ export type ProjectContextCapabilityQuery<TPayload = unknown> = Omit<
 
 export interface ProjectContextCapabilities {
   execute<TPayload = unknown>(
-    input: ProjectContextRequest<TPayload>
+    input: ProjectContextRequest<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeAnchorRangeQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeSpaceQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeRepoQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeProjectMapQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeModuleQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeModuleLayersQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeFileFlowQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeFileSymbolsQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   executeSourceSliceQuery<TPayload = unknown>(
-    input: ProjectContextCapabilityQuery<TPayload>
+    input: ProjectContextCapabilityQuery<TPayload>,
+    context?: ProjectContextExecutionContext
   ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
   analyzeArchitectureIntelligence(
     input: ArchitectureIntelligenceInput
@@ -68,27 +79,46 @@ export function createProjectContextCapabilities(
   projectContext: ProjectContextContract = ProjectContext
 ): ProjectContextCapabilities {
   const capabilities: ProjectContextCapabilities = {
-    execute: <TPayload = unknown>(input: ProjectContextRequest<TPayload>) =>
-      projectContext.execute(input),
-    executeAnchorRangeQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'anchor-range' }),
-    executeSpaceQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'space' }),
-    executeRepoQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'repo' }),
-    executeProjectMapQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'map' }),
-    executeModuleQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'module' }),
+    execute: <TPayload = unknown>(
+      input: ProjectContextRequest<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute(input, context),
+    executeAnchorRangeQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'anchor-range' }, context),
+    executeSpaceQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'space' }, context),
+    executeRepoQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'repo' }, context),
+    executeProjectMapQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'map' }, context),
+    executeModuleQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'module' }, context),
     executeModuleLayersQuery: <TPayload = unknown>(
-      input: ProjectContextCapabilityQuery<TPayload>
-    ) => projectContext.execute({ ...input, kind: 'module-layers' }),
-    executeFileFlowQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'file-flow' }),
-    executeFileSymbolsQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'file-symbols' }),
-    executeSourceSliceQuery: <TPayload = unknown>(input: ProjectContextCapabilityQuery<TPayload>) =>
-      projectContext.execute({ ...input, kind: 'source-slice' }),
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'module-layers' }, context),
+    executeFileFlowQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'file-flow' }, context),
+    executeFileSymbolsQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'file-symbols' }, context),
+    executeSourceSliceQuery: <TPayload = unknown>(
+      input: ProjectContextCapabilityQuery<TPayload>,
+      context?: ProjectContextExecutionContext
+    ) => projectContext.execute({ ...input, kind: 'source-slice' }, context),
     analyzeArchitectureIntelligence: (input: ArchitectureIntelligenceInput) =>
       analyzeArchitectureIntelligence(input),
     aggregateDynamicPlanningSignals: (input: DynamicSignalGatewayInput) =>

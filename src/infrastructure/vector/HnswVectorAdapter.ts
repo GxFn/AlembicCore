@@ -584,7 +584,11 @@ export class HnswVectorAdapter extends VectorStore {
     vectorResults.forEach((r, rank) => {
       const id = r.item.id;
       const entry = scores.get(id) || { item: r.item, rrfScore: 0 };
-      entry.rrfScore += alpha * (1 / (rrfK + rank + 1));
+      const contribution = alpha * (1 / (rrfK + rank + 1));
+      entry.rrfScore += contribution;
+      entry.denseRank = rank + 1;
+      entry.denseSimilarity = r.score;
+      entry.denseContribution = contribution;
       entry.item = r.item;
       scores.set(id, entry);
     });
@@ -594,7 +598,11 @@ export class HnswVectorAdapter extends VectorStore {
       const id = r.id;
       const existing = scores.get(id);
       if (existing) {
-        existing.rrfScore += (1 - alpha) * (1 / (rrfK + rank + 1));
+        const contribution = (1 - alpha) * (1 / (rrfK + rank + 1));
+        existing.rrfScore += contribution;
+        existing.sparseRank = rank + 1;
+        existing.sparseScore = r.score;
+        existing.sparseContribution = contribution;
       } else {
         scores.set(id, {
           item: {
@@ -604,19 +612,30 @@ export class HnswVectorAdapter extends VectorStore {
             metadata: this.#metadata.get(id) || {},
           },
           rrfScore: (1 - alpha) * (1 / (rrfK + rank + 1)),
+          sparseRank: rank + 1,
+          sparseScore: r.score,
+          sparseContribution: (1 - alpha) * (1 / (rrfK + rank + 1)),
         });
       }
     });
 
-    // 按 RRF 分数降序, 归一化到 [0, 1]
+    // Preserve raw RRF evidence; page-local max normalization is misleading.
     const fused = [...scores.values()].sort((a, b) => b.rrfScore - a.rrfScore).slice(0, topK);
 
-    const maxScore = fused.length > 0 ? fused[0].rrfScore : 1;
     return fused.map((r) => ({
       item: r.item,
-      score: maxScore > 0 ? r.rrfScore / maxScore : 0,
-      vectorScore: 0,
-      keywordScore: 0,
+      score: r.rrfScore,
+      rrfContribution: {
+        dense: r.denseContribution ?? 0,
+        sparse: r.sparseContribution ?? 0,
+        total: r.rrfScore,
+      },
+      denseRank: r.denseRank,
+      denseSimilarity: r.denseSimilarity,
+      sparseRank: r.sparseRank,
+      sparseScore: r.sparseScore,
+      vectorScore: r.denseSimilarity,
+      keywordScore: r.sparseScore,
     }));
   }
 

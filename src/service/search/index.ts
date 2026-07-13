@@ -2,6 +2,7 @@ export * from './CoarseRanker.js';
 export * from './contextBoost.js';
 export * from './FieldWeightedScorer.js';
 export * from './HybridRetriever.js';
+export * from './KnowledgeRetrieval.js';
 export * from './MultiSignalRanker.js';
 export * from './SearchEngine.js';
 export * from './SearchTypes.js';

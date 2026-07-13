@@ -1,5 +1,6 @@
 import type {
   ProjectContext as ProjectContextContract,
+  ProjectContextExecutionContext,
   ProjectContextRequest,
   ProjectContextResult,
 } from '../../../domain/project-context/index.js';
@@ -12,10 +13,10 @@ export function createProjectContext(
   handlers: ProjectContextHandlerRegistry = {}
 ): ProjectContextContract {
   return {
-    async execute(input: ProjectContextRequest) {
+    async execute(input: ProjectContextRequest, context?: ProjectContextExecutionContext) {
       try {
         const request = canonicalizeProjectContextRequest(input);
-        const result = await dispatchProjectContextRequest(request, handlers);
+        const result = await dispatchProjectContextRequest(request, handlers, context);
         return createProjectContextEnvelope({
           data: result.data,
           errors: result.errors,

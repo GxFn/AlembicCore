@@ -36,6 +36,19 @@ export { ScalarQuantizer } from './infrastructure/vector/ScalarQuantizer.js';
 export { VectorMigration } from './infrastructure/vector/VectorMigration.js';
 export { VectorStore } from './infrastructure/vector/VectorStore.js';
 export type {
+  EmbeddingCapabilityDescriptor,
+  EmbeddingExecutionContext,
+  EmbeddingInputKind,
+  EmbeddingPort,
+  LegacyEmbedProvider,
+  LegacyEmbedProviderAdapterOptions,
+} from './service/vector/EmbeddingPort.js';
+export {
+  asEmbeddingPort,
+  isEmbeddingPort,
+  LegacyEmbedProviderAdapter,
+} from './service/vector/EmbeddingPort.js';
+export type {
   VectorChunkData,
   VectorChunkEnricher,
   VectorDocumentInfo,
@@ -67,8 +80,28 @@ export {
   syncRecipeSemanticRegionVectors,
   testRecipeSemanticRegionGeneration,
 } from './service/vector/RecipeRegionVectorIndex.js';
-export type { SyncCoordinatorConfig } from './service/vector/SyncCoordinator.js';
-export { SyncCoordinator } from './service/vector/SyncCoordinator.js';
+export type {
+  SyncCoordinatorConfig,
+  VectorLifecycleCoordinatorConfig,
+} from './service/vector/SyncCoordinator.js';
+export {
+  SyncCoordinator,
+  VectorLifecycleCoordinator,
+} from './service/vector/SyncCoordinator.js';
+export type {
+  VectorIndexHit,
+  VectorIndexItem,
+  VectorIndexReader,
+  VectorIndexReaderSource,
+  VectorIndexStats,
+  VectorIndexWriter,
+  VectorIndexWriterSource,
+} from './service/vector/VectorIndexPorts.js';
+export {
+  createVectorIndexPorts,
+  VectorIndexReaderAdapter,
+  VectorIndexWriterAdapter,
+} from './service/vector/VectorIndexPorts.js';
 export { VectorService };
 export type {
   FetchLike,

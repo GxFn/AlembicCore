@@ -23,6 +23,7 @@ import {
   readProjectScopeRegistryDocument,
 } from '../../../shared/ProjectScope.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import {
   createProjectContextRepoSpaceMetadata,
   createProjectContextRepoSpacePathRef,
@@ -83,13 +84,17 @@ interface ActiveFileResolution {
 }
 
 export const spaceProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readSpacePayload(request.payload);
   const resolution = await resolveSpace({
     payload,
     scope: request.scope,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   if (!resolution.ok) {
     return createSpaceFailure(resolution.error, resolution.errors);
   }
@@ -99,7 +104,9 @@ export const spaceProjectContextHandler: ProjectContextHandler = async (
     payload,
     requestScope: request.scope,
     space: resolution.space,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   errors.push(...activeFile.errors);
   const active = selectActiveRepo({
     activeFile,
@@ -126,7 +133,9 @@ export const spaceProjectContextHandler: ProjectContextHandler = async (
   const sourceRefFacts = await normalizeSourceRefs({
     sourceRefs: payload.sourceRefs,
     space: resolution.space,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   errors.push(...sourceRefFacts.errors);
 
   const spaceRef = createProjectContextSpaceRef({
@@ -192,12 +201,15 @@ function readSpacePayload(payload: unknown): SpaceRequestPayload {
 async function resolveSpace(input: {
   payload: SpaceRequestPayload;
   scope: ProjectContextScope;
+  signal?: AbortSignal;
 }): Promise<
   | { ok: true; space: SpaceResolution }
   | { ok: false; error: ProjectContextQueryError; errors: ProjectContextQueryError[] }
 > {
   const projectRoot = path.resolve(input.scope.projectRoot);
+  throwIfProjectContextAborted(input);
   const rootRealpath = await readRealpath(projectRoot);
+  throwIfProjectContextAborted(input);
   if (!rootRealpath) {
     const error = createQueryError({
       code: 'invalid-scope',
@@ -228,10 +240,12 @@ async function resolveSpace(input: {
 
   const folders: SpaceFolder[] = [];
   for (const folder of folderInputs) {
+    throwIfProjectContextAborted(input);
     const resolved = await createSpaceFolder({
       folder,
       projectRoot,
       rootRealpath,
+      signal: input.signal,
     });
     folders.push(resolved.folder);
     errors.push(...resolved.errors);
@@ -306,6 +320,7 @@ async function createSpaceFolder(input: {
   folder: ExplicitFolderInput;
   projectRoot: string;
   rootRealpath: string;
+  signal?: AbortSignal;
 }): Promise<{ folder: SpaceFolder; errors: ProjectContextQueryError[] }> {
   const errors: ProjectContextQueryError[] = [];
   const absolutePath = path.isAbsolute(input.folder.path)
@@ -315,6 +330,7 @@ async function createSpaceFolder(input: {
   const repoId = input.folder.repositoryId ?? input.folder.folderId;
   const displayName = input.folder.displayName ?? repoId;
   const realpath = (await readRealpath(absolutePath)) ?? input.folder.realpath;
+  throwIfProjectContextAborted(input);
   const missing = !realpath;
   const outsideSpace = Boolean(realpath && !isInsidePath(input.rootRealpath, realpath));
   if (missing) {
@@ -348,6 +364,7 @@ async function createSpaceFolder(input: {
     sourceFolder: relativePath,
   });
   const childCount = missing || outsideSpace ? 0 : await countTopLevelChildren(absolutePath);
+  throwIfProjectContextAborted(input);
   const sourceFolder = createProjectContextRepoSpaceSourceFolderSummary({
     displayName,
     folderId: input.folder.folderId,
@@ -463,6 +480,7 @@ async function resolveActiveFileFact(input: {
   payload: SpaceRequestPayload;
   requestScope: ProjectContextScope;
   space: SpaceResolution;
+  signal?: AbortSignal;
 }): Promise<ActiveFileResolution> {
   const activeFileValue =
     input.payload.activeFile ?? input.requestScope.activeFile ?? input.payload.ref?.scope.filePath;
@@ -501,6 +519,7 @@ async function resolveActiveFileFact(input: {
   }
 
   const exists = await pathExists(path.join(input.space.projectRoot, activeFile.path));
+  throwIfProjectContextAborted(input);
   const ref = createProjectContextRepoSpacePathRef({
     exists,
     metadata: createProjectContextRepoSpaceMetadata({
@@ -612,10 +631,12 @@ function createProjectTreeFacts(input: {
 async function normalizeSourceRefs(input: {
   sourceRefs?: readonly string[];
   space: SpaceResolution;
+  signal?: AbortSignal;
 }): Promise<{ refs: ProjectContextRef[]; errors: ProjectContextQueryError[] }> {
   const refs: ProjectContextRef[] = [];
   const errors: ProjectContextQueryError[] = [];
   for (const sourceRef of input.sourceRefs ?? []) {
+    throwIfProjectContextAborted(input);
     const normalized = normalizeRelativePath(sourceRef.replace(/^\.\//, ''));
     const qualified = resolveQualifiedSourceRef(normalized, input.space.folders);
     if (qualified) {
@@ -625,10 +646,12 @@ async function normalizeSourceRefs(input: {
 
     const matches: { folder: SpaceFolder; relativePath: string }[] = [];
     for (const folder of input.space.folders.filter((candidate) => !candidate.missing)) {
+      throwIfProjectContextAborted(input);
       const absolutePath = path.join(folder.absolutePath, normalized);
       if (await pathExists(absolutePath)) {
         matches.push({ folder, relativePath: normalized });
       }
+      throwIfProjectContextAborted(input);
     }
     if (matches.length === 1) {
       refs.push(

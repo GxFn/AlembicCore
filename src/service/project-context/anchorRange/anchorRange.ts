@@ -5,6 +5,7 @@ import type {
   FileSymbolContext,
   ProjectContextAnchor,
   ProjectContextAnchorKind,
+  ProjectContextExecutionContext,
   ProjectContextQueryError,
   ProjectContextRef,
   ProjectContextUnavailableData,
@@ -20,6 +21,7 @@ import type {
   ProjectContextHandler,
   ProjectContextHandlerResult,
 } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { sourceSliceProjectContextHandler } from '../sourceSlice/index.js';
 import type {
   AnchorRangePayloadAnchor,
@@ -29,8 +31,10 @@ import type {
 } from './contracts.js';
 
 export const anchorRangeProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readAnchorRangePayload(request.payload);
   const options = normalizeOptions(payload);
   const anchorCandidate = readAnchorCandidate(payload, request.scope.activeFile);
@@ -38,7 +42,8 @@ export const anchorRangeProjectContextHandler: ProjectContextHandler = async (
     return createAnchorRangeFailure(anchorCandidate.failure);
   }
 
-  const resolvedAnchor = await resolveAnchorRange(request, anchorCandidate.anchor);
+  const resolvedAnchor = await resolveAnchorRange(request, anchorCandidate.anchor, context);
+  throwIfProjectContextAborted(context);
   if (!resolvedAnchor.ok) {
     return createAnchorRangeFailure(resolvedAnchor.failure);
   }
@@ -48,10 +53,15 @@ export const anchorRangeProjectContextHandler: ProjectContextHandler = async (
     resolvedAnchor.file.lineCount ?? resolvedAnchor.range.endLine,
     options
   );
-  const expandedSlice = await querySourceSlice(request, {
-    filePath: resolvedAnchor.file.filePath,
-    range: expandedRange,
-  });
+  const expandedSlice = await querySourceSlice(
+    request,
+    {
+      filePath: resolvedAnchor.file.filePath,
+      range: expandedRange,
+    },
+    context
+  );
+  throwIfProjectContextAborted(context);
   if (!isSourceSliceContext(expandedSlice.data)) {
     return {
       data: createUnavailableAnchorRangeData('anchor-range expanded source-slice is unavailable.'),
@@ -61,11 +71,12 @@ export const anchorRangeProjectContextHandler: ProjectContextHandler = async (
   }
 
   const symbolResult = options.includeSymbols
-    ? await queryFileSymbols(request, resolvedAnchor.file.filePath)
+    ? await queryFileSymbols(request, resolvedAnchor.file.filePath, context)
     : undefined;
   const flowResult = options.includeRelations
-    ? await queryFileFlow(request, resolvedAnchor.file.filePath)
+    ? await queryFileFlow(request, resolvedAnchor.file.filePath, context)
     : undefined;
+  throwIfProjectContextAborted(context);
 
   const symbols = options.includeSymbols
     ? filterSymbolsInRange(readFileSymbols(symbolResult?.data), expandedRange)
@@ -249,13 +260,18 @@ function readAnchorCandidate(
 
 async function resolveAnchorRange(
   request: CanonicalProjectContextRequest,
-  anchor: ProjectContextAnchor
+  anchor: ProjectContextAnchor,
+  context?: ProjectContextExecutionContext
 ): Promise<ResolvedAnchorResult> {
   if (anchor.range) {
-    const slice = await querySourceSlice(request, {
-      filePath: anchor.filePath,
-      range: anchor.range,
-    });
+    const slice = await querySourceSlice(
+      request,
+      {
+        filePath: anchor.filePath,
+        range: anchor.range,
+      },
+      context
+    );
     if (!isSourceSliceContext(slice.data)) {
       return failureFromHandlerResult(
         slice,
@@ -272,10 +288,14 @@ async function resolveAnchorRange(
   }
 
   if (anchor.line !== undefined) {
-    const slice = await querySourceSlice(request, {
-      filePath: anchor.filePath,
-      range: { endLine: anchor.line, startLine: anchor.line },
-    });
+    const slice = await querySourceSlice(
+      request,
+      {
+        filePath: anchor.filePath,
+        range: { endLine: anchor.line, startLine: anchor.line },
+      },
+      context
+    );
     if (!isSourceSliceContext(slice.data)) {
       return failureFromHandlerResult(
         slice,
@@ -292,10 +312,14 @@ async function resolveAnchorRange(
   }
 
   if (anchor.ref?.kind === 'file' && anchor.filePath) {
-    const firstLine = await querySourceSlice(request, {
-      filePath: anchor.filePath,
-      range: { endLine: 1, startLine: 1 },
-    });
+    const firstLine = await querySourceSlice(
+      request,
+      {
+        filePath: anchor.filePath,
+        range: { endLine: 1, startLine: 1 },
+      },
+      context
+    );
     if (!isSourceSliceContext(firstLine.data)) {
       return failureFromHandlerResult(firstLine, 'anchor-range file ref could not be resolved.');
     }
@@ -321,35 +345,47 @@ async function resolveAnchorRange(
 
 async function querySourceSlice(
   request: CanonicalProjectContextRequest,
-  payload: { filePath?: string; range?: SourceRangeSummary; ref?: ProjectContextRef }
+  payload: { filePath?: string; range?: SourceRangeSummary; ref?: ProjectContextRef },
+  context?: ProjectContextExecutionContext
 ): Promise<ProjectContextHandlerResult> {
-  return sourceSliceProjectContextHandler({
-    ...request,
-    kind: 'source-slice',
-    payload,
-  });
+  return sourceSliceProjectContextHandler(
+    {
+      ...request,
+      kind: 'source-slice',
+      payload,
+    },
+    context
+  );
 }
 
 async function queryFileSymbols(
   request: CanonicalProjectContextRequest,
-  filePath: string
+  filePath: string,
+  context?: ProjectContextExecutionContext
 ): Promise<ProjectContextHandlerResult> {
-  return fileSymbolsProjectContextHandler({
-    ...request,
-    kind: 'file-symbols',
-    payload: { filePath },
-  });
+  return fileSymbolsProjectContextHandler(
+    {
+      ...request,
+      kind: 'file-symbols',
+      payload: { filePath },
+    },
+    context
+  );
 }
 
 async function queryFileFlow(
   request: CanonicalProjectContextRequest,
-  filePath: string
+  filePath: string,
+  context?: ProjectContextExecutionContext
 ): Promise<ProjectContextHandlerResult> {
-  return fileFlowProjectContextHandler({
-    ...request,
-    kind: 'file-flow',
-    payload: { filePath },
-  });
+  return fileFlowProjectContextHandler(
+    {
+      ...request,
+      kind: 'file-flow',
+      payload: { filePath },
+    },
+    context
+  );
 }
 
 function failureFromHandlerResult(

@@ -65,31 +65,52 @@ export interface DependencyGraph {
   layers?: DependencyGraphLayer[];
 }
 
+export interface ProjectDiscoveryExecutionContext {
+  signal?: AbortSignal;
+}
+
+export function throwIfProjectDiscoveryAborted(context?: ProjectDiscoveryExecutionContext): void {
+  if (!context?.signal?.aborted) {
+    return;
+  }
+  const error = new Error(
+    context.signal.reason instanceof Error
+      ? context.signal.reason.message
+      : 'Project discovery cancelled.'
+  );
+  error.name = 'AbortError';
+  throw error;
+}
+
 export class ProjectDiscoverer {
   /** 检测此 Discoverer 是否适用于给定项目 */
   async detect(
-    projectRoot: string
+    projectRoot: string,
+    _context?: ProjectDiscoveryExecutionContext
   ): Promise<{ match: boolean; confidence: number; reason: string }> {
     throw new Error('Not implemented');
   }
 
   /** 加载项目结构（解析配置文件、构建依赖图） */
-  async load(projectRoot: string): Promise<void> {
+  async load(projectRoot: string, _context?: ProjectDiscoveryExecutionContext): Promise<void> {
     throw new Error('Not implemented');
   }
 
   /** 列出所有 Target/模块 */
-  async listTargets(): Promise<DiscoveredTarget[]> {
+  async listTargets(_context?: ProjectDiscoveryExecutionContext): Promise<DiscoveredTarget[]> {
     throw new Error('Not implemented');
   }
 
   /** 获取指定 Target 下的源码文件列表 */
-  async getTargetFiles(target: DiscoveredTarget): Promise<DiscoveredFile[]> {
+  async getTargetFiles(
+    target: DiscoveredTarget,
+    _context?: ProjectDiscoveryExecutionContext
+  ): Promise<DiscoveredFile[]> {
     throw new Error('Not implemented');
   }
 
   /** 获取模块间依赖关系图 */
-  async getDependencyGraph(): Promise<DependencyGraph> {
+  async getDependencyGraph(_context?: ProjectDiscoveryExecutionContext): Promise<DependencyGraph> {
     throw new Error('Not implemented');
   }
 

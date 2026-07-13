@@ -9,6 +9,7 @@ export type {
   ProjectContext as ProjectContextContract,
   ProjectContextAnchor,
   ProjectContextEnvelope,
+  ProjectContextExecutionContext,
   ProjectContextLevel,
   ProjectContextPresenterInput,
   ProjectContextPresenterUnavailable,

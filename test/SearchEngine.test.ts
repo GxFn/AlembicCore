@@ -196,6 +196,68 @@ describe('SearchEngine', () => {
     expect(engine.db).toBe(innerDb);
   });
 
+  test('auto search acts as a compatibility facade over KnowledgeRetrievalPort', async () => {
+    const retrieve = vi.fn(async () => ({
+      candidates: [
+        {
+          denseLaneUsed: true,
+          denseRank: 2,
+          denseSimilarity: 0.83,
+          diagnostics: {
+            aggregatedRegionCount: 1,
+            candidateBudgetReached: false,
+            candidateWindow: 32,
+            exhausted: true,
+            filteredDeprecatedCount: 0,
+            filteredOrphanCount: 4,
+            refillRounds: 1,
+          },
+          recipe: { id: 'r1', kind: 'rule', lifecycle: 'active', title: 'Boundary' },
+          recipeId: 'r1',
+          regionEvidence: [],
+          rrfContribution: { dense: 0.01, sparse: 0.008, total: 0.018 },
+          score: 0.018,
+          semanticUsed: true,
+          sparseLaneUsed: true,
+          sparseRank: 1,
+          sparseScore: 12,
+          vectorUsed: true,
+        },
+      ],
+      diagnostics: {
+        aggregatedRegionCount: 1,
+        candidateBudgetReached: false,
+        candidateWindow: 32,
+        exhausted: true,
+        filteredDeprecatedCount: 0,
+        filteredOrphanCount: 4,
+        refillRounds: 1,
+      },
+    }));
+    const engine = new SearchEngine(makeMockDb(), {
+      knowledgeRetrievalPort: { retrieve },
+      knowledgeRepo: makeVectorTruthRepo([]),
+      sourceRefRepo: makeSourceRefRepo(),
+    });
+
+    const response = await engine.search('architecture boundaries', {
+      limit: 3,
+      mode: 'auto',
+      type: 'knowledge',
+    });
+
+    expect(response.items.map((item) => item.id)).toEqual(['r1']);
+    expect(response.items[0]?.rrfContribution).toEqual({
+      dense: 0.01,
+      sparse: 0.008,
+      total: 0.018,
+    });
+    expect(response.searchMeta?.filteredOrphanVectorCount).toBe(4);
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    expect(retrieve.mock.calls[0]?.[0]?.topK).toBe(3);
+    expect(retrieve.mock.calls[0]?.[0]?.filter).toBeUndefined();
+  });
+
   test('getStats should report initial state', () => {
     const engine = new SearchEngine(makeMockDb());
     const stats = engine.getStats();

@@ -57,15 +57,58 @@ function createMockEventBus() {
 // ── 动态导入 ──
 
 let SyncCoordinator: typeof import('../src/service/vector/SyncCoordinator.js').SyncCoordinator;
+let VectorLifecycleCoordinator: typeof import('../src/service/vector/SyncCoordinator.js').VectorLifecycleCoordinator;
 
 beforeAll(async () => {
   const mod = await import('../src/service/vector/SyncCoordinator.js');
   SyncCoordinator = mod.SyncCoordinator;
+  VectorLifecycleCoordinator = mod.VectorLifecycleCoordinator;
 });
 
 // ── Tests ──
 
 describe('SyncCoordinator', () => {
+  it('keeps SyncCoordinator as a compatibility facade over VectorLifecycleCoordinator', () => {
+    const coordinator = new SyncCoordinator({
+      contextualEnricher: null,
+      debounceMs: 10,
+      embedProvider: null,
+      vectorStore: createMockVectorStore() as never,
+    });
+
+    expect(coordinator).toBeInstanceOf(VectorLifecycleCoordinator);
+  });
+
+  it('runs provider-independent removal with separate reader and writer ports', async () => {
+    const reader = {
+      getById: vi.fn(),
+      getStats: vi.fn(async () => ({ count: 1, indexSize: 1 })),
+      listIds: vi.fn(async () => ['entry_orphan']),
+      searchVector: vi.fn(),
+    };
+    const writer = {
+      batchUpsert: vi.fn(async () => undefined),
+      clear: vi.fn(async () => undefined),
+      remove: vi.fn(async () => undefined),
+      upsert: vi.fn(async () => undefined),
+    };
+    const coordinator = new VectorLifecycleCoordinator({
+      contextualEnricher: null,
+      debounceMs: 10,
+      embedProvider: null,
+      reader,
+      writer,
+    });
+
+    const result = await coordinator.reconcile({
+      prepare: vi.fn(() => ({ all: vi.fn(() => []) })),
+    } as never);
+
+    expect(result.orphansRemoved).toBe(1);
+    expect(writer.remove).toHaveBeenCalledWith('entry_orphan');
+    expect('remove' in reader).toBe(false);
+    expect('listIds' in writer).toBe(false);
+  });
   let vectorStore: ReturnType<typeof createMockVectorStore>;
   let embedProvider: ReturnType<typeof createMockEmbedProvider>;
   let eventBus: ReturnType<typeof createMockEventBus>;

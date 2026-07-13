@@ -345,10 +345,12 @@ describe('VectorService', () => {
       expect(results[0].semanticUsed).toBe(true);
     });
 
-    it('should return empty when no embedProvider', async () => {
+    it('should preserve sparse results when no embedProvider', async () => {
       const svc = createService({ embedProvider: null });
       const results = await svc.hybridSearch('query');
-      expect(results).toHaveLength(0);
+      expect(results).toHaveLength(1);
+      expect(results[0].vectorUsed).toBe(false);
+      expect(results[0].fallbackReason).toBe('embed_provider_missing');
     });
 
     it('should handle embed failure gracefully', async () => {
@@ -373,7 +375,7 @@ describe('VectorService', () => {
       const svc = createService();
       await svc.syncEntry(entry);
 
-      expect(embedProvider.embed).toHaveBeenCalledWith('Test\n\nHello world');
+      expect(embedProvider.embed).toHaveBeenCalledWith(['Test\n\nHello world']);
       expect(vectorStore.upsert).toHaveBeenCalledWith(
         expect.objectContaining({
           id: 'entry_123',
@@ -402,7 +404,7 @@ describe('VectorService', () => {
         content: { body: 'Description', code: 'let x = 1;' },
       });
 
-      expect(embedProvider.embed).toHaveBeenCalledWith('Complex\n\nDescription\n\nlet x = 1;');
+      expect(embedProvider.embed).toHaveBeenCalledWith(['Complex\n\nDescription\n\nlet x = 1;']);
     });
 
     it('should skip entry with empty content', async () => {

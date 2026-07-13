@@ -19,6 +19,7 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { IndexingPipeline } from '../../infrastructure/vector/IndexingPipeline.js';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import type { HybridRetriever } from '../search/HybridRetriever.js';
+import { asEmbeddingPort, type EmbeddingPort, type LegacyEmbedProvider } from './EmbeddingPort.js';
 import type { VectorChunkEnricher } from './EnrichmentTypes.js';
 import {
   parseRecipeIdFromRegionVectorId,
@@ -32,14 +33,11 @@ import {
   syncRecipeSemanticRegionVectors,
   testRecipeSemanticRegionGeneration,
 } from './RecipeRegionVectorIndex.js';
-import type { SyncCoordinator } from './SyncCoordinator.js';
+import type { VectorLifecycleCoordinator } from './SyncCoordinator.js';
 
 // ── Types ──
 
-export interface EmbedProvider {
-  embed(texts: string | string[]): Promise<number[] | number[][]>;
-  isAvailable?(): Promise<boolean>;
-}
+export type EmbedProvider = LegacyEmbedProvider | EmbeddingPort;
 
 export interface VectorServiceConfig {
   vectorStore: VectorStore;
@@ -130,8 +128,9 @@ export class VectorService {
   #hybridRetriever: HybridRetriever | null;
   #eventBus: EventBus | null;
   #embedProvider: EmbedProvider | null;
+  #embeddingPort: EmbeddingPort | null;
   #contextualEnricher: VectorChunkEnricher | null;
-  #syncCoordinator: SyncCoordinator | null = null;
+  #syncCoordinator: VectorLifecycleCoordinator | null = null;
   #autoSyncOnCrud: boolean;
   #syncDebounceMs: number;
   #drizzle: DrizzleDB | null;
@@ -150,6 +149,7 @@ export class VectorService {
     this.#hybridRetriever = config.hybridRetriever;
     this.#eventBus = config.eventBus;
     this.#embedProvider = config.embedProvider;
+    this.#embeddingPort = config.embedProvider ? asEmbeddingPort(config.embedProvider) : null;
     this.#contextualEnricher = config.contextualEnricher;
     this.#autoSyncOnCrud = config.autoSyncOnCrud;
     this.#syncDebounceMs = config.syncDebounceMs;
@@ -166,8 +166,10 @@ export class VectorService {
 
     // 延迟 import SyncCoordinator 避免循环依赖
     if (this.#autoSyncOnCrud && this.#eventBus) {
-      const { SyncCoordinator: SC } = await import('./SyncCoordinator.js');
-      this.#syncCoordinator = new SC({
+      const { VectorLifecycleCoordinator: LifecycleCoordinator } = await import(
+        './SyncCoordinator.js'
+      );
+      this.#syncCoordinator = new LifecycleCoordinator({
         vectorStore: this.#vectorStore,
         embedProvider: this.#embedProvider,
         contextualEnricher: this.#contextualEnricher,
@@ -359,11 +361,10 @@ export class VectorService {
 
     try {
       const t0 = performance.now();
-      const embedResult = await this.#embedProvider.embed(query);
+      const queryVector = await this.#embeddingPort!.embedQuery(query);
       const tEmbed = performance.now();
-      const queryVector = Array.isArray(embedResult[0]) ? embedResult[0] : embedResult;
 
-      const results = await this.#vectorStore.searchVector(queryVector as number[], {
+      const results = await this.#vectorStore.searchVector(queryVector, {
         topK,
         filter,
         minScore,
@@ -376,7 +377,7 @@ export class VectorService {
         | { hasVectors?: number; count?: number }
         | undefined;
       this.#logger.info(
-        `[VectorService] search: embed=${Math.round(tEmbed - t0)}ms hnsw=${Math.round(tHnsw - tEmbed)}ms total=${Math.round(tHnsw - t0)}ms results=${results.length} qdim=${(queryVector as number[])?.length ?? 0} nodes=${storeStats?.hasVectors ?? storeStats?.count ?? -1} adapter=${this.#vectorStore?.constructor?.name ?? 'unknown'}`
+        `[VectorService] search: embed=${Math.round(tEmbed - t0)}ms hnsw=${Math.round(tHnsw - tEmbed)}ms total=${Math.round(tHnsw - t0)}ms results=${results.length} qdim=${queryVector.length} nodes=${storeStats?.hasVectors ?? storeStats?.count ?? -1} adapter=${this.#vectorStore?.constructor?.name ?? 'unknown'}`
       );
 
       return results;
@@ -409,9 +410,6 @@ export class VectorService {
         | null;
     } = {}
   ): Promise<VectorHybridSearchHit[]> {
-    if (!this.#embedProvider) {
-      return [];
-    }
     if (!this.#hybridRetriever) {
       // 无 hybridRetriever 时降级为纯向量搜索
       const results = await this.search(query, { topK: opts.topK, filter: opts.filter ?? null });
@@ -436,10 +434,10 @@ export class VectorService {
       this.#logger.debug('[VectorService] embed circuit open, skipping embed');
     } else {
       try {
-        const embedResult = await this.#embedProvider.embed(query);
-        queryVector = Array.isArray(embedResult[0])
-          ? (embedResult[0] as number[])
-          : (embedResult as number[]);
+        queryVector = this.#embeddingPort ? await this.#embeddingPort.embedQuery(query) : null;
+        if (!queryVector) {
+          fallbackReason = 'embed_provider_missing';
+        }
         this.#embedConsecutiveFailures = 0;
       } catch (err: unknown) {
         this.#embedConsecutiveFailures++;
@@ -538,13 +536,12 @@ export class VectorService {
         return;
       }
 
-      const embedResult = await this.#embedProvider.embed(text);
-      const vector = Array.isArray(embedResult[0]) ? embedResult[0] : embedResult;
+      const vector = (await this.#embeddingPort!.embedDocuments([text]))[0] ?? [];
 
       await this.#vectorStore.upsert({
         id: `entry_${entry.id}`,
         content: text,
-        vector: vector as number[],
+        vector,
         metadata: {
           entryId: entry.id,
           title: entry.title,
@@ -693,10 +690,7 @@ export class VectorService {
 
     try {
       // 批量 embed
-      const embedResult = await this.#embedProvider.embed(textsWithIds.map((t) => t.text));
-      const vectors = Array.isArray(embedResult[0])
-        ? (embedResult as number[][])
-        : [embedResult as number[]];
+      const vectors = await this.#embeddingPort!.embedDocuments(textsWithIds.map((t) => t.text));
 
       // 批量 upsert
       const batch = textsWithIds.map((t, i) => ({
@@ -740,7 +734,10 @@ export class VectorService {
       };
     }
 
-    if (typeof this.#embedProvider.isAvailable !== 'function') {
+    if (
+      !('isAvailable' in this.#embedProvider) ||
+      typeof this.#embedProvider.isAvailable !== 'function'
+    ) {
       return {
         available: true,
         embedProviderConfigured: true,
@@ -811,6 +808,7 @@ export class VectorService {
 
     // 2. 切换 provider
     this.#embedProvider = newProvider;
+    this.#embeddingPort = asEmbeddingPort(newProvider);
     this.#syncCoordinator?.setEmbedProvider(newProvider);
     this.#indexingPipeline.setAiProvider(newProvider);
     opts.onProgress?.({ phase: 'migrate', detail: 'Provider switched' });

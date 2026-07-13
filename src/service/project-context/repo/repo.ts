@@ -17,6 +17,7 @@ import type {
   PackageSummary,
   PackageSystemSummary,
   PathSummary,
+  ProjectContextExecutionContext,
   ProjectContextJson,
   ProjectContextMetadata,
   ProjectContextQueryError,
@@ -44,6 +45,7 @@ import type {
   ProjectContextHandler,
   ProjectContextHandlerResult,
 } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { mapProjectContextHandler } from '../map/index.js';
 import {
   createProjectContextMapRepoSummary,
@@ -178,8 +180,10 @@ interface SourceFileFact {
 type PackageJsonRecord = Record<string, unknown>;
 
 export const repoProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readRepoPayload(request.payload);
   const repoIdentity = await resolveRepoIdentity({
     payload,
@@ -187,17 +191,20 @@ export const repoProjectContextHandler: ProjectContextHandler = async (
     repoId: request.scope.repoId,
     sourceFolder: request.scope.sourceFolder,
   });
+  throwIfProjectContextAborted(context);
   if (!repoIdentity.ok) {
     return createRepoFailure(repoIdentity.error, repoIdentity.errors);
   }
 
   const facts = await collectRepoContextFacts({
+    context,
     initialErrors: repoIdentity.errors,
     payload,
     project: request.project,
     repo: repoIdentity.identity,
     requestScope: request.scope,
   });
+  throwIfProjectContextAborted(context);
   const data = createRepoContextData(facts);
 
   return {
@@ -208,6 +215,7 @@ export const repoProjectContextHandler: ProjectContextHandler = async (
 };
 
 async function collectRepoContextFacts(input: {
+  context?: ProjectContextExecutionContext;
   initialErrors: readonly ProjectContextQueryError[];
   payload: RepoRequestPayload;
   project: CanonicalProjectContextRequest['project'];
@@ -215,13 +223,16 @@ async function collectRepoContextFacts(input: {
   requestScope: ProjectContextScope;
 }): Promise<RepoContextFacts> {
   const errors = [...input.initialErrors];
-  const manifestFacts = await readRepoManifestFacts(input.repo);
+  const manifestFacts = await readRepoManifestFacts(input.repo, input.context);
+  throwIfProjectContextAborted(input.context);
   errors.push(...manifestFacts.errors);
 
   const sourceFacts = await collectRepoSourceFacts({
+    context: input.context,
     maxFiles: input.payload.maxFiles,
     repo: input.repo,
   });
+  throwIfProjectContextAborted(input.context);
   errors.push(...sourceFacts.errors);
 
   const packageSystems = createPackageSystemSummaries({
@@ -251,7 +262,11 @@ async function collectRepoContextFacts(input: {
   const entrypoints =
     input.payload.includeEntrypoints === false
       ? []
-      : await createEntrypointSummaries({ manifestFacts, repo: input.repo });
+      : await createEntrypointSummaries({
+          context: input.context,
+          manifestFacts,
+          repo: input.repo,
+        });
   const commands =
     input.payload.includeCommands === false
       ? []
@@ -264,12 +279,14 @@ async function collectRepoContextFacts(input: {
       ? []
       : await createTopAreaSummaries({
           configFiles: manifestFacts.configFiles,
+          context: input.context,
           localPackages,
           repo: input.repo,
           sourceRoots: sourceFacts.sourceRoots,
           targets,
         });
   const mapFacts = await createRepoMapFacts({
+    context: input.context,
     payload: input.payload,
     project: input.project,
     repo: input.repo,
@@ -295,7 +312,11 @@ async function collectRepoContextFacts(input: {
   };
 }
 
-async function collectRepoSourceFacts(input: { repo: RepoIdentity; maxFiles?: number }): Promise<{
+async function collectRepoSourceFacts(input: {
+  repo: RepoIdentity;
+  maxFiles?: number;
+  context?: ProjectContextExecutionContext;
+}): Promise<{
   discovery: DiscoveryFacts;
   errors: ProjectContextQueryError[];
   sourceFiles: SourceFileFact[];
@@ -303,9 +324,11 @@ async function collectRepoSourceFacts(input: { repo: RepoIdentity; maxFiles?: nu
 }> {
   const errors: ProjectContextQueryError[] = [];
   const discovery = await collectDiscoveryFacts({
+    context: input.context,
     maxFiles: input.maxFiles ?? DEFAULT_MAX_FILES,
     repo: input.repo,
   });
+  throwIfProjectContextAborted(input.context);
   errors.push(...discovery.errors);
 
   const sourceRoots = await createSourceRootSummaries({
@@ -316,6 +339,7 @@ async function collectRepoSourceFacts(input: { repo: RepoIdentity; maxFiles?: nu
     discovery.files.length > 0
       ? { errors: [], files: [] }
       : await collectFallbackSourceFiles({
+          context: input.context,
           maxFiles: input.maxFiles,
           repo: input.repo,
           sourceRoots,
@@ -504,10 +528,14 @@ function loadProjectScopeForControlRoot(projectRoot: string): ProjectDescriptor 
   );
 }
 
-async function readRepoManifestFacts(repo: RepoIdentity): Promise<RepoManifestFacts> {
+async function readRepoManifestFacts(
+  repo: RepoIdentity,
+  context?: ProjectContextExecutionContext
+): Promise<RepoManifestFacts> {
   const configFiles: ConfigFileSummary[] = [];
   const errors: ProjectContextQueryError[] = [];
   for (const [filePath, kind] of Object.entries(CONFIG_FILE_KINDS)) {
+    throwIfProjectContextAborted(context);
     const absolutePath = path.join(repo.absoluteRoot, filePath);
     if (!(await pathExists(absolutePath))) {
       continue;
@@ -542,13 +570,19 @@ async function readRepoManifestFacts(repo: RepoIdentity): Promise<RepoManifestFa
 async function collectDiscoveryFacts(input: {
   repo: RepoIdentity;
   maxFiles: number;
+  context?: ProjectContextExecutionContext;
 }): Promise<DiscoveryFacts> {
   const registry = getDiscovererRegistry();
   const errors: ProjectContextQueryError[] = [];
   let conflict: ConflictResult | undefined;
   try {
-    conflict = await registry.analyzeConflict(input.repo.absoluteRoot);
+    throwIfProjectContextAborted(input.context);
+    conflict = await registry.analyzeConflict(input.repo.absoluteRoot, input.context);
+    throwIfProjectContextAborted(input.context);
   } catch (error) {
+    if (input.context?.signal?.aborted) {
+      throwIfProjectContextAborted(input.context);
+    }
     errors.push(
       createQueryError({
         code: 'query-unavailable',
@@ -572,7 +606,8 @@ async function collectDiscoveryFacts(input: {
   const selectedId = conflict?.recommended?.discovererId;
   const selected = selectedId
     ? registry.getAll().find((candidate) => candidate.id === selectedId)
-    : await registry.detect(input.repo.absoluteRoot);
+    : await registry.detect(input.repo.absoluteRoot, input.context);
+  throwIfProjectContextAborted(input.context);
   if (!selected) {
     errors.push(
       createQueryError({
@@ -585,8 +620,12 @@ async function collectDiscoveryFacts(input: {
   }
 
   try {
-    await selected.load(input.repo.absoluteRoot);
+    await selected.load(input.repo.absoluteRoot, input.context);
+    throwIfProjectContextAborted(input.context);
   } catch (error) {
+    if (input.context?.signal?.aborted) {
+      throwIfProjectContextAborted(input.context);
+    }
     errors.push(
       createQueryError({
         code: 'query-unavailable',
@@ -607,16 +646,19 @@ async function collectDiscoveryFacts(input: {
     };
   }
 
-  const targets = await readDiscovererTargets(selected, errors);
+  const targets = await readDiscovererTargets(selected, errors, input.context);
   // 声明式依赖图(2026-07-10 链路验通补齐):各 Discoverer 的 getDependencyGraph 一直
   // 有真实现(SPM target deps/easybox boxspec dependency/层级),但此前零消费方——
   // 主体图 API 的 edges 恒空。这里随 repo 事实一并带出;失败只降级不阻断。
-  const dependencyGraph = await readDiscovererDependencyGraph(selected, errors);
+  const dependencyGraph = await readDiscovererDependencyGraph(selected, errors, input.context);
   const sourceFiles: SourceFileFact[] = [];
   let truncated = false;
   for (const target of targets) {
-    const files = await readTargetFiles(selected, target, errors);
+    throwIfProjectContextAborted(input.context);
+    const files = await readTargetFiles(selected, target, errors, input.context);
+    throwIfProjectContextAborted(input.context);
     for (const file of files) {
+      throwIfProjectContextAborted(input.context);
       const sourceFile = normalizeDiscoveredFile(input.repo, target, file);
       if (!sourceFile) {
         continue;
@@ -662,11 +704,15 @@ async function collectDiscoveryFacts(input: {
  * 失败降级为 undefined 并登记 retryable 错误。
  */
 async function readDiscovererDependencyGraph(
-  discoverer: { getDependencyGraph(): Promise<unknown>; id: string },
-  errors: ProjectContextQueryError[]
+  discoverer: {
+    getDependencyGraph(context?: ProjectContextExecutionContext): Promise<unknown>;
+    id: string;
+  },
+  errors: ProjectContextQueryError[],
+  context?: ProjectContextExecutionContext
 ): Promise<RepoDependencyGraphSummary | undefined> {
   try {
-    const raw = (await discoverer.getDependencyGraph()) as {
+    const raw = (await discoverer.getDependencyGraph(context)) as {
       nodes?: unknown[];
       edges?: unknown[];
     } | null;
@@ -674,6 +720,7 @@ async function readDiscovererDependencyGraph(
     const rawEdges = Array.isArray(raw?.edges) ? raw.edges : [];
     const nodes: RepoDependencyGraphNode[] = [];
     for (const entry of rawNodes) {
+      throwIfProjectContextAborted(context);
       if (typeof entry === 'string' && entry.length > 0) {
         nodes.push({ id: entry });
         continue;
@@ -695,6 +742,7 @@ async function readDiscovererDependencyGraph(
     }
     const edges: RepoDependencyGraphEdge[] = [];
     for (const entry of rawEdges) {
+      throwIfProjectContextAborted(context);
       if (!entry || typeof entry !== 'object') {
         continue;
       }
@@ -720,6 +768,9 @@ async function readDiscovererDependencyGraph(
       ...(truncated ? { truncated: true } : {}),
     };
   } catch (error) {
+    if (context?.signal?.aborted) {
+      throwIfProjectContextAborted(context);
+    }
     errors.push(
       createQueryError({
         code: 'query-unavailable',
@@ -732,12 +783,21 @@ async function readDiscovererDependencyGraph(
 }
 
 async function readDiscovererTargets(
-  discoverer: { listTargets(): Promise<DiscoveredTarget[]>; id: string },
-  errors: ProjectContextQueryError[]
+  discoverer: {
+    listTargets(context?: ProjectContextExecutionContext): Promise<DiscoveredTarget[]>;
+    id: string;
+  },
+  errors: ProjectContextQueryError[],
+  context?: ProjectContextExecutionContext
 ): Promise<DiscoveredTarget[]> {
   try {
-    return (await discoverer.listTargets()).sort(compareDiscoveredTargets);
+    const targets = await discoverer.listTargets(context);
+    throwIfProjectContextAborted(context);
+    return targets.sort(compareDiscoveredTargets);
   } catch (error) {
+    if (context?.signal?.aborted) {
+      throwIfProjectContextAborted(context);
+    }
     errors.push(
       createQueryError({
         code: 'query-unavailable',
@@ -753,15 +813,24 @@ async function readDiscovererTargets(
 
 async function readTargetFiles(
   discoverer: {
-    getTargetFiles(target: DiscoveredTarget): Promise<DiscoveredFile[]>;
+    getTargetFiles(
+      target: DiscoveredTarget,
+      context?: ProjectContextExecutionContext
+    ): Promise<DiscoveredFile[]>;
     id: string;
   },
   target: DiscoveredTarget,
-  errors: ProjectContextQueryError[]
+  errors: ProjectContextQueryError[],
+  context?: ProjectContextExecutionContext
 ): Promise<DiscoveredFile[]> {
   try {
-    return await discoverer.getTargetFiles(target);
+    const files = await discoverer.getTargetFiles(target, context);
+    throwIfProjectContextAborted(context);
+    return files;
   } catch (error) {
+    if (context?.signal?.aborted) {
+      throwIfProjectContextAborted(context);
+    }
     errors.push(
       createQueryError({
         code: 'query-unavailable',
@@ -837,16 +906,19 @@ async function collectFallbackSourceFiles(input: {
   repo: RepoIdentity;
   sourceRoots: readonly PathSummary[];
   maxFiles?: number;
+  context?: ProjectContextExecutionContext;
 }): Promise<{ files: SourceFileFact[]; errors: ProjectContextQueryError[] }> {
   const maxFiles = input.maxFiles ?? DEFAULT_MAX_FILES;
   const files: SourceFileFact[] = [];
   const roots = input.sourceRoots.length > 0 ? input.sourceRoots.map((item) => item.path) : ['.'];
   for (const root of roots) {
+    throwIfProjectContextAborted(input.context);
     await collectSourceFilesUnder({
       absoluteRoot: path.join(input.repo.absoluteRoot, root),
       files,
       maxFiles,
       repoRoot: input.repo.absoluteRoot,
+      context: input.context,
     });
     if (files.length >= maxFiles) {
       return {
@@ -869,15 +941,19 @@ async function collectSourceFilesUnder(input: {
   repoRoot: string;
   files: SourceFileFact[];
   maxFiles: number;
+  context?: ProjectContextExecutionContext;
 }): Promise<void> {
   const pending = [input.absoluteRoot];
   while (pending.length > 0 && input.files.length < input.maxFiles) {
+    throwIfProjectContextAborted(input.context);
     const current = pending.pop();
     if (!current) {
       continue;
     }
     const entries = await readDirectoryEntries(current);
+    throwIfProjectContextAborted(input.context);
     for (const entry of entries) {
+      throwIfProjectContextAborted(input.context);
       const absolutePath = path.join(current, entry.name);
       if (entry.isDirectory()) {
         if (entry.name.startsWith('.') || SOURCE_SCAN_EXCLUDE_DIRS.has(entry.name)) {
@@ -1087,6 +1163,7 @@ function createLocalPackageSummaries(input: {
 async function createEntrypointSummaries(input: {
   repo: RepoIdentity;
   manifestFacts: RepoManifestFacts;
+  context?: ProjectContextExecutionContext;
 }): Promise<EntrypointSummary[]> {
   const entrypoints: EntrypointSummary[] = [];
   const packageJson = input.manifestFacts.packageJson;
@@ -1128,6 +1205,7 @@ async function createEntrypointSummaries(input: {
   }
 
   for (const filePath of HIGH_PRIORITY_ENTRY_FILES) {
+    throwIfProjectContextAborted(input.context);
     if (!(await pathExists(path.join(input.repo.absoluteRoot, filePath)))) {
       continue;
     }
@@ -1184,6 +1262,7 @@ async function createTopAreaSummaries(input: {
   targets: readonly TargetSummary[];
   localPackages: readonly PackageSummary[];
   configFiles: readonly ConfigFileSummary[];
+  context?: ProjectContextExecutionContext;
 }): Promise<PathSummary[]> {
   const priorityPaths = [
     ...input.sourceRoots.map((item) => ({ path: item.path, role: 'source-root' })),
@@ -1197,7 +1276,9 @@ async function createTopAreaSummaries(input: {
     ...input.configFiles.map((item) => ({ path: item.path, role: 'config' })),
   ];
   const directoryEntries = await readDirectoryEntries(input.repo.absoluteRoot);
+  throwIfProjectContextAborted(input.context);
   for (const entry of directoryEntries) {
+    throwIfProjectContextAborted(input.context);
     if (entry.name.startsWith('.') || SOURCE_SCAN_EXCLUDE_DIRS.has(entry.name)) {
       continue;
     }
@@ -1212,10 +1293,14 @@ async function createTopAreaSummaries(input: {
     priorityPaths.filter((entry) => entry.path !== '.'),
     (entry) => entry.path
   ).slice(0, TOP_AREA_LIMIT)) {
+    throwIfProjectContextAborted(input.context);
     summaries.push(
       createPathSummary({
         metadata: {
-          fileCount: await countTopAreaFiles(path.join(input.repo.absoluteRoot, item.path)),
+          fileCount: await countTopAreaFiles(
+            path.join(input.repo.absoluteRoot, item.path),
+            input.context
+          ),
           source: 'project-context-repo-top-area',
         },
         path: item.path,
@@ -1228,6 +1313,7 @@ async function createTopAreaSummaries(input: {
 }
 
 async function createRepoMapFacts(input: {
+  context?: ProjectContextExecutionContext;
   payload: RepoRequestPayload;
   project: CanonicalProjectContextRequest['project'];
   repo: RepoIdentity;
@@ -1250,19 +1336,22 @@ async function createRepoMapFacts(input: {
     };
   }
 
-  const result = await mapProjectContextHandler({
-    kind: 'map',
-    payload: {
-      moduleSeeds: moduleSeeds as ProjectContextJson[],
-      repoName: input.repo.repoName,
+  const result = await mapProjectContextHandler(
+    {
+      kind: 'map',
+      payload: {
+        moduleSeeds: moduleSeeds as ProjectContextJson[],
+        repoName: input.repo.repoName,
+      },
+      project: input.project,
+      scope: {
+        ...input.requestScope,
+        repoId: input.repo.repoId,
+        sourceFolder: input.repo.sourceFolder,
+      },
     },
-    project: input.project,
-    scope: {
-      ...input.requestScope,
-      repoId: input.repo.repoId,
-      sourceFolder: input.repo.sourceFolder,
-    },
-  });
+    input.context
+  );
   if (isUnavailableData(result.data)) {
     return {
       errors: [
@@ -1500,8 +1589,13 @@ async function readJsonObject(
   }
 }
 
-async function countTopAreaFiles(absolutePath: string): Promise<number> {
+async function countTopAreaFiles(
+  absolutePath: string,
+  context?: ProjectContextExecutionContext
+): Promise<number> {
+  throwIfProjectContextAborted(context);
   const stat = await readStat(absolutePath);
+  throwIfProjectContextAborted(context);
   if (!stat) {
     return 0;
   }
@@ -1514,11 +1608,15 @@ async function countTopAreaFiles(absolutePath: string): Promise<number> {
   let count = 0;
   const pending = [absolutePath];
   while (pending.length > 0 && count < 200) {
+    throwIfProjectContextAborted(context);
     const current = pending.pop();
     if (!current) {
       continue;
     }
-    for (const entry of await readDirectoryEntries(current)) {
+    const entries = await readDirectoryEntries(current);
+    throwIfProjectContextAborted(context);
+    for (const entry of entries) {
+      throwIfProjectContextAborted(context);
       if (entry.name.startsWith('.') || SOURCE_SCAN_EXCLUDE_DIRS.has(entry.name)) {
         continue;
       }

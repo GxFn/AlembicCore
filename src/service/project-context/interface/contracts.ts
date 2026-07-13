@@ -1,4 +1,5 @@
 import type {
+  ProjectContextExecutionContext,
   ProjectContextProjectIdentityInput,
   ProjectContextQueryError,
   ProjectContextRef,
@@ -42,7 +43,8 @@ export interface ProjectContextHandlerResult {
 }
 
 export type ProjectContextHandler = (
-  request: CanonicalProjectContextRequest
+  request: CanonicalProjectContextRequest,
+  context?: ProjectContextExecutionContext
 ) => Promise<ProjectContextHandlerResult> | ProjectContextHandlerResult;
 
 export type ProjectContextHandlerRegistry = Partial<

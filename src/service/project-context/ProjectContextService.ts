@@ -1,6 +1,7 @@
 import type {
   ProjectContext as ProjectContextContract,
   ProjectContextEnvelope,
+  ProjectContextExecutionContext,
   ProjectContextRequest,
   ProjectContextResult,
 } from '../../domain/project-context/index.js';
@@ -35,8 +36,11 @@ export class ProjectContextService implements ProjectContextContract {
     this.projectContext = createProjectContext(handlers);
   }
 
-  execute(input: ProjectContextRequest): Promise<ProjectContextEnvelope<ProjectContextResult>> {
-    return this.projectContext.execute(input);
+  execute(
+    input: ProjectContextRequest,
+    context?: ProjectContextExecutionContext
+  ): Promise<ProjectContextEnvelope<ProjectContextResult>> {
+    return this.projectContext.execute(input, context);
   }
 }
 

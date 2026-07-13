@@ -11,6 +11,7 @@ import path from 'node:path';
 
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import { ProjectRegistry } from '../../shared/ProjectRegistry.js';
+import type { KnowledgeRetrievalPort } from './KnowledgeRetrieval.js';
 
 /** Internal scorer document representation */
 export interface ScorerDocument {
@@ -459,6 +460,7 @@ export interface SearchCrossEncoder {
 
 /** SearchEngine constructor options */
 export interface SearchEngineOptions {
+  knowledgeRetrievalPort?: KnowledgeRetrievalPort | null;
   aiProvider?: SearchAiProvider | null;
   vectorStore?: SearchVectorStore | null;
   vectorService?: SearchVectorService | null;

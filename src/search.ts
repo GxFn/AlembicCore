@@ -9,6 +9,30 @@ export type { SearchContext, SearchItem } from './service/search/contextBoost.js
 export { contextBoost } from './service/search/contextBoost.js';
 export { FieldWeightedScorer } from './service/search/FieldWeightedScorer.js';
 export { HybridRetriever } from './service/search/HybridRetriever.js';
+export type {
+  HybridCandidateBatch,
+  HybridCandidateRetrieverOptions,
+  HybridCandidateSession,
+  KnowledgeRegionEvidence,
+  KnowledgeRetrievalCandidate,
+  KnowledgeRetrievalDiagnostics,
+  KnowledgeRetrievalPolicyOptions,
+  KnowledgeRetrievalPort,
+  KnowledgeRetrievalRequest,
+  KnowledgeRetrievalResult,
+  KnowledgeSparseRetriever,
+  KnowledgeTruthProjectionInput,
+  KnowledgeTruthProjectionResult,
+  KnowledgeTruthReader,
+  KnowledgeTruthRecord,
+  RawDenseCandidate,
+  RawSparseCandidate,
+} from './service/search/KnowledgeRetrieval.js';
+export {
+  HybridCandidateRetriever,
+  KnowledgeRetrievalPolicy,
+  KnowledgeTruthProjector,
+} from './service/search/KnowledgeRetrieval.js';
 export {
   AuthoritySignal,
   ContextMatchSignal,

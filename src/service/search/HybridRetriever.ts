@@ -80,7 +80,9 @@ export class HybridRetriever {
         data: result,
       };
       existing.denseRank = rank + 1;
-      existing.rrfScore += alpha * (1 / (k + rank + 1));
+      existing.denseSimilarity = result.score;
+      existing.denseContribution = alpha * (1 / (k + rank + 1));
+      existing.rrfScore += existing.denseContribution;
       existing.data = result;
       scores.set(id, existing);
     });
@@ -99,7 +101,9 @@ export class HybridRetriever {
         data: result,
       };
       existing.sparseRank = rank + 1;
-      existing.rrfScore += (1 - alpha) * (1 / (k + rank + 1));
+      existing.sparseScore = result.score;
+      existing.sparseContribution = (1 - alpha) * (1 / (k + rank + 1));
+      existing.rrfScore += existing.sparseContribution;
       if (!existing.data || !existing.data.item) {
         existing.data = result;
       }
@@ -109,10 +113,15 @@ export class HybridRetriever {
     // 按 RRF 分数降序排列
     const fused = [...scores.values()].sort((a, b) => b.rrfScore - a.rrfScore).slice(0, topK);
 
-    // 归一化 score 到 [0, 1] 方便下游使用
-    const maxRrf = fused.length > 0 ? fused[0].rrfScore : 1;
+    // Preserve the raw RRF total. A page-local maximum is not an absolute
+    // relevance scale and made every weak result page look fully confident.
     for (const item of fused) {
-      item.score = maxRrf > 0 ? item.rrfScore / maxRrf : 0;
+      item.score = item.rrfScore;
+      item.rrfContribution = {
+        dense: item.denseContribution ?? 0,
+        sparse: item.sparseContribution ?? 0,
+        total: item.rrfScore,
+      };
     }
 
     return fused;

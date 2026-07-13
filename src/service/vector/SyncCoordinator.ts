@@ -17,9 +17,10 @@ import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { knowledgeEntries } from '../../infrastructure/database/drizzle/schema.js';
 import type { EventBus } from '../../infrastructure/event/EventBus.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
+import { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import { queryNonDeprecatedEntries } from '../../repository/search/SearchRepoAdapter.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
+import { asEmbeddingPort } from './EmbeddingPort.js';
 import type { VectorChunkEnricher } from './EnrichmentTypes.js';
 import {
   parseRecipeIdFromRegionVectorId,
@@ -27,17 +28,47 @@ import {
   type RecipeRegionSourceEntry,
   syncRecipeSemanticRegionVectors,
 } from './RecipeRegionVectorIndex.js';
+import type { VectorIndexReader, VectorIndexWriter } from './VectorIndexPorts.js';
 import type { EmbedProvider } from './VectorService.js';
 
 // ── Types ──
 
-export interface SyncCoordinatorConfig {
-  vectorStore: VectorStore;
+export interface VectorLifecycleCoordinatorConfig {
+  /** @deprecated Compatibility aggregate; new wiring supplies reader + writer separately. */
+  vectorStore?: VectorStore;
+  reader?: VectorIndexReader;
+  writer?: VectorIndexWriter;
   embedProvider: EmbedProvider | null;
   contextualEnricher: VectorChunkEnricher | null;
   debounceMs: number;
   maxBatchSize?: number;
   drizzle?: DrizzleDB;
+}
+
+/** @deprecated Use VectorLifecycleCoordinatorConfig. */
+export type SyncCoordinatorConfig = VectorLifecycleCoordinatorConfig;
+
+class LifecycleVectorStoreBridge extends VectorStore {
+  readonly #reader: VectorIndexReader;
+  readonly #writer: VectorIndexWriter;
+
+  constructor(reader: VectorIndexReader, writer: VectorIndexWriter) {
+    super();
+    this.#reader = reader;
+    this.#writer = writer;
+  }
+
+  listIds(): Promise<string[]> {
+    return this.#reader.listIds();
+  }
+
+  remove(id: string): Promise<void> {
+    return this.#writer.remove(id);
+  }
+
+  batchUpsert(items: Parameters<VectorIndexWriter['batchUpsert']>[0]): Promise<void> {
+    return this.#writer.batchUpsert(items);
+  }
 }
 
 interface PendingChange {
@@ -62,8 +93,10 @@ export interface SyncCoordinatorReconcileResult {
 
 // ── Coordinator ──
 
-export class SyncCoordinator {
-  #vectorStore: VectorStore;
+export class VectorLifecycleCoordinator {
+  #reader: VectorIndexReader;
+  #writer: VectorIndexWriter;
+  #recipeRegionStore: VectorStore;
   #embedProvider: EmbedProvider | null;
   #contextualEnricher: VectorChunkEnricher | null;
   #debounceMs: number;
@@ -78,8 +111,15 @@ export class SyncCoordinator {
   #boundDeletedHandler: ((data: unknown) => void) | null = null;
   #boundLifecycleHandler: ((data: unknown) => void) | null = null;
 
-  constructor(config: SyncCoordinatorConfig) {
-    this.#vectorStore = config.vectorStore;
+  constructor(config: VectorLifecycleCoordinatorConfig) {
+    const reader = config.reader ?? config.vectorStore;
+    const writer = config.writer ?? config.vectorStore;
+    if (!reader || !writer) {
+      throw new Error('VectorLifecycleCoordinator requires reader and writer ports.');
+    }
+    this.#reader = reader;
+    this.#writer = writer;
+    this.#recipeRegionStore = config.vectorStore ?? new LifecycleVectorStoreBridge(reader, writer);
     this.#embedProvider = config.embedProvider;
     this.#contextualEnricher = config.contextualEnricher;
     this.#debounceMs = config.debounceMs;
@@ -199,7 +239,7 @@ export class SyncCoordinator {
 
     try {
       // 1. 获取向量索引中所有 ID
-      const vectorIds = new Set(await this.#vectorStore.listIds());
+      const vectorIds = new Set(await this.#reader.listIds());
 
       // 2. 获取 DB 中所有 active 知识条目 ID
       let dbEntries: Array<{ id: string; title?: string; content?: string; kind?: string }> = [];
@@ -238,7 +278,7 @@ export class SyncCoordinator {
       for (const vectorId of vectorIds) {
         if ((vectorId as string).startsWith('entry_') && !dbIdSet.has(vectorId as string)) {
           try {
-            await this.#vectorStore.remove(vectorId as string);
+            await this.#writer.remove(vectorId as string);
             result.orphansRemoved++;
           } catch (err: unknown) {
             // CO3 V1: a failed orphan removal used to vanish — it is now
@@ -266,7 +306,7 @@ export class SyncCoordinator {
           continue;
         }
         try {
-          await this.#vectorStore.remove(vectorId as string);
+          await this.#writer.remove(vectorId as string);
           result.recipeRegionOrphansRemoved++;
         } catch (err: unknown) {
           const message = err instanceof Error ? err.message : String(err);
@@ -302,7 +342,7 @@ export class SyncCoordinator {
       if (generationAvailable && missingEntries.length > 0) {
         await this.flush();
         try {
-          const reconciledVectorIds = new Set(await this.#vectorStore.listIds());
+          const reconciledVectorIds = new Set(await this.#reader.listIds());
           for (const entry of missingEntries) {
             if (reconciledVectorIds.has(`entry_${entry.id}`)) {
               result.missingSynced++;
@@ -486,7 +526,7 @@ export class SyncCoordinator {
     // 处理删除
     for (const entryId of removes) {
       try {
-        await this.#vectorStore.remove(`entry_${entryId}`);
+        await this.#writer.remove(`entry_${entryId}`);
       } catch (err: unknown) {
         // Removal failure does not block the batch, but it is no longer
         // silent — reconcile() repairs leftovers (CO3 V1 diagnostics).
@@ -523,10 +563,7 @@ export class SyncCoordinator {
         const hydrated = this.#hydrateEntryFields(validUpserts.map((u) => u.entryId));
         const texts = validUpserts.map((u) => this.#extractText(u));
         try {
-          const embedResult = await embedProvider.embed(texts);
-          const vectors = Array.isArray(embedResult[0])
-            ? (embedResult as number[][])
-            : [embedResult as number[]];
+          const vectors = await asEmbeddingPort(embedProvider).embedDocuments(texts);
 
           const items = validUpserts.map((u, i) => {
             const extra = hydrated.get(u.entryId);
@@ -551,7 +588,7 @@ export class SyncCoordinator {
             };
           });
 
-          await this.#vectorStore.batchUpsert(items);
+          await this.#writer.batchUpsert(items);
           upsertedCount = items.length;
 
           const regionEntries = validUpserts.map((change) =>
@@ -565,7 +602,7 @@ export class SyncCoordinator {
                 }
           );
           const regionResult = await syncRecipeSemanticRegionVectors(
-            this.#vectorStore,
+            this.#recipeRegionStore,
             embedProvider,
             regionEntries
           );
@@ -595,7 +632,7 @@ export class SyncCoordinator {
   async #removeRecipeRegions(entryId: string): Promise<void> {
     let vectorIds: string[];
     try {
-      vectorIds = await this.#vectorStore.listIds();
+      vectorIds = await this.#reader.listIds();
     } catch (err: unknown) {
       this.#logger.warn('[SyncCoordinator] recipe region list failed during removal', {
         entryId,
@@ -609,7 +646,7 @@ export class SyncCoordinator {
         parseRecipeIdFromRegionVectorId(vectorId) === entryId
       ) {
         try {
-          await this.#vectorStore.remove(vectorId);
+          await this.#writer.remove(vectorId);
         } catch (err: unknown) {
           this.#logger.warn('[SyncCoordinator] recipe region removal failed in batch', {
             entryId,
@@ -625,7 +662,10 @@ export class SyncCoordinator {
     if (!this.#embedProvider) {
       return false;
     }
-    if (typeof this.#embedProvider.isAvailable !== 'function') {
+    if (
+      !('isAvailable' in this.#embedProvider) ||
+      typeof this.#embedProvider.isAvailable !== 'function'
+    ) {
       return true;
     }
     try {
@@ -723,3 +763,9 @@ export class SyncCoordinator {
     return parts.join('\n\n') || change.entryId;
   }
 }
+
+/**
+ * Compatibility facade for existing Core/Alembic consumers. New maintenance
+ * wiring should name the provider-independent lifecycle responsibility.
+ */
+export class SyncCoordinator extends VectorLifecycleCoordinator {}

@@ -8,6 +8,7 @@ import type {
   RelationSummary,
   SymbolSummary,
 } from '../../../domain/project-context/index.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileFlowRelationRef } from '../shared/fileFlow-moduleLayers/index.js';
 import {
   createProjectContextFileRef,
@@ -42,8 +43,11 @@ export async function normalizeFileFlow(input: {
   exports: readonly ExtractedFileFlowExport[];
   callSites: readonly ExtractedFileFlowCallSite[];
   symbols: readonly SymbolSummary[];
+  signal?: AbortSignal;
 }): Promise<NormalizedFileFlow> {
+  throwIfProjectContextAborted(input);
   const importRelations = await normalizeImports(input);
+  throwIfProjectContextAborted(input);
   const exportSymbols = normalizeExportSymbols(input.symbols, input.exports);
   const exportRelations = normalizeExportRelations({ ...input, exports: input.exports });
   const callRelations = normalizeCallSites(input);
@@ -90,11 +94,14 @@ async function normalizeImports(input: {
   facts: SourceSliceFileFacts;
   fileRef: ProjectContextRef;
   imports: readonly ExtractedFileFlowImport[];
+  signal?: AbortSignal;
 }): Promise<{ relations: RelationSummary[]; warnings: FileFlowQueryFailure[] }> {
   const relations: RelationSummary[] = [];
   const warnings: FileFlowQueryFailure[] = [];
   for (const importRecord of input.imports) {
-    const target = await resolveImportTarget(input.facts, importRecord);
+    throwIfProjectContextAborted(input);
+    const target = await resolveImportTarget(input.facts, importRecord, input.signal);
+    throwIfProjectContextAborted(input);
     if (target.unresolved && target.reason === 'not-found') {
       warnings.push({
         code: 'query-unavailable',
@@ -283,7 +290,8 @@ function createRelationSummary(input: {
 
 async function resolveImportTarget(
   facts: SourceSliceFileFacts,
-  importRecord: ExtractedFileFlowImport
+  importRecord: ExtractedFileFlowImport,
+  signal?: AbortSignal
 ): Promise<ResolvedFileFlowImportTarget> {
   if (!isRelativeSpecifier(importRecord.specifier)) {
     return {
@@ -305,6 +313,7 @@ async function resolveImportTarget(
   }
 
   for (const candidate of createImportTargetCandidates(candidateBase)) {
+    throwIfProjectContextAborted({ signal });
     if (!isContainedProjectPath(candidate)) {
       continue;
     }
@@ -314,6 +323,7 @@ async function resolveImportTarget(
       continue;
     }
     if (await isFile(absolutePath)) {
+      throwIfProjectContextAborted({ signal });
       const filePath = toProjectContextPath(relativePath);
       return {
         filePath,

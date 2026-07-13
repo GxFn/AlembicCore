@@ -79,6 +79,11 @@ export interface RecipeSearchHitView {
   vectorUsed: boolean;
   semanticUsed: boolean;
   matchedFilters?: Record<string, string[]>;
+  denseSimilarity?: number;
+  denseRank?: number;
+  sparseScore?: number;
+  sparseRank?: number;
+  rrfContribution?: { dense: number; sparse: number; total: number };
   ref: RecipeContextRef;
 }
 
@@ -89,6 +94,7 @@ export interface RecipeSearchContext {
   semanticUsed: boolean;
   fallbackReason?: string;
   nextRefs: RecipeContextRef[];
+  candidateRecipeIds?: string[];
 }
 
 export interface RecipeSemanticRegionBlock {
@@ -97,6 +103,7 @@ export interface RecipeSemanticRegionBlock {
   score: number;
   content?: string;
   ref: RecipeContextRef;
+  denseSimilarity?: number;
 }
 
 export interface RecipePrimeContext {
@@ -105,6 +112,7 @@ export interface RecipePrimeContext {
   vectorUsed: boolean;
   fallbackReason?: string;
   nextRefs: RecipeContextRef[];
+  candidateRecipeIds?: string[];
 }
 
 export interface RecipeSourceRefGroup {

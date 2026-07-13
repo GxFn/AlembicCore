@@ -5,7 +5,12 @@
 // user installs Ollama and pulls the model). Injected into VectorService.
 // embedProvider, it transparently drives RecipeContext / prime semantic search.
 
-import type { EmbedProvider } from '../../service/vector/VectorService.js';
+import type {
+  EmbeddingCapabilityDescriptor,
+  EmbeddingExecutionContext,
+  EmbeddingPort,
+  LegacyEmbedProvider,
+} from '../../service/vector/EmbeddingPort.js';
 import Logger from '../logging/Logger.js';
 
 /** Minimal structural fetch contract so Core needs no DOM lib + is testable. */
@@ -58,7 +63,7 @@ const defaultFetch: FetchLike = (input, init) =>
     }
   ).fetch(input, init);
 
-export class OllamaEmbedProvider implements EmbedProvider {
+export class OllamaEmbedProvider implements EmbeddingPort, LegacyEmbedProvider {
   readonly model: string;
   readonly endpoint: string;
   readonly #timeoutMs: number;
@@ -88,13 +93,40 @@ export class OllamaEmbedProvider implements EmbedProvider {
     return single ? embeddings[0] : embeddings;
   }
 
-  async #embedBatch(input: string[]): Promise<number[][]> {
+  async embedQuery(text: string, context?: EmbeddingExecutionContext): Promise<number[]> {
+    return (await this.#embedBatch([text], context?.signal))[0] ?? [];
+  }
+
+  async embedDocuments(
+    texts: readonly string[],
+    context?: EmbeddingExecutionContext
+  ): Promise<number[][]> {
+    return texts.length === 0 ? [] : this.#embedBatch([...texts], context?.signal);
+  }
+
+  describeCapabilities(): EmbeddingCapabilityDescriptor {
+    return {
+      batchSupported: true,
+      formatProfile: 'symmetric',
+      inputKinds: ['query', 'document'],
+      model: this.model,
+      normalization: 'provider-defined',
+      provider: 'ollama',
+    };
+  }
+
+  async #embedBatch(input: string[], signal?: AbortSignal): Promise<number[][]> {
     // /api/embed is batch-native: input may be a string[] and returns one
     // embedding per input in order.
-    const response = await this.#request('POST', '/api/embed', {
-      input,
-      model: this.model,
-    });
+    const response = await this.#request(
+      'POST',
+      '/api/embed',
+      {
+        input,
+        model: this.model,
+      },
+      signal
+    );
     if (!response.ok) {
       const detail = await safeText(response);
       throw new Error(
@@ -171,7 +203,8 @@ export class OllamaEmbedProvider implements EmbedProvider {
   async #request(
     method: 'GET' | 'POST',
     path: string,
-    body?: Record<string, unknown>
+    body?: Record<string, unknown>,
+    signal?: AbortSignal
   ): Promise<FetchResponseLike> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.#timeoutMs);
@@ -180,9 +213,19 @@ export class OllamaEmbedProvider implements EmbedProvider {
         body: body ? JSON.stringify(body) : undefined,
         headers: body ? { 'content-type': 'application/json' } : undefined,
         method,
-        signal: controller.signal,
+        signal: signal ? AbortSignal.any([controller.signal, signal]) : controller.signal,
       });
     } catch (error) {
+      if (signal?.aborted) {
+        if (signal.reason instanceof Error && signal.reason.name === 'AbortError') {
+          throw signal.reason;
+        }
+        const abortError = new Error(
+          signal.reason instanceof Error ? signal.reason.message : 'Ollama embedding cancelled.'
+        );
+        abortError.name = 'AbortError';
+        throw abortError;
+      }
       if (isAbortError(error)) {
         throw new Error(
           `Ollama ${method} ${path} timed out after ${this.#timeoutMs}ms (endpoint ${this.endpoint}).`

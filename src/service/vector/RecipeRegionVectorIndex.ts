@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
+import { asEmbeddingPort } from './EmbeddingPort.js';
 import type { EmbedProvider } from './VectorService.js';
 
 export const RECIPE_SEMANTIC_REGION_METADATA_TYPE = 'recipe-semantic-region';
@@ -710,10 +711,9 @@ export async function syncRecipeSemanticRegionVectors(
 
   if (pendingChunks.length > 0) {
     try {
-      const embedResult = await embedProvider!.embed(pendingChunks.map((chunk) => chunk.content));
-      const vectors = Array.isArray(embedResult[0])
-        ? (embedResult as number[][])
-        : [embedResult as number[]];
+      const vectors = await asEmbeddingPort(embedProvider!).embedDocuments(
+        pendingChunks.map((chunk) => chunk.content)
+      );
       const items = pendingChunks.map((chunk, index) => ({
         id: chunk.id,
         content: chunk.content,
@@ -980,10 +980,7 @@ async function collectGenerationTestRetrievalSamples(
   for (const sampleQuery of queries) {
     const topK = sampleQuery.topK ?? 5;
     try {
-      const embedResult = await embedProvider.embed(sampleQuery.query);
-      const queryVector = Array.isArray(embedResult[0])
-        ? (embedResult[0] as number[])
-        : (embedResult as number[]);
+      const queryVector = await asEmbeddingPort(embedProvider).embedQuery(sampleQuery.query);
       const results = await vectorStore.searchVector(queryVector, {
         topK,
         minScore: sampleQuery.minScore,

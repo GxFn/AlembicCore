@@ -11,7 +11,11 @@
 import { WorkspaceResolver } from '../../shared/WorkspaceResolver.js';
 import type { ConflictResult, DetectMatch } from './DiscovererPreference.js';
 import { detectConflict, loadPreference } from './DiscovererPreference.js';
-import type { ProjectDiscoverer } from './ProjectDiscoverer.js';
+import {
+  type ProjectDiscoverer,
+  type ProjectDiscoveryExecutionContext,
+  throwIfProjectDiscoveryAborted,
+} from './ProjectDiscoverer.js';
 
 export class DiscovererRegistry {
   #discoverers: ProjectDiscoverer[] = [];
@@ -26,13 +30,11 @@ export class DiscovererRegistry {
   }
 
   /** 自动检测项目类型，返回最佳 Discoverer */
-  async detect(projectRoot: string) {
+  async detect(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
     const results = await Promise.all(
       this.#discoverers.map(async (d) => ({
         discoverer: d,
-        result: await d
-          .detect(projectRoot)
-          .catch(() => ({ match: false, confidence: 0, reason: 'detect error' })),
+        result: await detectWithCancellation(d, projectRoot, context),
       }))
     );
 
@@ -58,13 +60,11 @@ export class DiscovererRegistry {
    * 若存在用户偏好，将偏好 Discoverer 提升到首位。
    * @returns 按 confidence 降序排列的匹配结果（偏好优先）
    */
-  async detectAll(projectRoot: string) {
+  async detectAll(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
     const results = await Promise.all(
       this.#discoverers.map(async (d) => ({
         discoverer: d,
-        result: await d
-          .detect(projectRoot)
-          .catch(() => ({ match: false, confidence: 0, reason: 'detect error' })),
+        result: await detectWithCancellation(d, projectRoot, context),
       }))
     );
 
@@ -90,13 +90,14 @@ export class DiscovererRegistry {
    * 分析检测结果的冲突/模糊性
    * @returns 冲突分析结果，含 ambiguous 标记和推荐
    */
-  async analyzeConflict(projectRoot: string): Promise<ConflictResult> {
+  async analyzeConflict(
+    projectRoot: string,
+    context?: ProjectDiscoveryExecutionContext
+  ): Promise<ConflictResult> {
     const results = await Promise.all(
       this.#discoverers.map(async (d) => ({
         discoverer: d,
-        result: await d
-          .detect(projectRoot)
-          .catch(() => ({ match: false, confidence: 0, reason: 'detect error' })),
+        result: await detectWithCancellation(d, projectRoot, context),
       }))
     );
 
@@ -121,5 +122,23 @@ export class DiscovererRegistry {
   /** 获取所有已注册的 Discoverer */
   getAll() {
     return [...this.#discoverers];
+  }
+}
+
+async function detectWithCancellation(
+  discoverer: ProjectDiscoverer,
+  projectRoot: string,
+  context?: ProjectDiscoveryExecutionContext
+): Promise<{ match: boolean; confidence: number; reason: string }> {
+  throwIfProjectDiscoveryAborted(context);
+  try {
+    const result = await discoverer.detect(projectRoot, context);
+    throwIfProjectDiscoveryAborted(context);
+    return result;
+  } catch (_error) {
+    if (context?.signal?.aborted) {
+      throwIfProjectDiscoveryAborted(context);
+    }
+    return { confidence: 0, match: false, reason: 'detect error' };
   }
 }

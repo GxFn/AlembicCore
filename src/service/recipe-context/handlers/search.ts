@@ -26,7 +26,7 @@ export function makeSearchHandler(deps: RecipeContextDeps): RecipeContextHandler
     if (!query) {
       return failureResult('search', invalidPayloadDiagnostic('search requires payload.query.'));
     }
-    if (!deps.search) {
+    if (!deps.retrieval && !deps.search) {
       return failureResult(
         'search',
         queryUnavailableDiagnostic('No search engine is wired for this RecipeContext.')
@@ -37,18 +37,47 @@ export function makeSearchHandler(deps: RecipeContextDeps): RecipeContextHandler
     const limit = readNumber(request.payload, 'limit');
     const mode = readString(request.payload, 'mode');
 
-    const result = await deps.search.search(query, { filter, limit, mode });
+    const canonical = deps.retrieval
+      ? await deps.retrieval.retrieve({ filter, mode, query, topK: limit })
+      : null;
+    const result = canonical
+      ? {
+          fallbackReason: canonical.diagnostics.fallbackReason,
+          hits: canonical.candidates.map((candidate) => ({
+            denseRank: candidate.denseRank,
+            denseSimilarity: candidate.denseSimilarity,
+            matchedFilters: undefined,
+            recipeId: candidate.recipeId,
+            rrfContribution: candidate.rrfContribution,
+            score: candidate.score,
+            semanticUsed: candidate.semanticUsed,
+            sparseRank: candidate.sparseRank,
+            sparseScore: candidate.sparseScore,
+            title: typeof candidate.recipe.title === 'string' ? candidate.recipe.title : undefined,
+            vectorScore: candidate.denseSimilarity,
+            vectorUsed: candidate.vectorUsed,
+          })),
+          semanticUsed: canonical.candidates.some((candidate) => candidate.semanticUsed),
+          total: canonical.candidates.length,
+          vectorUsed: canonical.candidates.some((candidate) => candidate.vectorUsed),
+        }
+      : await deps.search!.search(query, { filter, limit, mode });
 
     const refs: RecipeContextRef[] = [];
     const hits: RecipeSearchHitView[] = result.hits.map((hit) => {
       const ref = recipeRef(hit.recipeId, { label: hit.title });
       refs.push(ref);
       return {
+        denseRank: hit.denseRank,
+        denseSimilarity: hit.denseSimilarity,
         matchedFilters: hit.matchedFilters,
         recipeId: hit.recipeId,
         ref,
         score: hit.score,
         semanticUsed: hit.semanticUsed,
+        sparseRank: hit.sparseRank,
+        sparseScore: hit.sparseScore,
+        rrfContribution: hit.rrfContribution,
         title: hit.title,
         vectorScore: hit.vectorScore,
         vectorUsed: hit.vectorUsed,
@@ -63,6 +92,7 @@ export function makeSearchHandler(deps: RecipeContextDeps): RecipeContextHandler
     const data: RecipeSearchContext = {
       fallbackReason: result.fallbackReason,
       hits,
+      candidateRecipeIds: result.hits.map((hit) => hit.recipeId),
       nextRefs: [],
       query,
       semanticUsed: result.semanticUsed,

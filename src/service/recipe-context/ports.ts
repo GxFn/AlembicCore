@@ -6,6 +6,7 @@
 // adapters/ layer.
 
 import type { RecipeMetadataFilter, RecipeRecord } from '../../domain/recipe-context/index.js';
+import type { KnowledgeRetrievalPort } from '../search/KnowledgeRetrieval.js';
 
 export interface RecipeReadPage {
   items: RecipeRecord[];
@@ -31,6 +32,11 @@ export interface RecipeSearchPortHit {
   vectorUsed: boolean;
   semanticUsed: boolean;
   matchedFilters?: Record<string, string[]>;
+  denseSimilarity?: number;
+  denseRank?: number;
+  sparseScore?: number;
+  sparseRank?: number;
+  rrfContribution?: { dense: number; sparse: number; total: number };
 }
 
 export interface RecipeSearchPortResult {
@@ -55,6 +61,7 @@ export interface RecipeRegionPortHit {
   regionClass: string;
   score: number;
   content?: string;
+  denseSimilarity?: number;
 }
 
 export interface RecipeRegionPortResult {
@@ -98,6 +105,10 @@ export interface RecipeSourceRefPort {
 export interface RecipeContextDeps {
   read: RecipeReadPort;
   sourceRefs: RecipeSourceRefPort;
+  /** Canonical Search/Prime candidate truth. Preferred by all new wiring. */
+  retrieval?: KnowledgeRetrievalPort | null;
+  /** @deprecated Compatibility-only SearchEngine adapter. */
   search?: RecipeSearchPort | null;
+  /** @deprecated Compatibility-only VectorService region adapter. */
   vector?: RecipeVectorPort | null;
 }

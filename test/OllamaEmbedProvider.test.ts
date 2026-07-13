@@ -99,6 +99,28 @@ describe('OllamaEmbedProvider — embed', () => {
     });
     await expect(provider.embed('x')).rejects.toThrow(/timed out after 20ms/);
   });
+
+  it('preserves caller cancellation as AbortError rather than reporting a timeout', async () => {
+    const hangingFetch: FetchLike = (_url, init?: FetchRequestInit) =>
+      new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      });
+    const controller = new AbortController();
+    const provider = new OllamaEmbedProvider({
+      fetchImpl: hangingFetch,
+      model: 'qwen3',
+      timeoutMs: 1_000,
+    });
+    const pending = provider.embedQuery('x', { signal: controller.signal });
+    controller.abort('caller-cancelled');
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(pending).rejects.not.toThrow(/timed out/);
+  });
 });
 
 describe('OllamaEmbedProvider — availability probe', () => {

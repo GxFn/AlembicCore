@@ -50,6 +50,11 @@ export interface ProjectContextRequest<TPayload = unknown> {
   payload?: TPayload;
 }
 
+/** Non-serialized execution controls. This object never enters request JSON or refs. */
+export interface ProjectContextExecutionContext {
+  signal?: AbortSignal;
+}
+
 export interface ProjectContextEnvelope<T = ProjectContextResult> {
   contractVersion: typeof PROJECT_CONTEXT_CONTRACT_VERSION;
   project: ProjectContextProject;
@@ -60,7 +65,10 @@ export interface ProjectContextEnvelope<T = ProjectContextResult> {
 }
 
 export interface ProjectContext {
-  execute(input: ProjectContextRequest): Promise<ProjectContextEnvelope<ProjectContextResult>>;
+  execute(
+    input: ProjectContextRequest,
+    context?: ProjectContextExecutionContext
+  ): Promise<ProjectContextEnvelope<ProjectContextResult>>;
 }
 
 export interface ProjectContextProjectIdentityInput {

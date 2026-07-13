@@ -737,7 +737,7 @@ describe('syncRecipeSemanticRegionVectors existing-id skip', () => {
     const before = (await store.listIds()).filter((id) =>
       id.startsWith('recipe_region_replace-safely_')
     );
-    embed.embed.mockRejectedValueOnce(new Error('embedding unavailable'));
+    embed.embed.mockRejectedValue(new Error('embedding unavailable'));
 
     const result = await syncRecipeSemanticRegionVectors(store, embed as never, [
       { ...base, doClause: 'replacement that cannot be embedded' },

@@ -27,7 +27,7 @@ export function makePrimeHandler(deps: RecipeContextDeps): RecipeContextHandler 
     const limit = readNumber(request.payload, 'limit');
     const regionClasses = readStringArray(request.payload, 'regionClasses');
 
-    if (!deps.vector) {
+    if (!deps.retrieval && !deps.vector) {
       const data: RecipePrimeContext = {
         blocks: [],
         fallbackReason: 'embed-provider-unavailable',
@@ -42,7 +42,37 @@ export function makePrimeHandler(deps: RecipeContextDeps): RecipeContextHandler 
       };
     }
 
-    const result = await deps.vector.searchRegions(query, { filter, limit, regionClasses });
+    const canonical = deps.retrieval
+      ? await deps.retrieval.retrieve({
+          filter,
+          query,
+          topK: limit,
+        })
+      : null;
+    const result = canonical
+      ? {
+          fallbackReason: canonical.diagnostics.fallbackReason,
+          hits: canonical.candidates
+            .flatMap((candidate) =>
+              candidate.regionEvidence
+                .filter(
+                  (evidence) =>
+                    !regionClasses?.length ||
+                    (evidence.regionClass && regionClasses.includes(evidence.regionClass))
+                )
+                .map((evidence) => ({
+                  content: evidence.content,
+                  denseSimilarity: evidence.denseSimilarity,
+                  id: evidence.id,
+                  recipeId: candidate.recipeId,
+                  regionClass: evidence.regionClass ?? 'unknown',
+                  score: candidate.score,
+                }))
+            )
+            .slice(0, limit ?? Number.MAX_SAFE_INTEGER),
+          vectorUsed: canonical.candidates.some((candidate) => candidate.vectorUsed),
+        }
+      : await deps.vector!.searchRegions(query, { filter, limit, regionClasses });
 
     const refs: RecipeContextRef[] = [];
     const blocks: RecipeSemanticRegionBlock[] = result.hits.map((hit) => {
@@ -50,6 +80,7 @@ export function makePrimeHandler(deps: RecipeContextDeps): RecipeContextHandler 
       refs.push(ref);
       return {
         content: hit.content,
+        denseSimilarity: hit.denseSimilarity,
         recipeId: hit.recipeId,
         ref,
         regionClass: hit.regionClass,
@@ -65,9 +96,20 @@ export function makePrimeHandler(deps: RecipeContextDeps): RecipeContextHandler 
         )
       );
     }
+    if (
+      canonical &&
+      new Set(blocks.map((block) => block.recipeId)).size < canonical.candidates.length
+    ) {
+      errors.push(
+        vectorUnavailableDiagnostic(
+          'Some canonical Recipe candidates have no matching semantic-region evidence; candidateRecipeIds remains authoritative.'
+        )
+      );
+    }
 
     const data: RecipePrimeContext = {
       blocks,
+      candidateRecipeIds: canonical?.candidates.map((candidate) => candidate.recipeId),
       fallbackReason: result.fallbackReason,
       nextRefs: [],
       query,

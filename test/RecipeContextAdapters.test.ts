@@ -10,11 +10,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
 import { KnowledgeService } from '../src/knowledge.js';
+import { createRecipeContextServiceFromCore as createPublicRecipeContextServiceFromCore } from '../src/recipe-context-capabilities.js';
 import { RecipeSourceRefRepositoryImpl } from '../src/repository/sourceref/RecipeSourceRefRepository.js';
 import {
   createRecipeContextServiceFromCore,
@@ -213,6 +214,77 @@ describe('vectorPortFromService over a real VectorService without an EmbedProvid
     const envelope = await service.execute({ kind: 'prime', payload: { query: 'persist' } });
     expect((envelope.data as { vectorUsed: boolean }).vectorUsed).toBe(false);
     expect(envelope.errors?.[0]?.code).toBe('vector-unavailable');
+  });
+});
+
+describe('public RecipeContext canonical retrieval wiring', () => {
+  it('accepts retrieval and does not invoke legacy search/vector facades', async () => {
+    const search = vi.fn();
+    const hybridSearch = vi.fn();
+    const retrieve = vi.fn(async () => ({
+      candidates: [
+        {
+          denseLaneUsed: true,
+          diagnostics: {
+            aggregatedRegionCount: 0,
+            candidateBudgetReached: false,
+            candidateWindow: 32,
+            exhausted: true,
+            filteredDeprecatedCount: 0,
+            filteredOrphanCount: 0,
+            refillRounds: 0,
+          },
+          recipe: { id: 'r1', lifecycle: 'active', title: 'Boundary' },
+          recipeId: 'r1',
+          regionEvidence: [{ denseSimilarity: 0.8, id: 'region-r1', regionClass: 'identity' }],
+          rrfContribution: { dense: 0.01, sparse: 0.008, total: 0.018 },
+          score: 0.018,
+          semanticUsed: true,
+          sparseLaneUsed: true,
+          vectorUsed: true,
+        },
+      ],
+      diagnostics: {
+        aggregatedRegionCount: 0,
+        candidateBudgetReached: false,
+        candidateWindow: 32,
+        exhausted: true,
+        filteredDeprecatedCount: 0,
+        filteredOrphanCount: 0,
+        refillRounds: 0,
+      },
+    }));
+    const service = createPublicRecipeContextServiceFromCore({
+      knowledge: knowledgeServiceWith([]),
+      retrieval: { retrieve },
+      searchEngine: { search },
+      sourceRefRepository: {
+        findByRecipeId: () => [],
+        findBySourcePath: () => [],
+        findByStatus: () => [],
+        findRenamed: () => [],
+        findStale: () => [],
+      },
+      vectorService: { hybridSearch },
+    });
+
+    const searchResult = await service.execute({
+      kind: 'search',
+      payload: { query: 'boundaries' },
+    });
+    const primeResult = await service.execute({
+      kind: 'prime',
+      payload: { query: 'boundaries' },
+    });
+
+    expect((searchResult.data as { candidateRecipeIds?: string[] }).candidateRecipeIds).toEqual([
+      'r1',
+    ]);
+    expect((primeResult.data as { candidateRecipeIds?: string[] }).candidateRecipeIds).toEqual([
+      'r1',
+    ]);
+    expect(search).not.toHaveBeenCalled();
+    expect(hybridSearch).not.toHaveBeenCalled();
   });
 });
 

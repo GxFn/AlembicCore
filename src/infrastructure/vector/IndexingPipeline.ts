@@ -11,6 +11,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { extname, join, relative } from 'node:path';
+import type { EmbeddingPort, LegacyEmbedProvider } from '../../service/vector/EmbeddingPort.js';
 import { computeContentHash } from '../../shared/contentHash.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import { KNOWLEDGE_BASE_DIR } from '../config/Defaults.js';
@@ -57,7 +58,7 @@ export class IndexingPipeline {
   constructor(
     options: {
       vectorStore?: VectorStore;
-      aiProvider?: { embed: (texts: string | string[]) => Promise<number[] | number[][]> };
+      aiProvider?: EmbeddingPort | LegacyEmbedProvider;
       scanDirs?: string[];
       projectRoot?: string;
       batchSize?: number;
@@ -101,9 +102,7 @@ export class IndexingPipeline {
   setVectorStore(store: VectorStore) {
     this.#vectorStore = store;
   }
-  setAiProvider(
-    provider: { embed: (texts: string | string[]) => Promise<number[] | number[][]> } | null
-  ) {
+  setAiProvider(provider: EmbeddingPort | LegacyEmbedProvider | null) {
     this.#aiProvider = provider;
     if (provider) {
       this.#batchEmbedder = new BatchEmbedder(provider, {

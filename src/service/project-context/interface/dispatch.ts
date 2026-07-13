@@ -1,4 +1,5 @@
 import type {
+  ProjectContextExecutionContext,
   ProjectContextQueryError,
   ProjectContextRequestKind,
 } from '../../../domain/project-context/index.js';
@@ -7,18 +8,23 @@ import type {
   ProjectContextHandlerRegistry,
   ProjectContextHandlerResult,
 } from './contracts.js';
+import { throwIfProjectContextAborted } from './execution.js';
 import { createUnavailableProjectContextData } from './response.js';
 
 export async function dispatchProjectContextRequest(
   request: CanonicalProjectContextRequest,
-  handlers: ProjectContextHandlerRegistry
+  handlers: ProjectContextHandlerRegistry,
+  context?: ProjectContextExecutionContext
 ): Promise<ProjectContextHandlerResult> {
+  throwIfProjectContextAborted(context);
   const handler = handlers[request.kind];
   if (!handler) {
     return createUnavailableResult(request.kind);
   }
 
-  return handler(request);
+  const result = await handler(request, context);
+  throwIfProjectContextAborted(context);
+  return result;
 }
 
 export function createUnavailableResult(

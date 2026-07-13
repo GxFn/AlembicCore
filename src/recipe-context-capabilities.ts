@@ -10,6 +10,7 @@ import type {
   RecipeSearchPayload,
   RecipeSourceRefPayload,
 } from './domain/recipe-context/index.js';
+import type { KnowledgeRetrievalPort } from './service/search/KnowledgeRetrieval.js';
 
 export type {
   RecipeContext,
@@ -124,6 +125,7 @@ export interface RecipeContextCoreServices {
   sourceRefRepository: RecipeContextSourceRefService;
   searchEngine?: RecipeContextSearchService | null;
   vectorService?: RecipeContextVectorService | null;
+  retrieval?: KnowledgeRetrievalPort | null;
 }
 
 export interface RecipeContextCapabilities {

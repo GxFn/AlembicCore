@@ -5,6 +5,7 @@
 // instances; this factory binds them to the read-only ports. searchEngine and
 // vectorService are optional.
 
+import type { KnowledgeRetrievalPort } from '../../search/KnowledgeRetrieval.js';
 import type { RecipeContextService } from '../RecipeContextService.js';
 import { createRecipeContextService } from '../RecipeContextService.js';
 import { type KnowledgeReadFacade, knowledgeReadPortFromService } from './knowledgeReadPort.js';
@@ -15,6 +16,7 @@ import { type VectorServiceFacade, vectorPortFromService } from './vectorPort.js
 export interface RecipeContextCoreParts {
   knowledge: KnowledgeReadFacade;
   sourceRefRepository: SourceRefRepositoryFacade;
+  retrieval?: KnowledgeRetrievalPort | null;
   searchEngine?: SearchEngineFacade | null;
   vectorService?: VectorServiceFacade | null;
 }
@@ -24,6 +26,7 @@ export function createRecipeContextServiceFromCore(
 ): RecipeContextService {
   return createRecipeContextService({
     read: knowledgeReadPortFromService(parts.knowledge),
+    retrieval: parts.retrieval,
     search: parts.searchEngine ? searchPortFromEngine(parts.searchEngine) : null,
     sourceRefs: sourceRefPortFromRepository(parts.sourceRefRepository),
     vector: parts.vectorService ? vectorPortFromService(parts.vectorService) : null,

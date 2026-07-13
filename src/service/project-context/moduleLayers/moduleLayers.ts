@@ -12,6 +12,7 @@ import type {
 } from '../../../domain/project-context/index.js';
 import { fileFlowProjectContextHandler } from '../fileFlow/index.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import {
   createProjectContextModuleLayerRef,
   resolveProjectContextModuleSeed,
@@ -37,13 +38,17 @@ interface InternalRelationRecord {
 }
 
 export const moduleLayersProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readModuleLayersPayload(request.payload);
   const seedResult = await resolveProjectContextModuleSeed({
     payload: request.payload,
     scope: request.scope,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   if (!seedResult.ok) {
     return createModuleLayersFailure(seedResult.error, seedResult.errors);
   }
@@ -51,12 +56,16 @@ export const moduleLayersProjectContextHandler: ProjectContextHandler = async (
   const errors = [...seedResult.errors];
   const fileFlows: FileFlowFacts[] = [];
   for (const file of seedResult.seed.ownedFiles) {
-    const result = await fileFlowProjectContextHandler({
-      kind: 'file-flow',
-      payload: { filePath: file.filePath },
-      project: request.project,
-      scope: request.scope,
-    });
+    throwIfProjectContextAborted(context);
+    const result = await fileFlowProjectContextHandler(
+      {
+        kind: 'file-flow',
+        payload: { filePath: file.filePath },
+        project: request.project,
+        scope: request.scope,
+      },
+      context
+    );
     if (result.errors) {
       errors.push(...result.errors);
     }

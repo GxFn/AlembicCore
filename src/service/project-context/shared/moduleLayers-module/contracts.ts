@@ -11,6 +11,7 @@ import type {
   ProjectContextRefScope,
   ProjectContextScope,
 } from '../../../../domain/project-context/index.js';
+import { throwIfProjectContextAborted } from '../../interface/execution.js';
 import { loadSourceSliceFile } from '../../sourceSlice/fileAccess.js';
 import { createProjectContextFileRef } from '../sourceSlice-fileSymbols/index.js';
 
@@ -60,7 +61,9 @@ export type ResolveProjectContextModuleSeedResult =
 export async function resolveProjectContextModuleSeed(input: {
   payload: unknown;
   scope: ProjectContextScope;
+  signal?: AbortSignal;
 }): Promise<ResolveProjectContextModuleSeedResult> {
+  throwIfProjectContextAborted(input);
   const payload = isRecord(input.payload) ? input.payload : {};
   const ref = readProjectContextRef(payload.ref);
   const metadata = isRecord(ref?.metadata) ? ref.metadata : {};
@@ -81,6 +84,7 @@ export async function resolveProjectContextModuleSeed(input: {
             includeVendor: input.scope.includeVendor,
             modulePath,
             projectRoot: input.scope.projectRoot,
+            signal: input.signal,
           })
         : [];
 
@@ -99,11 +103,13 @@ export async function resolveProjectContextModuleSeed(input: {
   const errors: ProjectContextQueryError[] = [];
   const ownedFiles: FileSummary[] = [];
   for (const filePath of ownedFilePaths) {
+    throwIfProjectContextAborted(input);
     const fileAccess = await loadSourceSliceFile({
       filePath,
       projectRoot: input.scope.projectRoot,
       repoId: input.scope.repoId,
       sourceFolder: input.scope.sourceFolder,
+      signal: input.signal,
     });
     if (!fileAccess.ok) {
       errors.push(
@@ -302,6 +308,7 @@ async function readModuleDirectoryFiles(input: {
   modulePath: string;
   includeGenerated: boolean;
   includeVendor: boolean;
+  signal?: AbortSignal;
 }): Promise<string[]> {
   const absoluteRoot = path.resolve(input.projectRoot);
   const absoluteModulePath = path.resolve(absoluteRoot, input.modulePath);
@@ -313,12 +320,15 @@ async function readModuleDirectoryFiles(input: {
   const files: string[] = [];
   const pending = [absoluteModulePath];
   while (pending.length > 0) {
+    throwIfProjectContextAborted(input);
     const current = pending.pop();
     if (!current) {
       continue;
     }
     const entries = await readDirectoryEntries(current);
+    throwIfProjectContextAborted(input);
     for (const entry of entries) {
+      throwIfProjectContextAborted(input);
       const absolutePath = path.join(current, entry.name);
       const relativePath = toProjectContextPath(path.relative(absoluteRoot, absolutePath));
       if (entry.isDirectory()) {

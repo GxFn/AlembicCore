@@ -22,6 +22,7 @@ import { CoarseRanker } from './CoarseRanker.js';
 import type { SearchItem } from './contextBoost.js';
 import { contextBoost } from './contextBoost.js';
 import { FieldWeightedScorer } from './FieldWeightedScorer.js';
+import type { KnowledgeRetrievalCandidate, KnowledgeRetrievalPort } from './KnowledgeRetrieval.js';
 import { MultiSignalRanker } from './MultiSignalRanker.js';
 import type {
   DbRow,
@@ -110,6 +111,7 @@ export class SearchEngine {
   aiProvider: SearchAiProvider | null;
   db: SearchDb;
   hybridRetriever: SearchHybridRetriever | null;
+  knowledgeRetrievalPort: KnowledgeRetrievalPort | null;
   #knowledgeRepo: SearchKnowledgeRepo;
   #sourceRefRepo: SearchSourceRefRepo;
   logger: ReturnType<typeof Logger.getInstance>;
@@ -130,6 +132,7 @@ export class SearchEngine {
     this.vectorStore = options.vectorStore || null;
     this.vectorService = options.vectorService || null;
     this.hybridRetriever = options.hybridRetriever || null;
+    this.knowledgeRetrievalPort = options.knowledgeRetrievalPort ?? null;
     this.scorer = new FieldWeightedScorer();
     this._coarseRanker = new CoarseRanker(
       options as {
@@ -285,6 +288,7 @@ export class SearchEngine {
     let semanticUsed: boolean | undefined;
     let vectorUsed: boolean | undefined;
     let filteredOrphanVectorCount = 0;
+    let canonicalRetrievalUsed = false;
 
     if ((!query || !query.trim()) && hasMetadataFilters) {
       results = this.#metadataFilterOnlySearch(type, limit, metadataFilters);
@@ -295,6 +299,31 @@ export class SearchEngine {
           // ── Weighted-First + Confidence Gate ──
           // 先跑 weighted（~40ms），评估是否需要 embed（2-22s）
           const weightedItems = this._scorerSearch(query, type, recallLimit, metadataFilters);
+          if (this.knowledgeRetrievalPort) {
+            try {
+              const canonical = await this.#retrieveCanonical(query, limit, metadataFilters, type);
+              results = canonical.items;
+              canonicalRetrievalUsed = true;
+              actualMode = canonical.vectorUsed
+                ? 'auto(canonical-hybrid)'
+                : 'auto(canonical-sparse)';
+              fallbackReason = canonical.fallbackReason;
+              semanticUsed = canonical.vectorUsed;
+              vectorUsed = canonical.vectorUsed;
+              filteredOrphanVectorCount += canonical.filteredOrphanCount;
+              break;
+            } catch (error) {
+              this.logger.warn('Canonical knowledge retrieval failed, falling back to weighted', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              results = weightedItems;
+              actualMode = 'auto(weighted-fallback)';
+              fallbackReason = 'knowledge_retrieval_failed';
+              semanticUsed = false;
+              vectorUsed = false;
+              break;
+            }
+          }
           const confidence = this.#computeWeightedConfidence(query, weightedItems, limit);
 
           if (confidence >= 60) {
@@ -394,6 +423,7 @@ export class SearchEngine {
           semanticUsed = semResult.semanticUsed;
           vectorUsed = semResult.vectorUsed;
           filteredOrphanVectorCount += semResult.filteredOrphanVectorCount ?? 0;
+          canonicalRetrievalUsed = semResult.canonical === true;
           break;
         }
         default:
@@ -403,7 +433,7 @@ export class SearchEngine {
     }
 
     // ── Ranking Pipeline ([CrossEncoder] → CoarseRanker → MultiSignalRanker → ContextBoost) ──
-    if (shouldRank && results.length > 0) {
+    if (shouldRank && !canonicalRetrievalUsed && results.length > 0) {
       results = await this._applyRanking(results, query, context);
     }
     results = results.slice(0, limit);
@@ -414,7 +444,7 @@ export class SearchEngine {
       query,
       mode: actualMode,
       type,
-      ranked: shouldRank && results.length > 0,
+      ranked: (shouldRank || canonicalRetrievalUsed) && results.length > 0,
     };
 
     // ── 搜索计时日志 ──
@@ -725,7 +755,34 @@ export class SearchEngine {
     semanticUsed?: boolean;
     vectorUsed?: boolean;
     filteredOrphanVectorCount?: number;
+    canonical?: boolean;
   }> {
+    if (this.knowledgeRetrievalPort) {
+      try {
+        const canonical = await this.#retrieveCanonical(query, limit, filters, type);
+        return {
+          actualMode: canonical.vectorUsed ? 'semantic' : 'weighted',
+          canonical: true,
+          fallbackReason: canonical.fallbackReason,
+          filteredOrphanVectorCount: canonical.filteredOrphanCount,
+          items: canonical.items,
+          semanticUsed: canonical.vectorUsed,
+          vectorUsed: canonical.vectorUsed,
+        };
+      } catch (error) {
+        this.logger.warn('Canonical knowledge retrieval failed, falling back to weighted', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return {
+          actualMode: 'weighted',
+          fallbackReason: 'knowledge_retrieval_failed',
+          items: this._scorerSearch(query, type, limit, filters),
+          semanticUsed: false,
+          vectorUsed: false,
+        };
+      }
+    }
+
     // 优先使用 VectorService (统一向量服务层)
     if (this.vectorService) {
       try {
@@ -1093,6 +1150,75 @@ export class SearchEngine {
       ok: true,
       items: liveItems,
       filteredOrphanVectorCount: Math.min(10_000, items.length - liveItems.length),
+    };
+  }
+
+  async #retrieveCanonical(
+    query: string,
+    topK: number,
+    filters: NormalizedSearchMetadataFilters,
+    type: string
+  ): Promise<{
+    items: SearchResultItem[];
+    vectorUsed: boolean;
+    fallbackReason?: string;
+    filteredOrphanCount: number;
+  }> {
+    const { type: requestedTypes, ...truthFilters } = filters;
+    const requestsRule =
+      type === 'rule' || requestedTypes?.some((value) => value.toLowerCase() === 'rule');
+    const canonicalFilter = {
+      ...truthFilters,
+      ...(requestsRule ? { kind: ['rule'] } : {}),
+    };
+    const result = await this.knowledgeRetrievalPort!.retrieve({
+      filter: Object.keys(canonicalFilter).length > 0 ? canonicalFilter : undefined,
+      query,
+      topK,
+    });
+    const items = result.candidates.map((candidate) => this.#mapKnowledgeCandidate(candidate));
+    this._supplementDetails(
+      items,
+      result.candidates.map((candidate) => candidate.recipe as DbRow)
+    );
+    return {
+      ...(result.diagnostics.fallbackReason
+        ? { fallbackReason: result.diagnostics.fallbackReason }
+        : {}),
+      filteredOrphanCount: result.diagnostics.filteredOrphanCount,
+      items,
+      vectorUsed: result.candidates.some((candidate) => candidate.vectorUsed),
+    };
+  }
+
+  #mapKnowledgeCandidate(candidate: KnowledgeRetrievalCandidate): SearchResultItem {
+    const recipe = candidate.recipe;
+    return {
+      ...recipe,
+      denseRank: candidate.denseRank,
+      denseSimilarity: candidate.denseSimilarity,
+      fallbackReason: candidate.fallbackReason,
+      id: candidate.recipeId,
+      kind: typeof recipe.kind === 'string' ? recipe.kind : 'pattern',
+      score: candidate.score,
+      scoreBreakdown: {
+        denseRank: candidate.denseRank,
+        denseSimilarity: candidate.denseSimilarity,
+        rrfContribution: candidate.rrfContribution,
+        sparseRank: candidate.sparseRank,
+        sparseScore: candidate.sparseScore,
+      },
+      semanticScore: candidate.denseSimilarity,
+      semanticUsed: candidate.semanticUsed,
+      sparseRank: candidate.sparseRank,
+      sparseScore: candidate.sparseScore,
+      title: typeof recipe.title === 'string' ? recipe.title : candidate.recipeId,
+      type: 'recipe',
+      vectorScore: candidate.denseSimilarity,
+      vectorUsed: candidate.vectorUsed,
+      rrfContribution: candidate.rrfContribution,
+      regionEvidence: candidate.regionEvidence,
+      retrievalDiagnostics: candidate.diagnostics,
     };
   }
 

@@ -6,6 +6,7 @@ import type {
   ProjectContextUnavailableData,
 } from '../../../domain/project-context/index.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileRef } from '../shared/sourceSlice-fileSymbols/index.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 import type { FileSymbolsQueryFailure, FileSymbolsRequestPayload } from './contracts.js';
@@ -14,8 +15,10 @@ import { summarizeFileSymbolNaming } from './naming.js';
 import { normalizeFileSymbols } from './normalize.js';
 
 export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readFileSymbolsPayload(request.payload);
   const ref = readProjectContextRef(payload.ref);
   const filePath = payload.filePath ?? ref?.scope.filePath ?? request.scope.activeFile;
@@ -32,7 +35,9 @@ export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
     projectRoot: request.scope.projectRoot,
     repoId: request.scope.repoId,
     sourceFolder: request.scope.sourceFolder,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {
     return createFileSymbolsFailure(fileAccess.failure);
   }

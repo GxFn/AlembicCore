@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import { computeContentHash } from '../../../shared/contentHash.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceQueryFailure } from './contracts.js';
 
 export type SourceSliceFileAccessResult =
@@ -13,13 +14,16 @@ export async function loadSourceSliceFile(input: {
   projectRoot: string;
   repoId?: string;
   sourceFolder?: string;
+  signal?: AbortSignal;
 }): Promise<SourceSliceFileAccessResult> {
+  throwIfProjectContextAborted(input);
   const identity = resolveSourceSliceFileIdentity(input);
   if (!identity.ok) {
     return identity;
   }
 
   const rootRealpath = await readRealpath(input.projectRoot);
+  throwIfProjectContextAborted(input);
   if (!rootRealpath) {
     return {
       failure: {
@@ -33,6 +37,7 @@ export async function loadSourceSliceFile(input: {
   }
 
   const fileRealpath = await readRealpath(identity.identity.absolutePath);
+  throwIfProjectContextAborted(input);
   if (!fileRealpath) {
     return {
       failure: {
@@ -58,6 +63,7 @@ export async function loadSourceSliceFile(input: {
 
   try {
     const stat = await fs.stat(identity.identity.absolutePath);
+    throwIfProjectContextAborted(input);
     if (!stat.isFile()) {
       return {
         failure: {
@@ -70,7 +76,11 @@ export async function loadSourceSliceFile(input: {
       };
     }
 
-    const text = await fs.readFile(identity.identity.absolutePath, 'utf8');
+    const text = await fs.readFile(identity.identity.absolutePath, {
+      encoding: 'utf8',
+      signal: input.signal,
+    });
+    throwIfProjectContextAborted(input);
     const lines = splitSourceTextLines(text);
     return {
       facts: {
@@ -85,6 +95,9 @@ export async function loadSourceSliceFile(input: {
       ok: true,
     };
   } catch (error) {
+    if (input.signal?.aborted) {
+      throwIfProjectContextAborted(input);
+    }
     return {
       failure: classifyReadFailure(error, identity.identity.filePath),
       ok: false,

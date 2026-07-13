@@ -7,6 +7,7 @@ import type {
 import { extractFileSymbolsFromSource } from '../fileSymbols/extract.js';
 import { normalizeFileSymbols } from '../fileSymbols/normalize.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileRef } from '../shared/sourceSlice-fileSymbols/index.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 import type { FileFlowQueryFailure, FileFlowRequestPayload } from './contracts.js';
@@ -14,8 +15,10 @@ import { extractFileFlowFromSource } from './extract.js';
 import { normalizeFileFlow } from './normalize.js';
 
 export const fileFlowProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readFileFlowPayload(request.payload);
   const ref = readProjectContextRef(payload.ref);
   const filePath = payload.filePath ?? ref?.scope.filePath ?? request.scope.activeFile;
@@ -32,7 +35,9 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     projectRoot: request.scope.projectRoot,
     repoId: request.scope.repoId,
     sourceFolder: request.scope.sourceFolder,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {
     return createFileFlowFailure(fileAccess.failure);
   }
@@ -68,7 +73,9 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     fileRef,
     imports: flowExtraction.imports,
     symbols: normalizedSymbols.symbols,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   const errors = [
     ...createUnavailableWarnings(fileAccess.facts.filePath, [
       flowExtraction.unavailableReason,

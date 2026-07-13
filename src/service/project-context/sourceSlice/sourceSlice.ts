@@ -6,6 +6,7 @@ import type {
   SourceSliceContext,
 } from '../../../domain/project-context/index.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import {
   createProjectContextFileRef,
   createProjectContextSourceRangeProjection,
@@ -15,8 +16,10 @@ import { loadSourceSliceFile } from './fileAccess.js';
 import { normalizeSourceSliceRange, readSourceSliceText } from './range.js';
 
 export const sourceSliceProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readSourceSlicePayload(request.payload);
   const ref = readProjectContextRef(payload.ref);
   const filePath = payload.filePath ?? ref?.scope.filePath;
@@ -33,7 +36,9 @@ export const sourceSliceProjectContextHandler: ProjectContextHandler = async (
     projectRoot: request.scope.projectRoot,
     repoId: request.scope.repoId,
     sourceFolder: request.scope.sourceFolder,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {
     return createSourceSliceFailure(fileAccess.failure);
   }

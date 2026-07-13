@@ -3,7 +3,7 @@
 // deterministic diagnostics, graceful vector degradation, and lifecycle
 // isolation (the ports are read-only by construction).
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createRecipeContextService,
   type RecipeContextDeps,
@@ -69,6 +69,7 @@ function fakeSourceRefPort(rows: RecipeSourceRefRow[]): RecipeSourceRefPort {
 function buildService(over: Partial<RecipeContextDeps> = {}) {
   const deps: RecipeContextDeps = {
     read: over.read ?? fakeReadPort([]),
+    retrieval: over.retrieval,
     search: over.search,
     sourceRefs: over.sourceRefs ?? fakeSourceRefPort([]),
     vector: over.vector,
@@ -212,6 +213,81 @@ describe('RecipeContextService — search', () => {
 });
 
 describe('RecipeContextService — prime', () => {
+  it('uses the same canonical ordered Recipe candidates as search', async () => {
+    const retrieve = vi.fn(async () => ({
+      candidates: [
+        {
+          denseLaneUsed: true,
+          diagnostics: {
+            aggregatedRegionCount: 0,
+            candidateBudgetReached: false,
+            candidateWindow: 32,
+            exhausted: true,
+            filteredDeprecatedCount: 0,
+            filteredOrphanCount: 0,
+            refillRounds: 0,
+          },
+          recipe: { id: 'r1', lifecycle: 'active', title: 'A' },
+          recipeId: 'r1',
+          regionEvidence: [{ denseSimilarity: 0.8, id: 'region-r1', regionClass: 'identity' }],
+          rrfContribution: { dense: 0.01, sparse: 0.008, total: 0.018 },
+          score: 0.018,
+          semanticUsed: true,
+          sparseLaneUsed: true,
+          vectorUsed: true,
+        },
+        {
+          denseLaneUsed: false,
+          diagnostics: {
+            aggregatedRegionCount: 0,
+            candidateBudgetReached: false,
+            candidateWindow: 32,
+            exhausted: true,
+            filteredDeprecatedCount: 0,
+            filteredOrphanCount: 0,
+            refillRounds: 0,
+          },
+          recipe: { id: 'r2', lifecycle: 'active', title: 'B' },
+          recipeId: 'r2',
+          regionEvidence: [],
+          rrfContribution: { dense: 0, sparse: 0.007, total: 0.007 },
+          score: 0.007,
+          semanticUsed: false,
+          sparseLaneUsed: true,
+          vectorUsed: false,
+        },
+      ],
+      diagnostics: {
+        aggregatedRegionCount: 0,
+        candidateBudgetReached: false,
+        candidateWindow: 32,
+        exhausted: true,
+        filteredDeprecatedCount: 0,
+        filteredOrphanCount: 0,
+        refillRounds: 0,
+      },
+    }));
+    const service = buildService({ retrieval: { retrieve } });
+
+    const search = await service.execute({ kind: 'search', payload: { query: 'boundaries' } });
+    const prime = await service.execute({
+      kind: 'prime',
+      payload: { query: 'boundaries', regionClasses: ['identity'] },
+    });
+
+    expect((search.data as { candidateRecipeIds?: string[] }).candidateRecipeIds).toEqual([
+      'r1',
+      'r2',
+    ]);
+    expect((prime.data as { candidateRecipeIds?: string[] }).candidateRecipeIds).toEqual([
+      'r1',
+      'r2',
+    ]);
+    expect((prime.data as { blocks: unknown[] }).blocks).toHaveLength(1);
+    expect(retrieve.mock.calls[0]?.[0]?.candidateFilter).toBeUndefined();
+    expect(retrieve.mock.calls[1]?.[0]?.candidateFilter).toBeUndefined();
+  });
+
   it('maps semantic-region blocks when the vector lane runs', async () => {
     const vector: RecipeVectorPort = {
       async searchRegions() {

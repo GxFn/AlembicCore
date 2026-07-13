@@ -831,7 +831,7 @@ describe('HybridRetriever', () => {
     expect(fused).toHaveLength(5);
   });
 
-  it('should normalize scores to [0, 1]', () => {
+  it('should preserve raw RRF scores without page-max normalization', () => {
     const retriever = new HybridRetriever({ rrfK: 60 });
     const fused = retriever.fuse({
       denseResults: [{ id: 'a', item: { id: 'a' } }],
@@ -843,8 +843,8 @@ describe('HybridRetriever', () => {
       expect(item.score).toBeGreaterThanOrEqual(0);
       expect(item.score).toBeLessThanOrEqual(1);
     }
-    // First item should have score = 1 (normalized max)
-    expect(fused[0].score).toBeCloseTo(1, 3);
+    expect(fused[0].score).toBeCloseTo(fused[0].rrfScore, 10);
+    expect(fused[0].score).toBeLessThan(1);
   });
 });
 

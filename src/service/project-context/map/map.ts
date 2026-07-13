@@ -10,6 +10,7 @@ import type {
   ModuleContext,
   ModuleLayerContext,
   ModuleSummary,
+  ProjectContextExecutionContext,
   ProjectContextJson,
   ProjectContextMetadata,
   ProjectContextQueryError,
@@ -24,6 +25,7 @@ import type {
   ProjectContextHandler,
   ProjectContextHandlerResult,
 } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { moduleProjectContextHandler } from '../module/index.js';
 import { moduleLayersProjectContextHandler } from '../moduleLayers/index.js';
 import {
@@ -35,8 +37,10 @@ import {
 import type { MapRequestPayload } from './contracts.js';
 
 export const mapProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readMapPayload(request.payload);
   const moduleSeedPayloads = readModuleSeedPayloads(request.payload);
   if (moduleSeedPayloads.length === 0) {
@@ -48,7 +52,7 @@ export const mapProjectContextHandler: ProjectContextHandler = async (
     return createMapFailure(error, []);
   }
 
-  const resolution = await resolveProjectMapModules(request, moduleSeedPayloads);
+  const resolution = await resolveProjectMapModules(request, moduleSeedPayloads, context);
   if (resolution.modules.length === 0) {
     const error = createQueryError({
       code: resolution.errors.some((item) => item.code === 'outside-scope')
@@ -65,17 +69,22 @@ export const mapProjectContextHandler: ProjectContextHandler = async (
 
 async function resolveProjectMapModules(
   request: CanonicalProjectContextRequest,
-  moduleSeedPayloads: readonly Record<string, unknown>[]
+  moduleSeedPayloads: readonly Record<string, unknown>[],
+  context?: ProjectContextExecutionContext
 ): Promise<{ errors: ProjectContextQueryError[]; modules: ProjectContextModuleMapModule[] }> {
   const errors: ProjectContextQueryError[] = [];
   const modules: ProjectContextModuleMapModule[] = [];
   for (const moduleSeedPayload of moduleSeedPayloads) {
-    const moduleResult = await moduleProjectContextHandler({
-      kind: 'module',
-      payload: { ...moduleSeedPayload, includeDependencies: true, includePublicSurfaces: false },
-      project: request.project,
-      scope: request.scope,
-    });
+    throwIfProjectContextAborted(context);
+    const moduleResult = await moduleProjectContextHandler(
+      {
+        kind: 'module',
+        payload: { ...moduleSeedPayload, includeDependencies: true, includePublicSurfaces: false },
+        project: request.project,
+        scope: request.scope,
+      },
+      context
+    );
     if (moduleResult.errors) {
       errors.push(...moduleResult.errors);
     }
@@ -83,12 +92,15 @@ async function resolveProjectMapModules(
       continue;
     }
 
-    const layerResult = await moduleLayersProjectContextHandler({
-      kind: 'module-layers',
-      payload: { ...moduleSeedPayload, includeBoundaryCrossings: true },
-      project: request.project,
-      scope: request.scope,
-    });
+    const layerResult = await moduleLayersProjectContextHandler(
+      {
+        kind: 'module-layers',
+        payload: { ...moduleSeedPayload, includeBoundaryCrossings: true },
+        project: request.project,
+        scope: request.scope,
+      },
+      context
+    );
     if (layerResult.errors) {
       errors.push(...layerResult.errors);
     }

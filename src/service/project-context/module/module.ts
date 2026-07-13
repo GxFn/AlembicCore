@@ -12,32 +12,40 @@ import type {
 import { fileFlowProjectContextHandler } from '../fileFlow/index.js';
 import { fileSymbolsProjectContextHandler } from '../fileSymbols/index.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { moduleLayersProjectContextHandler } from '../moduleLayers/index.js';
 import { resolveProjectContextModuleSeed } from '../shared/moduleLayers-module/index.js';
 import type { ModuleRequestPayload } from './contracts.js';
 
 export const moduleProjectContextHandler: ProjectContextHandler = async (
-  request
+  request,
+  context
 ): Promise<ProjectContextHandlerResult> => {
+  throwIfProjectContextAborted(context);
   const payload = readModulePayload(request.payload);
   const seedResult = await resolveProjectContextModuleSeed({
     payload: request.payload,
     scope: request.scope,
+    signal: context?.signal,
   });
+  throwIfProjectContextAborted(context);
   if (!seedResult.ok) {
     return createModuleFailure(seedResult.error, seedResult.errors);
   }
 
   const errors = [...seedResult.errors];
-  const moduleLayersResult = await moduleLayersProjectContextHandler({
-    kind: 'module-layers',
-    payload: {
-      ...copyRecordPayload(request.payload),
-      includeBoundaryCrossings: payload.includeDependencies !== false,
+  const moduleLayersResult = await moduleLayersProjectContextHandler(
+    {
+      kind: 'module-layers',
+      payload: {
+        ...copyRecordPayload(request.payload),
+        includeBoundaryCrossings: payload.includeDependencies !== false,
+      },
+      project: request.project,
+      scope: request.scope,
     },
-    project: request.project,
-    scope: request.scope,
-  });
+    context
+  );
   if (moduleLayersResult.errors) {
     errors.push(...moduleLayersResult.errors);
   }
@@ -48,12 +56,16 @@ export const moduleProjectContextHandler: ProjectContextHandler = async (
   const fileSymbols: FileSymbolContext[] = [];
   const fileFlows: FileFlowContext[] = [];
   for (const file of seedResult.seed.ownedFiles) {
-    const symbolsResult = await fileSymbolsProjectContextHandler({
-      kind: 'file-symbols',
-      payload: { filePath: file.filePath },
-      project: request.project,
-      scope: request.scope,
-    });
+    throwIfProjectContextAborted(context);
+    const symbolsResult = await fileSymbolsProjectContextHandler(
+      {
+        kind: 'file-symbols',
+        payload: { filePath: file.filePath },
+        project: request.project,
+        scope: request.scope,
+      },
+      context
+    );
     if (symbolsResult.errors) {
       errors.push(...symbolsResult.errors);
     }
@@ -61,12 +73,15 @@ export const moduleProjectContextHandler: ProjectContextHandler = async (
       fileSymbols.push(symbolsResult.data as FileSymbolContext);
     }
 
-    const flowResult = await fileFlowProjectContextHandler({
-      kind: 'file-flow',
-      payload: { filePath: file.filePath },
-      project: request.project,
-      scope: request.scope,
-    });
+    const flowResult = await fileFlowProjectContextHandler(
+      {
+        kind: 'file-flow',
+        payload: { filePath: file.filePath },
+        project: request.project,
+        scope: request.scope,
+      },
+      context
+    );
     if (flowResult.errors) {
       errors.push(...flowResult.errors);
     }
