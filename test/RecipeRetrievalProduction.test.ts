@@ -25,6 +25,7 @@ import {
   evaluateRecipeRetrievalReadiness,
   projectCompatibilityRecipeRetrievalProfile,
   projectRecipeRetrievalDocumentSet,
+  projectRecipeRetrievalSparseProjection,
   serializeRecipeRetrievalDocumentSetForSparse,
 } from '../src/service/knowledge/RecipeRetrieval.js';
 import { LifecycleStateMachine } from '../src/service/sustain/LifecycleStateMachine.js';
@@ -458,6 +459,48 @@ describe('Recipe retrieval profile truth and readiness', () => {
     expect(
       denseChunks.every((chunk) => chunk.metadata.documentSetHash === documentSet.documentSetHash)
     ).toBe(true);
+  });
+
+  it('preserves intent, boundary and support roles for native and compatibility sparse ranking', () => {
+    const legacy = new KnowledgeEntry({
+      ...recipeSource({
+        title: '模块依赖边界',
+        description: '功能模块通过基础设施协议保持单向依赖。',
+        whenClause: '新增模块依赖时',
+        doClause: '通过协议注入实现',
+        dontClause: '禁止一个功能模块直接引用另一个功能模块',
+        content: {
+          markdown: '组合根负责装配实现，功能模块保持可独立移除。',
+          rationale: '显式边界避免隐式耦合。',
+        },
+      }),
+      retrievalProfile: null,
+    });
+    const native = makeNativeEntry();
+
+    const compatibilitySet = projectRecipeRetrievalDocumentSet(legacy);
+    const compatibilitySparse = projectRecipeRetrievalSparseProjection(compatibilitySet);
+    const nativeSet = projectRecipeRetrievalDocumentSet(native);
+    const nativeSparse = projectRecipeRetrievalSparseProjection(nativeSet);
+
+    expect(compatibilitySet.profileMode).toBe('compatibility');
+    expect(compatibilitySparse.intentText).toContain(legacy.whenClause);
+    expect(compatibilitySparse.boundaryText).toContain(legacy.dontClause);
+    expect(compatibilitySparse.supportText).toContain('组合根负责装配实现');
+    expect(compatibilitySparse.text.indexOf(compatibilitySparse.intentText)).toBe(
+      compatibilitySparse.text.lastIndexOf(compatibilitySparse.intentText)
+    );
+    expect(
+      compatibilitySet.documents.find((document) => document.role === 'intent')?.sourceFields
+    ).toContain('retrievalProfile.scenarios');
+    expect(
+      compatibilitySet.documents.find((document) => document.role === 'guidance')?.sourceFields
+    ).toContain('retrievalProfile.exclusions');
+
+    expect(nativeSet.profileMode).toBe('native');
+    expect(nativeSparse.intentText).toContain(native.retrievalProfile?.summary.primary);
+    expect(nativeSparse.boundaryText).toContain(native.retrievalProfile?.exclusions[0]?.text);
+    expect(nativeSparse.supportText).toContain(native.content.markdown);
   });
 });
 

@@ -20,6 +20,7 @@ import {
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import {
   projectRecipeRetrievalDocumentSet,
+  projectRecipeRetrievalSparseProjection,
   serializeRecipeRetrievalDocumentSetForSparse,
 } from '../knowledge/RecipeRetrieval.js';
 import { parseRecipeIdFromRegionVectorId } from '../vector/RecipeRegionVectorIndex.js';
@@ -1542,14 +1543,25 @@ export class SearchEngine {
     } catch {
       /* ignore */
     }
-    // 提取 description 和 contentText 供 FieldWeightedScorer 字段级评分使用
-    const contentText = this._buildDocText(r);
+    const documentSet = projectRecipeRetrievalDocumentSet({
+      ...r,
+      content: parseJsonObject(r.content),
+      reasoning: parseJsonObject(r.reasoning),
+      retrievalProfile: r.retrievalProfile
+        ? (parseJsonObject(r.retrievalProfile) as unknown as RecipeRetrievalProfile)
+        : null,
+      tags: parseJsonArray(r.tags),
+    });
+    const sparseProjection = projectRecipeRetrievalSparseProjection(documentSet);
     return {
       type: 'knowledge',
       title: r.title,
       trigger: r.trigger || '',
       description: r.description || '',
-      contentText,
+      contentText: sparseProjection.text,
+      retrievalIntentText: sparseProjection.intentText,
+      retrievalBoundaryText: sparseProjection.boundaryText,
+      retrievalSupportText: sparseProjection.supportText,
       status: r.lifecycle,
       knowledgeType: r.knowledgeType,
       kind: r.kind || 'pattern',

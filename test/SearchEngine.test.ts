@@ -346,37 +346,92 @@ describe('SearchEngine', () => {
     expect(engine.getStats().cacheSize).toBe(1);
   });
 
-  test('indexes authoritative when/do/dont directives for candidate quality', async () => {
+  function legacyBoundaryRule() {
+    return {
+      id: 'layer-boundary-rule',
+      title: '分层依赖方向强制约束',
+      description:
+        'Features flow through Infrastructure into Core; Package.swift target dependencies enforce the direction.',
+      lifecycle: 'active',
+      language: 'swift',
+      category: 'architecture',
+      knowledgeType: 'boundary-constraint',
+      kind: 'rule',
+      content: JSON.stringify({
+        markdown:
+          'Every feature package stays independently removable because sibling target dependencies are absent.',
+        rationale: 'Independent feature ownership prevents implicit coupling.',
+      }),
+      reasoning: JSON.stringify({
+        whyStandard: 'A sibling feature import fails when its Package.swift dependency is absent.',
+      }),
+      tags: '["architecture","dependency","layering"]',
+      trigger: '@layered-dependency-direction',
+      whenClause: 'When adding package dependencies between feature modules',
+      doClause: 'Keep feature packages independent through one-way dependencies',
+      dontClause: 'Do not import one feature module from another feature directly',
+    };
+  }
+
+  function shallowLegacyRule(id, title, description) {
+    return {
+      id,
+      title,
+      description,
+      lifecycle: 'active',
+      language: 'swift',
+      category: 'architecture',
+      knowledgeType: 'guide',
+      kind: 'guide',
+      content: '{}',
+      reasoning: '{}',
+      tags: '[]',
+      trigger: `@${id}`,
+    };
+  }
+
+  test('ranks legacy package-boundary intent above shallow SwiftPM token overlap', async () => {
     const rows = [
-      {
-        id: 'surface-swift-app',
-        title: 'Swift app module lifecycle',
-        description: 'Generic application module integration',
-        lifecycle: 'active',
-        language: 'swift',
-        category: 'architecture',
-        knowledgeType: 'guide',
-        kind: 'guide',
-        content: '{}',
-        tags: '[]',
-        trigger: '',
-      },
-      {
-        id: 'layer-boundary-rule',
-        title: '分层依赖方向强制约束',
-        description: '功能层之间保持单向依赖',
-        lifecycle: 'active',
-        language: 'swift',
-        category: 'architecture',
-        knowledgeType: 'boundary-constraint',
-        kind: 'rule',
-        content: '{}',
-        tags: '["architecture"]',
-        trigger: '@layered-dependency-direction',
-        whenClause: 'When adding dependencies between feature modules',
-        doClause: 'Keep feature modules independent and dependencies layered',
-        dontClause: 'Do not import one feature module from another feature directly',
-      },
+      shallowLegacyRule('pure-swift', 'Pure Swift packages', 'Use Swift language features.'),
+      shallowLegacyRule('toolchain', 'SwiftPM toolchain', 'Configure Swift package builds.'),
+      shallowLegacyRule('feature-ui', 'Feature package UI', 'Build a feature package screen.'),
+      shallowLegacyRule('branch', 'Feature branch naming', 'Name a feature development branch.'),
+      legacyBoundaryRule(),
+    ];
+    const engine = new SearchEngine(makeMockDb(), {
+      knowledgeRepo: makeVectorTruthRepo(rows),
+      sourceRefRepo: makeSourceRefRepo(),
+    });
+
+    const result = await engine.search(
+      'How do I keep SwiftPM feature packages independent from each other?',
+      { limit: rows.length, mode: 'weighted', rank: false }
+    );
+    const targetRank = result.items.findIndex((item) => item.id === 'layer-boundary-rule');
+
+    expect(targetRank).toBeGreaterThanOrEqual(0);
+    expect(targetRank).toBeLessThan(3);
+  });
+
+  test('ranks legacy module exclusions above shallow feature and lifecycle labels', async () => {
+    const rows = [
+      shallowLegacyRule(
+        'feature-branch',
+        'Feature branch naming',
+        'Name a feature development branch.'
+      ),
+      shallowLegacyRule(
+        'feature-module-lifecycle',
+        'Feature module lifecycle',
+        'Initialize an application module.'
+      ),
+      shallowLegacyRule(
+        'feature-module-protocol',
+        'Feature module protocol',
+        'Define a module protocol.'
+      ),
+      shallowLegacyRule('direct-imports', 'Import ordering', 'Sort direct imports.'),
+      legacyBoundaryRule(),
     ];
     const engine = new SearchEngine(makeMockDb(), {
       knowledgeRepo: makeVectorTruthRepo(rows),
@@ -385,10 +440,12 @@ describe('SearchEngine', () => {
 
     const result = await engine.search(
       'What prevents one feature module from importing another feature directly?',
-      { limit: 2, mode: 'weighted', rank: false }
+      { limit: rows.length, mode: 'weighted', rank: false }
     );
+    const targetRank = result.items.findIndex((item) => item.id === 'layer-boundary-rule');
 
-    expect(result.items.map((item) => item.id)).toContain('layer-boundary-rule');
+    expect(targetRank).toBeGreaterThanOrEqual(0);
+    expect(targetRank).toBeLessThan(3);
   });
 
   test('metadata filters narrow results with AND across fields', async () => {

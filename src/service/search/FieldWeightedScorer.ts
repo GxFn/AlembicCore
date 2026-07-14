@@ -43,6 +43,9 @@ interface FieldWeightedDocument {
     title: string[];
     description: string[];
     content: string[];
+    retrievalIntent: string[];
+    retrievalBoundary: string[];
+    retrievalSupport: string[];
     kind: Set<string>;
     topics: Set<string>;
     allUnique: Set<string>;
@@ -90,6 +93,9 @@ export class FieldWeightedScorer implements Scorer {
     const knowledgeType = (meta.knowledgeType as string) || '';
     const kind = (meta.kind as string) || '';
     const contentText = (meta.contentText as string) || '';
+    const retrievalIntentText = (meta.retrievalIntentText as string) || '';
+    const retrievalBoundaryText = (meta.retrievalBoundaryText as string) || '';
+    const retrievalSupportText = (meta.retrievalSupportText as string) || '';
 
     // 独立分词每个字段
     const triggerTokens = tokenize(trigger);
@@ -97,6 +103,9 @@ export class FieldWeightedScorer implements Scorer {
     const descTokens = tokenize(description);
     // contentText 优先；若 meta 无 contentText 则用拼接文本 text 作为回退
     const contentTokens = tokenize(contentText || text);
+    const retrievalIntentTokens = tokenize(retrievalIntentText);
+    const retrievalBoundaryTokens = tokenize(retrievalBoundaryText);
+    const retrievalSupportTokens = tokenize(retrievalSupportText);
     const kindTokens = new Set(tokenize(kind).map(normalizeTopicToken));
     const topicTokens = new Set(
       tokenize([...tags, knowledgeType, kind].filter(Boolean).join(' ')).map(normalizeTopicToken)
@@ -130,6 +139,9 @@ export class FieldWeightedScorer implements Scorer {
         title: titleTokens,
         description: descTokens,
         content: contentTokens,
+        retrievalIntent: retrievalIntentTokens,
+        retrievalBoundary: retrievalBoundaryTokens,
+        retrievalSupport: retrievalSupportTokens,
         kind: kindTokens,
         topics: topicTokens,
         allUnique,
@@ -276,7 +288,19 @@ export class FieldWeightedScorer implements Scorer {
       totalScore +=
         CONTENT_WEIGHT * this._idfWeightedOverlap(queryTokens, doc.tokenizedFields.content);
 
-      // 6. Facet 评分 — language/category/knowledgeType 精确匹配
+      // 6. Canonical Recipe roles — only corroborated facts receive trigger-level priority.
+      // A token must occur in at least two projected roles, so a shallow title/directive word
+      // cannot multiply its score merely by being repeated inside one flattened document.
+      totalScore +=
+        TRIGGER_WEIGHT *
+        this._corroboratedRoleOverlap(
+          queryTokens,
+          doc.tokenizedFields.retrievalIntent,
+          doc.tokenizedFields.retrievalBoundary,
+          doc.tokenizedFields.retrievalSupport
+        );
+
+      // 7. Facet 评分 — language/category/knowledgeType 精确匹配
       totalScore += FACET_WEIGHT * this._facetScore(queryTokens, doc.fields);
 
       if (totalScore > 0) {
@@ -345,6 +369,28 @@ export class FieldWeightedScorer implements Scorer {
       }
     }
     return totalIdf > 0 ? matchedIdf / totalIdf : 0;
+  }
+
+  _corroboratedRoleOverlap(
+    queryTokens: string[],
+    intentTokens: string[],
+    boundaryTokens: string[],
+    supportTokens: string[]
+  ): number {
+    if (queryTokens.length === 0) {
+      return 0;
+    }
+    const query = new Set(queryTokens.map(normalizeTopicToken));
+    const roles = [intentTokens, boundaryTokens, supportTokens].map(
+      (tokens) => new Set(tokens.map(normalizeTopicToken))
+    );
+    let matched = 0;
+    for (const token of query) {
+      if (roles.filter((role) => role.has(token)).length >= 2) {
+        matched++;
+      }
+    }
+    return query.size > 0 ? matched / query.size : 0;
   }
 
   /** Tag 匹配评分 */

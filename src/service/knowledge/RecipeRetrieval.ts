@@ -53,6 +53,13 @@ export interface RecipeRetrievalDocumentSet {
   warnings: Array<{ code: string; message: string }>;
 }
 
+export interface RecipeRetrievalSparseProjection {
+  text: string;
+  intentText: string;
+  boundaryText: string;
+  supportText: string;
+}
+
 export interface RetrievalReadinessViolation {
   code: string;
   field?: string;
@@ -317,16 +324,42 @@ export function projectRecipeRetrievalDocumentSet(
   };
 }
 
-/** sparse lane 仅改变 role 权重，不改变 document set 中的事实。 */
+/**
+ * 将 canonical document roles 保留到 sparse scorer 边界。
+ *
+ * 旧实现通过重复 intent 字符串表达权重，但 tokenizer 会去重，角色信息实际丢失。
+ * 这里仅结构化既有 document facts；不翻译、不补同义词，也不改变 dense document set。
+ */
+export function projectRecipeRetrievalSparseProjection(
+  documentSet: RecipeRetrievalDocumentSet
+): RecipeRetrievalSparseProjection {
+  const eligible = documentSet.documents.filter((document) => document.candidateEligible);
+  const intentText = eligible
+    .filter((document) => document.role === 'intent')
+    .map((document) => document.text)
+    .join('\n');
+  const boundaryText = eligible
+    .filter((document) => document.role === 'guidance')
+    .map((document) => document.text)
+    .join('\n');
+  const supportText = eligible
+    .filter((document) => document.role === 'implementation' || document.role === 'rationale')
+    .map((document) => document.text)
+    .join('\n');
+
+  return {
+    text: [intentText, boundaryText, supportText].filter(Boolean).join('\n'),
+    intentText,
+    boundaryText,
+    supportText,
+  };
+}
+
+/** Compatibility string surface for callers that only accept one sparse text field. */
 export function serializeRecipeRetrievalDocumentSetForSparse(
   documentSet: RecipeRetrievalDocumentSet
 ): string {
-  return documentSet.documents
-    .filter((document) => document.candidateEligible)
-    .flatMap((document) =>
-      document.role === 'intent' ? [document.text, document.text] : [document.text]
-    )
-    .join('\n');
+  return projectRecipeRetrievalSparseProjection(documentSet).text;
 }
 
 export function evaluateRecipeRetrievalReadiness(
