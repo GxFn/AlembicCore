@@ -154,6 +154,13 @@ const requiredSubpathExports = {
     'ProjectContextCapabilities',
     'createProjectContextCapabilities',
   ],
+  '@alembic/core/project-context-foundation': [
+    'CERTIFIED_PROJECT_FACTS_CONSUMERS',
+    'CertifiedProjectFactsConsumerPort',
+    'FileCertifiedProjectFactsStore',
+    'NodeProjectContextFoundationHostPorts',
+    'captureCertifiedProjectFacts',
+  ],
   '@alembic/core/project-context-capabilities': [
     'ProjectContextCapabilities',
     'createProjectContextCapabilities',
@@ -373,6 +380,13 @@ const requiredTypeDeclarations = {
     'ProjectContextEnvelope',
     'ProjectContextRequest',
     'ProjectContextResult',
+  ],
+  '@alembic/core/project-context-foundation': [
+    'CertifiedProjectFactsArtifactV1',
+    'CertifiedProjectFactsConsumerBindingV1',
+    'ProjectContextFoundationCaptureInput',
+    'ProjectContextFoundationHostPorts',
+    'SourceRevisionVectorV1',
   ],
   '@alembic/core/project-context-capabilities': [
     'ProjectContextCapabilities',

@@ -62,6 +62,10 @@
       "types": "./dist/project-context.d.ts",
       "import": "./dist/project-context.js"
     },
+    "./project-context-foundation": {
+      "types": "./dist/projectContextFoundation.d.ts",
+      "import": "./dist/projectContextFoundation.js"
+    },
     "./project-context-capabilities": {
       "types": "./dist/project-context-capabilities.d.ts",
       "import": "./dist/project-context-capabilities.js"
