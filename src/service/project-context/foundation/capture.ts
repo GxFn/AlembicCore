@@ -66,6 +66,11 @@ interface CapturedRepository {
   revisionEntry: SourceRevisionVectorEntryV1;
 }
 
+interface StrictV2CaptureContext {
+  projectScopeManifest: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
+  requestMatrixHash: CanonicalSha256;
+}
+
 export class ProjectContextSourceStateDriftError extends Error {
   readonly code = 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT';
   readonly retryable = true;
@@ -99,8 +104,16 @@ export async function captureCertifiedProjectFacts(
   input: ProjectContextFoundationCaptureInput,
   ports: ProjectContextFoundationHostPorts
 ): Promise<CertifiedProjectFactsArtifactV1> {
+  assertLegacyCaptureEntry(input);
+  return captureCertifiedProjectFactsInternal(input, ports);
+}
+
+async function captureCertifiedProjectFactsInternal(
+  input: ProjectContextFoundationCaptureInput,
+  ports: ProjectContextFoundationHostPorts,
+  strictV2?: StrictV2CaptureContext
+): Promise<CertifiedProjectFactsArtifactV1> {
   validateCaptureInput(input);
-  const strictV2 = readStrictV2Context(input);
   const includeExcludePolicy = normalizeInventoryPolicy(input.inventoryPolicy);
   const includeExcludePolicyHash = hashCanonicalJson(includeExcludePolicy);
   const repositories = await captureRepositories(
@@ -116,12 +129,13 @@ export async function captureCertifiedProjectFacts(
     includeExcludePolicyHash
   );
   const { detail, chunks } = buildDetailPlane(repositories, input.detailPolicy, Boolean(strictV2));
-  const requestOutcomes = await captureRequestOutcomes(input, repositories, ports);
+  const requestOutcomes = await captureRequestOutcomes(input, repositories, ports, strictV2);
   await assertSourceStateStable(
     { ...input, inventoryPolicy: includeExcludePolicy },
     ports,
     includeExcludePolicyHash,
-    repositories
+    repositories,
+    Boolean(strictV2)
   );
   assertPortableSemanticJson(toProjectFactsJson(requestOutcomes), 'request outcomes');
   const legacyEntries = [...input.legacyEntries].sort((left, right) =>
@@ -190,45 +204,53 @@ export async function captureCertifiedProjectFactsV2(
   input: ProjectContextFoundationCaptureInputV2,
   ports: ProjectContextFoundationHostPorts
 ): Promise<CertifiedProjectFactsArtifactV1> {
-  verifyProjectScopeCaptureBindingV1(input.projectScope);
-  verifyProjectContextRequestMatrixV2(input.requestMatrix, input.projectScope.manifest);
-  if (input.requestMatrix.projectScopeHash !== input.projectScope.manifest.canonicalScopeHash) {
+  const { projectScope, requestMatrix } = snapshotStrictV2AuthorityInput(input);
+  verifyProjectScopeCaptureBindingV1(projectScope);
+  verifyProjectContextRequestMatrixV2(requestMatrix, projectScope.manifest);
+  if (requestMatrix.projectScopeHash !== projectScope.manifest.canonicalScopeHash) {
     throw new TypeError('Strict request matrix is bound to a different accepted project scope.');
   }
-  const expectedRepositories = input.projectScope.manifest.repositories;
-  const actualRepositories = input.projectScope.repositories.map(
+  const expectedRepositories = projectScope.manifest.repositories;
+  const actualRepositories = projectScope.repositories.map(
     ({ sourceRoot: _sourceRoot, ...repository }) => repository
   );
   if (hashCanonicalJson(expectedRepositories) !== hashCanonicalJson(actualRepositories)) {
     throw new TypeError('Runtime capture repositories do not match the accepted scope receipt.');
   }
-  const artifact = await captureCertifiedProjectFacts(
-    {
-      ...input,
-      projectMode: input.projectScope.manifest.projectMode,
-      repositories: input.projectScope.repositories,
-      requestPlans: input.requestMatrix.plans,
-      projections: Object.fromEntries(
-        CERTIFIED_PROJECT_FACTS_CONSUMERS.map((consumer) => [
+  deepFreezeStrictV2Authority(projectScope);
+  deepFreezeStrictV2Authority(requestMatrix);
+  const captureInput: ProjectContextFoundationCaptureInput = {
+    projectMode: projectScope.manifest.projectMode,
+    repositories: projectScope.repositories,
+    inventoryPolicy: input.inventoryPolicy,
+    detailPolicy: input.detailPolicy,
+    requestPlans: requestMatrix.plans,
+    legacyEntries: input.legacyEntries,
+    projections: Object.fromEntries(
+      CERTIFIED_PROJECT_FACTS_CONSUMERS.map((consumer) => [
+        consumer,
+        {
+          authority: 'strict-v2-post-open-adapter-required',
+          compatibilityProjection: true,
           consumer,
-          {
-            authority: 'strict-v2-post-open-adapter-required',
-            compatibilityProjection: true,
-            consumer,
-          },
-        ])
-      ) as ProjectContextFoundationCaptureInput['projections'],
-      certification: {
-        ...input.certification,
-        scopeIdentityHash: input.projectScope.manifest.canonicalScopeHash,
-      },
+        },
+      ])
+    ) as ProjectContextFoundationCaptureInput['projections'],
+    certification: {
+      ...input.certification,
+      scopeIdentityHash: projectScope.manifest.canonicalScopeHash,
     },
-    ports
-  );
+    ...(input.signal ? { signal: input.signal } : {}),
+  };
+  const strictV2: StrictV2CaptureContext = {
+    projectScopeManifest: projectScope.manifest,
+    requestMatrixHash: requestMatrix.matrixHash,
+  };
+  const artifact = await captureCertifiedProjectFactsInternal(captureInput, ports, strictV2);
   const matrixResult = evaluateProjectContextRequestMatrixV2(
-    input.requestMatrix,
+    requestMatrix,
     artifact.manifest.requestEnvelopeIndexV2 ?? [],
-    input.projectScope.manifest
+    projectScope.manifest
   );
   if (!matrixResult.ok) {
     throw new TypeError(
@@ -242,7 +264,8 @@ async function assertSourceStateStable(
   input: ProjectContextFoundationCaptureInput,
   ports: ProjectContextFoundationHostPorts,
   includeExcludePolicyHash: CanonicalSha256,
-  captured: CapturedRepository[]
+  captured: CapturedRepository[],
+  includeAuthorityV2: boolean
 ): Promise<void> {
   let verified: CapturedRepository[];
   try {
@@ -250,7 +273,7 @@ async function assertSourceStateStable(
       input,
       ports,
       includeExcludePolicyHash,
-      Boolean(readStrictV2Context(input))
+      includeAuthorityV2
     );
   } catch (error) {
     if (isAbortLike(error, input.signal)) {
@@ -720,6 +743,7 @@ async function captureRepositories(
           eligibleInventoryHash,
           workingTreeContentHash,
         },
+        includeAuthorityV2,
         input,
         ports,
         repository,
@@ -776,6 +800,7 @@ async function verifyCapturedSnapshot(input: {
   candidate: Parameters<
     NonNullable<ProjectContextFoundationHostPorts['verifySnapshot']>
   >[0]['candidate'];
+  includeAuthorityV2: boolean;
   input: ProjectContextFoundationCaptureInput;
   ports: ProjectContextFoundationHostPorts;
   repository: ProjectContextFoundationRepositoryInput;
@@ -827,6 +852,7 @@ async function verifyCapturedSnapshot(input: {
 }
 
 async function captureLegacyContentTerminalState(input: {
+  includeAuthorityV2: boolean;
   input: ProjectContextFoundationCaptureInput;
   ports: ProjectContextFoundationHostPorts;
   repository: ProjectContextFoundationRepositoryInput;
@@ -839,14 +865,13 @@ async function captureLegacyContentTerminalState(input: {
   // Legacy content hosts cannot attest snapshots, so Core closes their open interval
   // by rebuilding the complete terminal inventory and content with the same policy.
   throwIfAborted(input.input.signal);
-  const includeAuthorityV2 = Boolean(readStrictV2Context(input.input));
   const descriptors = normalizeFileDescriptors(
     await input.ports.enumerateEligibleFiles({
       repository: input.repository,
       policy: input.input.inventoryPolicy,
       signal: input.input.signal,
     }),
-    includeAuthorityV2
+    input.includeAuthorityV2
   );
   throwIfAborted(input.input.signal);
   const files: ProjectFactsInventoryFileV1[] = [];
@@ -867,7 +892,7 @@ async function captureLegacyContentTerminalState(input: {
       sizeBytes: copied.byteLength,
       blobSha256: hashBytes(copied),
       ownerModuleIds: uniqueStrings(descriptor.ownerModuleIds ?? []),
-      ...(includeAuthorityV2
+      ...(input.includeAuthorityV2
         ? { ownersV2: normalizeProjectContextInventoryOwnersV2(descriptor) }
         : {}),
     });
@@ -1105,7 +1130,8 @@ function buildDetailPlane(
 async function captureRequestOutcomes(
   input: ProjectContextFoundationCaptureInput,
   repositories: CapturedRepository[],
-  ports: ProjectContextFoundationHostPorts
+  ports: ProjectContextFoundationHostPorts,
+  strictV2?: StrictV2CaptureContext
 ): Promise<ProjectContextRequestOutcomeV1[]> {
   const outcomes: ProjectContextRequestOutcomeV1[] = [];
   for (const plan of [...input.requestPlans].sort(compareRequestPlans)) {
@@ -1116,7 +1142,7 @@ async function captureRequestOutcomes(
     }
     const selector = toProjectFactsJson(plan.selector);
     const scope = toProjectFactsJson(plan.scope);
-    const strictIdentity = buildStrictRequestIdentity(plan, input);
+    const strictIdentity = buildStrictRequestIdentity(plan, strictV2);
     if (plan.applicability === 'not-applicable') {
       const output = toProjectFactsJson({ reason: plan.typedReason, status: 'not-applicable' });
       outcomes.push({
@@ -1914,34 +1940,58 @@ function compareRequestPlans(
   );
 }
 
-function readStrictV2Context(input: ProjectContextFoundationCaptureInput):
-  | {
-      projectScopeManifest: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
-      requestMatrixHash: CanonicalSha256;
-    }
-  | undefined {
-  const candidate = input as Partial<ProjectContextFoundationCaptureInputV2>;
-  if (!candidate.projectScope || !candidate.requestMatrix) {
-    return undefined;
+function assertLegacyCaptureEntry(input: ProjectContextFoundationCaptureInput): void {
+  if (Reflect.has(input, 'projectScope') || Reflect.has(input, 'requestMatrix')) {
+    throw new TypeError(
+      'Strict-v2 fields require the explicit captureCertifiedProjectFactsV2 entry and a verified runtime scope binding.'
+    );
   }
-  verifyProjectScopeManifestV1(candidate.projectScope.manifest);
-  verifyProjectContextRequestMatrixV2(candidate.requestMatrix, candidate.projectScope.manifest);
-  if (
-    candidate.requestMatrix.projectScopeHash !== candidate.projectScope.manifest.canonicalScopeHash
-  ) {
-    throw new TypeError('Strict request matrix scope hash mismatch.');
+}
+
+function snapshotStrictV2AuthorityInput(
+  input: ProjectContextFoundationCaptureInputV2
+): Pick<ProjectContextFoundationCaptureInputV2, 'projectScope' | 'requestMatrix'> {
+  try {
+    // Validation and capture must consume the same detached values even when a JS caller
+    // supplies accessors or mutates the original authority object during argument reads.
+    return {
+      projectScope: structuredClone(input.projectScope),
+      requestMatrix: structuredClone(input.requestMatrix),
+    };
+  } catch (error) {
+    throw new TypeError('Strict-v2 authority inputs must be detached structural data.', {
+      cause: error,
+    });
   }
-  return {
-    projectScopeManifest: candidate.projectScope.manifest,
-    requestMatrixHash: candidate.requestMatrix.matrixHash,
-  };
+}
+
+function deepFreezeStrictV2Authority<T>(
+  value: T,
+  visiting = new WeakSet<object>(),
+  visited = new WeakSet<object>()
+): T {
+  if (!value || typeof value !== 'object' || Object.isFrozen(value)) {
+    return value;
+  }
+  if (visiting.has(value)) {
+    throw new TypeError('Strict-v2 authority inputs must be acyclic structural data.');
+  }
+  if (visited.has(value)) {
+    return value;
+  }
+  visiting.add(value);
+  for (const child of Object.values(value)) {
+    deepFreezeStrictV2Authority(child, visiting, visited);
+  }
+  visiting.delete(value);
+  visited.add(value);
+  return Object.freeze(value);
 }
 
 function buildStrictRequestIdentity(
   plan: ProjectContextRequestAuditPlan,
-  input: ProjectContextFoundationCaptureInput
+  strictV2?: StrictV2CaptureContext
 ): Partial<ProjectContextRequestOutcomeV1> {
-  const strictV2 = readStrictV2Context(input);
   if (!strictV2) {
     return {};
   }

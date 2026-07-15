@@ -2166,6 +2166,207 @@ describe('ProjectContext certified facts foundation', () => {
     ).toBe(false);
   });
 
+  it('rejects structural strict-v2 upgrades through the V1 capture entry before source access', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const projectScope = fixture.scope();
+    const requestMatrix = fixture.requestMatrix(projectScope.manifest);
+    const shadowRoot = fsSync.realpathSync.native(
+      fsSync.mkdtempSync(path.join(os.tmpdir(), 'project-facts-v2-shadow-'))
+    );
+    temporaryRoots.push(shadowRoot);
+    let sourceAccessCount = 0;
+    const shadowPorts: ProjectContextFoundationHostPorts = {
+      ...fixture.ports,
+      enumerateEligibleFiles: async (input) => {
+        sourceAccessCount += 1;
+        return input.repository.sourceRoot === shadowRoot
+          ? []
+          : fixture.ports.enumerateEligibleFiles(input);
+      },
+      executeRequest: async ({ plan }) => {
+        sourceAccessCount += 1;
+        return {
+          output: { kind: plan.kind, shadow: true },
+          parserRuntime: 'ready',
+          queryInitialization: 'ready',
+          sourceRanges: [],
+          terminalStatus: 'completed',
+        };
+      },
+      observeRevision: async (input) => {
+        sourceAccessCount += 1;
+        return fixture.ports.observeRevision(input);
+      },
+      readFile: async (input) => {
+        sourceAccessCount += 1;
+        return fixture.ports.readFile(input);
+      },
+      verifySnapshot: async (input) => {
+        sourceAccessCount += 1;
+        return fixture.ports.verifySnapshot!(input);
+      },
+    };
+    const legacyInput = {
+      ...fixture.input,
+      certification: {
+        ...fixture.input.certification,
+        scopeIdentityHash: projectScope.manifest.canonicalScopeHash,
+      },
+      repositories: projectScope.repositories.map((repository) => ({
+        ...repository,
+        sourceRoot: shadowRoot,
+      })),
+      requestPlans: requestMatrix.plans,
+    };
+    const ownFieldBypass = {
+      ...legacyInput,
+      projectScope,
+      requestMatrix,
+    };
+    const projectScopeOnlyBypass = { ...legacyInput, projectScope };
+    const requestMatrixOnlyBypass = { ...legacyInput, requestMatrix };
+    const inheritedFieldBypass = Object.assign(
+      Object.create({ projectScope, requestMatrix }) as ProjectContextFoundationCaptureInput,
+      legacyInput
+    );
+
+    for (const bypass of [
+      ownFieldBypass,
+      projectScopeOnlyBypass,
+      requestMatrixOnlyBypass,
+      inheritedFieldBypass,
+    ]) {
+      await expect(captureCertifiedProjectFacts(bypass, shadowPorts)).rejects.toThrow(
+        /strict-v2.*captureCertifiedProjectFactsV2/i
+      );
+    }
+    expect(sourceAccessCount).toBe(0);
+  });
+
+  it('captures strict-v2 from one detached authority snapshot despite accessor side effects', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const mutableScope = structuredClone(fixture.scope());
+    const requestMatrix = fixture.requestMatrix(mutableScope.manifest);
+    const shadowRoot = fsSync.realpathSync.native(
+      fsSync.mkdtempSync(path.join(os.tmpdir(), 'project-facts-v2-accessor-shadow-'))
+    );
+    temporaryRoots.push(shadowRoot);
+    const accessedRoots: string[] = [];
+    const ports: ProjectContextFoundationHostPorts = {
+      ...fixture.ports,
+      enumerateEligibleFiles: async (input) => {
+        accessedRoots.push(input.repository.sourceRoot);
+        return input.repository.sourceRoot === shadowRoot
+          ? []
+          : fixture.ports.enumerateEligibleFiles(input);
+      },
+      executeRequest: async ({ plan }) => ({
+        output: { kind: plan.kind, accessorProbe: true },
+        parserRuntime: 'ready',
+        queryInitialization: 'ready',
+        sourceRanges: [],
+        terminalStatus: 'completed',
+      }),
+    };
+    const accessorInput = {
+      ...fixture.input,
+      projectScope: mutableScope,
+    } as Parameters<typeof captureCertifiedProjectFactsV2>[0];
+    Object.defineProperty(accessorInput, 'requestMatrix', {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        mutableScope.repositories[0]!.sourceRoot = shadowRoot;
+        return requestMatrix;
+      },
+    });
+
+    const artifact = await captureCertifiedProjectFactsV2(accessorInput, ports);
+
+    expect(accessedRoots).not.toContain(shadowRoot);
+    expect(artifact.facts.inventory.fileCount).toBe(4);
+    expect(artifact.readiness).toMatchObject({
+      errors: [],
+      validatorVersion: 'pcf-readiness-v2',
+      verdict: 'passed',
+    });
+  });
+
+  it('fails closed when a host port mutates a verified strict-v2 repository binding', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const projectScope = fixture.scope();
+    const requestMatrix = fixture.requestMatrix(projectScope.manifest);
+    const shadowRoot = fsSync.realpathSync.native(
+      fsSync.mkdtempSync(path.join(os.tmpdir(), 'project-facts-v2-port-shadow-'))
+    );
+    temporaryRoots.push(shadowRoot);
+    let shadowUsed = false;
+    const ports: ProjectContextFoundationHostPorts = {
+      ...fixture.ports,
+      enumerateEligibleFiles: async (input) => {
+        shadowUsed ||= input.repository.sourceRoot === shadowRoot;
+        return input.repository.sourceRoot === shadowRoot
+          ? []
+          : fixture.ports.enumerateEligibleFiles(input);
+      },
+      executeRequest: async ({ plan }) => ({
+        output: { kind: plan.kind, portMutationProbe: true },
+        parserRuntime: 'ready',
+        queryInitialization: 'ready',
+        sourceRanges: [],
+        terminalStatus: 'completed',
+      }),
+      observeRevision: async (input) => {
+        input.repository.sourceRoot = shadowRoot;
+        shadowUsed ||= input.repository.sourceRoot === shadowRoot;
+        return fixture.ports.observeRevision(input);
+      },
+    };
+
+    await expect(
+      captureCertifiedProjectFactsV2(
+        {
+          ...fixture.input,
+          projectScope,
+          requestMatrix,
+        },
+        ports
+      )
+    ).rejects.toThrow();
+    expect(shadowUsed).toBe(false);
+  });
+
+  it('rejects cyclic strict-v2 authority extensions with a stable error before source access', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const projectScope = fixture.scope() as ReturnType<typeof fixture.scope> & {
+      cyclicExtension?: unknown;
+    };
+    projectScope.cyclicExtension = projectScope;
+    let sourceAccessCount = 0;
+    const ports: ProjectContextFoundationHostPorts = {
+      ...fixture.ports,
+      observeRevision: async (input) => {
+        sourceAccessCount += 1;
+        return fixture.ports.observeRevision(input);
+      },
+    };
+
+    await expect(
+      captureCertifiedProjectFactsV2(
+        {
+          ...fixture.input,
+          projectScope,
+          requestMatrix: fixture.requestMatrix(projectScope.manifest),
+        },
+        ports
+      )
+    ).rejects.toMatchObject({
+      name: 'TypeError',
+      message: expect.stringMatching(/acyclic structural data/i),
+    });
+    expect(sourceAccessCount).toBe(0);
+  });
+
   it('conserves strict V2 request identities across selector, scope, language, parser, and surface', () => {
     const fixture = createAuthorityV2Fixture();
     const scope = fixture.scope();
