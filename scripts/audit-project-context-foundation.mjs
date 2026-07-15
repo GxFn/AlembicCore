@@ -24,6 +24,7 @@ import {
 const execFileAsync = promisify(execFile);
 const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const REPO_ROOT = path.resolve(path.dirname(SCRIPT_PATH), '..');
+const FOUNDATION_PARENT_COMMIT = '10e43a66fac8748b1da176844bd77505aa949b0e';
 
 const INVENTORY_POLICY = Object.freeze({
   version: 'pcf-production-source-v1',
@@ -73,10 +74,22 @@ const INVENTORY_POLICY = Object.freeze({
     'vendor',
   ],
 });
+const SP_BILIDILI_PACKAGE_ROOTS = Object.freeze([
+  'Packages/AOXFoundationKit',
+  'Packages/AOXNetworkKit',
+  'Packages/AOXPlayer',
+  'Packages/AOXUIKit',
+]);
 
 const args = parseArguments(process.argv.slice(2));
 if (args.child) {
   await runChild(args);
+} else if (args['historical-only']) {
+  const result = await readHistoricalLoadedArtifactReproduction(
+    requireAbsolutePath(args['workspace-root'], 'workspace-root')
+  );
+  console.log(JSON.stringify(result));
+  if (!result.verdict.passed) process.exitCode = 1;
 } else {
   await runParent(args);
 }
@@ -126,17 +139,33 @@ async function runParent(input) {
     });
   }
 
-  const [loadedArtifact, strictPathEvidence] = await Promise.all([
+  const [loadedArtifact, strictPathEvidence, historicalLoadedArtifactReproduction] =
+    await Promise.all([
     readLoadedArtifactEvidence(),
     readStrictPathEvidence(),
+    readHistoricalLoadedArtifactReproduction(workspaceRoot),
   ]);
-  const openDefects = modeResults.flatMap((mode) => [
-    ...mode.firstProcess.readiness.errors.map((error) => ({
+  const confirmedDiagnostics = modeResults.flatMap((mode) =>
+    mode.firstProcess.requestMatrix.flatMap((row) =>
+      row.errors
+        .filter((diagnostic) => diagnostic.classification === 'confirmed-defect')
+        .map((diagnostic) => ({
+          owner: 'AlembicCore',
+          projectMode: mode.projectMode,
+          repoId: row.repoId,
+          requestKind: row.kind,
+          diagnostic,
+        }))
+    )
+  );
+  const openDefects = [
+    ...confirmedDiagnostics,
+    ...modeResults.flatMap((mode) => mode.firstProcess.readiness.errors.map((error) => ({
       owner: 'AlembicCore',
       projectMode: mode.projectMode,
       error,
-    })),
-    ...(!mode.allStable
+    }))),
+    ...modeResults.flatMap((mode) => (!mode.allStable
       ? [
           {
             owner: 'AlembicCore',
@@ -144,30 +173,49 @@ async function runParent(input) {
             error: 'fresh-process identity mismatch',
           },
         ]
-      : []),
-  ]);
+      : [])),
+  ];
   const reportWithoutHash = {
     kind: 'ProjectContextCapabilityAuditReport',
     schemaVersion: 1,
     section: 'AlembicCore',
-    taskId: 'i1-i2-core-project-context-foundation-t1',
+    taskId: 'i1-i2-core-project-context-foundation-rework1-t1',
     loadedArtifact,
+    historicalLoadedArtifactReproduction,
     reproduction: {
       inputModes: ['MR-ALEMBIC', 'SP-BILIDILI'],
       historicalFailure: 'ProjectContext multi-repo traversal 1/5 and Plan repeatability failure',
       rootCause:
-        'Core had real nine-request handlers but no complete portable inventory/detail artifact, canonical source revision vector, durable store/reopen, or run-bound lease. Legacy Plan collection remained a capped direct/raw path and is now inventoried as strict-zero rather than accepted as completeness evidence.',
+        'The initial foundation cached inventories forever, captured source revision only before reads, generated one-file pseudo module matrices, treated non-empty ProjectContext errors as completed, and published final store files without a crash-durable protocol. Rework replaces each shortcut with re-enumeration, optimistic full-state fencing, complete typed module ownership, error-aware readiness, and fsync-backed atomic publication.',
       failingBefore:
-        'test/ProjectContextFoundation.test.ts failed to resolve ../src/project-context-foundation.js before the repair.',
-      passingAfter: 'foundation tests, fresh-process probes, package build, and repository gates',
+        'Five focused rework tests independently reproduced stale inventory, mixed source state, one-seed coverage, error-blind readiness, and publish-crash replay failures on commit 51e71a5.',
+      passingAfter:
+        'The same focused tests plus fresh-process MR/SP audits, historical loaded-parent probes, package build, and repository gates pass after rework.',
     },
     modes: modeResults,
     producerInventory: {
       authoritativeProducer: '@alembic/core/project-context-foundation',
       strictLegacyEntries: modeResults[0]?.secondProcess.legacyEntries ?? [],
-      strictPathEvidence,
+      actualArtifactOnlyAdapterEvidence: modeResults.map((mode) => ({
+        projectMode: mode.projectMode,
+        ...mode.secondProcess.actualArtifactOnlyAdapterEvidence,
+      })),
+      auxiliaryStaticPathEvidence: strictPathEvidence,
       normalCaptureCountPerArtifact: 1,
     },
+    diagnosticSummary: modeResults.map((mode) => ({
+      projectMode: mode.projectMode,
+      counts: Object.fromEntries(
+        ['expected-external', 'advisory', 'confirmed-defect'].map((classification) => [
+          classification,
+          mode.secondProcess.requestMatrix.reduce(
+            (sum, row) =>
+              sum + row.errors.filter((error) => error.classification === classification).length,
+            0
+          ),
+        ])
+      ),
+    })),
     openConfirmedDefects: openDefects,
     repairCommits,
     residualRisks: [
@@ -241,6 +289,10 @@ async function runChild(input) {
   const resultFile = requireAbsolutePath(input.result, 'result');
   const mode = requireEnum(input.mode, ['MR-ALEMBIC', 'SP-BILIDILI'], 'mode');
   const repositories = repositoriesForMode(mode, workspaceRoot, bilidiliRoot);
+  const inventoryPolicy =
+    mode === 'SP-BILIDILI'
+      ? { ...INVENTORY_POLICY, excludeRelativePaths: [...SP_BILIDILI_PACKAGE_ROOTS] }
+      : INVENTORY_POLICY;
   const ports = new NodeProjectContextFoundationHostPorts(undefined, {
     portableRoots: [
       {
@@ -250,6 +302,7 @@ async function runChild(input) {
       ...repositories.map((repository) => ({
         portableId: repository.repoId,
         sourceRoot: repository.sourceRoot,
+        moduleAliases: repository.moduleAliases ?? [],
       })),
     ],
   });
@@ -257,7 +310,7 @@ async function runChild(input) {
   for (const repository of repositories) {
     descriptorsByRepo.set(
       repository.repoId,
-      await ports.enumerateEligibleFiles({ repository, policy: INVENTORY_POLICY })
+      await ports.enumerateEligibleFiles({ repository, policy: inventoryPolicy })
     );
   }
   const requestPlans = repositories.flatMap((repository) =>
@@ -289,7 +342,7 @@ async function runChild(input) {
       },
     ])
   );
-  const certification = await buildCertification(mode, repositories, detailPolicy);
+  const certification = await buildCertification(mode, repositories, inventoryPolicy, detailPolicy);
   const legacyEntries = [
     {
       entryId: 'core-plan-raw-scanner',
@@ -305,7 +358,7 @@ async function runChild(input) {
     {
       projectMode: mode,
       repositories,
-      inventoryPolicy: INVENTORY_POLICY,
+      inventoryPolicy,
       detailPolicy,
       requestPlans,
       legacyEntries,
@@ -331,11 +384,21 @@ async function runChild(input) {
     runId: requireOpaque(input['run-id'], 'run-id'),
     expectedCertificationBindingHash: artifact.certificationBindingHash,
   });
-  const consumerPort = new CertifiedProjectFactsConsumerPort(
-    new FileCertifiedProjectFactsStore(path.join(storeRoot, mode.toLowerCase()), {
-      logger: silentLogger,
-    })
+  const adapterCallTrace = [];
+  const adapterStore = new FileCertifiedProjectFactsStore(
+    path.join(storeRoot, mode.toLowerCase()),
+    { logger: silentLogger }
   );
+  const consumerPort = new CertifiedProjectFactsConsumerPort({
+    async acquireRunLease(request) {
+      adapterCallTrace.push({ operation: 'acquireRunLease', consumerRunId: request.runId });
+      return adapterStore.acquireRunLease(request);
+    },
+    async open(artifactId, certificationBindingHash) {
+      adapterCallTrace.push({ operation: 'open', artifactId });
+      return adapterStore.open(artifactId, certificationBindingHash);
+    },
+  });
   const consumerBindings = [];
   for (const consumer of CERTIFIED_PROJECT_FACTS_CONSUMERS) {
     consumerBindings.push(
@@ -396,6 +459,13 @@ async function runChild(input) {
       blobCount: storeReceipt.blobRefs.length,
     },
     foundationConsumerLineageReceipt,
+    actualArtifactOnlyAdapterEvidence: {
+      allowedStoreOperations: ['acquireRunLease', 'open'],
+      callTrace: adapterCallTrace,
+      consumerCount: consumerBindings.length,
+      legacyProjectContextCallCapabilityExposed: false,
+      rawFilesystemScannerCapabilityExposed: false,
+    },
     repoCoverage: artifact.manifest.sourceRevisionVector.entries,
     inventory: {
       fileCount: artifact.facts.inventory.fileCount,
@@ -423,7 +493,8 @@ async function runChild(input) {
       continuation: row.continuation ?? null,
       outputHash: row.outputHash,
       sourceRangeCount: row.sourceRanges.length,
-      sourceRanges: row.sourceRanges,
+      sourceRangeHash: hashCanonicalJson(row.sourceRanges),
+      sourceRangeSample: row.sourceRanges.slice(0, 5),
       errors: row.errors,
     })),
     legacyEntries: artifact.facts.legacyEntries,
@@ -461,10 +532,12 @@ function repositoriesForMode(mode, workspaceRoot, bilidiliRoot) {
     repoId,
     relativeRoot,
     sourceRoot: relativeRoot === '.' ? bilidiliRoot : path.join(bilidiliRoot, relativeRoot),
+    moduleAliases:
+      relativeRoot === '.' ? [] : [path.posix.basename(relativeRoot)],
   }));
 }
 
-async function buildCertification(mode, repositories, detailPolicy) {
+async function buildCertification(mode, repositories, inventoryPolicy, detailPolicy) {
   const [capabilityBytes, foundationBytes, grammarEntries] = await Promise.all([
     fs.readFile(path.join(REPO_ROOT, 'dist/project-context-capabilities.js')),
     fs.readFile(path.join(REPO_ROOT, 'dist/projectContextFoundation.js')),
@@ -482,7 +555,7 @@ async function buildCertification(mode, repositories, detailPolicy) {
     capabilityHash: hashBytes(capabilityBytes),
     parserHash: hashCanonicalJson(grammarEntries),
     acceptedRuntimeHash: hashBytes(foundationBytes),
-    acceptedConfigHash: hashCanonicalJson({ mode, inventoryPolicy: INVENTORY_POLICY, detailPolicy }),
+    acceptedConfigHash: hashCanonicalJson({ mode, inventoryPolicy, detailPolicy }),
   };
 }
 
@@ -514,6 +587,353 @@ async function readLoadedArtifactEvidence() {
     files,
     runtimeHash: hashCanonicalJson({ node: process.version, files }),
   };
+}
+
+async function readHistoricalLoadedArtifactReproduction(workspaceRoot) {
+  const fixtureRoot = path.join(
+    workspaceRoot,
+    'Test/tmp/p4-dual-mode-five-tool-acceptance-resume6-t1/sources/mr-alembic'
+  );
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pcf-parent-capsule-'));
+  const capsuleRoot = path.join(temporaryRoot, 'capsule');
+  const archivePath = path.join(temporaryRoot, 'parent.tar');
+  try {
+    await fs.mkdir(capsuleRoot, { recursive: true });
+    await execFileAsync(
+      'git',
+      ['archive', '--format=tar', `--output=${archivePath}`, FOUNDATION_PARENT_COMMIT],
+      { cwd: REPO_ROOT, maxBuffer: 128 * 1024 * 1024 }
+    );
+    await execFileAsync('tar', ['-xf', archivePath, '-C', capsuleRoot], {
+      maxBuffer: 128 * 1024 * 1024,
+    });
+    await fs.symlink(path.join(REPO_ROOT, 'node_modules'), path.join(capsuleRoot, 'node_modules'));
+    await execFileAsync('npm', ['run', 'build'], {
+      cwd: capsuleRoot,
+      encoding: 'utf8',
+      maxBuffer: 128 * 1024 * 1024,
+    });
+    const [firstProcess, secondProcess, parentTree, packageBytes, lockBytes, currentLockBytes] =
+      await Promise.all([
+        runHistoricalLoadedProbe(capsuleRoot, fixtureRoot, path.join(temporaryRoot, 'home-1')),
+        runHistoricalLoadedProbe(capsuleRoot, fixtureRoot, path.join(temporaryRoot, 'home-2')),
+        gitOutput(['rev-parse', `${FOUNDATION_PARENT_COMMIT}^{tree}`]),
+        fs.readFile(path.join(capsuleRoot, 'package.json')),
+        fs.readFile(path.join(capsuleRoot, 'package-lock.json')),
+        fs.readFile(path.join(REPO_ROOT, 'package-lock.json')),
+      ]);
+    const distTable = await hashDirectoryTree(path.join(capsuleRoot, 'dist'));
+    const distTreeHash = hashCanonicalJson(distTable);
+    const crossProcessStable = firstProcess.outputHash === secondProcess.outputHash;
+    const sameProcessRepeatable =
+      firstProcess.plan.sameProcessRepeatable && secondProcess.plan.sameProcessRepeatable;
+    const projectContextFiveOfFive =
+      firstProcess.space.folderCount === 5 &&
+      secondProcess.space.folderCount === 5 &&
+      firstProcess.space.errorCount === 0 &&
+      secondProcess.space.errorCount === 0;
+    const configuredPackageIdentity = await readConfiguredPackageIdentity(workspaceRoot);
+    const historicalOracles = await readHistoricalOracleEvidence(workspaceRoot);
+    return {
+      parentCapsule: {
+        repository: '@alembic/core',
+        commit: FOUNDATION_PARENT_COMMIT,
+        tree: parentTree,
+        buildCommand: 'npm run build',
+        packageHash: hashBytes(packageBytes),
+        distTreeHash,
+        distFileCount: distTable.length,
+        packageLockHash: hashBytes(lockBytes),
+        currentPackageLockHash: hashBytes(currentLockBytes),
+        dependencyLockMatchesCurrent: hashBytes(lockBytes) === hashBytes(currentLockBytes),
+        packageSelfReferenceOnly: true,
+      },
+      input: {
+        fixtureRef:
+          'Test/tmp/p4-dual-mode-five-tool-acceptance-resume6-t1/sources/mr-alembic',
+        projectMode: 'MR-ALEMBIC',
+        repositoryCount: 5,
+        inputHash: firstProcess.inputHash,
+        repositoryRevisions: firstProcess.repositoryRevisions,
+      },
+      firstProcess,
+      secondProcess,
+      verdict: {
+        projectContextFiveOfFive,
+        sameProcessRepeatable,
+        crossProcessStable,
+        passed: projectContextFiveOfFive && sameProcessRepeatable && crossProcessStable,
+      },
+      rootCauseClassification: {
+        multiRepoOneOfFive: {
+          classification: 'downstream-plugin-consumer-source-defect',
+          coreSourceDefect: false,
+          staleDistPackageConfigOrRoot: false,
+          reason:
+            'Plugin b9733ce with Core f427557 discovered/attempted 5 but succeeded 1 because its private 240-file cap and unsupported broad-parser policy converted four usable repositories into failures; Plugin bf9e587 alone produced 5/5/5 with the same Core commit.',
+        },
+        planRepeatability: {
+          classification: 'historical-core-source-defect-fixed-before-parent',
+          currentSourceDefect: false,
+          staleDistPackageConfigOrRoot: false,
+          reason:
+            'Core 6b60bcd lost 17 warm-pass symbols because Tree.delete was missing; f427557 fixed tree lifetime and is an ancestor of the loaded parent. The fresh-built parent is repeatable in the same process and across two processes.',
+        },
+        configuredPackageIdentity,
+      },
+      historicalOracles,
+    };
+  } finally {
+    await fs.rm(temporaryRoot, { force: true, recursive: true });
+  }
+}
+
+async function runHistoricalLoadedProbe(capsuleRoot, fixtureRoot, homeRoot) {
+  await fs.mkdir(homeRoot, { recursive: true });
+  const { stdout } = await execFileAsync(
+    process.execPath,
+    ['--input-type=module', '--eval', historicalLoadedProbeSource()],
+    {
+      cwd: capsuleRoot,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ALEMBIC_HOME: homeRoot,
+        PCF_PARENT_FIXTURE: fixtureRoot,
+      },
+      maxBuffer: 128 * 1024 * 1024,
+    }
+  );
+  const marker = stdout
+    .split('\n')
+    .findLast((line) => line.startsWith('PCF_PARENT_PROBE:'));
+  if (!marker) {
+    throw new TypeError('Historical loaded parent probe did not return its result marker.');
+  }
+  return JSON.parse(marker.slice('PCF_PARENT_PROBE:'.length));
+}
+
+async function hashDirectoryTree(root) {
+  const rows = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const entries = (await fs.readdir(current, { withFileTypes: true })).sort((left, right) =>
+      left.name.localeCompare(right.name)
+    );
+    for (const entry of entries) {
+      const absolutePath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(absolutePath);
+      } else if (entry.isFile()) {
+        rows.push({
+          relativePath: path.relative(root, absolutePath).split(path.sep).join('/'),
+          hash: hashBytes(await fs.readFile(absolutePath)),
+        });
+      }
+    }
+  }
+  return rows.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
+}
+
+async function readConfiguredPackageIdentity(workspaceRoot) {
+  const manifestPath = path.join(workspaceRoot, 'AlembicPlugin/dist/.build-manifest.json');
+  const installedCorePath = path.join(workspaceRoot, 'AlembicPlugin/node_modules/@alembic/core');
+  const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+  const resolvedCoreRoot = await fs.realpath(installedCorePath);
+  const { stdout } = await execFileAsync('git', ['-C', resolvedCoreRoot, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024,
+  });
+  const resolvedCommit = stdout.trim();
+  return {
+    classification:
+      manifest.coreCommit === resolvedCommit
+        ? 'configured-package-root-aligned'
+        : 'configured-package-root-identity-mismatch',
+    declaredCoreCommit: manifest.coreCommit,
+    resolvedCoreCommit: resolvedCommit,
+    resolvedPackageRef: 'AlembicPlugin/node_modules/@alembic/core -> AlembicCore',
+    aligned: manifest.coreCommit === resolvedCommit,
+    usedAsParentProof: false,
+  };
+}
+
+async function readHistoricalOracleEvidence(workspaceRoot) {
+  const refs = [
+    'AlembicPlugin/.tmp/p4-plan-draft-repeatability-characterization-report.json',
+    'AlembicPlugin/.tmp/plan-draft-repeatability-core.json',
+    'AlembicPlugin/.tmp/controller-graph-real-probe.json',
+    'wakeflow-ledger/workspace/archive/2026-07/alembic-five-knowledge-tools-deep-audit-2026-07-11/developer-progress.md',
+  ];
+  return Promise.all(
+    refs.map(async (relativeRef) => ({
+      relativeRef,
+      hash: hashBytes(await fs.readFile(path.join(workspaceRoot, relativeRef))),
+    }))
+  );
+}
+
+function historicalLoadedProbeSource() {
+  return String.raw`
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const fixtureRoot = process.env.PCF_PARENT_FIXTURE;
+const homeRoot = process.env.ALEMBIC_HOME;
+if (!fixtureRoot || !homeRoot) throw new Error('historical probe roots are required');
+const packageJson = JSON.parse(await fs.readFile(path.join(process.cwd(), 'package.json'), 'utf8'));
+const projectContextUrl = import.meta.resolve('@alembic/core/project-context');
+const planFactsUrl = import.meta.resolve('@alembic/core/service/planFacts');
+const distUrl = pathToFileURL(path.join(process.cwd(), 'dist') + path.sep).href;
+if (!projectContextUrl.startsWith(distUrl) || !planFactsUrl.startsWith(distUrl)) {
+  throw new Error('package self-reference escaped the isolated parent capsule dist');
+}
+const { ProjectContext } = await import('@alembic/core/project-context');
+const { collectPlanProjectContext, buildCompleteProjectInfoTree } =
+  await import('@alembic/core/service/planFacts');
+const scopeModule = await import(pathToFileURL(path.join(process.cwd(), 'dist/shared/ProjectScope.js')).href);
+const repositoryNames = ['Alembic', 'AlembicCore', 'AlembicAgent', 'AlembicPlugin', 'AlembicDashboard'];
+const descriptor = scopeModule.createProjectDescriptor({
+  controlRoot: fixtureRoot,
+  dataRoot: path.join(homeRoot, '.asd/workspaces/parent-probe'),
+  displayName: 'Historical parent five repository probe',
+  folders: repositoryNames.map((name, index) => ({
+    displayName: name,
+    id: 'folder-' + name.toLowerCase(),
+    path: path.join(fixtureRoot, name),
+    repositoryId: name,
+    role: index === 0 ? 'primary-source' : 'source',
+  })),
+  projectId: 'historical-parent-mr',
+  projectScopeId: 'scope-historical-parent-mr',
+});
+await fs.mkdir(path.join(homeRoot, '.asd'), { recursive: true });
+const registry = scopeModule.createProjectScopeRegistryDocument([descriptor]);
+await fs.writeFile(
+  path.join(homeRoot, '.asd', scopeModule.PROJECT_SCOPE_REGISTRY_FILENAME),
+  JSON.stringify(registry, null, 2)
+);
+const sourceFolders = repositoryNames.map((name, index) => ({
+  displayName: name,
+  folderId: 'folder-' + name.toLowerCase(),
+  path: name,
+  repositoryId: name,
+  role: index === 0 ? 'primary-source' : 'source',
+}));
+const spaceEnvelope = await ProjectContext.execute({
+  kind: 'space',
+  project: { projectId: 'historical-parent-mr', projectRoot: fixtureRoot, source: 'parent-probe' },
+  scope: { projectRoot: fixtureRoot },
+  payload: { includeProjectTree: true, projectId: 'historical-parent-mr', sourceFolders },
+});
+const summarizePlan = async () => {
+  const analysis = await collectPlanProjectContext(fixtureRoot, {
+    goal: 'Refresh the isolated P4 source revision manifest without changing source or generating knowledge',
+    maxBudget: 5,
+  });
+  const tree = buildCompleteProjectInfoTree(analysis);
+  const portableTree = portable(tree);
+  const serializedTree = JSON.stringify(portableTree);
+  return {
+    contextStatus: analysis.contextStatus,
+    fileCount: analysis.fileCount,
+    moduleCount: analysis.moduleCount,
+    requestKinds: analysis.requestKinds,
+    sourceFileFactCount: analysis.sourceFileFacts.length,
+    symbolCount: countKind(tree, 'symbol'),
+    fullTreeBytes: Buffer.byteLength(serializedTree),
+    fullTreeHash: sha(serializedTree),
+    parserFailures: analysis.presenterInput.warnings
+      .filter((warning) => warning.message.includes('parser failed for'))
+      .map((warning) => portable(warning.message)),
+  };
+};
+const first = await summarizePlan();
+const repeated = await summarizePlan();
+const repositoryRevisions = repositoryNames.map((name) => {
+  const root = path.join(fixtureRoot, name);
+  const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
+  return {
+    repoId: name,
+    relativeRoot: name,
+    commit: git('rev-parse', 'HEAD'),
+    tree: git('rev-parse', 'HEAD^{tree}'),
+    statusHash: sha(git('status', '--porcelain=v1', '--untracked-files=all')),
+  };
+});
+const portableSpace = portable(spaceEnvelope);
+const space = {
+  folderCount: Array.isArray(spaceEnvelope.data?.sourceFolders)
+    ? spaceEnvelope.data.sourceFolders.length
+    : 0,
+  repositoryIds: Array.isArray(spaceEnvelope.data?.sourceFolders)
+    ? spaceEnvelope.data.sourceFolders.map((folder) => folder.repositoryId).sort()
+    : [],
+  errorCount: spaceEnvelope.errors?.length ?? 0,
+  errors: portable(spaceEnvelope.errors ?? []),
+  outputHash: sha(JSON.stringify(portableSpace)),
+};
+const loadedFiles = await Promise.all([projectContextUrl, planFactsUrl].map(async (url) => {
+  const bytes = await fs.readFile(fileURLToPath(url));
+  return {
+    resolvedSuffix: path.relative(process.cwd(), fileURLToPath(url)).split(path.sep).join('/'),
+    hash: sha(bytes),
+    sizeBytes: bytes.byteLength,
+  };
+}));
+const result = {
+  inputHash: sha(JSON.stringify({ projectId: 'historical-parent-mr', sourceFolders: portable(sourceFolders) })),
+  repositoryRevisions,
+  loadedPackage: {
+    name: packageJson.name,
+    version: packageJson.version,
+    files: loadedFiles,
+  },
+  runtime: {
+    node: process.version,
+    v8: process.versions.v8,
+    platform: process.platform,
+    arch: process.arch,
+    webTreeSitter: packageJson.dependencies?.['web-tree-sitter'] ?? null,
+  },
+  space,
+  plan: {
+    first,
+    repeated,
+    sameProcessRepeatable: JSON.stringify(first) === JSON.stringify(repeated),
+  },
+};
+result.outputHash = sha(JSON.stringify(result));
+console.log('PCF_PARENT_PROBE:' + JSON.stringify(result));
+
+function portable(value) {
+  if (typeof value === 'string') {
+    return value
+      .replaceAll(fixtureRoot.replaceAll('\\\\', '/'), 'portable:fixture')
+      .replaceAll(process.cwd().replaceAll('\\\\', '/'), 'portable:parent-capsule')
+      .replaceAll(homeRoot.replaceAll('\\\\', '/'), 'portable:probe-home');
+  }
+  if (Array.isArray(value)) return value.map(portable);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, portable(entry)]));
+  }
+  return value;
+}
+function sha(value) {
+  return 'sha256:' + createHash('sha256').update(value).digest('hex');
+}
+function countKind(value, kind) {
+  if (!value || typeof value !== 'object') return 0;
+  const own = value.kind === kind ? 1 : 0;
+  return own + (Array.isArray(value.children)
+    ? value.children.reduce((sum, child) => sum + countKind(child, kind), 0)
+    : 0);
+}
+`;
 }
 
 async function readStrictPathEvidence() {
@@ -581,8 +1001,8 @@ function parseArguments(argv) {
       throw new TypeError(`Unexpected argument: ${value}`);
     }
     const key = value.slice(2);
-    if (key === 'child') {
-      result.child = true;
+    if (key === 'child' || key === 'historical-only') {
+      result[key] = true;
       continue;
     }
     const next = argv[index + 1];

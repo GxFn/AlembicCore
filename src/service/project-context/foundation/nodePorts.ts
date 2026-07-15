@@ -5,22 +5,20 @@ import { promisify } from 'node:util';
 import type {
   ProjectContext as ProjectContextContract,
   ProjectContextEnvelope,
+  ProjectContextQueryError,
   ProjectContextResult,
 } from '../../../domain/project-context/index.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import { ProjectContext } from '../ProjectContextService.js';
 import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
-import {
-  hashCanonicalJson,
-  normalizePortableRelativePath,
-  toProjectFactsJson,
-} from './canonical.js';
+import { normalizePortableRelativePath, toProjectFactsJson } from './canonical.js';
 import type {
   ProjectContextFoundationFileDescriptor,
   ProjectContextFoundationHostPorts,
   ProjectContextFoundationRepositoryInput,
   ProjectContextInventoryPolicyV1,
   ProjectContextRequestAuditPlan,
+  ProjectContextRequestDiagnosticV1,
   ProjectContextRequestExecutionResult,
   ProjectContextSourceRangeV1,
   ProjectFactsJson,
@@ -40,6 +38,7 @@ const PARSER_REQUEST_KINDS = new Set(['anchor-range', 'file-flow', 'file-symbols
 export interface NodeProjectContextFoundationPortableRoot {
   portableId: string;
   sourceRoot: string;
+  moduleAliases?: string[];
 }
 
 export interface NodeProjectContextFoundationHostPortsOptions {
@@ -50,11 +49,11 @@ interface ResolvedPortableRoot {
   portableId: string;
   root: string;
   current: boolean;
+  moduleAliases: string[];
 }
 
 export class NodeProjectContextFoundationHostPorts implements ProjectContextFoundationHostPorts {
   readonly #projectContext: ProjectContextContract;
-  readonly #inventoryCache = new Map<string, ProjectContextFoundationFileDescriptor[]>();
   readonly #portableRoots: NodeProjectContextFoundationPortableRoot[];
 
   constructor(
@@ -123,14 +122,6 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     policy: ProjectContextInventoryPolicyV1;
     signal?: AbortSignal;
   }): Promise<ProjectContextFoundationFileDescriptor[]> {
-    const cacheKey = `${input.repository.sourceRoot}\u0000${hashCanonicalJson(input.policy)}`;
-    const cached = this.#inventoryCache.get(cacheKey);
-    if (cached) {
-      return cached.map((entry) => ({
-        ...entry,
-        ownerModuleIds: [...(entry.ownerModuleIds ?? [])],
-      }));
-    }
     const root = await fs.realpath(input.repository.sourceRoot);
     const excludeDirectories = new Set(input.policy.excludeDirectories);
     const excludeRelativePaths = input.policy.excludeRelativePaths ?? [];
@@ -177,7 +168,6 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
       }
     }
     descriptors.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
-    this.#inventoryCache.set(cacheKey, descriptors);
     return descriptors.map((entry) => ({
       ...entry,
       ownerModuleIds: [...(entry.ownerModuleIds ?? [])],
@@ -239,7 +229,16 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           parserRuntime: 'not-required',
           queryInitialization: 'not-required',
           sourceRanges: [],
-          errors: ['ProjectContext request was cancelled.'],
+          errors: [
+            {
+              classification: 'confirmed-defect',
+              code: 'cancelled',
+              message: 'ProjectContext request was cancelled.',
+              retryable: true,
+              severity: 'error',
+              typedReason: 'request-did-not-reach-a-terminal-success-state',
+            },
+          ],
         };
       }
       throw error;
@@ -250,7 +249,12 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     repository: ProjectContextFoundationRepositoryInput
   ): Promise<ResolvedPortableRoot[]> {
     const inputs = [
-      { portableId: repository.repoId, sourceRoot: repository.sourceRoot, current: true },
+      {
+        portableId: repository.repoId,
+        sourceRoot: repository.sourceRoot,
+        current: true,
+        moduleAliases: [] as string[],
+      },
       ...this.#portableRoots.map((entry) => ({ ...entry, current: false })),
     ];
     const byRoot = new Map<string, ResolvedPortableRoot>();
@@ -266,6 +270,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
             portableId,
             root,
             current: input.current,
+            moduleAliases: uniquePortableAliases(input.moduleAliases ?? []),
           });
         }
       }
@@ -290,16 +295,7 @@ export function createProjectContextRequestAuditPlans(input: {
     Boolean(resolveAstParserLanguage(file.relativePath, file.language))
   );
   const anyFile = parserFile ?? files[0];
-  const moduleFile = parserFile ?? anyFile;
-  const modulePath = moduleFile ? parentRelativePath(moduleFile.relativePath) : undefined;
-  const moduleSeed = moduleFile
-    ? {
-        moduleName: modulePath ? path.posix.basename(modulePath) : input.repository.repoId,
-        ...(modulePath ? { modulePath } : {}),
-        ownedFiles: [moduleFile.relativePath],
-        role: 'certified-audit-seed',
-      }
-    : undefined;
+  const moduleSeeds = createCompleteModuleSeeds(input.repository.repoId, files);
   const scope = { repoId: input.repository.repoId };
   const plans: ProjectContextRequestAuditPlan[] = [
     applicableOrNa({
@@ -316,7 +312,18 @@ export function createProjectContextRequestAuditPlans(input: {
       kind: 'space',
       applicability: 'applicable',
       scope,
-      selector: anyFile ? { sourceRefs: [anyFile.relativePath] } : {},
+      selector: {
+        sourceFolders: [
+          {
+            displayName: input.repository.repoId,
+            folderId: input.repository.repoId,
+            path: '.',
+            repositoryId: input.repository.repoId,
+            role: 'primary-source',
+          },
+        ],
+        ...(anyFile ? { sourceRefs: [anyFile.relativePath] } : {}),
+      },
     },
     {
       repoId: input.repository.repoId,
@@ -325,32 +332,51 @@ export function createProjectContextRequestAuditPlans(input: {
       scope,
       selector: {
         repoName: input.repository.repoId,
-        ...(moduleSeed ? { moduleSeeds: [moduleSeed] } : {}),
+        ...(moduleSeeds.length > 0 ? { moduleSeeds } : {}),
       },
     },
     applicableOrNa({
       repoId: input.repository.repoId,
       kind: 'map',
       scope,
-      selector: moduleSeed
-        ? { moduleSeeds: [moduleSeed], repoName: input.repository.repoId }
-        : undefined,
+      selector:
+        moduleSeeds.length > 0 ? { moduleSeeds, repoName: input.repository.repoId } : undefined,
       reason: 'no-module-seed-from-eligible-inventory',
     }),
-    applicableOrNa({
-      repoId: input.repository.repoId,
-      kind: 'module',
-      scope,
-      selector: moduleSeed,
-      reason: 'no-module-seed-from-eligible-inventory',
-    }),
-    applicableOrNa({
-      repoId: input.repository.repoId,
-      kind: 'module-layers',
-      scope,
-      selector: moduleSeed,
-      reason: 'no-module-seed-from-eligible-inventory',
-    }),
+    ...(moduleSeeds.length > 0
+      ? moduleSeeds.map((selector) => ({
+          repoId: input.repository.repoId,
+          kind: 'module' as const,
+          applicability: 'applicable' as const,
+          scope,
+          selector,
+        }))
+      : [
+          applicableOrNa({
+            repoId: input.repository.repoId,
+            kind: 'module',
+            scope,
+            selector: undefined,
+            reason: 'no-module-seed-from-eligible-inventory',
+          }),
+        ]),
+    ...(moduleSeeds.length > 0
+      ? moduleSeeds.map((selector) => ({
+          repoId: input.repository.repoId,
+          kind: 'module-layers' as const,
+          applicability: 'applicable' as const,
+          scope,
+          selector,
+        }))
+      : [
+          applicableOrNa({
+            repoId: input.repository.repoId,
+            kind: 'module-layers',
+            scope,
+            selector: undefined,
+            reason: 'no-module-seed-from-eligible-inventory',
+          }),
+        ]),
     applicableOrNa({
       repoId: input.repository.repoId,
       kind: 'file-flow',
@@ -378,6 +404,42 @@ export function createProjectContextRequestAuditPlans(input: {
   return plans;
 }
 
+function createCompleteModuleSeeds(
+  repoId: string,
+  files: readonly ProjectContextFoundationFileDescriptor[]
+): ProjectFactsJson[] {
+  const byOwner = new Map<string, Set<string>>();
+  for (const file of files) {
+    const owners = file.ownerModuleIds?.length
+      ? file.ownerModuleIds
+      : inferOwnerModuleIds(file.relativePath);
+    for (const owner of owners) {
+      const ownedFiles = byOwner.get(owner) ?? new Set<string>();
+      ownedFiles.add(file.relativePath);
+      byOwner.set(owner, ownedFiles);
+    }
+  }
+  return [...byOwner.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([owner, ownedFiles]) => {
+      const ownerPath = owner.slice(owner.indexOf(':') + 1);
+      const modulePath = owner.startsWith('package:')
+        ? `Packages/${ownerPath}`
+        : ['module:', 'path:', 'test:'].some((prefix) => owner.startsWith(prefix))
+          ? ownerPath
+          : undefined;
+      const moduleName =
+        owner === 'root' ? repoId : path.posix.basename(modulePath ?? ownerPath) || repoId;
+      return {
+        moduleName,
+        ...(modulePath ? { modulePath } : {}),
+        ownerModuleId: owner,
+        ownedFiles: [...ownedFiles].sort(),
+        role: 'certified-inventory-owner',
+      };
+    });
+}
+
 function projectContextEnvelopeToAuditResult(
   envelope: ProjectContextEnvelope<ProjectContextResult>,
   repository: ProjectContextFoundationRepositoryInput,
@@ -390,15 +452,134 @@ function projectContextEnvelopeToAuditResult(
     (error) => error.code === 'query-unavailable'
   );
   const detectedLanguage = findFirstStringByKey(output, 'language');
+  const diagnostics = (envelope.errors ?? [])
+    .map((error) => classifyProjectContextDiagnostic(error, plan, portableRoots))
+    .sort(compareDiagnostics);
+  const hasConfirmedDefect = diagnostics.some(
+    (diagnostic) => diagnostic.classification === 'confirmed-defect'
+  );
   return {
-    terminalStatus: unavailable ? 'unavailable' : 'completed',
+    terminalStatus: hasConfirmedDefect ? 'failed' : unavailable ? 'unavailable' : 'completed',
     output,
     ...(detectedLanguage ? { detectedLanguage } : {}),
     parserRuntime: parserReadiness(plan, detectedLanguage, queryUnavailable),
     queryInitialization: queryReadiness(plan, queryUnavailable),
     sourceRanges: collectSourceRanges(output, repository.repoId),
-    errors: (envelope.errors ?? []).map((error) => `${error.code}:${error.message}`).sort(),
+    errors: diagnostics,
   };
+}
+
+function classifyProjectContextDiagnostic(
+  error: ProjectContextQueryError,
+  plan: ProjectContextRequestAuditPlan,
+  portableRoots: ResolvedPortableRoot[]
+): ProjectContextRequestDiagnosticV1 {
+  const externalDependencyMessage =
+    error.code === 'query-unavailable' &&
+    error.message.startsWith('map external dependency is not owned by module seeds:');
+  const dependencyName = externalDependencyMessage
+    ? error.message.slice(error.message.indexOf(':') + 1).trim()
+    : undefined;
+  const declaredModules = collectDeclaredModuleNames(plan.selector);
+  const unresolvedInternal = Boolean(
+    dependencyName &&
+      [...declaredModules].some(
+        (moduleName) =>
+          moduleName.toLowerCase() === dependencyName.toLowerCase() ||
+          dependencyName.toLowerCase().includes(`/${moduleName.toLowerCase()}/`)
+      )
+  );
+  const sibling = dependencyName
+    ? findRelatedPortableRepo(dependencyName, portableRoots)
+    : undefined;
+  const expectedExternal = Boolean(
+    dependencyName && !unresolvedInternal && !sibling && isExternalDependencyName(dependencyName)
+  );
+  const classification = unresolvedInternal
+    ? 'confirmed-defect'
+    : sibling
+      ? 'advisory'
+      : expectedExternal
+        ? 'expected-external'
+        : error.severity === 'warning'
+          ? 'advisory'
+          : 'confirmed-defect';
+  return {
+    classification,
+    code: error.code,
+    message: portableString(error.message, portableRoots),
+    retryable: error.retryable,
+    severity: error.severity,
+    typedReason: unresolvedInternal
+      ? 'declared-internal-module-remained-unresolved'
+      : sibling
+        ? 'dependency-crosses-an-approved-sibling-repository-boundary'
+        : expectedExternal
+          ? 'dependency-is-outside-certified-repository-ownership'
+          : classification === 'advisory'
+            ? 'project-context-warning-retained-for-review'
+            : 'project-context-error-invalidates-certified-readiness',
+    ...(error.path ? { path: portableString(error.path, portableRoots) } : {}),
+    ...(sibling ? { relatedRepoId: sibling } : {}),
+  };
+}
+
+function collectDeclaredModuleNames(value: ProjectFactsJson): Set<string> {
+  const names = new Set<string>();
+  visitJsonObjects(value, (record) => {
+    const moduleName = readString(record, 'moduleName');
+    if (moduleName) {
+      names.add(moduleName);
+    }
+  });
+  return names;
+}
+
+function findRelatedPortableRepo(
+  dependencyName: string,
+  portableRoots: ResolvedPortableRoot[]
+): string | undefined {
+  const normalized = dependencyName.replace(/\\/g, '/').toLowerCase();
+  if (!dependencyName.startsWith('.')) {
+    return portableRoots.find(
+      (root) =>
+        !root.current &&
+        (normalized === path.posix.basename(root.root).toLowerCase() ||
+          normalized === root.portableId.toLowerCase() ||
+          root.moduleAliases.some((alias) => normalized === alias.toLowerCase()))
+    )?.portableId;
+  }
+  return portableRoots.find(
+    (root) =>
+      !root.current &&
+      (normalized.includes(`/${path.posix.basename(root.root).toLowerCase()}/`) ||
+        normalized.includes(root.portableId.toLowerCase()))
+  )?.portableId;
+}
+
+function uniquePortableAliases(aliases: readonly string[]): string[] {
+  return [...new Set(aliases.map((alias) => alias.trim()).filter(Boolean))].sort((left, right) =>
+    left.localeCompare(right)
+  );
+}
+
+function isExternalDependencyName(value: string): boolean {
+  return (
+    value.startsWith('node:') ||
+    value.startsWith('@') ||
+    (!value.startsWith('.') && !value.startsWith('/') && !value.includes('\\'))
+  );
+}
+
+function compareDiagnostics(
+  left: ProjectContextRequestDiagnosticV1,
+  right: ProjectContextRequestDiagnosticV1
+): number {
+  return (
+    left.classification.localeCompare(right.classification) ||
+    left.code.localeCompare(right.code) ||
+    left.message.localeCompare(right.message)
+  );
 }
 
 function portableProjectContextJson(
@@ -569,19 +750,49 @@ function findFirstStringByKey(value: ProjectFactsJson, key: string): string | un
 
 function inferOwnerModuleIds(relativePath: string): string[] {
   const parts = relativePath.split('/');
-  if (parts.length <= 1) {
-    return ['root'];
+  const extension = path.posix.extname(relativePath).toLowerCase();
+  const sourceLike = [
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.mjs',
+    '.cjs',
+    '.swift',
+    '.m',
+    '.mm',
+    '.h',
+    '.kt',
+    '.kts',
+    '.java',
+    '.py',
+    '.go',
+    '.rs',
+    '.dart',
+  ].includes(extension);
+  if (!sourceLike || parts.length <= 1) {
+    return [];
   }
-  const packageIndex = parts.indexOf('Packages');
-  if (packageIndex >= 0 && parts[packageIndex + 1]) {
-    return [`package:${parts[packageIndex + 1]}`];
+  const packageIndex = parts.findIndex((part) => part.toLowerCase() === 'packages');
+  const packageSourcesIndex = packageIndex >= 0 ? parts.indexOf('Sources', packageIndex + 1) : -1;
+  if (packageSourcesIndex >= 0 && parts[packageSourcesIndex + 1]) {
+    return [`module:${parts.slice(0, packageSourcesIndex + 2).join('/')}`];
   }
-  return [`path:${parts[0]}`];
-}
-
-function parentRelativePath(relativePath: string): string | undefined {
-  const parent = path.posix.dirname(relativePath);
-  return parent === '.' ? undefined : parent;
+  if (parts[0] === 'Sources') {
+    const layered = ['Core', 'Infrastructure', 'Features'].includes(parts[1] ?? '');
+    const moduleEnd = layered && parts[2] ? 3 : 2;
+    return [`module:${parts.slice(0, moduleEnd).join('/')}`];
+  }
+  if (parts[0] === 'BiliDili') {
+    return ['module:BiliDili'];
+  }
+  if (parts[0] === 'Tests' && parts[1]) {
+    return [`test:${parts.slice(0, 2).join('/')}`];
+  }
+  if (['src', 'lib', 'app', 'source'].includes(parts[0]?.toLowerCase() ?? '')) {
+    return [`module:${parts[0]}`];
+  }
+  return [];
 }
 
 function isExcluded(relativePath: string, excludes: readonly string[]): boolean {

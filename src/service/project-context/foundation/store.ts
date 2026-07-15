@@ -52,6 +52,27 @@ const DEFAULT_LOGGER: ProjectContextFoundationLogger = {
   },
 };
 
+export type FileStoreDurabilityStep =
+  | 'immutable-after-temp-fsync'
+  | 'immutable-after-publish'
+  | 'immutable-after-directory-fsync'
+  | 'immutable-after-readback'
+  | 'lease-after-temp-fsync'
+  | 'lease-after-publish'
+  | 'lease-after-directory-fsync'
+  | 'lease-after-readback'
+  | 'replace-after-temp-fsync'
+  | 'replace-after-rename'
+  | 'replace-after-directory-fsync'
+  | 'replace-after-readback';
+
+export interface FileCertifiedProjectFactsStoreOptions {
+  logger?: ProjectContextFoundationLogger;
+  durability?: {
+    onStep?(step: FileStoreDurabilityStep, relativeRef: string): void | Promise<void>;
+  };
+}
+
 export class ProjectFactsLeaseConflictError extends Error {
   constructor(message: string) {
     super(message);
@@ -62,13 +83,15 @@ export class ProjectFactsLeaseConflictError extends Error {
 export class FileCertifiedProjectFactsStore {
   readonly #root: string;
   readonly #logger: ProjectContextFoundationLogger;
+  readonly #durability: FileCertifiedProjectFactsStoreOptions['durability'];
 
-  constructor(root: string, options: { logger?: ProjectContextFoundationLogger } = {}) {
+  constructor(root: string, options: FileCertifiedProjectFactsStoreOptions = {}) {
     if (!path.isAbsolute(root)) {
       throw new TypeError('Certified facts store root must be absolute.');
     }
     this.#root = path.resolve(root);
     this.#logger = options.logger ?? DEFAULT_LOGGER;
+    this.#durability = options.durability;
   }
 
   async put(
@@ -234,24 +257,15 @@ export class FileCertifiedProjectFactsStore {
       runId,
       state: 'active',
     };
-    await fs.mkdir(path.dirname(this.#absolute(leaseRef)), { recursive: true });
+    const leaseBytes = Buffer.from(canonicalJsonStringify(lease));
+    const publication = await this.#publishNoReplace(leaseRef, leaseBytes, 'lease');
     let status: CertifiedProjectFactsRunLeaseReceiptV1['status'] = 'acquired';
-    try {
-      await fs.writeFile(this.#absolute(leaseRef), canonicalJsonStringify(lease), {
-        encoding: 'utf8',
-        flag: 'wx',
-      });
+    if (publication.created) {
       this.#logger.info(
         `lease acquired preparation=${preparation.preparationId} run=${runId} artifact=${preparation.artifactId}`
       );
-    } catch (error) {
-      if (!isNodeError(error, 'EEXIST')) {
-        throw error;
-      }
-      const existing = parseJson<StoredRunLeaseV1>(
-        await fs.readFile(this.#absolute(leaseRef), 'utf8'),
-        leaseRef
-      );
+    } else {
+      const existing = parseJson<StoredRunLeaseV1>(publication.existing.toString('utf8'), leaseRef);
       if (
         existing.preparationId !== preparation.preparationId ||
         existing.artifactId !== preparation.artifactId ||
@@ -334,24 +348,26 @@ export class FileCertifiedProjectFactsStore {
   }
 
   async #ensureLayout(): Promise<void> {
-    await Promise.all(
-      ['artifacts', 'blobs', 'certification-receipts', 'preparations', 'leases'].map((directory) =>
-        fs.mkdir(path.join(this.#root, directory), { recursive: true })
-      )
-    );
+    await fs.mkdir(this.#root, { recursive: true });
+    await syncDirectory(path.dirname(this.#root));
+    for (const directory of [
+      'artifacts',
+      'blobs',
+      'certification-receipts',
+      'preparations',
+      'leases',
+    ]) {
+      await fs.mkdir(path.join(this.#root, directory), { recursive: true });
+      await syncDirectory(this.#root);
+      await syncDirectory(path.join(this.#root, directory));
+    }
   }
 
   async #writeImmutable(relativeRef: string, content: string | Uint8Array): Promise<void> {
-    const absolutePath = this.#absolute(relativeRef);
-    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
     const bytes = typeof content === 'string' ? Buffer.from(content) : Buffer.from(content);
-    try {
-      await fs.writeFile(absolutePath, bytes, { flag: 'wx' });
-    } catch (error) {
-      if (!isNodeError(error, 'EEXIST')) {
-        throw error;
-      }
-      const existing = await fs.readFile(absolutePath);
+    const publication = await this.#publishNoReplace(relativeRef, bytes, 'immutable');
+    if (!publication.created) {
+      const existing = publication.existing;
       if (!existing.equals(bytes)) {
         this.#logger.warn(`immutable content conflict ref=${relativeRef}`);
         throw new TypeError(`Content-addressed store collision at ${relativeRef}.`);
@@ -362,9 +378,86 @@ export class FileCertifiedProjectFactsStore {
 
   async #replaceAtomically(relativeRef: string, content: string): Promise<void> {
     const absolutePath = this.#absolute(relativeRef);
-    const temporaryPath = `${absolutePath}.tmp-${randomUUID()}`;
-    await fs.writeFile(temporaryPath, content, 'utf8');
+    await this.#ensureParentDirectory(absolutePath);
+    const bytes = Buffer.from(content);
+    const temporaryPath = path.join(
+      path.dirname(absolutePath),
+      `.${path.basename(absolutePath)}.tmp-${randomUUID()}`
+    );
+    const handle = await fs.open(temporaryPath, 'wx');
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await this.#checkpoint('replace-after-temp-fsync', relativeRef);
     await fs.rename(temporaryPath, absolutePath);
+    await this.#checkpoint('replace-after-rename', relativeRef);
+    await syncDirectory(path.dirname(absolutePath));
+    await this.#checkpoint('replace-after-directory-fsync', relativeRef);
+    await verifyFileBytes(absolutePath, bytes, relativeRef);
+    await this.#checkpoint('replace-after-readback', relativeRef);
+  }
+
+  async #publishNoReplace(
+    relativeRef: string,
+    bytes: Buffer,
+    operation: 'immutable' | 'lease'
+  ): Promise<{ created: true; existing: Buffer } | { created: false; existing: Buffer }> {
+    const absolutePath = this.#absolute(relativeRef);
+    await this.#ensureParentDirectory(absolutePath);
+    const temporaryPath = path.join(
+      path.dirname(absolutePath),
+      `.${path.basename(absolutePath)}.tmp-${randomUUID()}`
+    );
+    const handle = await fs.open(temporaryPath, 'wx');
+    try {
+      await handle.writeFile(bytes);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await this.#checkpoint(`${operation}-after-temp-fsync`, relativeRef);
+    try {
+      await fs.link(temporaryPath, absolutePath);
+    } catch (error) {
+      if (!isNodeError(error, 'EEXIST')) {
+        throw error;
+      }
+      await fs.unlink(temporaryPath);
+      await syncFile(absolutePath);
+      await syncDirectory(path.dirname(absolutePath));
+      const existing = await fs.readFile(absolutePath);
+      await this.#checkpoint(`${operation}-after-directory-fsync`, relativeRef);
+      await this.#checkpoint(`${operation}-after-readback`, relativeRef);
+      return { created: false, existing };
+    }
+    await this.#checkpoint(`${operation}-after-publish`, relativeRef);
+    await fs.unlink(temporaryPath);
+    await syncDirectory(path.dirname(absolutePath));
+    await this.#checkpoint(`${operation}-after-directory-fsync`, relativeRef);
+    await verifyFileBytes(absolutePath, bytes, relativeRef);
+    await this.#checkpoint(`${operation}-after-readback`, relativeRef);
+    return { created: true, existing: bytes };
+  }
+
+  async #ensureParentDirectory(absolutePath: string): Promise<void> {
+    const directory = path.dirname(absolutePath);
+    await fs.mkdir(directory, { recursive: true });
+    await syncDirectory(path.dirname(this.#root));
+    const relativeDirectory = path.relative(this.#root, directory);
+    const segments = relativeDirectory === '' ? [] : relativeDirectory.split(path.sep);
+    let current = this.#root;
+    await syncDirectory(current);
+    for (const segment of segments) {
+      current = path.join(current, segment);
+      await syncDirectory(current);
+    }
+  }
+
+  async #checkpoint(step: FileStoreDurabilityStep, relativeRef: string): Promise<void> {
+    await this.#durability?.onStep?.(step, relativeRef);
   }
 
   #absolute(relativeRef: string): string {
@@ -491,4 +584,33 @@ function parseJson<T>(serialized: string, label: string): T {
 
 function isNodeError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && (error as NodeJS.ErrnoException).code === code;
+}
+
+async function syncDirectory(directory: string): Promise<void> {
+  const handle = await fs.open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function syncFile(filePath: string): Promise<void> {
+  const handle = await fs.open(filePath, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function verifyFileBytes(
+  filePath: string,
+  expected: Buffer,
+  relativeRef: string
+): Promise<void> {
+  const actual = await fs.readFile(filePath);
+  if (!actual.equals(expected)) {
+    throw new TypeError(`Durable store readback mismatch at ${relativeRef}.`);
+  }
 }

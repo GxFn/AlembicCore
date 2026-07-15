@@ -25,6 +25,7 @@ import {
   type ProjectContextFoundationHostPorts,
   type ProjectContextFoundationRepositoryInput,
   type ProjectContextRequestAuditPlan,
+  type ProjectContextRequestDiagnosticV1,
   type ProjectContextRequestOutcomeV1,
   type ProjectFactsDetailDecisionV1,
   type ProjectFactsDetailPlaneV1,
@@ -46,6 +47,35 @@ interface CapturedRepository {
   revisionEntry: SourceRevisionVectorEntryV1;
 }
 
+export class ProjectContextSourceStateDriftError extends Error {
+  readonly code = 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT';
+  readonly retryable = true;
+
+  constructor(repoId: string, cause?: unknown) {
+    super(
+      `Source state changed during certified capture for ${repoId}; discard this attempt and retry from a new capture.`,
+      cause === undefined ? undefined : { cause }
+    );
+    this.name = 'ProjectContextSourceStateDriftError';
+  }
+}
+
+export class ProjectContextInventoryOverlapError extends TypeError {
+  readonly code = 'PROJECT_CONTEXT_INVENTORY_OVERLAP';
+  readonly retryable = false;
+
+  constructor(scopeId: string, projectRelativePath: string, repoIds: readonly string[]) {
+    super(
+      `Certified inventory assigns ${scopeId}:${projectRelativePath} to multiple repositories: ${[
+        ...repoIds,
+      ]
+        .sort()
+        .join(',')}.`
+    );
+    this.name = 'ProjectContextInventoryOverlapError';
+  }
+}
+
 export async function captureCertifiedProjectFacts(
   input: ProjectContextFoundationCaptureInput,
   ports: ProjectContextFoundationHostPorts
@@ -58,6 +88,7 @@ export async function captureCertifiedProjectFacts(
     ports,
     includeExcludePolicyHash
   );
+  assertNoCrossRepositoryInventoryOverlap(repositories);
   const inventory = buildInventoryPlane(
     repositories,
     includeExcludePolicy,
@@ -65,6 +96,12 @@ export async function captureCertifiedProjectFacts(
   );
   const { detail, chunks } = buildDetailPlane(repositories, input.detailPolicy);
   const requestOutcomes = await captureRequestOutcomes(input, repositories, ports);
+  await assertSourceStateStable(
+    { ...input, inventoryPolicy: includeExcludePolicy },
+    ports,
+    includeExcludePolicyHash,
+    repositories
+  );
   assertPortableSemanticJson(toProjectFactsJson(requestOutcomes), 'request outcomes');
   const legacyEntries = [...input.legacyEntries].sort((left, right) =>
     left.entryId.localeCompare(right.entryId)
@@ -119,6 +156,70 @@ export async function captureCertifiedProjectFacts(
   };
   verifyCertifiedProjectFactsArtifact(artifact);
   return artifact;
+}
+
+async function assertSourceStateStable(
+  input: ProjectContextFoundationCaptureInput,
+  ports: ProjectContextFoundationHostPorts,
+  includeExcludePolicyHash: CanonicalSha256,
+  captured: CapturedRepository[]
+): Promise<void> {
+  let verified: CapturedRepository[];
+  try {
+    verified = await captureRepositories(input, ports, includeExcludePolicyHash);
+  } catch (error) {
+    if (input.signal?.aborted) {
+      throw error;
+    }
+    const repoId = captured.find((repository) =>
+      error instanceof Error ? error.message.includes(repository.input.sourceRoot) : false
+    )?.input.repoId;
+    throw new ProjectContextSourceStateDriftError(repoId ?? 'captured repository', error);
+  }
+  for (const expected of captured) {
+    const actual = verified.find((repository) => repository.input.repoId === expected.input.repoId);
+    if (
+      !actual ||
+      hashCanonicalJson({ files: actual.files, revision: actual.revisionEntry }) !==
+        hashCanonicalJson({ files: expected.files, revision: expected.revisionEntry })
+    ) {
+      throw new ProjectContextSourceStateDriftError(expected.input.repoId);
+    }
+  }
+}
+
+function assertNoCrossRepositoryInventoryOverlap(
+  repositories: readonly CapturedRepository[]
+): void {
+  const ownersByProjectPath = new Map<
+    string,
+    { path: string; repoIds: Set<string>; scopeId: string }
+  >();
+  for (const repository of repositories) {
+    const relativeRoot = normalizePortableRelativePath(
+      repository.input.relativeRoot,
+      'relativeRoot'
+    );
+    for (const file of repository.files) {
+      const projectRelativePath =
+        relativeRoot === '.' ? file.relativePath : `${relativeRoot}/${file.relativePath}`;
+      const key = `${repository.input.scopeId}\u0000${projectRelativePath}`;
+      const owners = ownersByProjectPath.get(key) ?? {
+        path: projectRelativePath,
+        repoIds: new Set<string>(),
+        scopeId: repository.input.scopeId,
+      };
+      owners.repoIds.add(repository.input.repoId);
+      ownersByProjectPath.set(key, owners);
+    }
+  }
+  for (const owners of ownersByProjectPath.values()) {
+    if (owners.repoIds.size > 1) {
+      throw new ProjectContextInventoryOverlapError(owners.scopeId, owners.path, [
+        ...owners.repoIds,
+      ]);
+    }
+  }
 }
 
 export function verifyCertifiedProjectFactsArtifact(
@@ -564,7 +665,7 @@ async function captureRequestOutcomes(
         output,
         outputHash: hashCanonicalJson(output),
         sourceRanges,
-        errors: uniqueStrings(result.errors ?? []),
+        errors: normalizeRequestDiagnostics(result.errors ?? []),
       });
     } catch (error) {
       if (input.signal?.aborted) {
@@ -584,7 +685,16 @@ async function captureRequestOutcomes(
         output,
         outputHash: hashCanonicalJson(output),
         sourceRanges: [],
-        errors: [message],
+        errors: [
+          {
+            classification: 'confirmed-defect',
+            code: 'execution-failed',
+            message,
+            retryable: false,
+            severity: 'error',
+            typedReason: 'project-context-request-threw-before-a-valid-envelope',
+          },
+        ],
       });
     }
   }
@@ -688,31 +798,68 @@ function buildCaptureReadinessSummary(
     }
   }
   for (const repoId of repoIds) {
+    const expectedOwnership = buildExpectedModuleOwnership(
+      facts.inventory.files.filter((file) => file.repoId === repoId)
+    );
+    const expectedOwnerIds = new Set(Object.keys(expectedOwnership));
     for (const kind of PROJECT_CONTEXT_REQUEST_KIND_VALUES) {
       const rows = facts.requestOutcomes.filter(
         (row) => row.repoId === repoId && row.kind === kind
       );
-      if (rows.length !== 1) {
+      if (rows.length === 0) {
         errors.push(`request-row-count:${repoId}/${kind}:${rows.length}`);
         continue;
       }
-      const row = rows[0];
-      if (!row) {
-        continue;
+      if (!['module', 'module-layers'].includes(kind) && rows.length !== 1) {
+        errors.push(`request-row-count:${repoId}/${kind}:${rows.length}`);
       }
-      if (
-        (row.applicability === 'applicable' && row.terminalStatus !== 'completed') ||
-        (row.applicability === 'not-applicable' &&
-          (!row.typedReason || row.terminalStatus !== 'not-applicable'))
-      ) {
-        errors.push(`request-not-ready:${repoId}/${kind}:${row.terminalStatus}`);
+      if (['module', 'module-layers'].includes(kind) && expectedOwnerIds.size > 0) {
+        const actualOwnerIds = rows
+          .map((row) => readDirectOwnerModuleId(row.selector))
+          .filter((owner): owner is string => Boolean(owner));
+        if (
+          actualOwnerIds.length !== rows.length ||
+          hashCanonicalJson([...new Set(actualOwnerIds)].sort()) !==
+            hashCanonicalJson([...expectedOwnerIds].sort()) ||
+          hashCanonicalJson(collectModuleOwnership(rows.map((row) => row.selector))) !==
+            hashCanonicalJson(expectedOwnership)
+        ) {
+          errors.push(`module-owner-coverage:${repoId}/${kind}`);
+        }
       }
-      if (row.parserRuntime === 'unavailable' || row.queryInitialization === 'unavailable') {
-        errors.push(`runtime-not-ready:${repoId}/${kind}`);
-      }
-      for (const range of row.sourceRanges) {
-        if (!inventoryKeys.has(`${range.repoId}\u0000${range.relativePath}`)) {
-          errors.push(`source-range-outside-inventory:${range.repoId}/${range.relativePath}`);
+      for (const row of rows) {
+        if (['repo', 'map'].includes(kind) && expectedOwnerIds.size > 0) {
+          const declaredOwnerIds = collectOwnerModuleIds(row.selector);
+          if (
+            hashCanonicalJson(declaredOwnerIds) !==
+              hashCanonicalJson([...expectedOwnerIds].sort()) ||
+            hashCanonicalJson(collectModuleOwnership(row.selector)) !==
+              hashCanonicalJson(expectedOwnership)
+          ) {
+            errors.push(`module-owner-coverage:${repoId}/${kind}`);
+          }
+        }
+        if (
+          (row.applicability === 'applicable' && row.terminalStatus !== 'completed') ||
+          (row.applicability === 'not-applicable' &&
+            (!row.typedReason || row.terminalStatus !== 'not-applicable'))
+        ) {
+          errors.push(`request-not-ready:${repoId}/${kind}:${row.terminalStatus}`);
+        }
+        if (row.parserRuntime === 'unavailable' || row.queryInitialization === 'unavailable') {
+          errors.push(`runtime-not-ready:${repoId}/${kind}`);
+        }
+        for (const diagnostic of row.errors) {
+          if (!isTypedRequestDiagnostic(diagnostic)) {
+            errors.push(`unclassified-request-diagnostic:${repoId}/${kind}`);
+          } else if (diagnostic.classification === 'confirmed-defect') {
+            errors.push(`confirmed-request-defect:${repoId}/${kind}:${diagnostic.code}`);
+          }
+        }
+        for (const range of row.sourceRanges) {
+          if (!inventoryKeys.has(`${range.repoId}\u0000${range.relativePath}`)) {
+            errors.push(`source-range-outside-inventory:${range.repoId}/${range.relativePath}`);
+          }
         }
       }
     }
@@ -865,7 +1012,129 @@ function compareRequestPlans(
   return (
     left.repoId.localeCompare(right.repoId) ||
     PROJECT_CONTEXT_REQUEST_KIND_VALUES.indexOf(left.kind) -
-      PROJECT_CONTEXT_REQUEST_KIND_VALUES.indexOf(right.kind)
+      PROJECT_CONTEXT_REQUEST_KIND_VALUES.indexOf(right.kind) ||
+    hashCanonicalJson(left.selector).localeCompare(hashCanonicalJson(right.selector))
+  );
+}
+
+function normalizeRequestDiagnostics(
+  diagnostics: readonly ProjectContextRequestDiagnosticV1[]
+): ProjectContextRequestDiagnosticV1[] {
+  const byIdentity = new Map<string, ProjectContextRequestDiagnosticV1>();
+  for (const diagnostic of diagnostics) {
+    if (!isTypedRequestDiagnostic(diagnostic)) {
+      throw new TypeError('ProjectContext request diagnostics must carry a typed classification.');
+    }
+    const normalized = {
+      ...diagnostic,
+      code: diagnostic.code.trim(),
+      message: diagnostic.message.trim(),
+      typedReason: diagnostic.typedReason.trim(),
+      ...(diagnostic.path ? { path: normalizePortableDiagnosticPath(diagnostic.path) } : {}),
+    };
+    byIdentity.set(hashCanonicalJson(normalized), normalized);
+  }
+  return [...byIdentity.values()].sort(
+    (left, right) =>
+      left.classification.localeCompare(right.classification) ||
+      left.code.localeCompare(right.code) ||
+      left.message.localeCompare(right.message)
+  );
+}
+
+function isTypedRequestDiagnostic(value: unknown): value is ProjectContextRequestDiagnosticV1 {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+  const diagnostic = value as Partial<ProjectContextRequestDiagnosticV1>;
+  return (
+    typeof diagnostic.code === 'string' &&
+    Boolean(diagnostic.code.trim()) &&
+    typeof diagnostic.message === 'string' &&
+    Boolean(diagnostic.message.trim()) &&
+    typeof diagnostic.typedReason === 'string' &&
+    Boolean(diagnostic.typedReason.trim()) &&
+    typeof diagnostic.retryable === 'boolean' &&
+    ['error', 'warning'].includes(diagnostic.severity ?? '') &&
+    ['expected-external', 'advisory', 'confirmed-defect'].includes(diagnostic.classification ?? '')
+  );
+}
+
+function normalizePortableDiagnosticPath(value: string): string {
+  if (value.startsWith('portable:')) {
+    return value;
+  }
+  return normalizePortableRelativePath(value, 'diagnostic.path');
+}
+
+function readDirectOwnerModuleId(value: ProjectFactsJson): string | undefined {
+  return value && !Array.isArray(value) && typeof value === 'object'
+    ? typeof value.ownerModuleId === 'string'
+      ? value.ownerModuleId
+      : undefined
+    : undefined;
+}
+
+function collectOwnerModuleIds(value: ProjectFactsJson): string[] {
+  const ownerIds = new Set<string>();
+  visitJson(value, (key, entry) => {
+    if (key === 'ownerModuleId' && typeof entry === 'string') {
+      ownerIds.add(entry);
+    }
+  });
+  return [...ownerIds].sort();
+}
+
+function buildExpectedModuleOwnership(
+  files: readonly ProjectFactsInventoryFileV1[]
+): Record<string, string[]> {
+  const ownership = new Map<string, Set<string>>();
+  for (const file of files) {
+    for (const ownerModuleId of file.ownerModuleIds) {
+      const ownedFiles = ownership.get(ownerModuleId) ?? new Set<string>();
+      ownedFiles.add(file.relativePath);
+      ownership.set(ownerModuleId, ownedFiles);
+    }
+  }
+  return serializeModuleOwnership(ownership);
+}
+
+function collectModuleOwnership(value: ProjectFactsJson): Record<string, string[]> {
+  const ownership = new Map<string, Set<string>>();
+  const visitSeed = (entry: ProjectFactsJson): void => {
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        visitSeed(item);
+      }
+      return;
+    }
+    if (!entry || typeof entry !== 'object') {
+      return;
+    }
+    if (typeof entry.ownerModuleId === 'string' && Array.isArray(entry.ownedFiles)) {
+      const ownedFiles = ownership.get(entry.ownerModuleId) ?? new Set<string>();
+      for (const file of entry.ownedFiles) {
+        if (typeof file === 'string') {
+          ownedFiles.add(file);
+        }
+      }
+      ownership.set(entry.ownerModuleId, ownedFiles);
+    }
+    for (const nested of Object.values(entry)) {
+      visitSeed(nested);
+    }
+  };
+  visitSeed(value);
+  return serializeModuleOwnership(ownership);
+}
+
+function serializeModuleOwnership(
+  ownership: ReadonlyMap<string, ReadonlySet<string>>
+): Record<string, string[]> {
+  return Object.fromEntries(
+    [...ownership.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([ownerModuleId, ownedFiles]) => [ownerModuleId, [...ownedFiles].sort()])
   );
 }
 

@@ -125,6 +125,22 @@ export type ProjectContextRequestTerminalStatus =
 
 export type ProjectContextParserReadiness = 'ready' | 'not-required' | 'unavailable';
 
+export type ProjectContextRequestDiagnosticClassification =
+  | 'expected-external'
+  | 'advisory'
+  | 'confirmed-defect';
+
+export interface ProjectContextRequestDiagnosticV1 {
+  code: string;
+  message: string;
+  severity: 'error' | 'warning';
+  retryable: boolean;
+  classification: ProjectContextRequestDiagnosticClassification;
+  typedReason: string;
+  path?: string;
+  relatedRepoId?: string;
+}
+
 export interface ProjectContextSourceRangeV1 {
   repoId: string;
   relativePath: string;
@@ -140,7 +156,7 @@ export interface ProjectContextRequestExecutionResult {
   queryInitialization: ProjectContextParserReadiness;
   continuation?: string;
   sourceRanges?: ProjectContextSourceRangeV1[];
-  errors?: string[];
+  errors?: ProjectContextRequestDiagnosticV1[];
 }
 
 export interface ProjectContextRequestOutcomeV1 {
@@ -158,7 +174,7 @@ export interface ProjectContextRequestOutcomeV1 {
   output: ProjectFactsJson;
   outputHash: CanonicalSha256;
   sourceRanges: ProjectContextSourceRangeV1[];
-  errors: string[];
+  errors: ProjectContextRequestDiagnosticV1[];
 }
 
 export interface ProjectContextLegacyEntryAuditRowV1 {
