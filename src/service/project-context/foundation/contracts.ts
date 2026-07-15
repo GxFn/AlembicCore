@@ -7,8 +7,13 @@ export const CERTIFIED_PROJECT_FACTS_SCHEMA_VERSION = 1 as const;
 export const SOURCE_REVISION_VECTOR_VERSION = 1 as const;
 export const PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION = 1 as const;
 export const PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION = 1 as const;
+export const PROJECT_SCOPE_MANIFEST_VERSION = 1 as const;
+export const PROJECT_CONTEXT_REQUEST_OUTCOME_V2_VERSION = 2 as const;
+export const PROJECT_CONTEXT_CONSUMER_PROJECTION_VERSION = 2 as const;
+export const PROJECT_CONTEXT_CONSUMER_LINEAGE_VERSION = 2 as const;
 export const PROJECT_FACTS_CANONICALIZER_VERSION = 'pcf-canonical-json-v1' as const;
 export const PROJECT_FACTS_READINESS_VALIDATOR_VERSION = 'pcf-readiness-v1' as const;
+export const PROJECT_FACTS_READINESS_VALIDATOR_V2_VERSION = 'pcf-readiness-v2' as const;
 
 export const CERTIFIED_PROJECT_FACTS_CONSUMERS = [
   'plan',
@@ -90,11 +95,77 @@ export interface ProjectContextFoundationRepositoryInput {
   sourceRoot: string;
 }
 
+export interface AcceptedProjectScopeRepositoryV1 {
+  repoId: string;
+  relativeRoot: string;
+}
+
+export interface AcceptedProjectScopeDeclarationV1 {
+  projectMode: string;
+  projectIdentity: {
+    projectId: string;
+    scopeId: string;
+  };
+  repositories: AcceptedProjectScopeRepositoryV1[];
+}
+
+export interface ProjectScopeManifestRepositoryV1 {
+  scopeId: string;
+  repoId: string;
+  relativeRoot: string;
+}
+
+export interface ProjectScopeManifestV1 {
+  kind: 'ProjectScopeManifestV1';
+  version: typeof PROJECT_SCOPE_MANIFEST_VERSION;
+  projectMode: string;
+  projectIdentity: {
+    projectId: string;
+    scopeId: string;
+  };
+  repositories: ProjectScopeManifestRepositoryV1[];
+  acceptedDeclarationHash: CanonicalSha256;
+  canonicalScopeHash: CanonicalSha256;
+  receiptHash: CanonicalSha256;
+}
+
+export interface ProjectScopeCaptureBindingV1 {
+  manifest: ProjectScopeManifestV1;
+  /** Runtime-only accepted root; excluded from the manifest and every semantic hash. */
+  controlRoot: string;
+  /** Runtime-only absolute roots; the manifest and all semantic hashes exclude them. */
+  repositories: ProjectContextFoundationRepositoryInput[];
+}
+
+export type ProjectContextInventoryOwnerOriginV2 =
+  | 'package-build-declaration'
+  | 'host-declared'
+  | 'path-heuristic';
+
+export type ProjectContextInventoryOwnerDispositionV2 = 'exclusive' | 'shared' | 'ambiguous';
+
+export interface ProjectContextInventoryOwnerEvidenceV2 {
+  kind: 'package-build-declaration' | 'host-port-declaration' | 'relative-path-shape';
+  relativePath?: string;
+  contentHash?: CanonicalSha256;
+}
+
+export interface ProjectContextInventoryOwnerV2 {
+  ownerModuleId: string;
+  origin: ProjectContextInventoryOwnerOriginV2;
+  confidence: 'high' | 'medium' | 'low';
+  disposition: ProjectContextInventoryOwnerDispositionV2;
+  typedReason: string;
+  evidence: ProjectContextInventoryOwnerEvidenceV2[];
+}
+
 export interface ProjectContextFoundationFileDescriptor {
   relativePath: string;
   language: string;
   mode: string;
   ownerModuleIds?: string[];
+  /** Additive strict-v2 authority; ownerModuleIds remains the V1 compatibility projection. */
+  ownersV2?: ProjectContextInventoryOwnerV2[];
 }
 
 export type ProjectContextRepositoryRevisionObservation =
@@ -208,6 +279,37 @@ export interface ProjectContextRequestAuditPlan {
   scope: Omit<ProjectContextScopeInput, 'projectRoot'>;
 }
 
+export interface ProjectContextRequestAuditPlanV2 extends ProjectContextRequestAuditPlan {
+  authorityVersion: typeof PROJECT_CONTEXT_REQUEST_OUTCOME_V2_VERSION;
+  language?: string;
+  parserFamily?: string;
+  ownerSurfaceId?: string;
+}
+
+export interface ProjectContextRequestEnvelopeIndexRowV2 {
+  rowId: CanonicalSha256;
+  repoId: string;
+  kind: ProjectContextRequestKind;
+  selectorHash: CanonicalSha256;
+  canonicalScopeHash: CanonicalSha256;
+  language: string | null;
+  parserFamily: string | null;
+  ownerSurfaceId: string | null;
+  applicability: ProjectContextRequestApplicability;
+  terminalStatus?: ProjectContextRequestTerminalStatus;
+  outputHash?: CanonicalSha256;
+}
+
+export interface ProjectContextRequestMatrixV2 {
+  kind: 'ProjectContextRequestMatrixV2';
+  version: typeof PROJECT_CONTEXT_REQUEST_OUTCOME_V2_VERSION;
+  projectScopeHash: CanonicalSha256;
+  plans: ProjectContextRequestAuditPlanV2[];
+  rows: ProjectContextRequestEnvelopeIndexRowV2[];
+  matrixHash: CanonicalSha256;
+  receiptHash: CanonicalSha256;
+}
+
 export type ProjectContextRequestTerminalStatus =
   | 'completed'
   | 'not-applicable'
@@ -275,6 +377,14 @@ export interface ProjectContextRequestOutcomeV1 {
   dependencyResolutions?: ProjectContextDependencyResolutionV1[];
   dependencyObservationCount?: number;
   dependencyGraphReconciliation?: ProjectContextDependencyGraphReconciliationV1;
+  /** Present only on strict-v2 outcomes. */
+  authorityVersion?: typeof PROJECT_CONTEXT_REQUEST_OUTCOME_V2_VERSION;
+  rowId?: CanonicalSha256;
+  selectorHash?: CanonicalSha256;
+  canonicalScopeHash?: CanonicalSha256;
+  language?: string | null;
+  parserFamily?: string | null;
+  ownerSurfaceId?: string | null;
 }
 
 export interface ProjectContextLegacyEntryAuditRowV1 {
@@ -307,6 +417,12 @@ export interface ProjectContextFoundationCaptureInput {
   projections: CertifiedProjectFactsProjectionInputs;
   certification: ProjectContextCertificationInputV1;
   signal?: AbortSignal;
+}
+
+export interface ProjectContextFoundationCaptureInputV2
+  extends ProjectContextFoundationCaptureInput {
+  projectScope: ProjectScopeCaptureBindingV1;
+  requestMatrix: ProjectContextRequestMatrixV2;
 }
 
 export interface ProjectContextFoundationHostPorts {
@@ -350,6 +466,7 @@ export interface ProjectFactsInventoryFileV1 {
   sizeBytes: number;
   blobSha256: CanonicalSha256;
   ownerModuleIds: string[];
+  ownersV2?: ProjectContextInventoryOwnerV2[];
 }
 
 export interface ProjectFactsInventoryRepositoryV1 {
@@ -387,6 +504,15 @@ export interface ProjectFactsDetailSelectionV1 {
   fullChunkRefs: CanonicalSha256[];
 }
 
+export interface ProjectFactsFrozenFileV2 {
+  repoId: string;
+  relativePath: string;
+  blobHash: CanonicalSha256;
+  byteLength: number;
+  fullChunkRefs: CanonicalSha256[];
+  status: 'frozen-blob-available';
+}
+
 export interface ProjectFactsDetailPlaneV1 {
   schemaVersion: typeof CERTIFIED_PROJECT_FACTS_SCHEMA_VERSION;
   policy: ProjectContextDetailPolicyV1;
@@ -395,6 +521,8 @@ export interface ProjectFactsDetailPlaneV1 {
   selectedFileCount: number;
   omittedFileCount: number;
   continuation?: `pcf-detail-v1:${string}`;
+  frozenFiles?: ProjectFactsFrozenFileV2[];
+  frozenFileManifestHash?: CanonicalSha256;
   detailContentHash: CanonicalSha256;
 }
 
@@ -435,12 +563,18 @@ export interface CertifiedProjectFactsManifestV1 {
     terminalStatus: ProjectContextRequestTerminalStatus;
     outputHash: CanonicalSha256;
   }>;
+  projectScopeManifest?: ProjectScopeManifestV1;
+  requestEnvelopeIndexV2?: ProjectContextRequestEnvelopeIndexRowV2[];
+  requestMatrixHash?: CanonicalSha256;
+  frozenFileManifestHash?: CanonicalSha256;
   projectionContentHashes: Record<CertifiedProjectFactsConsumer, CanonicalSha256>;
   blobTable: Array<{ blobHash: CanonicalSha256; byteLength: number }>;
 }
 
 export interface CertifiedProjectFactsReadinessSummaryV1 {
-  validatorVersion: typeof PROJECT_FACTS_READINESS_VALIDATOR_VERSION;
+  validatorVersion:
+    | typeof PROJECT_FACTS_READINESS_VALIDATOR_VERSION
+    | typeof PROJECT_FACTS_READINESS_VALIDATOR_V2_VERSION;
   verdict: 'passed' | 'failed';
   errors: string[];
   errorsHash: CanonicalSha256;
@@ -503,6 +637,54 @@ export interface ProjectContextConsumerLineageReceiptV1 {
   sourceVectorHash: CanonicalSha256;
   rows: ProjectContextConsumerLineageRowV1[];
   receiptHash: CanonicalSha256;
+}
+
+export interface ProjectContextConsumerProjectionReceiptV2 {
+  kind: 'ProjectContextConsumerProjectionReceiptV2';
+  version: typeof PROJECT_CONTEXT_CONSUMER_PROJECTION_VERSION;
+  artifactId: CertifiedProjectFactsArtifactId;
+  sourceVectorHash: CanonicalSha256;
+  factsContentHash: CanonicalSha256;
+  certificationBindingHash: CanonicalSha256;
+  consumer: CertifiedProjectFactsConsumer;
+  adapterVersion: string;
+  projectionContentHash: CanonicalSha256;
+  entrypoint: string;
+  runId: string;
+  payloadSchemaHash: CanonicalSha256;
+  loadEvidenceHash: CanonicalSha256;
+  receiptHash: CanonicalSha256;
+}
+
+export interface ProjectContextConsumerLineageRowInputV2 {
+  projectionReceipt: ProjectContextConsumerProjectionReceiptV2;
+  canonicalScopeHash: CanonicalSha256;
+  sessionPersistReloadStatus: 'passed' | 'not-applicable';
+  directProjectContextCallCount: number;
+  rawFilesystemFallbackCount: number;
+  synthesizedProjectScopeFactCount: number;
+}
+
+export interface ProjectContextConsumerLineageRowV2
+  extends ProjectContextConsumerLineageRowInputV2 {
+  consumer: CertifiedProjectFactsConsumer;
+}
+
+export interface ProjectContextConsumerLineageReceiptV2 {
+  kind: 'ProjectContextConsumerLineageReceiptV2';
+  version: typeof PROJECT_CONTEXT_CONSUMER_LINEAGE_VERSION;
+  artifactId: CertifiedProjectFactsArtifactId;
+  sourceVectorHash: CanonicalSha256;
+  factsContentHash: CanonicalSha256;
+  certificationBindingHash: CanonicalSha256;
+  rows: ProjectContextConsumerLineageRowV2[];
+  receiptHash: CanonicalSha256;
+}
+
+export interface CertifiedProjectFactsConsumerProjectionV2 {
+  payload: ProjectFactsJson;
+  receipt: ProjectContextConsumerProjectionReceiptV2;
+  binding: CertifiedProjectFactsConsumerBindingV1;
 }
 
 export interface CertifiedProjectFactsReadinessResult {

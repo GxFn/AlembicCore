@@ -8,18 +8,22 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import {
+  buildProjectContextRequestMatrixV2,
+  buildProjectScopeManifestV1,
   CERTIFIED_PROJECT_FACTS_CONSUMERS,
   CertifiedProjectFactsConsumerPort,
   FileCertifiedProjectFactsStore,
   NodeProjectContextFoundationHostPorts,
   ProjectFactsLeaseConflictError,
-  captureCertifiedProjectFacts,
+  captureCertifiedProjectFactsV2,
+  createProjectContextConsumerLineageReceiptV2,
   createProjectContextDependencyOwnershipV1,
-  createProjectContextRequestAuditPlans,
-  createProjectContextConsumerLineageReceipt,
-  evaluateCertifiedProjectFactsReadiness,
+  createProjectContextRequestAuditPlansV2,
+  evaluateCertifiedProjectFactsReadinessV2,
+  evaluateProjectContextRequestMatrixV2,
   hashBytes,
   hashCanonicalJson,
+  verifyProjectScopeManifestV1,
 } from '../dist/projectContextFoundation.js';
 
 const execFileAsync = promisify(execFile);
@@ -65,6 +69,7 @@ const INVENTORY_POLICY = Object.freeze({
   excludeDirectories: [
     '.build',
     '.git',
+    '.swiftpm',
     '.wakeflow-active',
     '.wakeflow-local',
     'DerivedData',
@@ -73,6 +78,7 @@ const INVENTORY_POLICY = Object.freeze({
     'dist',
     'node_modules',
     'vendor',
+    'xcuserdata',
   ],
 });
 const SP_BILIDILI_PACKAGE_ROOTS = Object.freeze([
@@ -127,6 +133,9 @@ async function runParent(input) {
       'factsContentHash',
       'certificationBindingHash',
       'sourceVectorHash',
+      'projectScopeHash',
+      'requestMatrixHash',
+      'frozenFileManifestHash',
     ];
     const comparison = Object.fromEntries(
       stableFields.map((field) => [field, first[field] === second[field]])
@@ -140,11 +149,9 @@ async function runParent(input) {
     });
   }
 
-  const [loadedArtifact, strictPathEvidence, historicalLoadedArtifactReproduction] =
-    await Promise.all([
+  const [loadedArtifact, strictPathEvidence] = await Promise.all([
     readLoadedArtifactEvidence(),
     readStrictPathEvidence(),
-    readHistoricalLoadedArtifactReproduction(workspaceRoot),
   ]);
   const confirmedDiagnostics = modeResults.flatMap((mode) =>
     mode.firstProcess.requestMatrix.flatMap((row) =>
@@ -160,6 +167,7 @@ async function runParent(input) {
     )
   );
   const dependencyOwnershipSummary = modeResults.map(buildDependencyOwnershipSummary);
+  const authorityMutationCards = buildAuthorityMutationCards(modeResults);
   const openDefects = [
     ...confirmedDiagnostics,
     ...modeResults.flatMap((mode) => mode.firstProcess.readiness.errors.map((error) => ({
@@ -176,6 +184,17 @@ async function runParent(input) {
           },
         ]
       : [])),
+    ...modeResults.flatMap((mode) =>
+      mode.firstProcess.baseConsumerOrdering.unchanged && mode.firstProcess.detail.conservation
+        ? []
+        : [
+            {
+              owner: 'AlembicCore',
+              projectMode: mode.projectMode,
+              error: 'base/post-open ordering or frozen-file conservation failed',
+            },
+          ]
+    ),
     ...dependencyOwnershipSummary.flatMap((summary) =>
       summary.conservation.conserved
         ? []
@@ -185,33 +204,88 @@ async function runParent(input) {
               projectMode: summary.projectMode,
               error: 'dependency ownership observation/graph conservation failed',
             },
+        ]
+    ),
+    ...authorityMutationCards.flatMap((card) =>
+      card.rejected
+        ? []
+        : [
+            {
+              owner: 'AlembicCore',
+              projectMode: card.projectMode,
+              error: `authority mutation was not rejected: ${card.mutation}`,
+            },
           ]
     ),
   ];
   const reportWithoutHash = {
     kind: 'ProjectContextCapabilityAuditReport',
-    schemaVersion: 1,
+    schemaVersion: 2,
     section: 'AlembicCore',
-    taskId: 'i1-i2-core-content-terminal-fence-t1',
+    taskId: 'i1-i2-core-foundation-authority-v2-t1',
     loadedArtifact,
-    historicalLoadedArtifactReproduction,
     reproduction: {
       inputModes: ['MR-ALEMBIC', 'SP-BILIDILI'],
       historicalFailure: 'ProjectContext multi-repo traversal 1/5 and Plan repeatability failure',
       rootCause:
-        'Directory-derived module owners were disconnected from package imports/exports, so certified internal and sibling dependencies were mislabeled external. Capture also opened each inventory interval after a pre-read observation without a post-read/content fence, allowing a clean Git revision to certify dirty bytes. Rootcause2 binds dependency names to versioned package/module ownership and binds every verifier-backed candidate to a closed snapshot. The remaining legacy content-host fallback still echoed candidate hashes without a terminal full reread.',
+        'The accepted V1 checkpoint closed capture coherence and durability, but its scope/readiness lists were caller-coordinated, its request identity was mostly repo+kind single-row, omitted detail bytes were not stored, inventory owners had no typed authority, and audit placeholders could be presented as consumer lineage. Strict V2 separates these authority planes without rebuilding the Foundation store or lease.',
       failingBefore:
         'On commit 5414d681, 326 of 500 MR expected-external diagnostics were certified ownership (156 current-repo private/package imports and 170 approved sibling exports). The controller clean-tree probe also returned readiness passed for dirty bytes. On commit 443ab564, a no-verifier content host could certify A in both complete candidates while switching the terminal eligible inventory/content to B after each post observation; readiness still passed.',
       passingAfter:
-        'Canonical ownership conservation, module-seed binding, external-hotspot reconciliation, clean-tree byte verification, verifier-backed fences, legacy content terminal full rereads, adversarial add/delete/modify and AbortError tests, fresh-process MR/SP audits, historical loaded-parent probes, package build, and repository gates pass after repair.',
+        'Core-owned scope receipts, exact V2 request matrices, all-readable frozen-file refs, typed owner evidence, sealed base certification and post-open adapter receipts pass focused mutation tests and fresh-process MR/SP audits. Global PC-F remains pending Main/Plugin actual adapters plus Graph/Map truth.',
     },
-    modes: modeResults,
+    scopeAuthority: {
+      modes: modeResults.map((mode) => ({
+        projectMode: mode.projectMode,
+        manifest: mode.secondProcess.projectScopeManifest,
+        captureDerivedFromReceipt: true,
+        sourceVectorReconciled: mode.secondProcess.readiness.ok,
+      })),
+    },
+    requestAuditV2: modeResults.map((mode) => ({
+      projectMode: mode.projectMode,
+      expectedIndexHash: mode.secondProcess.requestMatrixReceipt.matrixHash,
+      actualIndexHash: hashCanonicalJson(
+        mode.secondProcess.requestMatrix.map((row) => ({
+          rowId: row.rowId,
+          repoId: row.repoId,
+          kind: row.kind,
+          selectorHash: row.selectorHash,
+          canonicalScopeHash: row.canonicalScopeHash,
+          language: row.language,
+          parserFamily: row.parserFamily,
+          ownerSurfaceId: row.ownerSurfaceId,
+          applicability: row.applicability,
+        })).sort((left, right) => left.rowId.localeCompare(right.rowId))
+      ),
+      rowCount: mode.secondProcess.requestMatrix.length,
+      conserved: mode.secondProcess.readiness.ok,
+    })),
+    frozenContentConservation: modeResults.map((mode) => ({
+      projectMode: mode.projectMode,
+      eligibleFiles: mode.secondProcess.inventory.fileCount,
+      frozenFileRefs: mode.secondProcess.detail.frozenFileCount,
+      readFailed: 0,
+      criticalReadFailures: 0,
+      uniqueCasBlobs: mode.secondProcess.storeReceipt.blobCount,
+      frozenFileManifestHash: mode.secondProcess.detail.frozenFileManifestHash,
+      conserved: mode.secondProcess.detail.conservation,
+    })),
+    ownerConservation: modeResults.map((mode) => ({
+      projectMode: mode.projectMode,
+      ...mode.secondProcess.inventory.ownerEvidence,
+      conserved:
+        mode.secondProcess.inventory.ownerEvidence.untypedRows === 0 &&
+        mode.secondProcess.inventory.ownerEvidence.pathHeuristicExclusiveRows === 0,
+    })),
+    mutationCards: authorityMutationCards,
+    modes: modeResults.map(compactModeEvidence),
     producerInventory: {
       authoritativeProducer: '@alembic/core/project-context-foundation',
       strictLegacyEntries: modeResults[0]?.secondProcess.legacyEntries ?? [],
-      actualArtifactOnlyAdapterEvidence: modeResults.map((mode) => ({
+      coreContractProbeEvidence: modeResults.map((mode) => ({
         projectMode: mode.projectMode,
-        ...mode.secondProcess.actualArtifactOnlyAdapterEvidence,
+        ...mode.secondProcess.coreContractProbeEvidence,
       })),
       auxiliaryStaticPathEvidence: strictPathEvidence,
       normalCaptureCountPerArtifact: 1,
@@ -230,6 +304,17 @@ async function runParent(input) {
       ),
     })),
     dependencyOwnershipSummary,
+    globalPcF: {
+      status: 'pending',
+      pendingRows: [
+        'Alembic Main actual plan/recipe-generation/dependency-graph/module-coverage adapters and session reload',
+        'AlembicPlugin actual dimension-completion/module-axis/submit-tool-router adapter and session reload',
+        'Main 12/80 and Plugin 24/500/raw/synthetic/empty-axis strict bypass counters',
+        'Plugin .gitmodules discovery reconciliation against Core scope tuples/revisions',
+        'terminal Graph/region semantic receipt with duplicate-root and script-as-repo zero',
+        'Map mount accounting/project coverage split and cumulative per-type continuation',
+      ],
+    },
     openConfirmedDefects: openDefects,
     repairCommits,
     residualRisks: [
@@ -260,6 +345,131 @@ async function runParent(input) {
   if (openDefects.length > 0) {
     process.exitCode = 1;
   }
+}
+
+function buildAuthorityMutationCards(modeResults) {
+  return modeResults.flatMap((mode) => {
+    const scope = mode.secondProcess.projectScopeManifest;
+    const matrix = mode.secondProcess.requestMatrixReceipt;
+    const rows = matrix.rows;
+    const scopeAlias = structuredClone(scope);
+    scopeAlias.repositories[0].repoId = `${scopeAlias.repositories[0].repoId}-alias`;
+    let scopeAliasRejected = false;
+    try {
+      verifyProjectScopeManifestV1(scopeAlias);
+    } catch {
+      scopeAliasRejected = true;
+    }
+    const languageSwap = structuredClone(rows);
+    languageSwap[0].language = languageSwap[0].language === 'swift' ? 'typescript' : 'swift';
+    const scopeSwap = structuredClone(rows);
+    if (scopeSwap.length > 1) {
+      scopeSwap[0].canonicalScopeHash = scopeSwap[1].canonicalScopeHash;
+    }
+    return [
+      {
+        projectMode: mode.projectMode,
+        mutation: 'synchronized-repo-alias-against-accepted-scope-receipt',
+        rejected: scopeAliasRejected,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'v2-row-delete',
+        rejected: !evaluateProjectContextRequestMatrixV2(matrix, rows.slice(1), scope).ok,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'v2-row-duplicate',
+        rejected: !evaluateProjectContextRequestMatrixV2(matrix, [...rows, rows[0]], scope).ok,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'v2-language-swap',
+        rejected: !evaluateProjectContextRequestMatrixV2(matrix, languageSwap, scope).ok,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'v2-scope-only-swap',
+        rejected: !evaluateProjectContextRequestMatrixV2(matrix, scopeSwap, scope).ok,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'audit-placeholder-projection',
+        rejected: mode.secondProcess.placeholderProjectionRejected,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'omitted-frozen-file-fresh-process-reopen',
+        rejected:
+          !mode.secondProcess.omittedFrozenRestartProbe.applicable ||
+          (mode.secondProcess.omittedFrozenRestartProbe.matched &&
+            mode.secondProcess.omittedFrozenRestartProbe.freshProcess &&
+            mode.secondProcess.omittedFrozenRestartProbe.liveFileDeleted &&
+            mode.secondProcess.omittedFrozenRestartProbe.liveMutationHash !==
+              mode.secondProcess.omittedFrozenRestartProbe.expectedBlobHash),
+        evidence: mode.secondProcess.omittedFrozenRestartProbe,
+      },
+      {
+        projectMode: mode.projectMode,
+        mutation: 'base-hash-post-open-mutation',
+        rejected:
+          mode.secondProcess.baseConsumerOrdering.unchanged &&
+          mode.secondProcess.baseConsumerOrdering.mutationRejected,
+      },
+    ];
+  });
+}
+
+function compactModeEvidence(mode) {
+  return {
+    ...mode,
+    firstProcess: compactProcessEvidence(mode.firstProcess),
+    secondProcess: compactProcessEvidence(mode.secondProcess),
+  };
+}
+
+function compactProcessEvidence(processEvidence) {
+  const {
+    requestMatrix,
+    requestMatrixReceipt,
+    dependencyOwnership,
+    ...boundedEvidence
+  } = processEvidence;
+  return {
+    ...boundedEvidence,
+    requestMatrixReceipt: {
+      kind: requestMatrixReceipt.kind,
+      version: requestMatrixReceipt.version,
+      projectScopeHash: requestMatrixReceipt.projectScopeHash,
+      matrixHash: requestMatrixReceipt.matrixHash,
+      receiptHash: requestMatrixReceipt.receiptHash,
+      planCount: requestMatrixReceipt.plans.length,
+      rowCount: requestMatrixReceipt.rows.length,
+      rows: requestMatrixReceipt.rows,
+    },
+    requestMatrix: requestMatrix.map((row) => {
+      const {
+        dependencyResolutions,
+        dependencyGraphReconciliation,
+        dependencyGraphEvidence,
+        ...boundedRow
+      } = row;
+      return {
+        ...boundedRow,
+        dependencyResolutionCount: dependencyResolutions?.length ?? 0,
+        dependencyResolutionHash: hashCanonicalJson(dependencyResolutions ?? []),
+        dependencyGraphReconciliationHash: hashCanonicalJson(
+          dependencyGraphReconciliation ?? emptyDependencyGraphReconciliation()
+        ),
+        dependencyGraphEvidenceHash: hashCanonicalJson(dependencyGraphEvidence ?? {}),
+      };
+    }),
+    dependencyOwnership: {
+      version: dependencyOwnership.version,
+      ownershipHash: dependencyOwnership.ownershipHash,
+      entryCount: dependencyOwnership.entries.length,
+    },
+  };
 }
 
 function buildDependencyOwnershipSummary(mode) {
@@ -531,6 +741,21 @@ async function runChild(input) {
   const resultFile = requireAbsolutePath(input.result, 'result');
   const mode = requireEnum(input.mode, ['MR-ALEMBIC', 'SP-BILIDILI'], 'mode');
   const repositories = repositoriesForMode(mode, workspaceRoot, bilidiliRoot);
+  const projectScope = buildProjectScopeManifestV1({
+    acceptedScope: {
+      projectMode: mode,
+      projectIdentity: {
+        projectId: mode === 'MR-ALEMBIC' ? 'alembic-workspace' : 'bilidili',
+        scopeId: mode === 'MR-ALEMBIC' ? 'mr-alembic' : 'sp-bilidili',
+      },
+      repositories: repositories.map(({ repoId, relativeRoot }) => ({
+        repoId,
+        relativeRoot,
+      })),
+    },
+    controlRoot: mode === 'MR-ALEMBIC' ? workspaceRoot : bilidiliRoot,
+    sourceRoots: repositories.map(({ repoId, sourceRoot }) => ({ repoId, sourceRoot })),
+  });
   const inventoryPolicy =
     mode === 'SP-BILIDILI'
       ? { ...INVENTORY_POLICY, excludeRelativePaths: [...SP_BILIDILI_PACKAGE_ROOTS] }
@@ -564,12 +789,22 @@ async function runChild(input) {
     portableRoots,
     dependencyOwnership,
   });
+  for (const repository of repositories) {
+    descriptorsByRepo.set(
+      repository.repoId,
+      await ports.enumerateEligibleFiles({ repository, policy: inventoryPolicy })
+    );
+  }
   const requestPlans = repositories.flatMap((repository) =>
-    createProjectContextRequestAuditPlans({
+    createProjectContextRequestAuditPlansV2({
       repository,
       eligibleFiles: descriptorsByRepo.get(repository.repoId) ?? [],
-      dependencyOwnership,
+      projectScopeManifest: projectScope.manifest,
     })
+  );
+  const requestMatrix = buildProjectContextRequestMatrixV2(
+    projectScope.manifest,
+    requestPlans
   );
   const selectedFiles = repositories.flatMap((repository) => {
     const descriptors = descriptorsByRepo.get(repository.repoId) ?? [];
@@ -596,7 +831,7 @@ async function runChild(input) {
   );
   const certification = await buildCertification(
     mode,
-    repositories,
+    projectScope.manifest,
     inventoryPolicy,
     detailPolicy,
     dependencyOwnership
@@ -612,10 +847,12 @@ async function runChild(input) {
       synthesizedProjectScopeFactCount: 0,
     },
   ];
-  const artifact = await captureCertifiedProjectFacts(
+  const artifact = await captureCertifiedProjectFactsV2(
     {
       projectMode: mode,
       repositories,
+      projectScope,
+      requestMatrix,
       inventoryPolicy,
       detailPolicy,
       requestPlans,
@@ -625,8 +862,9 @@ async function runChild(input) {
     },
     ports
   );
-  const readiness = evaluateCertifiedProjectFactsReadiness(artifact, {
-    expectedRepoIds: repositories.map((repository) => repository.repoId),
+  const readiness = evaluateCertifiedProjectFactsReadinessV2(artifact, {
+    acceptedScopeManifest: projectScope.manifest,
+    requestMatrix,
     requiredLegacyEntryIds: ['core-plan-raw-scanner'],
   });
   if (!readiness.ok) {
@@ -680,30 +918,92 @@ async function runChild(input) {
       return adapterStore.open(artifactId, certificationBindingHash);
     },
   });
-  const consumerBindings = [];
+  const baseSealBeforeOpen = {
+    certificationBindingHash: artifact.certificationBindingHash,
+    storeReceiptHash: storeReceipt.receiptHash,
+  };
+  const projectionResults = [];
   for (const consumer of CERTIFIED_PROJECT_FACTS_CONSUMERS) {
-    consumerBindings.push(
-      await consumerPort.reopen({
+    projectionResults.push(
+      await consumerPort.reopenWithAdapter({
         preparationId: preparation.preparationId,
         runId: requireOpaque(input['run-id'], 'run-id'),
         consumer,
         expectedCertificationBindingHash: artifact.certificationBindingHash,
+        adapter: {
+          adapterVersion: 'core-contract-probe-v2',
+          entrypoint: `contract-probe/core/${consumer}`,
+          payloadSchemaHash: hashCanonicalJson({ consumer, schemaVersion: 2 }),
+          loadEvidenceHash: hashCanonicalJson({
+            consumer,
+            runtime: process.version,
+            foundationArtifactId: artifact.artifactId,
+          }),
+          project(opened) {
+            return {
+              consumer,
+              inventoryContentHash: opened.facts.inventory.inventoryContentHash,
+              requestMatrixHash: opened.manifest.requestMatrixHash,
+              sourceVectorHash: opened.sourceVectorHash,
+            };
+          },
+        },
       })
     );
   }
-  const foundationConsumerLineageReceipt = createProjectContextConsumerLineageReceipt(
+  const coreContractProbeLineageReceipt = createProjectContextConsumerLineageReceiptV2(
     artifact,
-    consumerBindings.map((binding) => ({
-      consumer: binding.consumer,
-      entrypoint: `CertifiedProjectFactsConsumerPort.reopen:${binding.consumer}`,
-      projectionContentHash: binding.projectionContentHash,
-      sessionReloadStatus: 'passed',
+    projectionResults.map(({ receipt }) => ({
+      projectionReceipt: receipt,
+      canonicalScopeHash: projectScope.manifest.canonicalScopeHash,
+      sessionPersistReloadStatus: 'not-applicable',
       directProjectContextCallCount: 0,
       rawFilesystemFallbackCount: 0,
       synthesizedProjectScopeFactCount: 0,
-      verdict: 'passed',
     }))
   );
+  let placeholderProjectionRejected = false;
+  try {
+    await consumerPort.reopenWithAdapter({
+      preparationId: preparation.preparationId,
+      runId: requireOpaque(input['run-id'], 'run-id'),
+      consumer: 'plan',
+      expectedCertificationBindingHash: artifact.certificationBindingHash,
+      adapter: {
+        adapterVersion: 'audit-placeholder-v1',
+        entrypoint: 'scripts/audit-project-context-foundation.mjs',
+        payloadSchemaHash: hashCanonicalJson({ placeholder: true }),
+        loadEvidenceHash: hashCanonicalJson({ audit: true }),
+        project() {
+          return { placeholder: true };
+        },
+      },
+    });
+  } catch (error) {
+    placeholderProjectionRejected =
+      error instanceof TypeError && /actual loaded adapter/i.test(error.message);
+  }
+  let baseMutationRejected = false;
+  try {
+    await consumerPort.reopenWithAdapter({
+      preparationId: preparation.preparationId,
+      runId: requireOpaque(input['run-id'], 'run-id'),
+      consumer: 'plan',
+      expectedCertificationBindingHash: artifact.certificationBindingHash,
+      adapter: {
+        adapterVersion: 'core-mutation-probe-v2',
+        entrypoint: 'contract-probe/core/mutation',
+        payloadSchemaHash: hashCanonicalJson({ consumer: 'plan', schemaVersion: 2 }),
+        loadEvidenceHash: hashCanonicalJson({ mutationProbe: true }),
+        project(opened) {
+          opened.facts.detail.decisions.pop();
+          return { mutated: true };
+        },
+      },
+    });
+  } catch (error) {
+    baseMutationRejected = error instanceof TypeError;
+  }
   let secondConsumerRefused = false;
   try {
     await store.acquireRunLease({
@@ -721,12 +1021,19 @@ async function runChild(input) {
     path.join(storeRoot, mode.toLowerCase()),
     { logger: silentLogger }
   ).open(artifact.artifactId, artifact.certificationBindingHash);
+  const omittedFrozenRestartProbe = await probeFrozenOmittedFileMutation(
+    path.join(storeRoot, mode.toLowerCase()),
+    silentLogger
+  );
   const result = {
     projectMode: mode,
     artifactId: artifact.artifactId,
     factsContentHash: artifact.factsContentHash,
     certificationBindingHash: artifact.certificationBindingHash,
     sourceVectorHash: artifact.sourceVectorHash,
+    projectScopeHash: projectScope.manifest.canonicalScopeHash,
+    requestMatrixHash: requestMatrix.matrixHash,
+    frozenFileManifestHash: artifact.facts.detail.frozenFileManifestHash,
     readiness,
     captureReadiness: artifact.readiness,
     preparationId: preparation.preparationId,
@@ -739,11 +1046,35 @@ async function runChild(input) {
       receiptHash: storeReceipt.receiptHash,
       blobCount: storeReceipt.blobRefs.length,
     },
-    foundationConsumerLineageReceipt,
-    actualArtifactOnlyAdapterEvidence: {
+    projectScopeManifest: projectScope.manifest,
+    requestMatrixReceipt: requestMatrix,
+    coreContractProbeLineageReceipt,
+    placeholderProjectionRejected,
+    omittedFrozenRestartProbe,
+    baseConsumerOrdering: {
+      baseSealBeforeOpen,
+      baseSealAfterLineage: {
+        certificationBindingHash: artifact.certificationBindingHash,
+        storeReceiptHash: storeReceipt.receiptHash,
+      },
+      unchanged:
+        baseSealBeforeOpen.certificationBindingHash === artifact.certificationBindingHash &&
+        baseSealBeforeOpen.storeReceiptHash === storeReceipt.receiptHash,
+      mutationRejected: baseMutationRejected,
+      order: [
+        'base-certification-store-put-readback',
+        'preparation-lease-open',
+        'core-contract-projection-receipts',
+        'immutable-post-open-lineage',
+      ],
+    },
+    coreContractProbeEvidence: {
       allowedStoreOperations: ['acquireRunLease', 'open'],
       callTrace: adapterCallTrace,
-      consumerCount: consumerBindings.length,
+      consumerCount: projectionResults.length,
+      productionConsumerEvidence: false,
+      typedReason:
+        'Core exercises the actual adapter port contract; Main/Plugin production adapters remain pending downstream work.',
       legacyProjectContextCallCapabilityExposed: false,
       rawFilesystemScannerCapabilityExposed: false,
     },
@@ -752,6 +1083,39 @@ async function runChild(input) {
       fileCount: artifact.facts.inventory.fileCount,
       inventoryContentHash: artifact.facts.inventory.inventoryContentHash,
       repositories: artifact.facts.inventory.repositories,
+      ownerEvidence: {
+        rowCount: artifact.facts.inventory.files.reduce(
+          (sum, file) => sum + (file.ownersV2?.length ?? 0),
+          0
+        ),
+        originCounts: Object.fromEntries(
+          ['package-build-declaration', 'host-declared', 'path-heuristic'].map((origin) => [
+            origin,
+            artifact.facts.inventory.files.reduce(
+              (sum, file) =>
+                sum + (file.ownersV2 ?? []).filter((owner) => owner.origin === origin).length,
+              0
+            ),
+          ])
+        ),
+        untypedRows: artifact.facts.inventory.files.reduce(
+          (sum, file) =>
+            sum +
+            (file.ownersV2 ?? []).filter(
+              (owner) => !owner.typedReason || owner.evidence.length === 0
+            ).length,
+          0
+        ),
+        pathHeuristicExclusiveRows: artifact.facts.inventory.files.reduce(
+          (sum, file) =>
+            sum +
+            (file.ownersV2 ?? []).filter(
+              (owner) =>
+                owner.origin === 'path-heuristic' && owner.disposition === 'exclusive'
+            ).length,
+          0
+        ),
+      },
     },
     detail: {
       selectedFileCount: artifact.facts.detail.selectedFileCount,
@@ -759,10 +1123,21 @@ async function runChild(input) {
       continuation: artifact.facts.detail.continuation ?? null,
       detailContentHash: artifact.facts.detail.detailContentHash,
       fullChunkCount: artifact.chunks.length,
+      frozenFileCount: artifact.facts.detail.frozenFiles?.length ?? 0,
+      frozenFileManifestHash: artifact.facts.detail.frozenFileManifestHash ?? null,
+      conservation:
+        artifact.facts.inventory.fileCount ===
+        (artifact.facts.detail.frozenFiles?.length ?? 0),
     },
     requestMatrix: artifact.facts.requestOutcomes.map((row) => ({
       repoId: row.repoId,
       kind: row.kind,
+      rowId: row.rowId,
+      selectorHash: row.selectorHash,
+      canonicalScopeHash: row.canonicalScopeHash,
+      language: row.language,
+      parserFamily: row.parserFamily,
+      ownerSurfaceId: row.ownerSurfaceId,
       applicability: row.applicability,
       typedReason: row.typedReason ?? null,
       selector: row.selector,
@@ -788,9 +1163,181 @@ async function runChild(input) {
   };
   await fs.mkdir(path.dirname(resultFile), { recursive: true });
   await fs.writeFile(resultFile, `${JSON.stringify(result, null, 2)}\n`, 'utf8');
-  if (!readiness.ok || !secondConsumerRefused || !result.reopenMatched) {
+  if (
+    !readiness.ok ||
+    !secondConsumerRefused ||
+    !result.reopenMatched ||
+    !placeholderProjectionRejected ||
+    (omittedFrozenRestartProbe.applicable && !omittedFrozenRestartProbe.matched)
+  ) {
     process.exitCode = 1;
   }
+}
+
+async function probeFrozenOmittedFileMutation(storeRoot, logger) {
+  const sourceRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pcf-frozen-mutation-source-'));
+  const selectedPath = path.join(sourceRoot, 'selected.ts');
+  const omittedPath = path.join(sourceRoot, 'omitted.ts');
+  const selectedBytes = Buffer.from('export const selected = 1;\n');
+  const originalOmittedBytes = Buffer.from('export const omitted = 2;\n');
+  try {
+    await Promise.all([
+      fs.writeFile(selectedPath, selectedBytes),
+      fs.writeFile(omittedPath, originalOmittedBytes),
+    ]);
+    const repository = {
+      scopeId: 'frozen-mutation-scope',
+      repoId: 'frozen-mutation-repo',
+      relativeRoot: '.',
+      sourceRoot,
+    };
+    const projectScope = buildProjectScopeManifestV1({
+      acceptedScope: {
+        projectMode: 'FOUNDATION-MUTATION-PROBE',
+        projectIdentity: {
+          projectId: 'foundation-mutation-probe',
+          scopeId: repository.scopeId,
+        },
+        repositories: [{ repoId: repository.repoId, relativeRoot: '.' }],
+      },
+      controlRoot: sourceRoot,
+      sourceRoots: [{ repoId: repository.repoId, sourceRoot }],
+    });
+    const files = [
+      {
+        relativePath: 'omitted.ts',
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: [],
+        ownersV2: [],
+      },
+      {
+        relativePath: 'selected.ts',
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: [],
+        ownersV2: [],
+      },
+    ];
+    const plans = createProjectContextRequestAuditPlansV2({
+      repository,
+      eligibleFiles: files,
+      projectScopeManifest: projectScope.manifest,
+    });
+    const requestMatrix = buildProjectContextRequestMatrixV2(projectScope.manifest, plans);
+    const ports = {
+      observeRevision: async () => ({ kind: 'content' }),
+      enumerateEligibleFiles: async () => structuredClone(files),
+      readFile: async ({ relativePath }) => fs.readFile(path.join(sourceRoot, relativePath)),
+      verifySnapshot: async ({ candidate }) => ({
+        version: 1,
+        verified: true,
+        binding: 'working-tree-content',
+        finalRevision: candidate.postRevision,
+        eligibleInventoryHash: candidate.eligibleInventoryHash,
+        workingTreeContentHash: candidate.workingTreeContentHash,
+        typedReason: 'foundation-mutation-probe-content-fence',
+      }),
+      executeRequest: async ({ plan }) => ({
+        terminalStatus: 'completed',
+        output: { kind: plan.kind, mutationProbe: true },
+        detectedLanguage: plan.language,
+        parserRuntime: plan.parserFamily ? 'ready' : 'not-required',
+        queryInitialization: plan.parserFamily ? 'ready' : 'not-required',
+        sourceRanges: [],
+      }),
+    };
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        projectMode: projectScope.manifest.projectMode,
+        repositories: projectScope.repositories,
+        projectScope,
+        requestMatrix,
+        inventoryPolicy: {
+          version: 'foundation-mutation-probe-v1',
+          includeExtensions: ['.ts'],
+          excludeDirectories: ['.git'],
+        },
+        detailPolicy: {
+          maxSelectedFiles: 1,
+          maxPreviewBytes: 32,
+          chunkBytes: 16,
+          selectedFiles: [{ repoId: repository.repoId, relativePath: 'selected.ts' }],
+        },
+        requestPlans: requestMatrix.plans,
+        legacyEntries: [],
+        projections: Object.fromEntries(
+          CERTIFIED_PROJECT_FACTS_CONSUMERS.map((consumer) => [consumer, { consumer }])
+        ),
+        certification: {
+          scopeIdentityHash: projectScope.manifest.canonicalScopeHash,
+          capabilityHash: hashCanonicalJson({ probe: 'capability' }),
+          parserHash: hashCanonicalJson({ probe: 'parser' }),
+          acceptedRuntimeHash: hashCanonicalJson({ probe: 'runtime' }),
+          acceptedConfigHash: hashCanonicalJson({ probe: 'config' }),
+        },
+      },
+      ports
+    );
+    await new FileCertifiedProjectFactsStore(storeRoot, { logger }).put(artifact);
+    const expectedBlobHash = hashBytes(originalOmittedBytes);
+    const mutatedBytes = Buffer.from('export const omitted = 999;\n');
+    await fs.writeFile(omittedPath, mutatedBytes);
+    const liveMutationHash = hashBytes(await fs.readFile(omittedPath));
+    await fs.unlink(omittedPath);
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ['--input-type=module', '--eval', frozenFreshProcessProbeSource()],
+      {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PCF_PROBE_STORE: storeRoot,
+          PCF_PROBE_ARTIFACT: artifact.artifactId,
+          PCF_PROBE_BINDING: artifact.certificationBindingHash,
+          PCF_PROBE_REPO: repository.repoId,
+          PCF_PROBE_PATH: 'omitted.ts',
+        },
+        maxBuffer: 1024 * 1024,
+      }
+    );
+    const marker = stdout
+      .split('\n')
+      .findLast((line) => line.startsWith('PCF_FROZEN_PROBE:'));
+    if (!marker) throw new TypeError('Frozen fresh-process probe returned no result marker.');
+    const freshProcess = JSON.parse(marker.slice('PCF_FROZEN_PROBE:'.length));
+    return {
+      applicable: true,
+      repoId: repository.repoId,
+      relativePath: 'omitted.ts',
+      expectedBlobHash,
+      liveMutationHash,
+      liveFileDeleted: !(await fileExists(omittedPath)),
+      reopenedBlobHash: freshProcess.blobHash,
+      matched: freshProcess.blobHash === expectedBlobHash,
+      freshProcess: true,
+      liveFilesystemCapabilityExposed: false,
+    };
+  } finally {
+    await fs.rm(sourceRoot, { force: true, recursive: true });
+  }
+}
+
+function frozenFreshProcessProbeSource() {
+  return String.raw`
+import { FileCertifiedProjectFactsStore, hashBytes } from '@alembic/core/project-context-foundation';
+const store = new FileCertifiedProjectFactsStore(process.env.PCF_PROBE_STORE, {
+  logger: { info() {}, warn() {} },
+});
+const bytes = await store.readFrozenFile({
+  artifactId: process.env.PCF_PROBE_ARTIFACT,
+  certificationBindingHash: process.env.PCF_PROBE_BINDING,
+  repoId: process.env.PCF_PROBE_REPO,
+  relativePath: process.env.PCF_PROBE_PATH,
+});
+console.log('PCF_FROZEN_PROBE:' + JSON.stringify({ blobHash: hashBytes(bytes) }));
+`;
 }
 
 function repositoriesForMode(mode, workspaceRoot, bilidiliRoot) {
@@ -972,7 +1519,7 @@ async function fileExists(filePath) {
 
 async function buildCertification(
   mode,
-  repositories,
+  projectScopeManifest,
   inventoryPolicy,
   detailPolicy,
   dependencyOwnership
@@ -984,14 +1531,7 @@ async function buildCertification(
     readGrammarEntries(),
   ]);
   return {
-    scopeIdentityHash: hashCanonicalJson({
-      mode,
-      repositories: repositories.map(({ scopeId, repoId, relativeRoot }) => ({
-        scopeId,
-        repoId,
-        relativeRoot,
-      })),
-    }),
+    scopeIdentityHash: projectScopeManifest.canonicalScopeHash,
     capabilityHash: hashBytes(capabilityBytes),
     parserHash: hashCanonicalJson(grammarEntries),
     acceptedRuntimeHash: hashCanonicalJson({

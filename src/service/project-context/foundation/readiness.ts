@@ -6,9 +6,18 @@ import {
   CERTIFIED_PROJECT_FACTS_SCHEMA_VERSION,
   type CertifiedProjectFactsArtifactV1,
   type CertifiedProjectFactsReadinessResult,
+  PROJECT_FACTS_READINESS_VALIDATOR_V2_VERSION,
   type ProjectContextConsumerLineageReceiptV1,
   type ProjectContextConsumerLineageRowInputV1,
+  type ProjectContextRequestMatrixV2,
+  type ProjectScopeManifestV1,
 } from './contracts.js';
+import { validateProjectContextInventoryOwnersV2 } from './ownersV2.js';
+import {
+  evaluateProjectContextRequestMatrixV2,
+  verifyProjectContextRequestMatrixV2,
+} from './requestV2.js';
+import { verifyProjectScopeManifestV1 } from './scope.js';
 
 export function evaluateCertifiedProjectFactsReadiness(
   artifact: CertifiedProjectFactsArtifactV1,
@@ -176,6 +185,112 @@ export function evaluateCertifiedProjectFactsReadiness(
     }
   }
   return { ok: errors.length === 0, errors };
+}
+
+export function evaluateCertifiedProjectFactsReadinessV2(
+  artifact: CertifiedProjectFactsArtifactV1,
+  options: {
+    acceptedScopeManifest: ProjectScopeManifestV1;
+    requestMatrix: ProjectContextRequestMatrixV2;
+    requiredLegacyEntryIds?: string[];
+  }
+): CertifiedProjectFactsReadinessResult {
+  const errors: string[] = [];
+  try {
+    verifyCertifiedProjectFactsArtifact(artifact);
+    verifyProjectScopeManifestV1(options.acceptedScopeManifest);
+    verifyProjectContextRequestMatrixV2(options.requestMatrix, options.acceptedScopeManifest);
+  } catch (error) {
+    errors.push(error instanceof Error ? error.message : String(error));
+  }
+  if (artifact.readiness.validatorVersion !== PROJECT_FACTS_READINESS_VALIDATOR_V2_VERSION) {
+    errors.push('Strict-v2 readiness requires the versioned V2 capture validator receipt.');
+  }
+  const embeddedScope = artifact.manifest.projectScopeManifest;
+  if (!embeddedScope) {
+    errors.push('Strict-v2 readiness requires an embedded ProjectScopeManifestV1.');
+  } else if (embeddedScope.receiptHash !== options.acceptedScopeManifest.receiptHash) {
+    errors.push('Embedded project scope receipt does not match the independently accepted scope.');
+  }
+  if (
+    artifact.certification.scopeIdentityHash !== options.acceptedScopeManifest.canonicalScopeHash
+  ) {
+    errors.push('Certification scope identity is not the independently accepted scope hash.');
+  }
+  const expectedTuples = options.acceptedScopeManifest.repositories;
+  const inventoryTuples = artifact.facts.inventory.repositories.map((row) => ({
+    scopeId: row.scopeId,
+    repoId: row.repoId,
+    relativeRoot: row.relativeRoot,
+  }));
+  const vectorTuples = artifact.manifest.sourceRevisionVector.entries.map((row) => ({
+    scopeId: row.scopeId,
+    repoId: row.repoId,
+    relativeRoot: row.relativeRoot,
+  }));
+  if (
+    hashCanonicalJson(expectedTuples) !== hashCanonicalJson(inventoryTuples) ||
+    hashCanonicalJson(expectedTuples) !== hashCanonicalJson(vectorTuples)
+  ) {
+    errors.push('Accepted project scope tuples are not conserved by inventory/source vector.');
+  }
+  if (
+    artifact.manifest.requestMatrixHash !== options.requestMatrix.matrixHash ||
+    options.requestMatrix.projectScopeHash !== options.acceptedScopeManifest.canonicalScopeHash
+  ) {
+    errors.push('Strict-v2 request matrix is not bound to the accepted project scope.');
+  }
+  const matrix = evaluateProjectContextRequestMatrixV2(
+    options.requestMatrix,
+    artifact.manifest.requestEnvelopeIndexV2 ?? [],
+    options.acceptedScopeManifest
+  );
+  errors.push(...matrix.errors);
+  if (artifact.facts.requestOutcomes.some((row) => row.authorityVersion !== 2)) {
+    errors.push(
+      'V1 request outcomes are compatibility evidence and cannot prove strict readiness.'
+    );
+  }
+  const frozenFiles = artifact.facts.detail.frozenFiles ?? [];
+  const inventoryByKey = new Map(
+    artifact.facts.inventory.files.map((file) => [`${file.repoId}\u0000${file.relativePath}`, file])
+  );
+  if (
+    frozenFiles.length !== artifact.facts.inventory.fileCount ||
+    hashCanonicalJson(frozenFiles) !== artifact.facts.detail.frozenFileManifestHash
+  ) {
+    errors.push('eligibleFiles=frozenBlobAvailable+readFailed conservation failed.');
+  }
+  for (const frozen of frozenFiles) {
+    const inventory = inventoryByKey.get(`${frozen.repoId}\u0000${frozen.relativePath}`);
+    if (
+      !inventory ||
+      frozen.fullChunkRefs.length !== 1 ||
+      frozen.fullChunkRefs[0] !== frozen.blobHash ||
+      frozen.blobHash !== inventory.blobSha256 ||
+      frozen.byteLength !== inventory.sizeBytes ||
+      !artifact.chunks.some((chunk) => chunk.blobHash === frozen.blobHash)
+    ) {
+      errors.push(`Frozen blob is unavailable for ${frozen.repoId}/${frozen.relativePath}.`);
+    }
+  }
+  errors.push(...validateProjectContextInventoryOwnersV2(artifact.facts.inventory.files).errors);
+  for (const entryId of options.requiredLegacyEntryIds ?? []) {
+    const entry = artifact.facts.legacyEntries.find((row) => row.entryId === entryId);
+    if (!entry) {
+      errors.push(`Required legacy entry is missing: ${entryId}.`);
+    } else if (
+      entry.directProjectContextCallCount !== 0 ||
+      entry.rawFilesystemFallbackCount !== 0 ||
+      entry.synthesizedProjectScopeFactCount !== 0
+    ) {
+      errors.push(`Strict legacy entry has a non-zero direct/fallback counter: ${entryId}.`);
+    }
+  }
+  if (artifact.readiness.verdict !== 'passed') {
+    errors.push(...artifact.readiness.errors.map((error) => `Capture readiness failed: ${error}.`));
+  }
+  return { ok: errors.length === 0, errors: uniqueStrings(errors) };
 }
 
 export function createProjectContextConsumerLineageReceipt(

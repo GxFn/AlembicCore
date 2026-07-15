@@ -21,26 +21,40 @@ import {
   PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION,
   PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
   PROJECT_FACTS_CANONICALIZER_VERSION,
+  PROJECT_FACTS_READINESS_VALIDATOR_V2_VERSION,
   PROJECT_FACTS_READINESS_VALIDATOR_VERSION,
   type ProjectContextDependencyResolutionV1,
   type ProjectContextFoundationCaptureInput,
+  type ProjectContextFoundationCaptureInputV2,
   type ProjectContextFoundationFileDescriptor,
   type ProjectContextFoundationHostPorts,
   type ProjectContextFoundationRepositoryInput,
   type ProjectContextRepositoryRevisionObservation,
   type ProjectContextRequestAuditPlan,
+  type ProjectContextRequestAuditPlanV2,
   type ProjectContextRequestDiagnosticV1,
   type ProjectContextRequestOutcomeV1,
   type ProjectContextSnapshotVerificationV1,
   type ProjectFactsDetailDecisionV1,
   type ProjectFactsDetailPlaneV1,
   type ProjectFactsDetailSelectionV1,
+  type ProjectFactsFrozenFileV2,
   type ProjectFactsInventoryFileV1,
   type ProjectFactsInventoryPlaneV1,
   type ProjectFactsInventoryRepositoryV1,
   type ProjectFactsJson,
   type SourceRevisionVectorEntryV1,
 } from './contracts.js';
+import {
+  normalizeProjectContextInventoryOwnersV2,
+  validateProjectContextInventoryOwnersV2,
+} from './ownersV2.js';
+import {
+  buildRequestEnvelopeIndexRowV2,
+  evaluateProjectContextRequestMatrixV2,
+  verifyProjectContextRequestMatrixV2,
+} from './requestV2.js';
+import { verifyProjectScopeCaptureBindingV1, verifyProjectScopeManifestV1 } from './scope.js';
 
 interface CapturedRepository {
   input: ProjectContextFoundationRepositoryInput;
@@ -86,12 +100,14 @@ export async function captureCertifiedProjectFacts(
   ports: ProjectContextFoundationHostPorts
 ): Promise<CertifiedProjectFactsArtifactV1> {
   validateCaptureInput(input);
+  const strictV2 = readStrictV2Context(input);
   const includeExcludePolicy = normalizeInventoryPolicy(input.inventoryPolicy);
   const includeExcludePolicyHash = hashCanonicalJson(includeExcludePolicy);
   const repositories = await captureRepositories(
     { ...input, inventoryPolicy: includeExcludePolicy },
     ports,
-    includeExcludePolicyHash
+    includeExcludePolicyHash,
+    Boolean(strictV2)
   );
   assertNoCrossRepositoryInventoryOverlap(repositories);
   const inventory = buildInventoryPlane(
@@ -99,7 +115,7 @@ export async function captureCertifiedProjectFacts(
     includeExcludePolicy,
     includeExcludePolicyHash
   );
-  const { detail, chunks } = buildDetailPlane(repositories, input.detailPolicy);
+  const { detail, chunks } = buildDetailPlane(repositories, input.detailPolicy, Boolean(strictV2));
   const requestOutcomes = await captureRequestOutcomes(input, repositories, ports);
   await assertSourceStateStable(
     { ...input, inventoryPolicy: includeExcludePolicy },
@@ -121,7 +137,8 @@ export async function captureCertifiedProjectFacts(
   const readiness = buildCaptureReadinessSummary(
     facts,
     repositories.map((repository) => repository.input.repoId),
-    chunks
+    chunks,
+    strictV2
   );
   const projections = buildProjections(input.projections);
   const sourceRevisionVector = buildSourceRevisionVectorV1(
@@ -137,6 +154,12 @@ export async function captureCertifiedProjectFacts(
     projections,
     requestOutcomes,
     sourceRevisionVector,
+    ...(strictV2
+      ? {
+          projectScopeManifest: strictV2.projectScopeManifest,
+          requestMatrixHash: strictV2.requestMatrixHash,
+        }
+      : {}),
   });
   const artifactId = `cpf-v1:${canonicalHashDigest(hashCanonicalJson(manifest))}` as const;
   const certificationBindingHash = hashCanonicalJson({
@@ -163,6 +186,58 @@ export async function captureCertifiedProjectFacts(
   return artifact;
 }
 
+export async function captureCertifiedProjectFactsV2(
+  input: ProjectContextFoundationCaptureInputV2,
+  ports: ProjectContextFoundationHostPorts
+): Promise<CertifiedProjectFactsArtifactV1> {
+  verifyProjectScopeCaptureBindingV1(input.projectScope);
+  verifyProjectContextRequestMatrixV2(input.requestMatrix, input.projectScope.manifest);
+  if (input.requestMatrix.projectScopeHash !== input.projectScope.manifest.canonicalScopeHash) {
+    throw new TypeError('Strict request matrix is bound to a different accepted project scope.');
+  }
+  const expectedRepositories = input.projectScope.manifest.repositories;
+  const actualRepositories = input.projectScope.repositories.map(
+    ({ sourceRoot: _sourceRoot, ...repository }) => repository
+  );
+  if (hashCanonicalJson(expectedRepositories) !== hashCanonicalJson(actualRepositories)) {
+    throw new TypeError('Runtime capture repositories do not match the accepted scope receipt.');
+  }
+  const artifact = await captureCertifiedProjectFacts(
+    {
+      ...input,
+      projectMode: input.projectScope.manifest.projectMode,
+      repositories: input.projectScope.repositories,
+      requestPlans: input.requestMatrix.plans,
+      projections: Object.fromEntries(
+        CERTIFIED_PROJECT_FACTS_CONSUMERS.map((consumer) => [
+          consumer,
+          {
+            authority: 'strict-v2-post-open-adapter-required',
+            compatibilityProjection: true,
+            consumer,
+          },
+        ])
+      ) as ProjectContextFoundationCaptureInput['projections'],
+      certification: {
+        ...input.certification,
+        scopeIdentityHash: input.projectScope.manifest.canonicalScopeHash,
+      },
+    },
+    ports
+  );
+  const matrixResult = evaluateProjectContextRequestMatrixV2(
+    input.requestMatrix,
+    artifact.manifest.requestEnvelopeIndexV2 ?? [],
+    input.projectScope.manifest
+  );
+  if (!matrixResult.ok) {
+    throw new TypeError(
+      `Captured strict request matrix is not conserved: ${matrixResult.errors.join(',')}.`
+    );
+  }
+  return artifact;
+}
+
 async function assertSourceStateStable(
   input: ProjectContextFoundationCaptureInput,
   ports: ProjectContextFoundationHostPorts,
@@ -171,7 +246,12 @@ async function assertSourceStateStable(
 ): Promise<void> {
   let verified: CapturedRepository[];
   try {
-    verified = await captureRepositories(input, ports, includeExcludePolicyHash);
+    verified = await captureRepositories(
+      input,
+      ports,
+      includeExcludePolicyHash,
+      Boolean(readStrictV2Context(input))
+    );
   } catch (error) {
     if (isAbortLike(error, input.signal)) {
       throw error;
@@ -260,6 +340,31 @@ export function verifyCertifiedProjectFactsArtifact(
   ) {
     throw new TypeError('Certified facts plane hash does not match its manifest.');
   }
+  const strictPlaneSignals = [
+    artifact.manifest.projectScopeManifest !== undefined,
+    artifact.manifest.requestMatrixHash !== undefined,
+    artifact.manifest.requestEnvelopeIndexV2 !== undefined,
+    artifact.manifest.frozenFileManifestHash !== undefined,
+    artifact.facts.detail.frozenFiles !== undefined,
+    artifact.facts.detail.frozenFileManifestHash !== undefined,
+    artifact.facts.requestOutcomes.some((outcome) => outcome.authorityVersion === 2),
+  ];
+  const hasAnyOwnerV2 = artifact.facts.inventory.files.some((file) => file.ownersV2 !== undefined);
+  const hasStrictPlane = strictPlaneSignals.some(Boolean) || hasAnyOwnerV2;
+  if (
+    hasStrictPlane &&
+    (!strictPlaneSignals.every(Boolean) ||
+      artifact.facts.inventory.files.some((file) => file.ownersV2 === undefined))
+  ) {
+    throw new TypeError('Certified strict-v2 authority planes must be present atomically.');
+  }
+  if (
+    hasStrictPlane &&
+    (artifact.facts.requestOutcomes.some((outcome) => outcome.authorityVersion !== 2) ||
+      artifact.facts.inventory.files.some((file) => file.ownersV2 === undefined))
+  ) {
+    throw new TypeError('Certified strict-v2 authority rows must not downgrade to V1 rows.');
+  }
   const requestEnvelopeIndex = artifact.facts.requestOutcomes.map((outcome) => ({
     repoId: outcome.repoId,
     kind: outcome.kind,
@@ -273,10 +378,47 @@ export function verifyCertifiedProjectFactsArtifact(
   ) {
     throw new TypeError('Certified request envelope index does not match its manifest.');
   }
+  const requestEnvelopeIndexV2 = artifact.facts.requestOutcomes
+    .filter((outcome) => outcome.authorityVersion === 2)
+    .map((outcome) => ({
+      rowId: outcome.rowId!,
+      repoId: outcome.repoId,
+      kind: outcome.kind,
+      selectorHash: outcome.selectorHash!,
+      canonicalScopeHash: outcome.canonicalScopeHash!,
+      language: outcome.language ?? null,
+      parserFamily: outcome.parserFamily ?? null,
+      ownerSurfaceId: outcome.ownerSurfaceId ?? null,
+      applicability: outcome.applicability,
+      terminalStatus: outcome.terminalStatus,
+      outputHash: outcome.outputHash,
+    }))
+    .sort((left, right) => left.rowId.localeCompare(right.rowId));
+  if (
+    hashCanonicalJson(requestEnvelopeIndexV2) !==
+    hashCanonicalJson(artifact.manifest.requestEnvelopeIndexV2 ?? [])
+  ) {
+    throw new TypeError('Certified strict-v2 request envelope index does not match its manifest.');
+  }
+  if (artifact.manifest.projectScopeManifest) {
+    verifyProjectScopeManifestV1(artifact.manifest.projectScopeManifest);
+    if (
+      artifact.certification.scopeIdentityHash !==
+      artifact.manifest.projectScopeManifest.canonicalScopeHash
+    ) {
+      throw new TypeError('Certified strict-v2 scope identity does not match the scope receipt.');
+    }
+  }
   const expectedReadiness = buildCaptureReadinessSummary(
     artifact.facts,
     artifact.manifest.sourceRevisionVector.entries.map((entry) => entry.repoId),
-    artifact.chunks
+    artifact.chunks,
+    artifact.manifest.projectScopeManifest && artifact.manifest.requestMatrixHash
+      ? {
+          projectScopeManifest: artifact.manifest.projectScopeManifest,
+          requestMatrixHash: artifact.manifest.requestMatrixHash,
+        }
+      : undefined
   );
   if (hashCanonicalJson(expectedReadiness) !== hashCanonicalJson(artifact.readiness)) {
     throw new TypeError('Certified facts readiness summary is not reproducible.');
@@ -352,6 +494,43 @@ export function verifyCertifiedProjectFactsArtifact(
       throw new TypeError(
         `Certified detail preview does not match full content: ${selection.repoId}/${selection.relativePath}.`
       );
+    }
+  }
+  const frozenFiles = artifact.facts.detail.frozenFiles ?? [];
+  if (artifact.facts.detail.frozenFiles !== undefined) {
+    if (
+      hashCanonicalJson(frozenFiles) !== artifact.facts.detail.frozenFileManifestHash ||
+      artifact.facts.detail.frozenFileManifestHash !== artifact.manifest.frozenFileManifestHash
+    ) {
+      throw new TypeError('Certified frozen-file manifest hash mismatch.');
+    }
+    const inventoryByKey = new Map(
+      artifact.facts.inventory.files.map((file) => [
+        `${file.repoId}\u0000${file.relativePath}`,
+        file,
+      ])
+    );
+    const inventoryKeys = new Set(inventoryByKey.keys());
+    if (frozenFiles.length !== inventoryKeys.size) {
+      throw new TypeError('Certified frozen-file rows do not conserve the inventory.');
+    }
+    for (const frozen of frozenFiles) {
+      const inventory = inventoryByKey.get(`${frozen.repoId}\u0000${frozen.relativePath}`);
+      const bytes = chunksByHash.get(frozen.blobHash);
+      if (
+        !inventory ||
+        !bytes ||
+        frozen.status !== 'frozen-blob-available' ||
+        frozen.fullChunkRefs.length !== 1 ||
+        frozen.fullChunkRefs[0] !== frozen.blobHash ||
+        frozen.blobHash !== inventory.blobSha256 ||
+        frozen.byteLength !== inventory.sizeBytes ||
+        hashBytes(bytes) !== frozen.blobHash
+      ) {
+        throw new TypeError(
+          `Certified frozen file does not match inventory: ${frozen.repoId}/${frozen.relativePath}.`
+        );
+      }
     }
   }
   for (const consumer of CERTIFIED_PROJECT_FACTS_CONSUMERS) {
@@ -468,7 +647,8 @@ function normalizeInventoryPolicy(
 async function captureRepositories(
   input: ProjectContextFoundationCaptureInput,
   ports: ProjectContextFoundationHostPorts,
-  includeExcludePolicyHash: CanonicalSha256
+  includeExcludePolicyHash: CanonicalSha256,
+  includeAuthorityV2: boolean
 ): Promise<CapturedRepository[]> {
   const result: CapturedRepository[] = [];
   for (const repository of [...input.repositories].sort(compareRepositories)) {
@@ -480,7 +660,7 @@ async function captureRepositories(
       policy: input.inventoryPolicy,
       signal: input.signal,
     });
-    const normalizedDescriptors = normalizeFileDescriptors(descriptors);
+    const normalizedDescriptors = normalizeFileDescriptors(descriptors, includeAuthorityV2);
     const contents = new Map<string, Uint8Array>();
     const files: ProjectFactsInventoryFileV1[] = [];
     for (const descriptor of normalizedDescriptors) {
@@ -508,6 +688,9 @@ async function captureRepositories(
         sizeBytes: copied.byteLength,
         blobSha256: hashBytes(copied),
         ownerModuleIds: uniqueStrings(descriptor.ownerModuleIds ?? []),
+        ...(includeAuthorityV2
+          ? { ownersV2: normalizeProjectContextInventoryOwnersV2(descriptor) }
+          : {}),
       });
     }
     const eligibleInventoryHash = hashCanonicalJson(files);
@@ -527,7 +710,11 @@ async function captureRepositories(
           preRevision: { ...preRevision },
           postRevision: { ...postRevision },
           files: files.map((file) => ({
-            file: { ...file, ownerModuleIds: [...file.ownerModuleIds] },
+            file: {
+              ...file,
+              ownerModuleIds: [...file.ownerModuleIds],
+              ...(file.ownersV2 ? { ownersV2: structuredClone(file.ownersV2) } : {}),
+            },
             content: Uint8Array.from(contents.get(file.relativePath)!),
           })),
           eligibleInventoryHash,
@@ -652,12 +839,14 @@ async function captureLegacyContentTerminalState(input: {
   // Legacy content hosts cannot attest snapshots, so Core closes their open interval
   // by rebuilding the complete terminal inventory and content with the same policy.
   throwIfAborted(input.input.signal);
+  const includeAuthorityV2 = Boolean(readStrictV2Context(input.input));
   const descriptors = normalizeFileDescriptors(
     await input.ports.enumerateEligibleFiles({
       repository: input.repository,
       policy: input.input.inventoryPolicy,
       signal: input.input.signal,
-    })
+    }),
+    includeAuthorityV2
   );
   throwIfAborted(input.input.signal);
   const files: ProjectFactsInventoryFileV1[] = [];
@@ -678,6 +867,9 @@ async function captureLegacyContentTerminalState(input: {
       sizeBytes: copied.byteLength,
       blobSha256: hashBytes(copied),
       ownerModuleIds: uniqueStrings(descriptor.ownerModuleIds ?? []),
+      ...(includeAuthorityV2
+        ? { ownersV2: normalizeProjectContextInventoryOwnersV2(descriptor) }
+        : {}),
     });
   }
   const eligibleInventoryHash = hashCanonicalJson(files);
@@ -782,7 +974,8 @@ function buildInventoryPlane(
 
 function buildDetailPlane(
   repositories: CapturedRepository[],
-  policy: ProjectContextFoundationCaptureInput['detailPolicy']
+  policy: ProjectContextFoundationCaptureInput['detailPolicy'],
+  freezeAllEligibleFiles: boolean
 ): { detail: ProjectFactsDetailPlaneV1; chunks: CertifiedProjectFactsChunkV1[] } {
   const inventoryFiles = repositories
     .flatMap((repository) => repository.files)
@@ -803,8 +996,34 @@ function buildDetailPlane(
   const chunksByHash = new Map<CanonicalSha256, CertifiedProjectFactsChunkV1>();
   const decisions: ProjectFactsDetailDecisionV1[] = [];
   const selections: ProjectFactsDetailSelectionV1[] = [];
+  const frozenFiles: ProjectFactsFrozenFileV2[] = [];
   for (const file of inventoryFiles) {
     const key = `${file.repoId}\u0000${file.relativePath}`;
+    const repository = repositories.find((candidate) => candidate.input.repoId === file.repoId);
+    const content = repository?.contents.get(file.relativePath);
+    if (!content) {
+      throw new TypeError(`Eligible file is missing from captured frozen bytes: ${key}.`);
+    }
+    if (hashBytes(content) !== file.blobSha256 || content.byteLength !== file.sizeBytes) {
+      throw new TypeError(`Frozen eligible bytes do not match inventory: ${key}.`);
+    }
+    if (freezeAllEligibleFiles) {
+      if (!chunksByHash.has(file.blobSha256)) {
+        chunksByHash.set(file.blobSha256, {
+          blobHash: file.blobSha256,
+          byteLength: content.byteLength,
+          dataBase64: Buffer.from(content).toString('base64'),
+        });
+      }
+      frozenFiles.push({
+        repoId: file.repoId,
+        relativePath: file.relativePath,
+        blobHash: file.blobSha256,
+        byteLength: file.sizeBytes,
+        fullChunkRefs: [file.blobSha256],
+        status: 'frozen-blob-available',
+      });
+    }
     if (!selectedKeys.has(key)) {
       decisions.push({
         repoId: file.repoId,
@@ -813,11 +1032,6 @@ function buildDetailPlane(
         reason: 'detail-file-cap',
       });
       continue;
-    }
-    const repository = repositories.find((candidate) => candidate.input.repoId === file.repoId);
-    const content = repository?.contents.get(file.relativePath);
-    if (!content) {
-      throw new TypeError(`Selected detail file is missing from capture: ${key}.`);
     }
     const fullChunkRefs: CanonicalSha256[] = [];
     for (let offset = 0; offset < content.byteLength; offset += policy.chunkBytes) {
@@ -831,6 +1045,9 @@ function buildDetailPlane(
           dataBase64: Buffer.from(bytes).toString('base64'),
         });
       }
+    }
+    if (freezeAllEligibleFiles && fullChunkRefs.length === 0) {
+      fullChunkRefs.push(file.blobSha256);
     }
     const preview = content.slice(0, Math.min(content.byteLength, policy.maxPreviewBytes));
     decisions.push({
@@ -864,6 +1081,9 @@ function buildDetailPlane(
     selections,
     selectedFileCount: selections.length,
     omittedFileCount: omittedKeys.length,
+    ...(freezeAllEligibleFiles
+      ? { frozenFiles, frozenFileManifestHash: hashCanonicalJson(frozenFiles) }
+      : {}),
     ...(omittedKeys.length > 0
       ? {
           continuation:
@@ -896,6 +1116,7 @@ async function captureRequestOutcomes(
     }
     const selector = toProjectFactsJson(plan.selector);
     const scope = toProjectFactsJson(plan.scope);
+    const strictIdentity = buildStrictRequestIdentity(plan, input);
     if (plan.applicability === 'not-applicable') {
       const output = toProjectFactsJson({ reason: plan.typedReason, status: 'not-applicable' });
       outcomes.push({
@@ -915,6 +1136,7 @@ async function captureRequestOutcomes(
         dependencyResolutions: [],
         dependencyObservationCount: 0,
         dependencyGraphReconciliation: emptyDependencyGraphReconciliation(),
+        ...strictIdentity,
       });
       continue;
     }
@@ -955,6 +1177,7 @@ async function captureRequestOutcomes(
         dependencyGraphReconciliation: normalizeDependencyGraphReconciliation(
           result.dependencyGraphReconciliation ?? emptyDependencyGraphReconciliation()
         ),
+        ...strictIdentity,
       });
     } catch (error) {
       if (input.signal?.aborted) {
@@ -987,6 +1210,7 @@ async function captureRequestOutcomes(
             typedReason: 'project-context-request-threw-before-a-valid-envelope',
           },
         ],
+        ...strictIdentity,
       });
     }
   }
@@ -1021,10 +1245,28 @@ function buildManifest(input: {
   legacyEntries: ProjectContextFoundationCaptureInput['legacyEntries'];
   projections: Record<CertifiedProjectFactsConsumer, CertifiedProjectFactsProjectionV1>;
   chunks: CertifiedProjectFactsChunkV1[];
+  projectScopeManifest?: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
+  requestMatrixHash?: CanonicalSha256;
 }): CertifiedProjectFactsManifestV1 {
   const blobTable = input.chunks
     .map((chunk) => ({ blobHash: chunk.blobHash, byteLength: chunk.byteLength }))
     .sort((left, right) => left.blobHash.localeCompare(right.blobHash));
+  const requestEnvelopeIndexV2 = input.requestOutcomes
+    .filter((outcome) => outcome.authorityVersion === 2)
+    .map((outcome) => ({
+      rowId: outcome.rowId!,
+      repoId: outcome.repoId,
+      kind: outcome.kind,
+      selectorHash: outcome.selectorHash!,
+      canonicalScopeHash: outcome.canonicalScopeHash!,
+      language: outcome.language ?? null,
+      parserFamily: outcome.parserFamily ?? null,
+      ownerSurfaceId: outcome.ownerSurfaceId ?? null,
+      applicability: outcome.applicability,
+      terminalStatus: outcome.terminalStatus,
+      outputHash: outcome.outputHash,
+    }))
+    .sort((left, right) => left.rowId.localeCompare(right.rowId));
   return {
     kind: 'CertifiedProjectFactsManifest',
     schemaVersion: CERTIFIED_PROJECT_FACTS_SCHEMA_VERSION,
@@ -1044,6 +1286,16 @@ function buildManifest(input: {
       terminalStatus: outcome.terminalStatus,
       outputHash: outcome.outputHash,
     })),
+    ...(input.projectScopeManifest ? { projectScopeManifest: input.projectScopeManifest } : {}),
+    ...(requestEnvelopeIndexV2.length > 0
+      ? {
+          requestEnvelopeIndexV2,
+          requestMatrixHash: input.requestMatrixHash,
+        }
+      : {}),
+    ...(input.detail.frozenFileManifestHash
+      ? { frozenFileManifestHash: input.detail.frozenFileManifestHash }
+      : {}),
     projectionContentHashes: Object.fromEntries(
       CERTIFIED_PROJECT_FACTS_CONSUMERS.map((consumer) => [
         consumer,
@@ -1057,12 +1309,19 @@ function buildManifest(input: {
 function buildCaptureReadinessSummary(
   facts: CertifiedProjectFactsArtifactV1['facts'],
   repositoryIds: string[],
-  chunks: CertifiedProjectFactsChunkV1[]
+  chunks: CertifiedProjectFactsChunkV1[],
+  strictV2?: {
+    projectScopeManifest: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
+    requestMatrixHash: CanonicalSha256;
+  }
 ): CertifiedProjectFactsArtifactV1['readiness'] {
   const errors: string[] = [];
   const repoIds = [...repositoryIds].sort();
   const inventoryKeys = new Set(
     facts.inventory.files.map((file) => `${file.repoId}\u0000${file.relativePath}`)
+  );
+  const inventoryByKey = new Map(
+    facts.inventory.files.map((file) => [`${file.repoId}\u0000${file.relativePath}`, file])
   );
   const decisionKeys = new Set(
     facts.detail.decisions.map((decision) => `${decision.repoId}\u0000${decision.relativePath}`)
@@ -1082,6 +1341,29 @@ function buildCaptureReadinessSummary(
     }
   }
   const chunkHashes = new Set(chunks.map((chunk) => chunk.blobHash));
+  const frozenFiles = facts.detail.frozenFiles ?? [];
+  if (strictV2 || facts.detail.frozenFiles) {
+    if (
+      frozenFiles.length !== inventoryKeys.size ||
+      hashCanonicalJson(frozenFiles) !== facts.detail.frozenFileManifestHash
+    ) {
+      errors.push('frozen-file-conservation-failed');
+    }
+    for (const frozen of frozenFiles) {
+      const inventory = inventoryByKey.get(`${frozen.repoId}\u0000${frozen.relativePath}`);
+      if (
+        !inventory ||
+        frozen.status !== 'frozen-blob-available' ||
+        frozen.fullChunkRefs.length !== 1 ||
+        frozen.fullChunkRefs[0] !== frozen.blobHash ||
+        frozen.blobHash !== inventory.blobSha256 ||
+        frozen.byteLength !== inventory.sizeBytes ||
+        !chunkHashes.has(frozen.blobHash)
+      ) {
+        errors.push(`frozen-file-unavailable:${frozen.repoId}/${frozen.relativePath}`);
+      }
+    }
+  }
   for (const selection of facts.detail.selections) {
     for (const chunkRef of selection.fullChunkRefs) {
       if (!chunkHashes.has(chunkRef)) {
@@ -1102,8 +1384,29 @@ function buildCaptureReadinessSummary(
         errors.push(`request-row-count:${repoId}/${kind}:${rows.length}`);
         continue;
       }
-      if (!['module', 'module-layers'].includes(kind) && rows.length !== 1) {
+      const strictRows = rows.every((row) => row.authorityVersion === 2);
+      if (!strictRows && !['module', 'module-layers'].includes(kind) && rows.length !== 1) {
         errors.push(`request-row-count:${repoId}/${kind}:${rows.length}`);
+      }
+      if (strictV2 && !strictRows) {
+        errors.push(`strict-v2-request-row-missing:${repoId}/${kind}`);
+      }
+      if (strictRows) {
+        const rowIds = rows.map((row) => row.rowId);
+        if (
+          rowIds.some((rowId) => !rowId) ||
+          new Set(rowIds).size !== rowIds.length ||
+          rows.some(
+            (row) =>
+              !row.selectorHash ||
+              !row.canonicalScopeHash ||
+              row.language === undefined ||
+              row.parserFamily === undefined ||
+              row.ownerSurfaceId === undefined
+          )
+        ) {
+          errors.push(`strict-v2-request-identity:${repoId}/${kind}`);
+        }
       }
       if (['module', 'module-layers'].includes(kind) && expectedOwnerIds.size > 0) {
         const actualOwnerIds = rows
@@ -1205,6 +1508,36 @@ function buildCaptureReadinessSummary(
     }
   }
   errors.push(...validateDependencyOwnershipCatalog(facts.requestOutcomes, facts.inventory.files));
+  if (strictV2) {
+    const ownerResult = validateProjectContextInventoryOwnersV2(facts.inventory.files);
+    errors.push(...ownerResult.errors);
+    const actualRows = facts.requestOutcomes
+      .filter((row) => row.authorityVersion === 2)
+      .map((row) => ({
+        rowId: row.rowId!,
+        repoId: row.repoId,
+        kind: row.kind,
+        selectorHash: row.selectorHash!,
+        canonicalScopeHash: row.canonicalScopeHash!,
+        language: row.language ?? null,
+        parserFamily: row.parserFamily ?? null,
+        ownerSurfaceId: row.ownerSurfaceId ?? null,
+        applicability: row.applicability,
+      }))
+      .sort((left, right) => left.rowId.localeCompare(right.rowId));
+    if (hashCanonicalJson(actualRows) !== strictV2.requestMatrixHash) {
+      errors.push('strict-v2-request-matrix-conservation-failed');
+    }
+    const scopeRows = strictV2.projectScopeManifest.repositories;
+    const inventoryScopeRows = facts.inventory.repositories.map((row) => ({
+      scopeId: row.scopeId,
+      repoId: row.repoId,
+      relativeRoot: row.relativeRoot,
+    }));
+    if (hashCanonicalJson(scopeRows) !== hashCanonicalJson(inventoryScopeRows)) {
+      errors.push('strict-v2-project-scope-conservation-failed');
+    }
+  }
   for (const entry of facts.legacyEntries) {
     if (
       entry.directProjectContextCallCount !== 0 ||
@@ -1216,7 +1549,9 @@ function buildCaptureReadinessSummary(
   }
   const normalizedErrors = uniqueStrings(errors);
   return {
-    validatorVersion: PROJECT_FACTS_READINESS_VALIDATOR_VERSION,
+    validatorVersion: strictV2
+      ? PROJECT_FACTS_READINESS_VALIDATOR_V2_VERSION
+      : PROJECT_FACTS_READINESS_VALIDATOR_VERSION,
     verdict: normalizedErrors.length === 0 ? 'passed' : 'failed',
     errors: normalizedErrors,
     errorsHash: hashCanonicalJson(normalizedErrors),
@@ -1439,7 +1774,8 @@ function validateDependencyOwnershipCatalog(
 }
 
 function normalizeFileDescriptors(
-  descriptors: ProjectContextFoundationFileDescriptor[]
+  descriptors: ProjectContextFoundationFileDescriptor[],
+  includeAuthorityV2: boolean
 ): ProjectContextFoundationFileDescriptor[] {
   const byPath = new Map<string, ProjectContextFoundationFileDescriptor>();
   for (const descriptor of descriptors) {
@@ -1447,12 +1783,16 @@ function normalizeFileDescriptors(
     if (byPath.has(relativePath)) {
       throw new TypeError(`Duplicate eligible file path: ${relativePath}.`);
     }
+    const { ownersV2: _ownersV2, ...compatibilityDescriptor } = descriptor;
     byPath.set(relativePath, {
-      ...descriptor,
+      ...compatibilityDescriptor,
       relativePath,
       language: descriptor.language.trim() || 'unknown',
       mode: normalizeFileMode(descriptor.mode),
       ownerModuleIds: uniqueStrings(descriptor.ownerModuleIds ?? []),
+      ...(includeAuthorityV2
+        ? { ownersV2: normalizeProjectContextInventoryOwnersV2(descriptor) }
+        : {}),
     });
   }
   return [...byPath.values()].sort((left, right) =>
@@ -1569,8 +1909,56 @@ function compareRequestPlans(
     left.repoId.localeCompare(right.repoId) ||
     PROJECT_CONTEXT_REQUEST_KIND_VALUES.indexOf(left.kind) -
       PROJECT_CONTEXT_REQUEST_KIND_VALUES.indexOf(right.kind) ||
-    hashCanonicalJson(left.selector).localeCompare(hashCanonicalJson(right.selector))
+    hashCanonicalJson(left.selector).localeCompare(hashCanonicalJson(right.selector)) ||
+    hashCanonicalJson(left).localeCompare(hashCanonicalJson(right))
   );
+}
+
+function readStrictV2Context(input: ProjectContextFoundationCaptureInput):
+  | {
+      projectScopeManifest: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
+      requestMatrixHash: CanonicalSha256;
+    }
+  | undefined {
+  const candidate = input as Partial<ProjectContextFoundationCaptureInputV2>;
+  if (!candidate.projectScope || !candidate.requestMatrix) {
+    return undefined;
+  }
+  verifyProjectScopeManifestV1(candidate.projectScope.manifest);
+  verifyProjectContextRequestMatrixV2(candidate.requestMatrix, candidate.projectScope.manifest);
+  if (
+    candidate.requestMatrix.projectScopeHash !== candidate.projectScope.manifest.canonicalScopeHash
+  ) {
+    throw new TypeError('Strict request matrix scope hash mismatch.');
+  }
+  return {
+    projectScopeManifest: candidate.projectScope.manifest,
+    requestMatrixHash: candidate.requestMatrix.matrixHash,
+  };
+}
+
+function buildStrictRequestIdentity(
+  plan: ProjectContextRequestAuditPlan,
+  input: ProjectContextFoundationCaptureInput
+): Partial<ProjectContextRequestOutcomeV1> {
+  const strictV2 = readStrictV2Context(input);
+  if (!strictV2) {
+    return {};
+  }
+  const strictPlan = plan as ProjectContextRequestAuditPlanV2;
+  if (strictPlan.authorityVersion !== 2) {
+    throw new TypeError(`Strict capture received a V1 request plan: ${plan.repoId}/${plan.kind}.`);
+  }
+  const row = buildRequestEnvelopeIndexRowV2(strictPlan, strictV2.projectScopeManifest);
+  return {
+    authorityVersion: 2,
+    rowId: row.rowId,
+    selectorHash: row.selectorHash,
+    canonicalScopeHash: row.canonicalScopeHash,
+    language: row.language,
+    parserFamily: row.parserFamily,
+    ownerSurfaceId: row.ownerSurfaceId,
+  };
 }
 
 function normalizeRequestDiagnostics(

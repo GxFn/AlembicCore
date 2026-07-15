@@ -6,6 +6,7 @@ import {
   canonicalJsonStringify,
   hashBytes,
   hashCanonicalJson,
+  normalizePortableRelativePath,
 } from './canonical.js';
 import {
   createCertifiedProjectFactsCertificationReceipt,
@@ -101,6 +102,23 @@ export class FileCertifiedProjectFactsStore {
     if (artifact.readiness.verdict !== 'passed') {
       throw new TypeError('Refusing to store certified facts that failed strict readiness.');
     }
+    const existingReceipt = await this.#readExistingStoreReceipt(
+      artifact.artifactId,
+      artifact.certificationBindingHash
+    );
+    if (existingReceipt) {
+      const reopened = await this.open(artifact.artifactId, artifact.certificationBindingHash);
+      if (
+        reopened.factsContentHash !== artifact.factsContentHash ||
+        hashCanonicalJson(reopened.manifest) !== hashCanonicalJson(artifact.manifest)
+      ) {
+        throw new TypeError(`Immutable artifact replay mismatch for ${artifact.artifactId}.`);
+      }
+      this.#logger.info(
+        `store replay verified artifact=${artifact.artifactId} blobs=${existingReceipt.blobRefs.length}`
+      );
+      return existingReceipt;
+    }
     await this.#ensureLayout();
     const blobRefs: string[] = [];
     for (const chunk of artifact.chunks) {
@@ -166,19 +184,17 @@ export class FileCertifiedProjectFactsStore {
       await fs.readFile(this.#absolute(artifactRef), 'utf8'),
       artifactRef
     );
-    const chunks = await Promise.all(
-      stored.chunks.map(async (chunk) => {
-        const blobRef = this.#blobRef(chunk.blobHash);
-        const bytes = await fs.readFile(this.#absolute(blobRef));
-        if (bytes.byteLength !== chunk.byteLength || hashBytes(bytes) !== chunk.blobHash) {
-          throw new TypeError(`Stored full chunk failed readback verification: ${chunk.blobHash}.`);
-        }
-        return {
-          ...chunk,
-          dataBase64: bytes.toString('base64'),
-        };
-      })
-    );
+    const chunks = await mapWithConcurrency(stored.chunks, 64, async (chunk) => {
+      const blobRef = this.#blobRef(chunk.blobHash);
+      const bytes = await fs.readFile(this.#absolute(blobRef));
+      if (bytes.byteLength !== chunk.byteLength || hashBytes(bytes) !== chunk.blobHash) {
+        throw new TypeError(`Stored full chunk failed readback verification: ${chunk.blobHash}.`);
+      }
+      return {
+        ...chunk,
+        dataBase64: bytes.toString('base64'),
+      };
+    });
     const certificationReceiptRef = this.#certificationReceiptRef(certificationBindingHash);
     const certificationReceipt = parseJson<CertifiedProjectFactsCertificationReceiptV1>(
       await fs.readFile(this.#absolute(certificationReceiptRef), 'utf8'),
@@ -211,6 +227,89 @@ export class FileCertifiedProjectFactsStore {
     }
     this.#logger.info(`reopened artifact=${artifactId} blobs=${chunks.length}`);
     return artifact;
+  }
+
+  async readFrozenFile(input: {
+    artifactId: CertifiedProjectFactsArtifactId;
+    certificationBindingHash: CanonicalSha256;
+    repoId: string;
+    relativePath: string;
+  }): Promise<Buffer> {
+    const relativePath = normalizePortableRelativePath(input.relativePath, 'relativePath');
+    const artifactRef = this.#artifactRef(input.artifactId);
+    const stored = parseJson<StoredCertifiedProjectFactsArtifactV1>(
+      await fs.readFile(this.#absolute(artifactRef), 'utf8'),
+      artifactRef
+    );
+    const storeReceipt = await this.#readExistingStoreReceipt(
+      input.artifactId,
+      input.certificationBindingHash
+    );
+    if (!storeReceipt) {
+      throw new TypeError(`Store receipt is missing for ${input.artifactId}.`);
+    }
+    const certificationReceiptRef = this.#certificationReceiptRef(input.certificationBindingHash);
+    const certificationReceipt = parseJson<CertifiedProjectFactsCertificationReceiptV1>(
+      await fs.readFile(this.#absolute(certificationReceiptRef), 'utf8'),
+      certificationReceiptRef
+    );
+    verifyCertificationReceipt(
+      certificationReceipt,
+      input.artifactId,
+      input.certificationBindingHash
+    );
+    if (
+      stored.artifactId !== input.artifactId ||
+      `cpf-v1:${canonicalHashDigest(hashCanonicalJson(stored.manifest))}` !== input.artifactId ||
+      hashCanonicalJson(stored.facts) !== stored.factsContentHash ||
+      stored.factsContentHash !== stored.manifest.factsContentHash ||
+      hashCanonicalJson(stored.facts.detail) !== stored.manifest.detailManifestHash ||
+      hashCanonicalJson(stored.facts.detail.frozenFiles ?? []) !==
+        stored.facts.detail.frozenFileManifestHash ||
+      stored.facts.detail.frozenFileManifestHash !== stored.manifest.frozenFileManifestHash ||
+      storeReceipt.artifactRef !== artifactRef ||
+      storeReceipt.certificationReceiptRef !== certificationReceiptRef ||
+      storeReceipt.manifestHash !== hashCanonicalJson(stored.manifest) ||
+      certificationReceipt.manifestHash !== hashCanonicalJson(stored.manifest) ||
+      certificationReceipt.detailContentHash !== stored.facts.detail.detailContentHash
+    ) {
+      throw new TypeError(`Frozen-file metadata failed immutable readback: ${input.artifactId}.`);
+    }
+    const frozen = stored.facts.detail.frozenFiles?.find(
+      (row) => row.repoId === input.repoId && row.relativePath === relativePath
+    );
+    if (!frozen) {
+      throw new TypeError(
+        `Frozen file is unavailable in the certified artifact: ${input.repoId}/${relativePath}.`
+      );
+    }
+    const inventory = stored.facts.inventory.files.find(
+      (file) => file.repoId === input.repoId && file.relativePath === relativePath
+    );
+    const chunk = stored.chunks.find((row) => row.blobHash === frozen.blobHash);
+    const blobRef = this.#blobRef(frozen.blobHash);
+    if (
+      !inventory ||
+      !chunk ||
+      frozen.fullChunkRefs.length !== 1 ||
+      frozen.fullChunkRefs[0] !== frozen.blobHash ||
+      frozen.blobHash !== inventory.blobSha256 ||
+      frozen.byteLength !== inventory.sizeBytes ||
+      !storeReceipt.blobRefs.includes(blobRef)
+    ) {
+      throw new TypeError(
+        `Frozen file blob is missing from the immutable store: ${frozen.blobHash}.`
+      );
+    }
+    const bytes = await fs.readFile(this.#absolute(blobRef));
+    if (
+      bytes.byteLength !== frozen.byteLength ||
+      bytes.byteLength !== chunk.byteLength ||
+      hashBytes(bytes) !== frozen.blobHash
+    ) {
+      throw new TypeError(`Frozen file blob failed immutable readback: ${frozen.blobHash}.`);
+    }
+    return bytes;
   }
 
   async createPreparation(
@@ -345,6 +444,32 @@ export class FileCertifiedProjectFactsStore {
       throw new TypeError(`Preparation receipt hash mismatch for ${preparationId}.`);
     }
     return preparation;
+  }
+
+  async #readExistingStoreReceipt(
+    artifactId: CertifiedProjectFactsArtifactId,
+    certificationBindingHash: CanonicalSha256
+  ): Promise<CertifiedProjectFactsStoreReceiptV1 | undefined> {
+    const receiptRef = this.#storeReceiptRef(artifactId, certificationBindingHash);
+    let serialized: string;
+    try {
+      serialized = await fs.readFile(this.#absolute(receiptRef), 'utf8');
+    } catch (error) {
+      if (isNodeError(error, 'ENOENT')) {
+        return undefined;
+      }
+      throw error;
+    }
+    const receipt = parseJson<CertifiedProjectFactsStoreReceiptV1>(serialized, receiptRef);
+    const { receiptHash, ...semantic } = receipt;
+    if (
+      hashCanonicalJson(semantic) !== receiptHash ||
+      receipt.artifactId !== artifactId ||
+      receipt.certificationBindingHash !== certificationBindingHash
+    ) {
+      throw new TypeError(`Store receipt identity/hash mismatch for ${artifactId}.`);
+    }
+    return receipt;
   }
 
   async #ensureLayout(): Promise<void> {
@@ -613,4 +738,22 @@ async function verifyFileBytes(
   if (!actual.equals(expected)) {
     throw new TypeError(`Durable store readback mismatch at ${relativeRef}.`);
   }
+}
+
+async function mapWithConcurrency<T, R>(
+  values: readonly T[],
+  concurrency: number,
+  project: (value: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await project(values[index]!, index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }

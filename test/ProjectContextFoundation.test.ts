@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,15 +7,22 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  buildProjectContextRequestMatrixV2,
+  buildProjectScopeManifestV1,
   buildSourceRevisionVectorV1,
   CERTIFIED_PROJECT_FACTS_CONSUMERS,
   CertifiedProjectFactsConsumerPort,
   captureCertifiedProjectFacts,
+  captureCertifiedProjectFactsV2,
   createProjectContextConsumerLineageReceipt,
+  createProjectContextConsumerLineageReceiptV2,
   createProjectContextDependencyOwnershipV1,
   createProjectContextRequestAuditPlans,
+  createProjectContextRequestAuditPlansV2,
   deserializeCertifiedProjectFactsArtifact,
   evaluateCertifiedProjectFactsReadiness,
+  evaluateCertifiedProjectFactsReadinessV2,
+  evaluateProjectContextRequestMatrixV2,
   FileCertifiedProjectFactsStore,
   hashBytes,
   hashCanonicalJson,
@@ -22,9 +30,14 @@ import {
   type ProjectContextFoundationCaptureInput,
   type ProjectContextFoundationHostPorts,
   type ProjectContextRequestAuditPlan,
+  type ProjectContextRequestMatrixV2,
   ProjectFactsLeaseConflictError,
+  readCertifiedProjectFactsFrozenPage,
   serializeCertifiedProjectFactsArtifact,
+  validateProjectContextInventoryOwnersV2,
   verifyCertifiedProjectFactsArtifact,
+  verifyProjectContextRequestMatrixV2,
+  verifyProjectScopeManifestV1,
 } from '../src/projectContextFoundation.js';
 
 const temporaryRoots: string[] = [];
@@ -180,6 +193,76 @@ describe('ProjectContext certified facts foundation', () => {
       requiredLegacyEntryIds: ['core-plan-raw-scanner'],
     });
     expect(readiness).toEqual({ errors: [], ok: true });
+  });
+
+  it('keeps legacy V1 artifacts without a frozen-file plane readable', async () => {
+    const artifact = await captureCertifiedProjectFacts(createCaptureInput(), createHostPorts());
+    const legacyArtifact = structuredClone(artifact);
+    const selectedChunkHashes = new Set(
+      legacyArtifact.facts.detail.selections.flatMap((selection) => selection.fullChunkRefs)
+    );
+    legacyArtifact.chunks = legacyArtifact.chunks.filter((chunk) =>
+      selectedChunkHashes.has(chunk.blobHash)
+    );
+    delete legacyArtifact.facts.detail.frozenFiles;
+    delete legacyArtifact.facts.detail.frozenFileManifestHash;
+    delete legacyArtifact.manifest.frozenFileManifestHash;
+    const { detailContentHash: _detailContentHash, ...detailSemantic } =
+      legacyArtifact.facts.detail;
+    legacyArtifact.facts.detail.detailContentHash = hashCanonicalJson(detailSemantic);
+    legacyArtifact.factsContentHash = hashCanonicalJson(legacyArtifact.facts);
+    legacyArtifact.manifest.factsContentHash = legacyArtifact.factsContentHash;
+    legacyArtifact.manifest.detailManifestHash = hashCanonicalJson(legacyArtifact.facts.detail);
+    legacyArtifact.manifest.blobTable = legacyArtifact.chunks
+      .map((chunk) => ({ blobHash: chunk.blobHash, byteLength: chunk.byteLength }))
+      .sort((left, right) => left.blobHash.localeCompare(right.blobHash));
+    legacyArtifact.manifest.fullChunkManifestHash = hashCanonicalJson(
+      legacyArtifact.manifest.blobTable
+    );
+    legacyArtifact.artifactId =
+      `cpf-v1:${hashCanonicalJson(legacyArtifact.manifest).slice('sha256:'.length)}` as const;
+    legacyArtifact.certificationBindingHash = hashCanonicalJson({
+      artifactId: legacyArtifact.artifactId,
+      factsContentHash: legacyArtifact.factsContentHash,
+      sourceVectorHash: legacyArtifact.sourceVectorHash,
+      readiness: legacyArtifact.readiness,
+      ...legacyArtifact.certification,
+    });
+
+    expect(() => verifyCertifiedProjectFactsArtifact(legacyArtifact)).not.toThrow();
+    expect(() =>
+      deserializeCertifiedProjectFactsArtifact(
+        serializeCertifiedProjectFactsArtifact(legacyArtifact)
+      )
+    ).not.toThrow();
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-legacy-v1-'));
+    temporaryRoots.push(root);
+    const store = new FileCertifiedProjectFactsStore(root, {
+      logger: { info() {}, warn() {} },
+    });
+    await store.put(legacyArtifact);
+    await expect(
+      store.open(legacyArtifact.artifactId, legacyArtifact.certificationBindingHash)
+    ).resolves.toMatchObject({ artifactId: legacyArtifact.artifactId });
+  });
+
+  it('preserves the V1 empty selected-file representation without a synthetic frozen blob', async () => {
+    const input = createCaptureInput();
+    const basePorts = createHostPorts();
+    const artifact = await captureCertifiedProjectFacts(input, {
+      ...basePorts,
+      enumerateEligibleFiles: async () => [
+        { language: 'typescript', mode: '100644', relativePath: 'src/empty.ts' },
+      ],
+      readFile: async () => Buffer.alloc(0),
+    });
+
+    expect(artifact.facts.detail.frozenFiles).toBeUndefined();
+    expect(artifact.facts.inventory.files[0]?.ownersV2).toBeUndefined();
+    expect(artifact.facts.detail.selections[0]?.fullChunkRefs).toEqual([]);
+    expect(artifact.chunks).toEqual([]);
+    expect(() => verifyCertifiedProjectFactsArtifact(artifact)).not.toThrow();
   });
 
   it('re-reads add, modify, and delete changes through one host port instance', async () => {
@@ -1969,6 +2052,468 @@ describe('ProjectContext certified facts foundation', () => {
     expect(artifact.facts.detail.omittedFileCount).toBe(5000);
     expect(artifact.facts.detail.decisions).toHaveLength(5001);
   });
+
+  it('derives strict capture from an independently sealed project scope receipt', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const projectScope = buildProjectScopeManifestV1({
+      acceptedScope: {
+        projectIdentity: { projectId: 'alembic', scopeId: 'mr-alembic' },
+        projectMode: 'MR-ALEMBIC',
+        repositories: [{ relativeRoot: '.', repoId: 'core' }],
+      },
+      controlRoot: fixture.controlRoot,
+      sourceRoots: [{ repoId: 'core', sourceRoot: fixture.controlRoot }],
+    });
+    const { manifest, repositories } = projectScope;
+
+    expect(manifest.repositories).toEqual([
+      { relativeRoot: '.', repoId: 'core', scopeId: 'mr-alembic' },
+    ]);
+    expect(manifest.canonicalScopeHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(repositories).toEqual(fixture.input.repositories);
+    const substitutedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-scope-swap-'));
+    temporaryRoots.push(substitutedRoot);
+    expect(() =>
+      buildProjectScopeManifestV1({
+        acceptedScope: {
+          projectIdentity: { projectId: 'alembic', scopeId: 'mr-alembic' },
+          projectMode: 'MR-ALEMBIC',
+          repositories: [{ relativeRoot: '.', repoId: 'core' }],
+        },
+        controlRoot: fixture.controlRoot,
+        sourceRoots: [{ repoId: 'core', sourceRoot: substitutedRoot }],
+      })
+    ).toThrow(/controlRoot\/relativeRoot/);
+    const substitutedBinding = structuredClone(projectScope);
+    substitutedBinding.repositories[0]!.sourceRoot = substitutedRoot;
+    await expect(
+      captureCertifiedProjectFactsV2(
+        {
+          ...fixture.input,
+          projectScope: substitutedBinding,
+          requestMatrix: fixture.requestMatrix(manifest),
+        },
+        fixture.ports
+      )
+    ).rejects.toThrow(/source-root bindings/i);
+    expect(() =>
+      verifyProjectScopeManifestV1({
+        ...manifest,
+        repositories: [{ ...manifest.repositories[0]!, repoId: 'core-alias' }],
+      })
+    ).toThrow(/scope manifest/i);
+    expect(() =>
+      verifyProjectScopeManifestV1({
+        ...manifest,
+        repositories: [
+          manifest.repositories[0]!,
+          { ...manifest.repositories[0]!, relativeRoot: 'duplicate-root' },
+        ],
+      })
+    ).toThrow(/duplicate repository id/i);
+
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        projectScope,
+        requestMatrix: fixture.requestMatrix(manifest),
+      },
+      fixture.ports
+    );
+    expect(
+      evaluateCertifiedProjectFactsReadinessV2(artifact, {
+        acceptedScopeManifest: manifest,
+        requestMatrix: fixture.requestMatrix(manifest),
+      })
+    ).toEqual({ errors: [], ok: true });
+    const emptyFrozenHashDrift = structuredClone(artifact);
+    emptyFrozenHashDrift.manifest.frozenFileManifestHash = hashCanonicalJson({ drift: true });
+    resignArtifactForIntegrityTest(emptyFrozenHashDrift);
+    expect(() => verifyCertifiedProjectFactsArtifact(emptyFrozenHashDrift)).toThrow(
+      /frozen-file manifest hash mismatch/i
+    );
+    const projectionDrift = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        projections: Object.fromEntries(
+          CERTIFIED_PROJECT_FACTS_CONSUMERS.map((consumer) => [
+            consumer,
+            { callerPlaceholderChanged: true, consumer },
+          ])
+        ) as ProjectContextFoundationCaptureInput['projections'],
+        projectScope,
+        requestMatrix: fixture.requestMatrix(manifest),
+      },
+      fixture.ports
+    );
+    expect(projectionDrift.artifactId).toBe(artifact.artifactId);
+    expect(projectionDrift.certificationBindingHash).toBe(artifact.certificationBindingHash);
+
+    const aliasScope = buildProjectScopeManifestV1({
+      acceptedScope: {
+        projectIdentity: { projectId: 'alembic', scopeId: 'mr-alembic' },
+        projectMode: 'MR-ALEMBIC',
+        repositories: [{ relativeRoot: '.', repoId: 'core-alias' }],
+      },
+      controlRoot: fixture.controlRoot,
+      sourceRoots: [{ repoId: 'core-alias', sourceRoot: fixture.controlRoot }],
+    }).manifest;
+    expect(
+      evaluateCertifiedProjectFactsReadinessV2(artifact, {
+        acceptedScopeManifest: aliasScope,
+        requestMatrix: fixture.requestMatrix(manifest),
+      }).ok
+    ).toBe(false);
+  });
+
+  it('conserves strict V2 request identities across selector, scope, language, parser, and surface', () => {
+    const fixture = createAuthorityV2Fixture();
+    const scope = fixture.scope();
+    const matrix = fixture.requestMatrix(scope.manifest);
+    expect(matrix.rows.length).toBeGreaterThan(9);
+    expect(new Set(matrix.rows.map((row) => row.rowId)).size).toBe(matrix.rows.length);
+    expect(
+      matrix.rows.every(
+        (row) =>
+          /^sha256:[a-f0-9]{64}$/.test(row.selectorHash) &&
+          /^sha256:[a-f0-9]{64}$/.test(row.canonicalScopeHash)
+      )
+    ).toBe(true);
+
+    const deleteRow = { ...matrix, rows: matrix.rows.slice(1) } as ProjectContextRequestMatrixV2;
+    const duplicateRow = {
+      ...matrix,
+      rows: [...matrix.rows, matrix.rows[0]!],
+    } as ProjectContextRequestMatrixV2;
+    const languageSwap = structuredClone(matrix);
+    languageSwap.rows[0]!.language = 'swift';
+    const scopeSwap = structuredClone(matrix);
+    scopeSwap.rows[0]!.canonicalScopeHash = matrix.rows[1]!.canonicalScopeHash;
+    const planSwap = structuredClone(matrix);
+    planSwap.plans[0]!.selector = { unrelated: true };
+    planSwap.receiptHash = hashCanonicalJson({
+      kind: planSwap.kind,
+      version: planSwap.version,
+      projectScopeHash: planSwap.projectScopeHash,
+      plans: planSwap.plans,
+      rows: planSwap.rows,
+      matrixHash: planSwap.matrixHash,
+    });
+
+    expect(evaluateProjectContextRequestMatrixV2(matrix, deleteRow.rows, scope.manifest).ok).toBe(
+      false
+    );
+    expect(
+      evaluateProjectContextRequestMatrixV2(matrix, duplicateRow.rows, scope.manifest).ok
+    ).toBe(false);
+    expect(
+      evaluateProjectContextRequestMatrixV2(matrix, languageSwap.rows, scope.manifest).ok
+    ).toBe(false);
+    expect(evaluateProjectContextRequestMatrixV2(matrix, scopeSwap.rows, scope.manifest).ok).toBe(
+      false
+    );
+    expect(() => verifyProjectContextRequestMatrixV2(planSwap, scope.manifest)).toThrow(
+      /plans are not canonically bound/i
+    );
+  });
+
+  it('keeps all nine strict request kinds as typed N/A rows for an empty inventory', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const scope = fixture.scope();
+    const repository = fixture.input.repositories[0]!;
+    const plans = createProjectContextRequestAuditPlansV2({
+      eligibleFiles: [],
+      projectScopeManifest: scope.manifest,
+      repository,
+    });
+    const matrix = buildProjectContextRequestMatrixV2(scope.manifest, plans);
+    const basePorts = fixture.ports;
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        projectScope: scope,
+        requestMatrix: matrix,
+      },
+      {
+        ...basePorts,
+        enumerateEligibleFiles: async () => [],
+        readFile: async () => {
+          throw new Error('empty inventory must not read a file');
+        },
+      }
+    );
+
+    expect(new Set(artifact.facts.requestOutcomes.map((row) => row.kind)).size).toBe(9);
+    expect(artifact.facts.requestOutcomes).toHaveLength(9);
+    expect(
+      artifact.facts.requestOutcomes
+        .filter((row) =>
+          ['anchor-range', 'file-flow', 'file-symbols', 'source-slice'].includes(row.kind)
+        )
+        .every((row) => row.applicability === 'not-applicable')
+    ).toBe(true);
+    expect(
+      evaluateCertifiedProjectFactsReadinessV2(artifact, {
+        acceptedScopeManifest: scope.manifest,
+        requestMatrix: matrix,
+      })
+    ).toEqual({ errors: [], ok: true });
+  });
+
+  it('freezes every readable eligible file and reopens an omitted file without live fallback', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const scope = fixture.scope();
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        projectScope: scope,
+        requestMatrix: fixture.requestMatrix(scope.manifest),
+      },
+      fixture.ports
+    );
+    expect(artifact.facts.detail.frozenFiles).toHaveLength(4);
+    expect(artifact.facts.detail.frozenFiles.map((row) => row.relativePath)).toEqual([
+      'package.json',
+      'pyproject.toml',
+      'src/index.ts',
+      'src/worker.py',
+    ]);
+
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-v2-frozen-'));
+    temporaryRoots.push(root);
+    const store = new FileCertifiedProjectFactsStore(root, {
+      logger: { info() {}, warn() {} },
+    });
+    await store.put(artifact);
+    fixture.contents.set('src/worker.py', Buffer.from('def worker():\n    return 999\n'));
+    fixture.contents.delete('src/worker.py');
+    const reopenedStore = new FileCertifiedProjectFactsStore(root, {
+      logger: { info() {}, warn() {} },
+    });
+    await expect(
+      reopenedStore.readFrozenFile({
+        artifactId: artifact.artifactId,
+        certificationBindingHash: artifact.certificationBindingHash,
+        relativePath: 'src/worker.py',
+        repoId: 'core',
+      })
+    ).resolves.toEqual(Buffer.from('def worker():\n    return 2\n'));
+    const reopened = await reopenedStore.open(
+      artifact.artifactId,
+      artifact.certificationBindingHash
+    );
+    const firstPage = readCertifiedProjectFactsFrozenPage(reopened, { limit: 1 });
+    expect(firstPage.files).toHaveLength(1);
+    expect(firstPage.continuation).toMatch(/^pcf-frozen-page-v2:[a-f0-9]{64}:1$/);
+    const secondPage = readCertifiedProjectFactsFrozenPage(reopened, {
+      continuation: firstPage.continuation,
+      limit: 10,
+    });
+    expect(secondPage.files.find((file) => file.relativePath === 'src/worker.py')).toMatchObject({
+      relativePath: 'src/worker.py',
+      dataBase64: Buffer.from('def worker():\n    return 2\n').toString('base64'),
+    });
+  });
+
+  it('requires typed inventory owner evidence and rejects heuristic-only coverage authority', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const scope = fixture.scope();
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        projectScope: scope,
+        requestMatrix: fixture.requestMatrix(scope.manifest),
+      },
+      fixture.ports
+    );
+    expect(validateProjectContextInventoryOwnersV2(artifact.facts.inventory.files)).toEqual({
+      errors: [],
+      ok: true,
+    });
+
+    const withoutEvidence = structuredClone(artifact.facts.inventory.files);
+    withoutEvidence.find((file) => (file.ownersV2?.length ?? 0) > 0)!.ownersV2![0]!.evidence = [];
+    expect(validateProjectContextInventoryOwnersV2(withoutEvidence).ok).toBe(false);
+
+    const heuristicCoverage = structuredClone(artifact.facts.inventory.files);
+    heuristicCoverage.find((file) => (file.ownersV2?.length ?? 0) > 0)!.ownersV2![0] = {
+      confidence: 'low',
+      disposition: 'exclusive',
+      evidence: [{ kind: 'relative-path-shape', relativePath: 'src/index.ts' }],
+      origin: 'path-heuristic',
+      ownerModuleId: 'module:src',
+      typedReason: 'path-shape-only',
+    };
+    expect(validateProjectContextInventoryOwnersV2(heuristicCoverage).ok).toBe(false);
+
+    const inventedAuthority = structuredClone(artifact.facts.inventory.files);
+    const inventedOwner = inventedAuthority.find((file) => (file.ownersV2?.length ?? 0) > 0)!
+      .ownersV2![0]!;
+    Object.assign(inventedOwner, {
+      confidence: 'absolute',
+      disposition: 'sovereign',
+      origin: 'invented-trust',
+    });
+    expect(validateProjectContextInventoryOwnersV2(inventedAuthority).ok).toBe(false);
+
+    const relabeledHeuristic = structuredClone(artifact.facts.inventory.files);
+    const relabeledOwner = relabeledHeuristic.find((file) => (file.ownersV2?.length ?? 0) > 0)!
+      .ownersV2![0]!;
+    relabeledOwner.origin = 'host-declared';
+    relabeledOwner.evidence = [{ kind: 'relative-path-shape', relativePath: 'src/index.ts' }];
+    expect(validateProjectContextInventoryOwnersV2(relabeledHeuristic).ok).toBe(false);
+
+    const brokenFrozenRef = structuredClone(artifact);
+    brokenFrozenRef.facts.detail.frozenFiles![0]!.fullChunkRefs = [];
+    brokenFrozenRef.facts.detail.frozenFileManifestHash = hashCanonicalJson(
+      brokenFrozenRef.facts.detail.frozenFiles
+    );
+    brokenFrozenRef.manifest.frozenFileManifestHash =
+      brokenFrozenRef.facts.detail.frozenFileManifestHash;
+    resignArtifactForIntegrityTest(brokenFrozenRef);
+    expect(() => verifyCertifiedProjectFactsArtifact(brokenFrozenRef)).toThrow();
+
+    const partialDowngrade = structuredClone(artifact);
+    delete partialDowngrade.manifest.requestMatrixHash;
+    resignArtifactForIntegrityTest(partialDowngrade);
+    expect(() => verifyCertifiedProjectFactsArtifact(partialDowngrade)).toThrow(
+      /authority planes must be present atomically/i
+    );
+  });
+
+  it('seals actual post-open projection receipts without mutating the base certification', async () => {
+    const fixture = createAuthorityV2Fixture();
+    const scope = fixture.scope();
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        projectScope: scope,
+        requestMatrix: fixture.requestMatrix(scope.manifest),
+      },
+      fixture.ports
+    );
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-v2-consumer-'));
+    temporaryRoots.push(root);
+    const store = new FileCertifiedProjectFactsStore(root, {
+      logger: { info() {}, warn() {} },
+    });
+    const storeReceipt = await store.put(artifact);
+    const sealedBase = {
+      certificationBindingHash: artifact.certificationBindingHash,
+      receiptHash: storeReceipt.receiptHash,
+    };
+    const preparation = await store.createPreparation(
+      artifact.artifactId,
+      artifact.certificationBindingHash
+    );
+    const port = new CertifiedProjectFactsConsumerPort(store);
+    const projectionReceipts = [];
+    for (const consumer of CERTIFIED_PROJECT_FACTS_CONSUMERS) {
+      const result = await port.reopenWithAdapter({
+        adapter: {
+          adapterVersion: 'fixture-adapter-v2',
+          entrypoint: `test/actual-adapters/${consumer}.ts`,
+          loadEvidenceHash: hashCanonicalJson({ consumer, loaded: true }),
+          payloadSchemaHash: hashCanonicalJson({ consumer, schema: 2 }),
+          project: (opened) => ({
+            consumer,
+            fileCount: opened.facts.inventory.fileCount,
+          }),
+        },
+        consumer,
+        expectedCertificationBindingHash: artifact.certificationBindingHash,
+        preparationId: preparation.preparationId,
+        runId: 'authority-v2-run',
+      });
+      projectionReceipts.push(result.receipt);
+    }
+    const lineage = createProjectContextConsumerLineageReceiptV2(
+      artifact,
+      projectionReceipts.map((receipt) => ({
+        canonicalScopeHash: scope.manifest.canonicalScopeHash,
+        directProjectContextCallCount: 0,
+        projectionReceipt: receipt,
+        rawFilesystemFallbackCount: 0,
+        sessionPersistReloadStatus: 'passed',
+        synthesizedProjectScopeFactCount: 0,
+      }))
+    );
+
+    expect(lineage.certificationBindingHash).toBe(sealedBase.certificationBindingHash);
+    expect(artifact.certificationBindingHash).toBe(sealedBase.certificationBindingHash);
+    expect(storeReceipt.receiptHash).toBe(sealedBase.receiptHash);
+    expect(lineage.rows).toHaveLength(CERTIFIED_PROJECT_FACTS_CONSUMERS.length);
+    await expect(
+      port.reopenWithAdapter({
+        adapter: {
+          adapterVersion: 'malicious-adapter-v2',
+          entrypoint: 'test/actual-adapters/malicious.ts',
+          loadEvidenceHash: hashCanonicalJson({ consumer: 'plan', loaded: true }),
+          payloadSchemaHash: hashCanonicalJson({ consumer: 'plan', schema: 2 }),
+          project: (opened) => {
+            const mutable = opened as unknown as {
+              facts: { inventory: { files: unknown[] } };
+            };
+            mutable.facts.inventory.files.pop();
+            return { mutated: true };
+          },
+        },
+        consumer: 'plan',
+        expectedCertificationBindingHash: artifact.certificationBindingHash,
+        preparationId: preparation.preparationId,
+        runId: 'authority-v2-run',
+      })
+    ).rejects.toThrow();
+    await expect(
+      store.open(artifact.artifactId, artifact.certificationBindingHash)
+    ).resolves.toMatchObject({
+      certificationBindingHash: sealedBase.certificationBindingHash,
+      facts: { inventory: { fileCount: artifact.facts.inventory.fileCount } },
+    });
+    expect(() =>
+      createProjectContextConsumerLineageReceiptV2(
+        artifact,
+        projectionReceipts.map((receipt) => ({
+          canonicalScopeHash: hashCanonicalJson({ wrongScope: true }),
+          directProjectContextCallCount: 0,
+          projectionReceipt: receipt,
+          rawFilesystemFallbackCount: 0,
+          sessionPersistReloadStatus: 'passed',
+          synthesizedProjectScopeFactCount: 0,
+        }))
+      )
+    ).toThrow(/scope identity mismatch/i);
+    await expect(
+      port.reopenWithAdapter({
+        adapter: {
+          adapterVersion: 'fixture-adapter-v2',
+          entrypoint: 'test/actual-adapters/plan.ts',
+          loadEvidenceHash: 'sha256:not-a-canonical-hash',
+          payloadSchemaHash: hashCanonicalJson({ consumer: 'plan', schema: 2 }),
+          project: () => ({ consumer: 'plan' }),
+        },
+        consumer: 'plan',
+        expectedCertificationBindingHash: artifact.certificationBindingHash,
+        preparationId: preparation.preparationId,
+        runId: 'authority-v2-run',
+      })
+    ).rejects.toThrow(/canonical SHA-?256/i);
+    await expect(
+      port.reopenWithAdapter({
+        adapter: {
+          adapterVersion: 'placeholder-v1',
+          entrypoint: 'scripts/audit-project-context-foundation.mjs',
+          loadEvidenceHash: hashCanonicalJson({ audit: true }),
+          payloadSchemaHash: hashCanonicalJson({ placeholder: true }),
+          project: () => ({ placeholder: true }),
+        },
+        consumer: 'plan',
+        expectedCertificationBindingHash: artifact.certificationBindingHash,
+        preparationId: preparation.preparationId,
+        runId: 'authority-v2-run',
+      })
+    ).rejects.toThrow(/actual loaded adapter/i);
+  });
 });
 
 function resignArtifactForIntegrityTest(
@@ -2122,6 +2667,137 @@ function createHostPorts(
       return content;
     },
   };
+}
+
+function createAuthorityV2Fixture() {
+  const input = createCaptureInput();
+  const controlRoot = fsSync.realpathSync.native(
+    fsSync.mkdtempSync(path.join(os.tmpdir(), 'project-facts-v2-scope-'))
+  );
+  temporaryRoots.push(controlRoot);
+  input.repositories[0]!.sourceRoot = controlRoot;
+  const packageJsonBytes = Buffer.from('{"name":"@fixture/core"}\n');
+  const pyprojectBytes = Buffer.from('[project]\nname = "fixture-worker"\n');
+  const files = [
+    {
+      language: 'json',
+      mode: '100644',
+      ownerModuleIds: [],
+      ownersV2: [],
+      relativePath: 'package.json',
+    },
+    {
+      language: 'toml',
+      mode: '100644',
+      ownerModuleIds: [],
+      ownersV2: [],
+      relativePath: 'pyproject.toml',
+    },
+    {
+      language: 'typescript',
+      mode: '100644',
+      ownerModuleIds: ['module:core'],
+      ownersV2: [
+        {
+          confidence: 'high' as const,
+          disposition: 'exclusive' as const,
+          evidence: [
+            {
+              contentHash: hashBytes(packageJsonBytes),
+              kind: 'package-build-declaration' as const,
+              relativePath: 'package.json',
+            },
+          ],
+          origin: 'package-build-declaration' as const,
+          ownerModuleId: 'module:core',
+          typedReason: 'package-build-declares-core-module',
+        },
+      ],
+      relativePath: 'src/index.ts',
+    },
+    {
+      language: 'python',
+      mode: '100644',
+      ownerModuleIds: ['module:worker'],
+      ownersV2: [
+        {
+          confidence: 'high' as const,
+          disposition: 'exclusive' as const,
+          evidence: [
+            {
+              contentHash: hashBytes(pyprojectBytes),
+              kind: 'package-build-declaration' as const,
+              relativePath: 'pyproject.toml',
+            },
+          ],
+          origin: 'package-build-declaration' as const,
+          ownerModuleId: 'module:worker',
+          typedReason: 'package-build-declares-worker-module',
+        },
+      ],
+      relativePath: 'src/worker.py',
+    },
+  ];
+  const contents = new Map([
+    ['package.json', packageJsonBytes],
+    ['pyproject.toml', pyprojectBytes],
+    ['src/index.ts', Buffer.from('export const alpha = 1;\n')],
+    ['src/worker.py', Buffer.from('def worker():\n    return 2\n')],
+  ]);
+  const basePorts = createHostPorts();
+  const ports: ProjectContextFoundationHostPorts = {
+    ...basePorts,
+    enumerateEligibleFiles: async () => files,
+    executeRequest: async ({ plan }) => {
+      const selector = plan.selector as { filePath?: string };
+      const detectedLanguage = selector.filePath?.endsWith('.py') ? 'python' : 'typescript';
+      const parserKind = ['anchor-range', 'file-flow', 'file-symbols'].includes(plan.kind);
+      return {
+        detectedLanguage: parserKind ? detectedLanguage : undefined,
+        output: { kind: plan.kind, selector: plan.selector },
+        parserRuntime: parserKind ? 'ready' : 'not-required',
+        queryInitialization: parserKind ? 'ready' : 'not-required',
+        sourceRanges: selector.filePath
+          ? [
+              {
+                endLine: 1,
+                relativePath: selector.filePath,
+                repoId: plan.repoId,
+                startLine: 1,
+              },
+            ]
+          : [],
+        terminalStatus: 'completed',
+      };
+    },
+    readFile: async ({ relativePath }) => {
+      const content = contents.get(relativePath);
+      if (!content) {
+        throw new Error(`Unexpected authority-v2 file read: ${relativePath}`);
+      }
+      return content;
+    },
+  };
+  const scope = () =>
+    buildProjectScopeManifestV1({
+      acceptedScope: {
+        projectIdentity: { projectId: 'alembic', scopeId: 'mr-alembic' },
+        projectMode: 'MR-ALEMBIC',
+        repositories: [{ relativeRoot: '.', repoId: 'core' }],
+      },
+      controlRoot,
+      sourceRoots: [{ repoId: 'core', sourceRoot: controlRoot }],
+    });
+  const requestMatrix = (manifest: ReturnType<typeof buildProjectScopeManifestV1>['manifest']) =>
+    buildProjectContextRequestMatrixV2(
+      manifest,
+      createProjectContextRequestAuditPlansV2({
+        eligibleFiles: files,
+        projectScopeManifest: manifest,
+        repository: input.repositories[0]!,
+      })
+    );
+  return { contents, controlRoot, input, ports, requestMatrix, scope };
 }
 
 async function createTemporaryGitRepository(): Promise<string> {

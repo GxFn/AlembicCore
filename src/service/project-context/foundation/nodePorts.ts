@@ -238,11 +238,40 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           continue;
         }
         const stat = await fs.stat(absolutePath);
+        const ownerModuleIds = inferOwnerModuleIds(relativePath);
         descriptors.push({
           relativePath,
           language: LanguageService.inferLang(relativePath),
           mode: stat.mode & 0o111 ? '100755' : '100644',
-          ownerModuleIds: inferOwnerModuleIds(relativePath),
+          ownerModuleIds,
+          ownersV2: ownerModuleIds.map((ownerModuleId) => {
+            const ownershipEntries = (this.#dependencyOwnership?.entries ?? []).filter(
+              (entry) =>
+                entry.repoId === input.repository.repoId && entry.ownerModuleId === ownerModuleId
+            );
+            return ownershipEntries.length > 0
+              ? {
+                  ownerModuleId,
+                  origin: 'package-build-declaration' as const,
+                  confidence: 'high' as const,
+                  disposition:
+                    ownerModuleIds.length > 1 ? ('shared' as const) : ('exclusive' as const),
+                  typedReason: 'dependency-ownership-catalog-binds-package-build-evidence',
+                  evidence: ownershipEntries.map((entry) => ({
+                    kind: 'package-build-declaration' as const,
+                    relativePath: entry.provenance.relativePath,
+                    contentHash: entry.provenance.contentHash,
+                  })),
+                }
+              : {
+                  ownerModuleId,
+                  origin: 'path-heuristic' as const,
+                  confidence: 'low' as const,
+                  disposition: 'ambiguous' as const,
+                  typedReason: 'relative-path-shape-is-advisory-only',
+                  evidence: [{ kind: 'relative-path-shape' as const, relativePath }],
+                };
+          }),
         });
       }
     }
@@ -250,6 +279,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     return descriptors.map((entry) => ({
       ...entry,
       ownerModuleIds: [...(entry.ownerModuleIds ?? [])],
+      ownersV2: entry.ownersV2 ? structuredClone(entry.ownersV2) : undefined,
     }));
   }
 
@@ -376,6 +406,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
   async #captureTerminalCandidate(input: {
     repository: ProjectContextFoundationRepositoryInput;
     policy: ProjectContextInventoryPolicyV1;
+    candidate: ProjectContextSnapshotCandidateV1;
     signal?: AbortSignal;
   }): Promise<{
     eligibleInventoryHash: CanonicalSha256;
@@ -392,6 +423,9 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           signal: input.signal,
         })
       );
+      const includeAuthorityV2 = input.candidate.files.some(
+        ({ file }) => file.ownersV2 !== undefined
+      );
       files.push({
         repoId: input.repository.repoId,
         relativePath: descriptor.relativePath,
@@ -400,6 +434,9 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
         sizeBytes: content.byteLength,
         blobSha256: hashBytes(content),
         ownerModuleIds: uniquePortableAliases(descriptor.ownerModuleIds ?? []),
+        ...(includeAuthorityV2
+          ? { ownersV2: descriptor.ownersV2 ? structuredClone(descriptor.ownersV2) : [] }
+          : {}),
       });
     }
     files.sort((left, right) => left.relativePath.localeCompare(right.relativePath));
