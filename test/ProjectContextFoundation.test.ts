@@ -761,6 +761,114 @@ describe('ProjectContext certified facts foundation', () => {
     });
   });
 
+  it('rejects matching legacy content candidates whose terminal state adds, deletes, or modifies files', async () => {
+    const scenarios = [
+      {
+        name: 'add',
+        mutate: (files: Map<string, Buffer>) =>
+          files.set('src/added.ts', Buffer.from('export const added = true;\n')),
+      },
+      {
+        name: 'delete',
+        mutate: (files: Map<string, Buffer>) => files.delete('src/worker.ts'),
+      },
+      {
+        name: 'modify',
+        mutate: (files: Map<string, Buffer>) =>
+          files.set('src/worker.ts', Buffer.from('export const beta = 3;\n')),
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const basePorts = createHostPorts();
+      const { verifySnapshot: _verifySnapshot, ...legacyPorts } = basePorts;
+      const candidateFiles = new Map<string, Buffer>([
+        ['src/index.ts', Buffer.from('export const alpha = 1;\n')],
+        ['src/worker.ts', Buffer.from('export const beta = 2;\n')],
+      ]);
+      const terminalFiles = new Map(
+        [...candidateFiles].map(([relativePath, content]) => [relativePath, Buffer.from(content)])
+      );
+      scenario.mutate(terminalFiles);
+      const contentHash = (files: Map<string, Buffer>) =>
+        hashCanonicalJson(
+          [...files]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([relativePath, content]) => [relativePath, '100644', hashBytes(content)])
+        );
+      const inventoryHash = (files: Map<string, Buffer>) =>
+        hashCanonicalJson(
+          [...files]
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([relativePath, content]) => ({
+              repoId: 'core',
+              relativePath,
+              language: 'typescript',
+              mode: '100644',
+              sizeBytes: content.byteLength,
+              blobSha256: hashBytes(content),
+              ownerModuleIds: ['module:src'],
+            }))
+        );
+      expect(inventoryHash(candidateFiles), scenario.name).not.toBe(inventoryHash(terminalFiles));
+      expect(contentHash(candidateFiles), scenario.name).not.toBe(contentHash(terminalFiles));
+
+      let visibleFiles = candidateFiles;
+      let observationCount = 0;
+      const ports: ProjectContextFoundationHostPorts = {
+        ...legacyPorts,
+        enumerateEligibleFiles: async () =>
+          [...visibleFiles.keys()].sort().map((relativePath) => ({
+            language: 'typescript',
+            mode: '100644',
+            ownerModuleIds: ['module:src'],
+            relativePath,
+          })),
+        observeRevision: async () => {
+          observationCount += 1;
+          visibleFiles = observationCount % 2 === 1 ? candidateFiles : terminalFiles;
+          return { kind: 'content' };
+        },
+        readFile: async ({ relativePath }) => {
+          const content = visibleFiles.get(relativePath);
+          if (!content) {
+            throw new Error(`Missing ${scenario.name} fixture file: ${relativePath}`);
+          }
+          return content;
+        },
+      };
+
+      await expect(
+        captureCertifiedProjectFacts(createCaptureInput(), ports),
+        scenario.name
+      ).rejects.toMatchObject({ code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT' });
+    }
+  });
+
+  it('preserves AbortError from a legacy content terminal reread', async () => {
+    const reason = Object.assign(new Error('terminal-content-abort'), { name: 'AbortError' });
+    const basePorts = createHostPorts();
+    const { verifySnapshot: _verifySnapshot, ...legacyPorts } = basePorts;
+    let terminalRead = false;
+    let observationCount = 0;
+    const ports: ProjectContextFoundationHostPorts = {
+      ...legacyPorts,
+      enumerateEligibleFiles: async (request) => {
+        if (terminalRead) {
+          throw reason;
+        }
+        return legacyPorts.enumerateEligibleFiles(request);
+      },
+      observeRevision: async () => {
+        observationCount += 1;
+        terminalRead = observationCount % 2 === 0;
+        return { kind: 'content' };
+      },
+    };
+
+    await expect(captureCertifiedProjectFacts(createCaptureInput(), ports)).rejects.toBe(reason);
+  });
+
   it('keeps legacy content hosts compatible through two matching complete candidates', async () => {
     const basePorts = createHostPorts();
     const { verifySnapshot: _verifySnapshot, ...legacyPorts } = basePorts;

@@ -192,18 +192,18 @@ async function runParent(input) {
     kind: 'ProjectContextCapabilityAuditReport',
     schemaVersion: 1,
     section: 'AlembicCore',
-    taskId: 'i1-i2-core-project-context-foundation-rootcause2-t1',
+    taskId: 'i1-i2-core-content-terminal-fence-t1',
     loadedArtifact,
     historicalLoadedArtifactReproduction,
     reproduction: {
       inputModes: ['MR-ALEMBIC', 'SP-BILIDILI'],
       historicalFailure: 'ProjectContext multi-repo traversal 1/5 and Plan repeatability failure',
       rootCause:
-        'Directory-derived module owners were disconnected from package imports/exports, so certified internal and sibling dependencies were mislabeled external. Capture also opened each inventory interval after a pre-read observation without a post-read/content fence, allowing a clean Git revision to certify dirty bytes. Rootcause2 binds dependency names to versioned package/module ownership and binds every candidate to a closed host-verified snapshot.',
+        'Directory-derived module owners were disconnected from package imports/exports, so certified internal and sibling dependencies were mislabeled external. Capture also opened each inventory interval after a pre-read observation without a post-read/content fence, allowing a clean Git revision to certify dirty bytes. Rootcause2 binds dependency names to versioned package/module ownership and binds every verifier-backed candidate to a closed snapshot. The remaining legacy content-host fallback still echoed candidate hashes without a terminal full reread.',
       failingBefore:
-        'On commit 5414d681, 326 of 500 MR expected-external diagnostics were certified ownership (156 current-repo private/package imports and 170 approved sibling exports). The controller probe also made both observations report the same clean tree while both reads returned the same dirty bytes; readiness still passed.',
+        'On commit 5414d681, 326 of 500 MR expected-external diagnostics were certified ownership (156 current-repo private/package imports and 170 approved sibling exports). The controller clean-tree probe also returned readiness passed for dirty bytes. On commit 443ab564, a no-verifier content host could certify A in both complete candidates while switching the terminal eligible inventory/content to B after each post observation; readiness still passed.',
       passingAfter:
-        'Canonical ownership conservation, module-seed binding, external-hotspot reconciliation, clean-tree byte verification, dirty/content terminal fences, adversarial snapshot tests, fresh-process MR/SP audits, historical loaded-parent probes, package build, and repository gates pass after root-cause repair.',
+        'Canonical ownership conservation, module-seed binding, external-hotspot reconciliation, clean-tree byte verification, verifier-backed fences, legacy content terminal full rereads, adversarial add/delete/modify and AbortError tests, fresh-process MR/SP audits, historical loaded-parent probes, package build, and repository gates pass after repair.',
     },
     modes: modeResults,
     producerInventory: {
@@ -977,9 +977,10 @@ async function buildCertification(
   detailPolicy,
   dependencyOwnership
 ) {
-  const [capabilityBytes, foundationBytes, grammarEntries] = await Promise.all([
+  const [capabilityBytes, foundationBytes, captureBytes, grammarEntries] = await Promise.all([
     fs.readFile(path.join(REPO_ROOT, 'dist/project-context-capabilities.js')),
     fs.readFile(path.join(REPO_ROOT, 'dist/projectContextFoundation.js')),
+    fs.readFile(path.join(REPO_ROOT, 'dist/service/project-context/foundation/capture.js')),
     readGrammarEntries(),
   ]);
   return {
@@ -993,7 +994,10 @@ async function buildCertification(
     }),
     capabilityHash: hashBytes(capabilityBytes),
     parserHash: hashCanonicalJson(grammarEntries),
-    acceptedRuntimeHash: hashBytes(foundationBytes),
+    acceptedRuntimeHash: hashCanonicalJson({
+      capture: hashBytes(captureBytes),
+      entry: hashBytes(foundationBytes),
+    }),
     acceptedConfigHash: hashCanonicalJson({
       mode,
       inventoryPolicy,
@@ -1012,17 +1016,20 @@ async function readGrammarEntries() {
 }
 
 async function readLoadedArtifactEvidence() {
-  const [commit, tree, packageBytes, foundationBytes, capabilityBytes] = await Promise.all([
-    gitOutput(['rev-parse', 'HEAD']),
-    gitOutput(['rev-parse', 'HEAD^{tree}']),
-    fs.readFile(path.join(REPO_ROOT, 'package.json')),
-    fs.readFile(path.join(REPO_ROOT, 'dist/projectContextFoundation.js')),
-    fs.readFile(path.join(REPO_ROOT, 'dist/project-context-capabilities.js')),
-  ]);
+  const [commit, tree, packageBytes, foundationBytes, capabilityBytes, captureBytes] =
+    await Promise.all([
+      gitOutput(['rev-parse', 'HEAD']),
+      gitOutput(['rev-parse', 'HEAD^{tree}']),
+      fs.readFile(path.join(REPO_ROOT, 'package.json')),
+      fs.readFile(path.join(REPO_ROOT, 'dist/projectContextFoundation.js')),
+      fs.readFile(path.join(REPO_ROOT, 'dist/project-context-capabilities.js')),
+      fs.readFile(path.join(REPO_ROOT, 'dist/service/project-context/foundation/capture.js')),
+    ]);
   const files = {
     'package.json': hashBytes(packageBytes),
     'dist/projectContextFoundation.js': hashBytes(foundationBytes),
     'dist/project-context-capabilities.js': hashBytes(capabilityBytes),
+    'dist/service/project-context/foundation/capture.js': hashBytes(captureBytes),
   };
   return {
     repository: '@alembic/core',

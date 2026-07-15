@@ -615,15 +615,82 @@ async function verifyCapturedSnapshot(input: {
       typedReason: 'git-snapshot-verifier-required',
     };
   }
+  const terminal = await captureLegacyContentTerminalState(input);
+  const candidateFiles = input.candidate.files.map(({ file }) => file);
+  const filesMatch = hashCanonicalJson(terminal.files) === hashCanonicalJson(candidateFiles);
+  const hashesMatch =
+    terminal.eligibleInventoryHash === input.candidate.eligibleInventoryHash &&
+    terminal.workingTreeContentHash === input.candidate.workingTreeContentHash;
+  const revisionMatches = sameRevisionObservation(
+    input.candidate.postRevision,
+    terminal.finalRevision
+  );
+  const verified = filesMatch && hashesMatch && revisionMatches;
   return {
     version: PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
-    verified: true,
+    verified,
     binding: 'working-tree-content',
-    finalRevision: input.candidate.postRevision,
-    eligibleInventoryHash: input.candidate.eligibleInventoryHash,
-    workingTreeContentHash: input.candidate.workingTreeContentHash,
-    typedReason: 'content-revision-bound-to-complete-candidate',
+    finalRevision: terminal.finalRevision,
+    eligibleInventoryHash: terminal.eligibleInventoryHash,
+    workingTreeContentHash: terminal.workingTreeContentHash,
+    typedReason: verified
+      ? 'content-revision-bound-to-terminal-complete-reread'
+      : 'content-revision-terminal-state-mismatch',
   };
+}
+
+async function captureLegacyContentTerminalState(input: {
+  input: ProjectContextFoundationCaptureInput;
+  ports: ProjectContextFoundationHostPorts;
+  repository: ProjectContextFoundationRepositoryInput;
+}): Promise<{
+  eligibleInventoryHash: CanonicalSha256;
+  files: ProjectFactsInventoryFileV1[];
+  finalRevision: ProjectContextRepositoryRevisionObservation;
+  workingTreeContentHash: CanonicalSha256;
+}> {
+  // Legacy content hosts cannot attest snapshots, so Core closes their open interval
+  // by rebuilding the complete terminal inventory and content with the same policy.
+  throwIfAborted(input.input.signal);
+  const descriptors = normalizeFileDescriptors(
+    await input.ports.enumerateEligibleFiles({
+      repository: input.repository,
+      policy: input.input.inventoryPolicy,
+      signal: input.input.signal,
+    })
+  );
+  throwIfAborted(input.input.signal);
+  const files: ProjectFactsInventoryFileV1[] = [];
+  for (const descriptor of descriptors) {
+    throwIfAborted(input.input.signal);
+    const content = await input.ports.readFile({
+      repository: input.repository,
+      relativePath: descriptor.relativePath,
+      signal: input.input.signal,
+    });
+    throwIfAborted(input.input.signal);
+    const copied = Uint8Array.from(content);
+    files.push({
+      repoId: input.repository.repoId,
+      relativePath: descriptor.relativePath,
+      language: descriptor.language.trim() || 'unknown',
+      mode: normalizeFileMode(descriptor.mode),
+      sizeBytes: copied.byteLength,
+      blobSha256: hashBytes(copied),
+      ownerModuleIds: uniqueStrings(descriptor.ownerModuleIds ?? []),
+    });
+  }
+  const eligibleInventoryHash = hashCanonicalJson(files);
+  const workingTreeContentHash = hashCanonicalJson(
+    files.map((file) => [file.relativePath, file.mode, file.blobSha256])
+  );
+  throwIfAborted(input.input.signal);
+  const finalRevision = await input.ports.observeRevision({
+    repository: input.repository,
+    signal: input.input.signal,
+  });
+  throwIfAborted(input.input.signal);
+  return { eligibleInventoryHash, files, finalRevision, workingTreeContentHash };
 }
 
 function isValidSnapshotVerification(
