@@ -1,7 +1,8 @@
+import fs from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { DimensionDef } from '../src/types/ProjectSnapshot.js';
 import {
@@ -16,6 +17,217 @@ const dimensions: DimensionDef[] = [
 ];
 
 describe('GenerateSessionManager durable lease lifecycle', () => {
+  it('persists progressive project context updates on the same session lineage', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-session-context-update-'));
+    try {
+      const projectRoot = join(dataRoot, 'repo');
+      const manager = new GenerateSessionManager({ dataRoot });
+      const session = manager.createSession({
+        projectRoot,
+        dimensions,
+        projectContext: {
+          certifiedProjectFacts: {
+            artifactId: 'cpf-v1:fixture',
+            receipts: {
+              plan: { receiptHash: 'plan' },
+              'recipe-generation': { receiptHash: 'recipe' },
+            },
+          },
+        },
+      });
+      session.markDimensionComplete('architecture', {
+        analysisText: '## Architecture\n\nPreserve existing progress across context updates.',
+        keyFindings: ['Session progress is independent of receipt persistence'],
+        referencedFiles: ['src/service.ts'],
+      });
+      const identityBeforeUpdate = session.toSnapshot();
+
+      session.replaceProjectContext({
+        certifiedProjectFacts: {
+          artifactId: 'cpf-v1:fixture',
+          receipts: {
+            plan: { receiptHash: 'plan' },
+            'recipe-generation': { receiptHash: 'recipe' },
+            'dependency-graph': { receiptHash: 'dependency' },
+          },
+        },
+      });
+
+      const dependencyReload = new GenerateSessionManager({ dataRoot })
+        .getAnySession(session.id, { projectRoot })
+        ?.toSnapshot();
+      expect(
+        (
+          dependencyReload?.projectContext.certifiedProjectFacts as {
+            receipts: Record<string, unknown>;
+          }
+        ).receipts
+      ).toEqual({
+        plan: { receiptHash: 'plan' },
+        'recipe-generation': { receiptHash: 'recipe' },
+        'dependency-graph': { receiptHash: 'dependency' },
+      });
+
+      session.replaceProjectContext({
+        certifiedProjectFacts: {
+          artifactId: 'cpf-v1:fixture',
+          receipts: {
+            plan: { receiptHash: 'plan' },
+            'recipe-generation': { receiptHash: 'recipe' },
+            'dependency-graph': { receiptHash: 'dependency' },
+            'module-coverage': { receiptHash: 'module' },
+          },
+        },
+      });
+
+      const freshSnapshot = new GenerateSessionManager({ dataRoot })
+        .getAnySession(session.id, { projectRoot })
+        ?.toSnapshot();
+      expect(freshSnapshot).toMatchObject({
+        id: identityBeforeUpdate.id,
+        projectRoot: identityBeforeUpdate.projectRoot,
+        dimensions: identityBeforeUpdate.dimensions,
+        startedAt: identityBeforeUpdate.startedAt,
+        expiresAt: identityBeforeUpdate.expiresAt,
+        completedDimensions: identityBeforeUpdate.completedDimensions,
+      });
+      expect(
+        (
+          freshSnapshot?.projectContext.certifiedProjectFacts as {
+            receipts: Record<string, unknown>;
+          }
+        ).receipts
+      ).toEqual({
+        plan: { receiptHash: 'plan' },
+        'recipe-generation': { receiptHash: 'recipe' },
+        'dependency-graph': { receiptHash: 'dependency' },
+        'module-coverage': { receiptHash: 'module' },
+      });
+      expect(freshSnapshot?.completedDimensions.architecture).toBeDefined();
+      expect(
+        new GenerateSessionManager({ dataRoot }).getSessionStatus(session.id, { projectRoot })
+      ).toMatchObject({ state: 'active', reason: 'session_active' });
+
+      const storeFile = JSON.parse(
+        await readFile(join(dataRoot, '.asd', 'bootstrap-sessions', 'active-sessions.json'), 'utf8')
+      ) as { sessions: Array<{ id: string; projectContext: Record<string, unknown> }> };
+      expect(storeFile.sessions.find((entry) => entry.id === session.id)?.projectContext).toEqual(
+        freshSnapshot?.projectContext
+      );
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('isolates persisted project context from update inputs and snapshot outputs', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-session-context-isolation-'));
+    try {
+      const projectRoot = join(dataRoot, 'repo');
+      const manager = new GenerateSessionManager({ dataRoot });
+      let projectNameReads = 0;
+      const constructorInput = {
+        get projectName() {
+          projectNameReads += 1;
+          return projectNameReads === 1 ? 'repo' : 'inconsistent-second-read';
+        },
+        modules: [{ name: 'initial-module' }],
+      };
+      const session = manager.createSession({
+        projectRoot,
+        dimensions,
+        projectContext: constructorInput,
+      });
+      expect(projectNameReads).toBe(1);
+      constructorInput.modules[0]!.name = 'mutated-constructor-input';
+      expect(session.toSnapshot()).toMatchObject({
+        projectContext: {
+          modules: [{ name: 'initial-module' }],
+          projectName: 'repo',
+        },
+        sessionStore: {
+          projectContext: {
+            modules: [{ name: 'initial-module' }],
+            projectName: 'repo',
+          },
+        },
+      });
+      const updateInput = {
+        projectName: 'repo',
+        modules: [{ name: 'updated-module' }],
+        certifiedProjectFacts: {
+          artifactId: 'cpf-v1:fixture',
+          receipts: {
+            plan: { receiptHash: 'plan' },
+            'dependency-graph': { receiptHash: 'dependency' },
+          },
+        },
+      };
+      const expectedProjectContext = structuredClone(updateInput);
+
+      session.replaceProjectContext(updateInput);
+      updateInput.certifiedProjectFacts.receipts.plan.receiptHash = 'mutated-input';
+      Object.assign(updateInput.certifiedProjectFacts.receipts, {
+        'module-coverage': { receiptHash: 'unpersisted-input' },
+      });
+      updateInput.modules[0]!.name = 'mutated-update-input';
+      expect(session.toSnapshot().projectContext).toEqual(expectedProjectContext);
+
+      const storePath = join(dataRoot, '.asd', 'bootstrap-sessions', 'active-sessions.json');
+      const diskBeforeFailedUpdate = await readFile(storePath, 'utf8');
+      const writeFailure = vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
+        throw new Error('fixture persistence failure');
+      });
+      try {
+        expect(() =>
+          session.replaceProjectContext({
+            projectName: 'must-not-stick',
+            modules: [{ name: 'must-not-stick' }],
+          })
+        ).toThrow('fixture persistence failure');
+      } finally {
+        writeFailure.mockRestore();
+      }
+      expect(session.toSnapshot().projectContext).toEqual(expectedProjectContext);
+      expect(await readFile(storePath, 'utf8')).toBe(diskBeforeFailedUpdate);
+
+      const readSnapshot = session.toSnapshot();
+      const readCarrier = readSnapshot.projectContext.certifiedProjectFacts as {
+        receipts: Record<string, { receiptHash: string }>;
+      };
+      readCarrier.receipts.plan!.receiptHash = 'mutated-output';
+      readCarrier.receipts['module-coverage'] = { receiptHash: 'unpersisted-output' };
+      const readStoreModules = readSnapshot.sessionStore.projectContext.modules as Array<{
+        name: string;
+      }>;
+      readStoreModules[0]!.name = 'mutated-store-output';
+
+      expect(session.toSnapshot()).toMatchObject({
+        projectContext: expectedProjectContext,
+        sessionStore: {
+          projectContext: {
+            modules: [{ name: 'updated-module' }],
+            projectName: 'repo',
+          },
+        },
+      });
+      expect(
+        new GenerateSessionManager({ dataRoot })
+          .getAnySession(session.id, { projectRoot })
+          ?.toSnapshot()
+      ).toMatchObject({
+        projectContext: expectedProjectContext,
+        sessionStore: {
+          projectContext: {
+            modules: [{ name: 'updated-module' }],
+            projectName: 'repo',
+          },
+        },
+      });
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
   it('restores session progress and submission evidence after manager restart', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-session-'));
     try {

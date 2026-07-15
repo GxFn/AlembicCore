@@ -204,7 +204,8 @@ export class GenerateSession {
     onChange,
   }: GenerateSessionOpts) {
     this.#onChange = onChange ?? null;
-    this.#projectContext = { ...projectContext };
+    const initialProjectContext = cloneProjectContext(projectContext);
+    this.#projectContext = initialProjectContext;
     this.id = id ?? `bs-${crypto.randomUUID()}`;
     this.projectRoot = normalizeProjectRoot(projectRoot);
     this.dimensions = dimensions;
@@ -213,7 +214,7 @@ export class GenerateSession {
     );
     this.sessionStore = sessionStore
       ? MiningSessionStore.fromJSON(sessionStore as unknown as Record<string, unknown>)
-      : new MiningSessionStore(projectContext);
+      : new MiningSessionStore(initialProjectContext);
 
     /** 宿主 Agent 提交追踪 (v2: 对标内部 Agent 的 EvidenceCollector) */
     this.submissionTracker = submissionTracker
@@ -272,6 +273,22 @@ export class GenerateSession {
   extendTtl(minimumTtlMs = 60 * 60 * 1000): void {
     this.expiresAt = Math.max(this.expiresAt, Date.now() + minimumTtlMs);
     this.#emitChange();
+  }
+
+  /**
+   * 原地替换会话携带的项目上下文，并沿用既有 onChange 持久化边界。
+   * 调用方不能借此更换 session/dataRoot，也不必等待其他状态变化才落盘。
+   */
+  replaceProjectContext(projectContext: Record<string, unknown>): void {
+    const nextProjectContext = cloneProjectContext(projectContext);
+    const previousProjectContext = this.#projectContext;
+    this.#projectContext = nextProjectContext;
+    try {
+      this.#emitChange();
+    } catch (error) {
+      this.#projectContext = previousProjectContext;
+      throw error;
+    }
   }
 
   // ── 维度完成 ──────────────────────────────────────────────
@@ -385,13 +402,13 @@ export class GenerateSession {
       id: this.id,
       projectRoot: this.projectRoot,
       dimensions: this.dimensions,
-      projectContext: { ...this.#projectContext },
+      projectContext: cloneProjectContext(this.#projectContext),
       startedAt: this.startedAt,
       expiresAt: this.expiresAt,
       completedDimensions: Object.fromEntries(this.completedDimensions),
       crossDimensionHints: normalizeHints(this.crossDimensionHints),
       snapshotCache: this.snapshotCache,
-      sessionStore: this.sessionStore.toJSON(),
+      sessionStore: this.sessionStore.toJSON(this.#projectContext),
       submissionTracker: this.submissionTracker.toJSON(),
       savedAt: Date.now(),
     };
@@ -689,6 +706,23 @@ function sessionProjectKey(projectRoot: string): string {
 
 function normalizeProjectRoot(projectRoot: string): string {
   return path.resolve(projectRoot);
+}
+
+function cloneProjectContext(projectContext: Record<string, unknown>): Record<string, unknown> {
+  try {
+    const detached = structuredClone(projectContext);
+    const serialized = JSON.stringify(detached);
+    const cloned = JSON.parse(serialized) as unknown;
+    if (!isRecord(cloned)) {
+      throw new TypeError('Project context must be a record.');
+    }
+    return cloned;
+  } catch (error) {
+    throw new TypeError(
+      'Generate session project context must be JSON-serializable structural data.',
+      { cause: error }
+    );
+  }
 }
 
 function normalizeHints(

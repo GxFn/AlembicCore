@@ -144,13 +144,7 @@ export class MiningSessionStore {
   #logger = Logger.getInstance();
 
   constructor(config: MiningSessionStoreConfig = {}) {
-    this.#projectContext = {
-      ...(config.projectContext || {}),
-      ...(config.projectName ? { projectName: config.projectName } : {}),
-      ...(config.primaryLang ? { primaryLang: config.primaryLang } : {}),
-      ...(typeof config.fileCount === 'number' ? { fileCount: config.fileCount } : {}),
-      ...(config.modules !== undefined ? { modules: config.modules } : {}),
-    };
+    this.#projectContext = normalizeMiningProjectContext(config);
     this.#ttlMs = config.ttlMs ?? DEFAULT_TTL_MS;
   }
 
@@ -464,13 +458,15 @@ export class MiningSessionStore {
     }
   }
 
-  toJSON(): MiningSessionStoreSerialized {
+  toJSON(projectContextOverride?: MiningSessionStoreConfig): MiningSessionStoreSerialized {
     return {
       dimensionReports: Object.fromEntries(this.#dimensionReports),
       crossReferences: this.#crossReferences,
       tierReflections: this.#tierReflections,
       submittedCandidates: Object.fromEntries(this.#submittedCandidates),
-      projectContext: this.#projectContext,
+      projectContext: projectContextOverride
+        ? normalizeMiningProjectContext(projectContextOverride)
+        : structuredClone(this.#projectContext),
     };
   }
 
@@ -642,6 +638,16 @@ export class MiningSessionStore {
     }
     cache.set(key, { result: value, cachedAt: Date.now(), hitCount: 0 });
   }
+}
+
+function normalizeMiningProjectContext(config: MiningSessionStoreConfig): Record<string, unknown> {
+  return structuredClone({
+    ...(config.projectContext || {}),
+    ...(config.projectName ? { projectName: config.projectName } : {}),
+    ...(config.primaryLang ? { primaryLang: config.primaryLang } : {}),
+    ...(typeof config.fileCount === 'number' ? { fileCount: config.fileCount } : {}),
+    ...(config.modules !== undefined ? { modules: config.modules } : {}),
+  });
 }
 
 function normalizeEvidence(value: unknown): string {
