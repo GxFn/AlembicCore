@@ -14,6 +14,7 @@ import {
   NodeProjectContextFoundationHostPorts,
   ProjectFactsLeaseConflictError,
   captureCertifiedProjectFacts,
+  createProjectContextDependencyOwnershipV1,
   createProjectContextRequestAuditPlans,
   createProjectContextConsumerLineageReceipt,
   evaluateCertifiedProjectFactsReadiness,
@@ -158,6 +159,7 @@ async function runParent(input) {
         }))
     )
   );
+  const dependencyOwnershipSummary = modeResults.map(buildDependencyOwnershipSummary);
   const openDefects = [
     ...confirmedDiagnostics,
     ...modeResults.flatMap((mode) => mode.firstProcess.readiness.errors.map((error) => ({
@@ -174,23 +176,34 @@ async function runParent(input) {
           },
         ]
       : [])),
+    ...dependencyOwnershipSummary.flatMap((summary) =>
+      summary.conservation.conserved
+        ? []
+        : [
+            {
+              owner: 'AlembicCore',
+              projectMode: summary.projectMode,
+              error: 'dependency ownership observation/graph conservation failed',
+            },
+          ]
+    ),
   ];
   const reportWithoutHash = {
     kind: 'ProjectContextCapabilityAuditReport',
     schemaVersion: 1,
     section: 'AlembicCore',
-    taskId: 'i1-i2-core-project-context-foundation-rework1-t1',
+    taskId: 'i1-i2-core-project-context-foundation-rootcause2-t1',
     loadedArtifact,
     historicalLoadedArtifactReproduction,
     reproduction: {
       inputModes: ['MR-ALEMBIC', 'SP-BILIDILI'],
       historicalFailure: 'ProjectContext multi-repo traversal 1/5 and Plan repeatability failure',
       rootCause:
-        'The initial foundation cached inventories forever, captured source revision only before reads, generated one-file pseudo module matrices, treated non-empty ProjectContext errors as completed, and published final store files without a crash-durable protocol. Rework replaces each shortcut with re-enumeration, optimistic full-state fencing, complete typed module ownership, error-aware readiness, and fsync-backed atomic publication.',
+        'Directory-derived module owners were disconnected from package imports/exports, so certified internal and sibling dependencies were mislabeled external. Capture also opened each inventory interval after a pre-read observation without a post-read/content fence, allowing a clean Git revision to certify dirty bytes. Rootcause2 binds dependency names to versioned package/module ownership and binds every candidate to a closed host-verified snapshot.',
       failingBefore:
-        'Five focused rework tests independently reproduced stale inventory, mixed source state, one-seed coverage, error-blind readiness, and publish-crash replay failures on commit 51e71a5.',
+        'On commit 5414d681, 326 of 500 MR expected-external diagnostics were certified ownership (156 current-repo private/package imports and 170 approved sibling exports). The controller probe also made both observations report the same clean tree while both reads returned the same dirty bytes; readiness still passed.',
       passingAfter:
-        'The same focused tests plus fresh-process MR/SP audits, historical loaded-parent probes, package build, and repository gates pass after rework.',
+        'Canonical ownership conservation, module-seed binding, external-hotspot reconciliation, clean-tree byte verification, dirty/content terminal fences, adversarial snapshot tests, fresh-process MR/SP audits, historical loaded-parent probes, package build, and repository gates pass after root-cause repair.',
     },
     modes: modeResults,
     producerInventory: {
@@ -216,6 +229,7 @@ async function runParent(input) {
         ])
       ),
     })),
+    dependencyOwnershipSummary,
     openConfirmedDefects: openDefects,
     repairCommits,
     residualRisks: [
@@ -246,6 +260,234 @@ async function runParent(input) {
   if (openDefects.length > 0) {
     process.exitCode = 1;
   }
+}
+
+function buildDependencyOwnershipSummary(mode) {
+  const classifications = [
+    'internal-resolved',
+    'approved-sibling',
+    'expected-external',
+    'confirmed-defect',
+  ];
+  const resolutions = mode.secondProcess.requestMatrix.flatMap((row) =>
+    (row.dependencyResolutions ?? []).map((resolution) => ({
+      ...resolution,
+      repoId: row.repoId,
+      requestKind: row.kind,
+    }))
+  );
+  const counts = Object.fromEntries(
+    classifications.map((classification) => {
+      const rows = resolutions.filter((row) => row.classification === classification);
+      return [
+        classification,
+        {
+          requestOccurrenceCount: rows.length,
+          uniqueSpecifierCount: new Set(rows.map((row) => row.dependencyName)).size,
+          samples: rows
+            .sort(
+              (left, right) =>
+                left.dependencyName.localeCompare(right.dependencyName) ||
+                left.repoId.localeCompare(right.repoId) ||
+                left.requestKind.localeCompare(right.requestKind)
+            )
+            .slice(0, 5),
+        },
+      ];
+    })
+  );
+  const classifiedDependencyObservations = classifications.reduce(
+    (sum, classification) => sum + counts[classification].requestOccurrenceCount,
+    0
+  );
+  const graphOutputEvidence = mode.secondProcess.requestMatrix.reduce(
+    (summary, row) => ({
+      internalResolutionCount:
+        summary.internalResolutionCount + row.dependencyGraphEvidence.internalResolutionCount,
+      approvedSiblingCount:
+        summary.approvedSiblingCount + row.dependencyGraphEvidence.approvedSiblingCount,
+      remainingExternalCount:
+        summary.remainingExternalCount + row.dependencyGraphEvidence.remainingExternalCount,
+    }),
+    { internalResolutionCount: 0, approvedSiblingCount: 0, remainingExternalCount: 0 }
+  );
+  const graphReconciliation = mode.secondProcess.requestMatrix.reduce(
+    (summary, row) => ({
+      originalExternalHotspotCount:
+        summary.originalExternalHotspotCount +
+        row.dependencyGraphReconciliation.originalExternalHotspotCount,
+      internalResolvedHotspotCount:
+        summary.internalResolvedHotspotCount +
+        row.dependencyGraphReconciliation.internalResolvedHotspotCount,
+      approvedSiblingHotspotCount:
+        summary.approvedSiblingHotspotCount +
+        row.dependencyGraphReconciliation.approvedSiblingHotspotCount,
+      remainingExternalHotspotCount:
+        summary.remainingExternalHotspotCount +
+        row.dependencyGraphReconciliation.remainingExternalHotspotCount,
+      originalExternalDependencyNames: uniqueStrings([
+        ...summary.originalExternalDependencyNames,
+        ...(row.dependencyGraphReconciliation.originalExternalDependencyNames ?? []),
+      ]),
+      internalResolvedDependencyNames: uniqueStrings([
+        ...summary.internalResolvedDependencyNames,
+        ...(row.dependencyGraphReconciliation.internalResolvedDependencyNames ?? []),
+      ]),
+      approvedSiblingDependencyNames: uniqueStrings([
+        ...summary.approvedSiblingDependencyNames,
+        ...(row.dependencyGraphReconciliation.approvedSiblingDependencyNames ?? []),
+      ]),
+      remainingExternalDependencyNames: uniqueStrings([
+        ...summary.remainingExternalDependencyNames,
+        ...(row.dependencyGraphReconciliation.remainingExternalDependencyNames ?? []),
+      ]),
+    }),
+    emptyDependencyGraphReconciliation()
+  );
+  const graphWarningCounts = Object.fromEntries(
+    classifications.map((classification) => [
+      classification,
+      mode.secondProcess.requestMatrix
+        .filter((row) => row.kind === 'map')
+        .flatMap((row) => row.dependencyResolutions ?? [])
+        .filter((resolution) => resolution.classification === classification).length,
+    ])
+  );
+  const originalWarningObservations = mode.secondProcess.requestMatrix.reduce(
+    (sum, row) => sum + row.dependencyObservationCount,
+    0
+  );
+  const warningConserved = originalWarningObservations === classifiedDependencyObservations;
+  const graphConserved =
+    graphReconciliation.originalExternalHotspotCount ===
+    graphReconciliation.internalResolvedHotspotCount +
+      graphReconciliation.approvedSiblingHotspotCount +
+      graphReconciliation.remainingExternalHotspotCount;
+  const reconciledOutputMatches =
+    graphOutputEvidence.internalResolutionCount ===
+      graphReconciliation.internalResolvedHotspotCount &&
+    graphOutputEvidence.approvedSiblingCount ===
+      graphReconciliation.approvedSiblingHotspotCount &&
+    graphOutputEvidence.remainingExternalCount ===
+      graphReconciliation.remainingExternalHotspotCount;
+  const graphWarningAlignment = mode.secondProcess.requestMatrix
+    .filter((row) => row.kind === 'map')
+    .map(buildDependencyWarningGraphAlignment);
+  const warningGraphAligned = graphWarningAlignment.every((row) => row.aligned);
+  return {
+    projectMode: mode.projectMode,
+    ownershipEvidence: {
+      ownershipHash: mode.secondProcess.dependencyOwnership.ownershipHash,
+      entryCount: mode.secondProcess.dependencyOwnership.entries.length,
+      provenanceHashes: [
+        ...new Set(
+          mode.secondProcess.dependencyOwnership.entries.map(
+            (entry) => entry.provenance.contentHash
+          )
+        ),
+      ].sort(),
+      ownerBindings: [
+        ...new Set(
+          mode.secondProcess.dependencyOwnership.entries.map(
+            (entry) => `${entry.repoId}:${entry.ownerModuleId}`
+          )
+        ),
+      ].sort(),
+    },
+    counts,
+    conservation: {
+      originalWarningObservations,
+      classifiedDependencyObservations,
+      warningConserved,
+      graphConserved,
+      reconciledOutputMatches,
+      warningGraphAligned,
+      conserved:
+        warningConserved && graphConserved && reconciledOutputMatches && warningGraphAligned,
+    },
+    graphWarningCounts,
+    graphWarningAlignment,
+    graphReconciliation,
+    graphOutputEvidence,
+  };
+}
+
+function summarizeDependencyGraphOutput(value) {
+  const summary = {
+    internalResolutionCount: 0,
+    approvedSiblingCount: 0,
+    remainingExternalCount: 0,
+  };
+  visit(value);
+  return summary;
+
+  function visit(entry) {
+    if (Array.isArray(entry)) {
+      for (const item of entry) visit(item);
+      return;
+    }
+    if (!entry || typeof entry !== 'object') return;
+    if (Array.isArray(entry.internalDependencyNamespaceResolutions)) {
+      summary.internalResolutionCount += entry.internalDependencyNamespaceResolutions.length;
+    }
+    if (Array.isArray(entry.approvedSiblingDependencyHotspots)) {
+      summary.approvedSiblingCount += entry.approvedSiblingDependencyHotspots.length;
+    }
+    if (Array.isArray(entry.externalDependencyHotspots)) {
+      summary.remainingExternalCount += entry.externalDependencyHotspots.length;
+    }
+    for (const item of Object.values(entry)) visit(item);
+  }
+}
+
+function emptyDependencyGraphReconciliation() {
+  return {
+    originalExternalHotspotCount: 0,
+    internalResolvedHotspotCount: 0,
+    approvedSiblingHotspotCount: 0,
+    remainingExternalHotspotCount: 0,
+    originalExternalDependencyNames: [],
+    internalResolvedDependencyNames: [],
+    approvedSiblingDependencyNames: [],
+    remainingExternalDependencyNames: [],
+  };
+}
+
+function uniqueStrings(values) {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function buildDependencyWarningGraphAlignment(row) {
+  const resolutionNames = (...classifications) =>
+    uniqueStrings(
+      (row.dependencyResolutions ?? [])
+        .filter((resolution) => classifications.includes(resolution.classification))
+        .map((resolution) => resolution.dependencyName)
+    );
+  const warningNames = {
+    original: resolutionNames(
+      'internal-resolved',
+      'approved-sibling',
+      'expected-external',
+      'confirmed-defect'
+    ),
+    internal: resolutionNames('internal-resolved'),
+    approvedSibling: resolutionNames('approved-sibling'),
+    remaining: resolutionNames('expected-external', 'confirmed-defect'),
+  };
+  const graphNames = {
+    original: row.dependencyGraphReconciliation.originalExternalDependencyNames ?? [],
+    internal: row.dependencyGraphReconciliation.internalResolvedDependencyNames ?? [],
+    approvedSibling: row.dependencyGraphReconciliation.approvedSiblingDependencyNames ?? [],
+    remaining: row.dependencyGraphReconciliation.remainingExternalDependencyNames ?? [],
+  };
+  return {
+    repoId: row.repoId,
+    requestKind: row.kind,
+    warningNames,
+    graphNames,
+    aligned: JSON.stringify(warningNames) === JSON.stringify(graphNames),
+  };
 }
 
 async function runFreshChild(input) {
@@ -293,8 +535,7 @@ async function runChild(input) {
     mode === 'SP-BILIDILI'
       ? { ...INVENTORY_POLICY, excludeRelativePaths: [...SP_BILIDILI_PACKAGE_ROOTS] }
       : INVENTORY_POLICY;
-  const ports = new NodeProjectContextFoundationHostPorts(undefined, {
-    portableRoots: [
+  const portableRoots = [
       {
         portableId: 'approved-project-root',
         sourceRoot: mode === 'MR-ALEMBIC' ? workspaceRoot : bilidiliRoot,
@@ -304,19 +545,30 @@ async function runChild(input) {
         sourceRoot: repository.sourceRoot,
         moduleAliases: repository.moduleAliases ?? [],
       })),
-    ],
+    ];
+  const inventoryPorts = new NodeProjectContextFoundationHostPorts(undefined, {
+    portableRoots,
   });
   const descriptorsByRepo = new Map();
   for (const repository of repositories) {
     descriptorsByRepo.set(
       repository.repoId,
-      await ports.enumerateEligibleFiles({ repository, policy: inventoryPolicy })
+      await inventoryPorts.enumerateEligibleFiles({ repository, policy: inventoryPolicy })
     );
   }
+  const dependencyOwnership = await buildDependencyOwnership(
+    repositories,
+    descriptorsByRepo
+  );
+  const ports = new NodeProjectContextFoundationHostPorts(undefined, {
+    portableRoots,
+    dependencyOwnership,
+  });
   const requestPlans = repositories.flatMap((repository) =>
     createProjectContextRequestAuditPlans({
       repository,
       eligibleFiles: descriptorsByRepo.get(repository.repoId) ?? [],
+      dependencyOwnership,
     })
   );
   const selectedFiles = repositories.flatMap((repository) => {
@@ -342,7 +594,13 @@ async function runChild(input) {
       },
     ])
   );
-  const certification = await buildCertification(mode, repositories, inventoryPolicy, detailPolicy);
+  const certification = await buildCertification(
+    mode,
+    repositories,
+    inventoryPolicy,
+    detailPolicy,
+    dependencyOwnership
+  );
   const legacyEntries = [
     {
       entryId: 'core-plan-raw-scanner',
@@ -371,6 +629,29 @@ async function runChild(input) {
     expectedRepoIds: repositories.map((repository) => repository.repoId),
     requiredLegacyEntryIds: ['core-plan-raw-scanner'],
   });
+  if (!readiness.ok) {
+    const dependencyRows = artifact.facts.requestOutcomes
+      .filter((row) => row.dependencyObservationCount || row.dependencyGraphReconciliation?.originalExternalHotspotCount)
+      .map((row) => ({
+        repoId: row.repoId,
+        kind: row.kind,
+        dependencyObservationCount: row.dependencyObservationCount,
+        resolutionCounts: Object.fromEntries(
+          ['internal-resolved', 'approved-sibling', 'expected-external', 'confirmed-defect'].map(
+            (classification) => [
+              classification,
+              (row.dependencyResolutions ?? []).filter(
+                (resolution) => resolution.classification === classification
+              ).length,
+            ]
+          )
+        ),
+        dependencyGraphReconciliation: row.dependencyGraphReconciliation,
+      }));
+    throw new TypeError(
+      `Capture readiness failed: ${JSON.stringify({ errors: readiness.errors, dependencyRows })}`
+    );
+  }
   const silentLogger = { info() {}, warn() {} };
   const store = new FileCertifiedProjectFactsStore(path.join(storeRoot, mode.toLowerCase()), {
     logger: silentLogger,
@@ -496,7 +777,13 @@ async function runChild(input) {
       sourceRangeHash: hashCanonicalJson(row.sourceRanges),
       sourceRangeSample: row.sourceRanges.slice(0, 5),
       errors: row.errors,
+      dependencyResolutions: row.dependencyResolutions,
+      dependencyObservationCount: row.dependencyObservationCount ?? 0,
+      dependencyGraphReconciliation:
+        row.dependencyGraphReconciliation ?? emptyDependencyGraphReconciliation(),
+      dependencyGraphEvidence: summarizeDependencyGraphOutput(row.output),
     })),
+    dependencyOwnership,
     legacyEntries: artifact.facts.legacyEntries,
   };
   await fs.mkdir(path.dirname(resultFile), { recursive: true });
@@ -537,7 +824,159 @@ function repositoriesForMode(mode, workspaceRoot, bilidiliRoot) {
   }));
 }
 
-async function buildCertification(mode, repositories, inventoryPolicy, detailPolicy) {
+async function buildDependencyOwnership(repositories, descriptorsByRepo) {
+  const entries = [];
+  for (const repository of repositories) {
+    const descriptors = descriptorsByRepo.get(repository.repoId) ?? [];
+    const packagePath = path.join(repository.sourceRoot, 'package.json');
+    const packageBytes = await readOptionalFile(packagePath);
+    if (packageBytes) {
+      const manifest = JSON.parse(packageBytes.toString('utf8'));
+      const packageName = typeof manifest.name === 'string' ? manifest.name.trim() : '';
+      if (packageName) {
+        const provenance = {
+          relativePath: 'package.json',
+          contentHash: hashBytes(packageBytes),
+        };
+        const ownerModuleId = selectPrimaryOwnerModuleId(descriptors, packageName);
+        entries.push({
+          repoId: repository.repoId,
+          ownerModuleId,
+          ownerPackageName: packageName,
+          source: 'package-name',
+          pattern: packageName,
+          provenance,
+        });
+        for (const exportKey of readPackageMapKeys(manifest.exports, '.')) {
+          if (exportKey === '.') continue;
+          entries.push({
+            repoId: repository.repoId,
+            ownerModuleId,
+            ownerPackageName: packageName,
+            source: 'package-export',
+            pattern: `${packageName}${exportKey.slice(1)}`,
+            provenance,
+          });
+        }
+        for (const importKey of readPackageMapKeys(manifest.imports, '#')) {
+          entries.push({
+            repoId: repository.repoId,
+            ownerModuleId,
+            ownerPackageName: packageName,
+            source: 'package-import',
+            pattern: importKey,
+            targetPatterns: readPackageTargetPatterns(manifest.imports[importKey], importKey),
+            provenance,
+          });
+        }
+      }
+    }
+    for (const moduleAlias of repository.moduleAliases ?? []) {
+      const provenanceBytes =
+        (await readOptionalFile(path.join(repository.sourceRoot, 'Package.swift'))) ??
+        Buffer.from(`explicit-module-alias:${moduleAlias}\n`);
+      entries.push({
+        repoId: repository.repoId,
+        ownerModuleId: selectPrimaryOwnerModuleId(descriptors, moduleAlias),
+        ownerPackageName: moduleAlias,
+        source: 'module-alias',
+        pattern: moduleAlias,
+        provenance: {
+          relativePath: (await fileExists(path.join(repository.sourceRoot, 'Package.swift')))
+            ? 'Package.swift'
+            : 'explicit-module-alias-v1',
+          contentHash: hashBytes(provenanceBytes),
+        },
+      });
+    }
+  }
+  return createProjectContextDependencyOwnershipV1(entries);
+}
+
+function selectPrimaryOwnerModuleId(descriptors, preferredName) {
+  const counts = new Map();
+  for (const descriptor of descriptors) {
+    for (const owner of descriptor.ownerModuleIds ?? []) {
+      if (!owner.startsWith('test:')) {
+        counts.set(owner, (counts.get(owner) ?? 0) + 1);
+      }
+    }
+  }
+  const preferred = [...counts.keys()].find(
+    (owner) => path.posix.basename(owner.slice(owner.indexOf(':') + 1)) === preferredName
+  );
+  const selected =
+    preferred ??
+    [...counts.entries()].sort(
+      ([leftOwner, leftCount], [rightOwner, rightCount]) =>
+        rightCount - leftCount || leftOwner.localeCompare(rightOwner)
+    )[0]?.[0];
+  if (!selected) {
+    throw new TypeError(`No certified module owner is available for ${preferredName}.`);
+  }
+  return selected;
+}
+
+function readPackageMapKeys(value, requiredPrefix) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return [];
+  }
+  return Object.keys(value)
+    .filter((key) => key.startsWith(requiredPrefix))
+    .sort();
+}
+
+function readPackageTargetPatterns(value, importKey) {
+  const targets = [];
+  visit(value);
+  if (targets.length === 0) {
+    throw new TypeError(`Package import ${importKey} has no canonical repository target.`);
+  }
+  return [...new Set(targets)].sort();
+
+  function visit(entry) {
+    if (typeof entry === 'string') {
+      if (!entry.startsWith('./')) {
+        throw new TypeError(`Package import ${importKey} targets outside its repository: ${entry}.`);
+      }
+      targets.push(entry.slice(2));
+      return;
+    }
+    if (entry === null) {
+      throw new TypeError(`Package import ${importKey} contains a null target.`);
+    }
+    if (Array.isArray(entry)) {
+      for (const child of entry) visit(child);
+      return;
+    }
+    if (entry && typeof entry === 'object') {
+      for (const child of Object.values(entry)) visit(child);
+      return;
+    }
+    throw new TypeError(`Package import ${importKey} contains an unsupported target.`);
+  }
+}
+
+async function readOptionalFile(filePath) {
+  try {
+    return await fs.readFile(filePath);
+  } catch (error) {
+    if (error && typeof error === 'object' && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
+async function fileExists(filePath) {
+  return Boolean(await readOptionalFile(filePath));
+}
+
+async function buildCertification(
+  mode,
+  repositories,
+  inventoryPolicy,
+  detailPolicy,
+  dependencyOwnership
+) {
   const [capabilityBytes, foundationBytes, grammarEntries] = await Promise.all([
     fs.readFile(path.join(REPO_ROOT, 'dist/project-context-capabilities.js')),
     fs.readFile(path.join(REPO_ROOT, 'dist/projectContextFoundation.js')),
@@ -555,7 +994,12 @@ async function buildCertification(mode, repositories, inventoryPolicy, detailPol
     capabilityHash: hashBytes(capabilityBytes),
     parserHash: hashCanonicalJson(grammarEntries),
     acceptedRuntimeHash: hashBytes(foundationBytes),
-    acceptedConfigHash: hashCanonicalJson({ mode, inventoryPolicy, detailPolicy }),
+    acceptedConfigHash: hashCanonicalJson({
+      mode,
+      inventoryPolicy,
+      detailPolicy,
+      dependencyOwnershipHash: dependencyOwnership.ownershipHash,
+    }),
   };
 }
 

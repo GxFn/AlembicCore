@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -9,10 +11,12 @@ import {
   CertifiedProjectFactsConsumerPort,
   captureCertifiedProjectFacts,
   createProjectContextConsumerLineageReceipt,
+  createProjectContextDependencyOwnershipV1,
   createProjectContextRequestAuditPlans,
   deserializeCertifiedProjectFactsArtifact,
   evaluateCertifiedProjectFactsReadiness,
   FileCertifiedProjectFactsStore,
+  hashBytes,
   hashCanonicalJson,
   NodeProjectContextFoundationHostPorts,
   type ProjectContextFoundationCaptureInput,
@@ -20,9 +24,11 @@ import {
   type ProjectContextRequestAuditPlan,
   ProjectFactsLeaseConflictError,
   serializeCertifiedProjectFactsArtifact,
+  verifyCertifiedProjectFactsArtifact,
 } from '../src/projectContextFoundation.js';
 
 const temporaryRoots: string[] = [];
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   await Promise.all(
@@ -477,6 +483,338 @@ describe('ProjectContext certified facts foundation', () => {
     }
   });
 
+  it('rejects a clean revision fence whose reads return the same dirty bytes in both rounds', async () => {
+    const input = createCaptureInput();
+    const basePorts = createHostPorts();
+    const { verifySnapshot: _verifySnapshot, ...unverifiedBasePorts } = basePorts;
+    const clean = Buffer.from('export const value = "clean";\n');
+    const dirty = Buffer.from('export const value = "dirty";\n');
+    let workingTree = clean;
+
+    const ports: ProjectContextFoundationHostPorts = {
+      ...unverifiedBasePorts,
+      enumerateEligibleFiles: async () => {
+        workingTree = clean;
+        return [{ language: 'typescript', mode: '100644', relativePath: 'src/index.ts' }];
+      },
+      observeRevision: async () => ({
+        commitId: 'a'.repeat(40),
+        dirty: false,
+        kind: 'git',
+        treeId: 'b'.repeat(40),
+      }),
+      readFile: async () => {
+        workingTree = dirty;
+        return workingTree;
+      },
+    };
+
+    await expect(captureCertifiedProjectFacts(input, ports)).rejects.toMatchObject({
+      code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+    });
+    expect(workingTree).toEqual(dirty);
+  });
+
+  it('rejects a verifier that turns clean outer fences into an observed dirty final state', async () => {
+    const input = createCaptureInput();
+    const basePorts = createHostPorts();
+    const dirty = Buffer.from('export const value = "dirty";\n');
+    const ports: ProjectContextFoundationHostPorts = {
+      ...basePorts,
+      enumerateEligibleFiles: async () => [
+        { language: 'typescript', mode: '100644', relativePath: 'src/index.ts' },
+      ],
+      observeRevision: async () => ({
+        commitId: 'a'.repeat(40),
+        dirty: false,
+        kind: 'git',
+        treeId: 'b'.repeat(40),
+      }),
+      readFile: async () => dirty,
+      verifySnapshot: async ({ candidate }) => ({
+        version: 1,
+        verified: true,
+        binding: 'working-tree-content',
+        finalRevision: {
+          commitId: 'a'.repeat(40),
+          dirty: true,
+          kind: 'git',
+          treeId: 'b'.repeat(40),
+        },
+        eligibleInventoryHash: candidate.eligibleInventoryHash,
+        workingTreeContentHash: candidate.workingTreeContentHash,
+        typedReason: 'terminal-observation-is-dirty',
+      }),
+    };
+
+    await expect(captureCertifiedProjectFacts(input, ports)).rejects.toMatchObject({
+      code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+    });
+  });
+
+  it('isolates captured inventory and detail bytes from a mutating snapshot verifier', async () => {
+    const basePorts = createHostPorts();
+    const artifact = await captureCertifiedProjectFacts(createCaptureInput(), {
+      ...basePorts,
+      verifySnapshot: async (request) => {
+        const candidateFile = request.candidate.files[0]!;
+        candidateFile.content.fill(0x78);
+        (candidateFile.file.ownerModuleIds as string[]).push('module:forged');
+        (request.candidate.preRevision as { dirty?: boolean }).dirty = true;
+        return basePorts.verifySnapshot!(request);
+      },
+    });
+
+    const selected = artifact.facts.detail.selections[0]!;
+    const inventory = artifact.facts.inventory.files.find(
+      (file) => file.repoId === selected.repoId && file.relativePath === selected.relativePath
+    )!;
+    expect(selected.fullContentHash).toBe(inventory.blobSha256);
+    expect(inventory.ownerModuleIds).not.toContain('module:forged');
+    expect(Buffer.from(selected.previewBase64, 'base64').toString('utf8')).toBe('expor');
+    expect(() => verifyCertifiedProjectFactsArtifact(artifact)).not.toThrow();
+  });
+
+  it('rejects re-signed detail planes whose chunk order or preview diverges from inventory', async () => {
+    const artifact = await captureCertifiedProjectFacts(createCaptureInput(), createHostPorts());
+    const reordered = structuredClone(artifact);
+    reordered.facts.detail.selections[0]!.fullChunkRefs.reverse();
+    resignArtifactForIntegrityTest(reordered);
+    expect(() => verifyCertifiedProjectFactsArtifact(reordered)).toThrow(
+      /detail content does not match inventory/i
+    );
+
+    const forgedPreview = structuredClone(artifact);
+    forgedPreview.facts.detail.selections[0]!.previewBase64 =
+      Buffer.from('xxxxx').toString('base64');
+    resignArtifactForIntegrityTest(forgedPreview);
+    expect(() => verifyCertifiedProjectFactsArtifact(forgedPreview)).toThrow(
+      /detail preview does not match full content/i
+    );
+  });
+
+  it('closes each read interval against add, delete, and modify before the post fence', async () => {
+    for (const scenario of ['add', 'delete', 'modify'] as const) {
+      const input = createCaptureInput();
+      const basePorts = createHostPorts();
+      const files = new Map([['src/index.ts', Buffer.from('export const value = 1;\n')]]);
+      let changed = false;
+      let verifierCalled = false;
+      const ports: ProjectContextFoundationHostPorts = {
+        ...basePorts,
+        enumerateEligibleFiles: async () =>
+          [...files.keys()].map((relativePath) => ({
+            language: 'typescript',
+            mode: '100644',
+            relativePath,
+          })),
+        observeRevision: async () => ({
+          commitId: 'a'.repeat(40),
+          dirty: changed,
+          kind: 'git',
+          treeId: 'b'.repeat(40),
+        }),
+        readFile: async ({ relativePath }) => {
+          const captured = files.get(relativePath);
+          if (!captured) {
+            throw new Error(`missing ${relativePath}`);
+          }
+          if (scenario === 'add') {
+            files.set('src/added.ts', Buffer.from('export {};\n'));
+          }
+          if (scenario === 'delete') {
+            files.delete(relativePath);
+          }
+          if (scenario === 'modify') {
+            files.set(relativePath, Buffer.from('export const value = 2;\n'));
+          }
+          changed = true;
+          return captured;
+        },
+        verifySnapshot: async (request) => {
+          verifierCalled = true;
+          return basePorts.verifySnapshot!(request);
+        },
+      };
+
+      await expect(captureCertifiedProjectFacts(input, ports), scenario).rejects.toMatchObject({
+        code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+      });
+      expect(verifierCalled, scenario).toBe(false);
+    }
+  });
+
+  it('rejects transient clean-to-dirty-to-clean bytes that do not match the declared Git tree', async () => {
+    const root = await createTemporaryGitRepository();
+    const repository = {
+      relativeRoot: '.',
+      repoId: 'core',
+      scopeId: 'mr-alembic',
+      sourceRoot: root,
+    };
+    const input = createCaptureInput();
+    input.repositories = [repository];
+    const clean = await fs.readFile(path.join(root, 'src/index.ts'));
+    const dirty = Buffer.from('export const value = "dirty";\n');
+    const nodePorts = new NodeProjectContextFoundationHostPorts({ execute() {} } as never);
+    const requestPorts = createHostPorts();
+    const ports: ProjectContextFoundationHostPorts = {
+      enumerateEligibleFiles: (request) => nodePorts.enumerateEligibleFiles(request),
+      executeRequest: (request) => requestPorts.executeRequest(request),
+      observeRevision: (request) => nodePorts.observeRevision(request),
+      readFile: async (request) => {
+        await fs.writeFile(path.join(root, request.relativePath), dirty);
+        const captured = await nodePorts.readFile(request);
+        await fs.writeFile(path.join(root, request.relativePath), clean);
+        return captured;
+      },
+      verifySnapshot: (request) => nodePorts.verifySnapshot(request),
+    };
+
+    await expect(captureCertifiedProjectFacts(input, ports)).rejects.toMatchObject({
+      code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+    });
+    expect(await fs.readFile(path.join(root, 'src/index.ts'))).toEqual(clean);
+    expect((await execFileAsync('git', ['-C', root, 'status', '--porcelain'])).stdout).toBe('');
+  });
+
+  it('binds a stable dirty Git snapshot to its terminal full-content hash', async () => {
+    const root = await createTemporaryGitRepository();
+    await fs.writeFile(path.join(root, 'src/index.ts'), 'export const value = "dirty";\n');
+    const repository = {
+      relativeRoot: '.',
+      repoId: 'core',
+      scopeId: 'mr-alembic',
+      sourceRoot: root,
+    };
+    const nodePorts = new NodeProjectContextFoundationHostPorts({ execute() {} } as never);
+    const descriptors = await nodePorts.enumerateEligibleFiles({
+      repository,
+      policy: createCaptureInput().inventoryPolicy,
+    });
+    const input = createCaptureInput();
+    input.repositories = [repository];
+    input.requestPlans = createProjectContextRequestAuditPlans({
+      repository,
+      eligibleFiles: descriptors,
+    });
+    const requestPorts = createHostPorts();
+    const ports: ProjectContextFoundationHostPorts = {
+      enumerateEligibleFiles: (request) => nodePorts.enumerateEligibleFiles(request),
+      executeRequest: (request) => requestPorts.executeRequest(request),
+      observeRevision: (request) => nodePorts.observeRevision(request),
+      readFile: (request) => nodePorts.readFile(request),
+      verifySnapshot: (request) => nodePorts.verifySnapshot(request),
+    };
+
+    const artifact = await captureCertifiedProjectFacts(input, ports);
+
+    expect(artifact.manifest.sourceRevisionVector.entries[0]?.revision).toMatchObject({
+      kind: 'git-dirty',
+      workingTreeContentHash: expect.stringMatching(/^sha256:/),
+    });
+    expect(artifact.readiness.verdict).toBe('passed');
+  });
+
+  it('promotes stable eligible ignored content to a content-bound dirty revision', async () => {
+    const root = await createTemporaryGitRepository();
+    await fs.writeFile(path.join(root, '.gitignore'), '.generated/\n');
+    await execFileAsync('git', ['-C', root, 'add', '.gitignore']);
+    await execFileAsync('git', ['-C', root, 'commit', '--quiet', '-m', 'ignore generated']);
+    await fs.mkdir(path.join(root, '.generated'), { recursive: true });
+    await fs.writeFile(path.join(root, '.generated/stable.ts'), 'export const stable = true;\n');
+    expect((await execFileAsync('git', ['-C', root, 'status', '--porcelain'])).stdout).toBe('');
+    const repository = {
+      relativeRoot: '.',
+      repoId: 'core',
+      scopeId: 'mr-alembic',
+      sourceRoot: root,
+    };
+    const nodePorts = new NodeProjectContextFoundationHostPorts({ execute() {} } as never);
+    const descriptors = await nodePorts.enumerateEligibleFiles({
+      repository,
+      policy: createCaptureInput().inventoryPolicy,
+    });
+    const input = createCaptureInput();
+    input.repositories = [repository];
+    input.requestPlans = createProjectContextRequestAuditPlans({
+      repository,
+      eligibleFiles: descriptors,
+    });
+    const requestPorts = createHostPorts();
+    const ports: ProjectContextFoundationHostPorts = {
+      enumerateEligibleFiles: (request) => nodePorts.enumerateEligibleFiles(request),
+      executeRequest: (request) => requestPorts.executeRequest(request),
+      observeRevision: (request) => nodePorts.observeRevision(request),
+      readFile: (request) => nodePorts.readFile(request),
+      verifySnapshot: (request) => nodePorts.verifySnapshot(request),
+    };
+
+    const artifact = await captureCertifiedProjectFacts(input, ports);
+
+    expect(artifact.facts.inventory.files.map((file) => file.relativePath)).toContain(
+      '.generated/stable.ts'
+    );
+    expect(artifact.manifest.sourceRevisionVector.entries[0]?.revision).toMatchObject({
+      kind: 'git-dirty',
+      workingTreeContentHash: expect.stringMatching(/^sha256:/),
+    });
+  });
+
+  it('keeps legacy content hosts compatible through two matching complete candidates', async () => {
+    const basePorts = createHostPorts();
+    const { verifySnapshot: _verifySnapshot, ...legacyPorts } = basePorts;
+    const artifact = await captureCertifiedProjectFacts(createCaptureInput(), {
+      ...legacyPorts,
+      observeRevision: async () => ({ kind: 'content' }),
+    });
+
+    expect(artifact.manifest.sourceRevisionVector.entries[0]?.revision).toMatchObject({
+      kind: 'content',
+      workingTreeContentHash: expect.stringMatching(/^sha256:/),
+    });
+    expect(artifact.readiness.verdict).toBe('passed');
+  });
+
+  it('preserves cancellation from read, post-fence, and snapshot-verifier stages', async () => {
+    for (const stage of ['read', 'post-fence', 'verifier'] as const) {
+      const controller = new AbortController();
+      const reason = new Error(`cancel-${stage}`);
+      const basePorts = createHostPorts();
+      let observationCount = 0;
+      const ports: ProjectContextFoundationHostPorts = {
+        ...basePorts,
+        observeRevision: async (request) => {
+          observationCount += 1;
+          if (stage === 'post-fence' && observationCount === 2) {
+            controller.abort(reason);
+            throw reason;
+          }
+          return basePorts.observeRevision(request);
+        },
+        readFile: async (request) => {
+          if (stage === 'read') {
+            controller.abort(reason);
+            throw reason;
+          }
+          return basePorts.readFile(request);
+        },
+        verifySnapshot: async (request) => {
+          if (stage === 'verifier') {
+            controller.abort(reason);
+            throw reason;
+          }
+          return basePorts.verifySnapshot!(request);
+        },
+      };
+
+      await expect(
+        captureCertifiedProjectFacts({ ...createCaptureInput(), signal: controller.signal }, ports),
+        stage
+      ).rejects.toBe(reason);
+    }
+  });
+
   it('does not let non-empty request errors pass strict readiness', async () => {
     const basePorts = createHostPorts();
     const artifact = await captureCertifiedProjectFacts(createCaptureInput(), {
@@ -807,6 +1145,438 @@ describe('ProjectContext certified facts foundation', () => {
     );
   });
 
+  it('binds package ownership to module seeds and reconciles graph dependency output', async () => {
+    const approvedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-ownership-'));
+    temporaryRoots.push(approvedRoot);
+    const coreRoot = path.join(approvedRoot, 'Core');
+    const agentRoot = path.join(approvedRoot, 'Agent');
+    await fs.mkdir(coreRoot, { recursive: true });
+    await fs.mkdir(agentRoot, { recursive: true });
+    const evidenceHash = hashCanonicalJson({ packageJson: 1 });
+    const ownership = createProjectContextDependencyOwnershipV1([
+      {
+        repoId: 'core',
+        ownerModuleId: 'module:src',
+        ownerPackageName: '@alembic/core',
+        source: 'package-name',
+        pattern: '@alembic/core',
+        provenance: { relativePath: 'package.json', contentHash: evidenceHash },
+      },
+      {
+        repoId: 'core',
+        ownerModuleId: 'module:src',
+        ownerPackageName: '@alembic/core',
+        source: 'package-export',
+        pattern: '@alembic/core/project-context',
+        provenance: { relativePath: 'package.json', contentHash: evidenceHash },
+      },
+      {
+        repoId: 'core',
+        ownerModuleId: 'module:src',
+        ownerPackageName: '@alembic/core',
+        source: 'package-import',
+        pattern: '#shared/*',
+        targetPatterns: ['src/shared/*'],
+        provenance: { relativePath: 'package.json', contentHash: evidenceHash },
+      },
+      {
+        repoId: 'agent',
+        ownerModuleId: 'module:src',
+        ownerPackageName: '@alembic/agent',
+        source: 'package-import',
+        pattern: '#shared/*',
+        targetPatterns: ['src/shared/*'],
+        provenance: { relativePath: 'package.json', contentHash: evidenceHash },
+      },
+      {
+        repoId: 'agent',
+        ownerModuleId: 'module:src',
+        ownerPackageName: '@alembic/agent',
+        source: 'package-export',
+        pattern: '@alembic/agent/*',
+        provenance: { relativePath: 'package.json', contentHash: evidenceHash },
+      },
+    ]);
+    const dependencyNames = [
+      '@alembic/core/project-context',
+      '#shared/value.js',
+      '@alembic/agent/runtime',
+      '@alembic/core/private',
+      'node:fs',
+    ];
+    const projectContext = {
+      execute: async () => ({
+        contractVersion: 1,
+        data: {
+          dependencySummary: { edgeCount: 0, notes: ['external-dependencies:5'] },
+          externalDependencyHotspots: dependencyNames.map((name) => ({ name, refs: [] })),
+          modules: [],
+        },
+        errors: dependencyNames.map((dependencyName) => ({
+          code: 'query-unavailable',
+          message: `map external dependency is not owned by module seeds: ${dependencyName}`,
+          retryable: false,
+          severity: 'warning',
+        })),
+        project: { projectRoot: coreRoot },
+        queryLevel: 'map',
+        refs: [],
+      }),
+    } as never;
+    const repository = {
+      relativeRoot: 'Core',
+      repoId: 'core',
+      scopeId: 'mr-alembic',
+      sourceRoot: coreRoot,
+    };
+    const plan = createProjectContextRequestAuditPlans({
+      repository,
+      dependencyOwnership: ownership,
+      eligibleFiles: [
+        {
+          language: 'typescript',
+          mode: '100644',
+          ownerModuleIds: ['module:src'],
+          relativePath: 'src/index.ts',
+        },
+        {
+          language: 'typescript',
+          mode: '100644',
+          ownerModuleIds: ['module:src'],
+          relativePath: 'src/shared/value.ts',
+        },
+      ],
+    }).find((candidate) => candidate.kind === 'map')!;
+    const ports = new NodeProjectContextFoundationHostPorts(projectContext, {
+      dependencyOwnership: ownership,
+      portableRoots: [{ portableId: 'agent', sourceRoot: agentRoot }],
+    });
+
+    const result = await ports.executeRequest({ repository, plan });
+    const output = result.output as {
+      data: {
+        approvedSiblingDependencyHotspots: unknown[];
+        dependencyOwnershipResolutions: Array<{ classification: string }>;
+        externalDependencyHotspots: Array<{ name: string }>;
+        internalDependencyNamespaceResolutions: unknown[];
+      };
+    };
+
+    expect(JSON.stringify(plan.selector)).toContain('dependencyOwnershipBindings');
+    expect(result.dependencyResolutions?.map((row) => row.classification).sort()).toEqual([
+      'approved-sibling',
+      'confirmed-defect',
+      'expected-external',
+      'internal-resolved',
+      'internal-resolved',
+    ]);
+    expect(
+      result.dependencyResolutions?.find((row) => row.dependencyName === '@alembic/agent/runtime')
+    ).toMatchObject({
+      classification: 'approved-sibling',
+      ownerRepoId: 'agent',
+      ownerModuleId: 'module:src',
+    });
+    expect(
+      result.dependencyResolutions?.find((row) => row.dependencyName === '#shared/value.js')
+    ).toMatchObject({ classification: 'internal-resolved', ownerRepoId: 'core' });
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ classification: 'advisory', relatedRepoId: 'agent' }),
+        expect.objectContaining({ classification: 'expected-external' }),
+        expect.objectContaining({
+          classification: 'confirmed-defect',
+          typedReason: 'known-package-subpath-is-not-exported',
+        }),
+      ])
+    );
+    expect(output.data.externalDependencyHotspots.map((row) => row.name).sort()).toEqual([
+      '@alembic/core/private',
+      'node:fs',
+    ]);
+    expect(output.data.approvedSiblingDependencyHotspots).toHaveLength(1);
+    expect(output.data.internalDependencyNamespaceResolutions).toHaveLength(2);
+    expect(output.data.dependencyOwnershipResolutions).toHaveLength(3);
+    expect(result.terminalStatus).toBe('failed');
+  });
+
+  it('fails capture when ownership provenance is not the certified inventory blob', async () => {
+    const input = createCaptureInput();
+    const descriptors = [
+      {
+        language: 'json',
+        mode: '100644',
+        ownerModuleIds: ['module:src'],
+        relativePath: 'package.json',
+      },
+      {
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: ['module:src'],
+        relativePath: 'src/index.ts',
+      },
+      {
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: ['module:src'],
+        relativePath: 'src/worker.ts',
+      },
+    ];
+    input.inventoryPolicy.includeExtensions = ['.json', '.ts'];
+    input.requestPlans = createProjectContextRequestAuditPlans({
+      repository: input.repositories[0]!,
+      eligibleFiles: descriptors,
+    });
+    const packageBytes = Buffer.from('{"name":"@alembic/core"}\n');
+    const basePorts = createHostPorts();
+    const artifact = await captureCertifiedProjectFacts(input, {
+      ...basePorts,
+      enumerateEligibleFiles: async () => descriptors,
+      readFile: async ({ relativePath }) =>
+        relativePath === 'package.json'
+          ? packageBytes
+          : Buffer.from(
+              relativePath === 'src/index.ts'
+                ? 'export const alpha = 1;\n'
+                : 'export const beta = 2;\n'
+            ),
+      executeRequest: async (request) => {
+        const result = await basePorts.executeRequest(request);
+        return request.plan.kind === 'map'
+          ? {
+              ...result,
+              dependencyObservationCount: 1,
+              dependencyGraphReconciliation: {
+                approvedSiblingHotspotCount: 0,
+                internalResolvedHotspotCount: 0,
+                originalExternalHotspotCount: 0,
+                remainingExternalHotspotCount: 0,
+              },
+              dependencyResolutions: [
+                {
+                  classification: 'internal-resolved',
+                  dependencyName: '#shared/value.js',
+                  importerRepoId: 'core',
+                  matchedOwnershipKey: '#shared/*',
+                  ownerModuleId: 'module:src',
+                  ownerRepoId: 'core',
+                  ownershipEvidenceHash: hashBytes(Buffer.from('not-package-json')),
+                  ownershipProvenancePath: 'package.json',
+                  ownershipSource: 'package-import',
+                  requestKind: 'map',
+                  resolvedTargets: [{ relativePath: 'src/index.ts' }],
+                  typedReason: 'fixture-provenance-mismatch',
+                },
+              ],
+            }
+          : result;
+      },
+    });
+
+    const mapOutcome = artifact.facts.requestOutcomes.find((row) => row.kind === 'map')!;
+    expect(mapOutcome.terminalStatus).toBe('failed');
+    expect(mapOutcome.errors[0]?.message).toMatch(
+      /provenance is not bound to certified inventory/i
+    );
+    expect(artifact.readiness.verdict).toBe('failed');
+  });
+
+  it('binds the complete ownership catalog to inventory even when no diagnostic uses an entry', async () => {
+    const input = createCaptureInput();
+    const descriptors = [
+      {
+        language: 'json',
+        mode: '100644',
+        ownerModuleIds: ['module:src'],
+        relativePath: 'package.json',
+      },
+      {
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: ['module:src'],
+        relativePath: 'src/index.ts',
+      },
+      {
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: ['module:src'],
+        relativePath: 'src/worker.ts',
+      },
+    ];
+    const ownership = createProjectContextDependencyOwnershipV1([
+      {
+        repoId: 'core',
+        ownerModuleId: 'module:src',
+        ownerPackageName: '@alembic/core',
+        source: 'package-name',
+        pattern: '@alembic/core',
+        provenance: {
+          relativePath: 'package.json',
+          contentHash: hashBytes(Buffer.from('{"name":"stale"}\n')),
+        },
+      },
+    ]);
+    input.inventoryPolicy.includeExtensions = ['.json', '.ts'];
+    input.requestPlans = createProjectContextRequestAuditPlans({
+      repository: input.repositories[0]!,
+      eligibleFiles: descriptors,
+      dependencyOwnership: ownership,
+    });
+    const basePorts = createHostPorts();
+    const artifact = await captureCertifiedProjectFacts(input, {
+      ...basePorts,
+      enumerateEligibleFiles: async () => descriptors,
+      readFile: async ({ relativePath }) =>
+        Buffer.from(
+          relativePath === 'package.json'
+            ? '{"name":"@alembic/core"}\n'
+            : relativePath === 'src/index.ts'
+              ? 'export const alpha = 1;\n'
+              : 'export const beta = 2;\n'
+        ),
+    });
+
+    expect(artifact.readiness.errors).toContain(
+      'dependency-ownership-catalog-provenance:core/@alembic/core'
+    );
+    expect(evaluateCertifiedProjectFactsReadiness(artifact, { expectedRepoIds: ['core'] }).ok).toBe(
+      false
+    );
+  });
+
+  it('fails readiness when original dependency observations are not conserved by resolutions', async () => {
+    const basePorts = createHostPorts();
+    const artifact = await captureCertifiedProjectFacts(createCaptureInput(), {
+      ...basePorts,
+      executeRequest: async (request) => ({
+        ...(await basePorts.executeRequest(request)),
+        dependencyObservationCount: request.plan.kind === 'map' ? 1 : 0,
+        dependencyGraphReconciliation: {
+          approvedSiblingHotspotCount: 0,
+          internalResolvedHotspotCount: 0,
+          originalExternalHotspotCount: 0,
+          remainingExternalHotspotCount: 0,
+        },
+        dependencyResolutions: [],
+      }),
+    });
+
+    expect(artifact.readiness.verdict).toBe('failed');
+    expect(artifact.readiness.errors).toContain('dependency-observation-conservation:core/map');
+  });
+
+  it('fails readiness when map warnings and graph hotspots are not cross-conserved', async () => {
+    const basePorts = createHostPorts();
+    const artifact = await captureCertifiedProjectFacts(createCaptureInput(), {
+      ...basePorts,
+      executeRequest: async (request) => ({
+        ...(await basePorts.executeRequest(request)),
+        dependencyObservationCount: request.plan.kind === 'map' ? 1 : 0,
+        dependencyGraphReconciliation: {
+          approvedSiblingHotspotCount: 0,
+          internalResolvedHotspotCount: 0,
+          originalExternalHotspotCount: 0,
+          remainingExternalHotspotCount: 0,
+        },
+        dependencyResolutions:
+          request.plan.kind === 'map'
+            ? [
+                {
+                  classification: 'expected-external',
+                  dependencyName: 'node:fs',
+                  importerRepoId: 'core',
+                  requestKind: 'map',
+                  typedReason: 'fixture-external',
+                },
+              ]
+            : [],
+      }),
+    });
+
+    expect(artifact.readiness.errors).toContain('dependency-warning-graph-alignment:core/map');
+  });
+
+  it('fails closed for a missing current owner seed and ambiguous public ownership', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-ownership-defect-'));
+    temporaryRoots.push(root);
+    const evidenceHash = hashCanonicalJson({ packageJson: 'defect-fixture' });
+    const ownership = createProjectContextDependencyOwnershipV1([
+      {
+        repoId: 'core',
+        ownerModuleId: 'module:missing',
+        ownerPackageName: '@alembic/core',
+        source: 'package-name',
+        pattern: '@alembic/core',
+        provenance: { relativePath: 'package.json', contentHash: evidenceHash },
+      },
+      ...['agent', 'plugin'].map((repoId) => ({
+        repoId,
+        ownerModuleId: `module:${repoId}`,
+        ownerPackageName: 'SharedKit',
+        source: 'module-alias' as const,
+        pattern: 'SharedKit',
+        provenance: { relativePath: 'Package.swift', contentHash: evidenceHash },
+      })),
+    ]);
+    const dependencies = ['@alembic/core', 'SharedKit'];
+    const projectContext = {
+      execute: async () => ({
+        contractVersion: 1,
+        data: {
+          externalDependencyHotspots: dependencies.map((name) => ({ name, refs: [] })),
+          modules: [],
+        },
+        errors: dependencies.map((dependencyName) => ({
+          code: 'query-unavailable',
+          message: `map external dependency is not owned by module seeds: ${dependencyName}`,
+          retryable: false,
+          severity: 'warning',
+        })),
+        project: { projectRoot: root },
+        queryLevel: 'map',
+        refs: [],
+      }),
+    } as never;
+    const repository = {
+      relativeRoot: '.',
+      repoId: 'core',
+      scopeId: 'mr-alembic',
+      sourceRoot: root,
+    };
+    const plan = createProjectContextRequestAuditPlans({
+      repository,
+      dependencyOwnership: ownership,
+      eligibleFiles: [
+        {
+          language: 'typescript',
+          mode: '100644',
+          ownerModuleIds: ['module:src'],
+          relativePath: 'src/index.ts',
+        },
+      ],
+    }).find((candidate) => candidate.kind === 'map')!;
+    const result = await new NodeProjectContextFoundationHostPorts(projectContext, {
+      dependencyOwnership: ownership,
+    }).executeRequest({ repository, plan });
+
+    expect(result.dependencyResolutions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          classification: 'confirmed-defect',
+          dependencyName: '@alembic/core',
+          typedReason: 'certified-owner-module-is-missing-from-request-seeds',
+        }),
+        expect.objectContaining({
+          classification: 'confirmed-defect',
+          dependencyName: 'SharedKit',
+          typedReason: 'dependency-ownership-is-ambiguous',
+        }),
+      ])
+    );
+    expect(result.errors?.every((error) => error.classification === 'confirmed-defect')).toBe(true);
+    expect(result.terminalStatus).toBe('failed');
+  });
+
   it('attaches lineage only after artifact identity and keeps strict counters at zero', async () => {
     const artifact = await captureCertifiedProjectFacts(createCaptureInput(), createHostPorts());
     const receipt = createProjectContextConsumerLineageReceipt(
@@ -1093,6 +1863,24 @@ describe('ProjectContext certified facts foundation', () => {
   });
 });
 
+function resignArtifactForIntegrityTest(
+  artifact: Parameters<typeof verifyCertifiedProjectFactsArtifact>[0]
+): void {
+  const { detailContentHash: _detailContentHash, ...detailSemantic } = artifact.facts.detail;
+  artifact.facts.detail.detailContentHash = hashCanonicalJson(detailSemantic);
+  artifact.factsContentHash = hashCanonicalJson(artifact.facts);
+  artifact.manifest.factsContentHash = artifact.factsContentHash;
+  artifact.manifest.detailManifestHash = hashCanonicalJson(artifact.facts.detail);
+  artifact.artifactId = `cpf-v1:${hashCanonicalJson(artifact.manifest).slice('sha256:'.length)}`;
+  artifact.certificationBindingHash = hashCanonicalJson({
+    artifactId: artifact.artifactId,
+    factsContentHash: artifact.factsContentHash,
+    sourceVectorHash: artifact.sourceVectorHash,
+    readiness: artifact.readiness,
+    ...artifact.certification,
+  });
+}
+
 function createCaptureInput(): ProjectContextFoundationCaptureInput {
   return {
     certification: {
@@ -1202,6 +1990,21 @@ function createHostPorts(
       kind: 'git',
       treeId: 'b'.repeat(40),
     }),
+    verifySnapshot: async ({ candidate }) => ({
+      version: 1,
+      verified: true,
+      binding:
+        candidate.postRevision.kind === 'git' && !candidate.postRevision.dirty
+          ? 'git-tree'
+          : 'working-tree-content',
+      finalRevision: candidate.postRevision,
+      eligibleInventoryHash: candidate.eligibleInventoryHash,
+      workingTreeContentHash: candidate.workingTreeContentHash,
+      ...(candidate.postRevision.kind === 'git' && !candidate.postRevision.dirty
+        ? { treeId: candidate.postRevision.treeId ?? undefined }
+        : {}),
+      typedReason: 'deterministic-test-snapshot-binding',
+    }),
     readFile: async ({ relativePath }) => {
       readCounts.set(relativePath, (readCounts.get(relativePath) ?? 0) + 1);
       const content = contents.get(relativePath);
@@ -1211,4 +2014,17 @@ function createHostPorts(
       return content;
     },
   };
+}
+
+async function createTemporaryGitRepository(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-git-snapshot-'));
+  temporaryRoots.push(root);
+  await fs.mkdir(path.join(root, 'src'), { recursive: true });
+  await fs.writeFile(path.join(root, 'src/index.ts'), 'export const value = "clean";\n');
+  await execFileAsync('git', ['-C', root, 'init', '--quiet']);
+  await execFileAsync('git', ['-C', root, 'config', 'user.email', 'pcf-test@example.invalid']);
+  await execFileAsync('git', ['-C', root, 'config', 'user.name', 'PCF Test']);
+  await execFileAsync('git', ['-C', root, 'add', 'src/index.ts']);
+  await execFileAsync('git', ['-C', root, 'commit', '--quiet', '-m', 'fixture']);
+  return root;
 }

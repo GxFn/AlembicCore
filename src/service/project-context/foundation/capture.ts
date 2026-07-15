@@ -18,15 +18,20 @@ import {
   type CertifiedProjectFactsConsumer,
   type CertifiedProjectFactsManifestV1,
   type CertifiedProjectFactsProjectionV1,
+  PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION,
+  PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
   PROJECT_FACTS_CANONICALIZER_VERSION,
   PROJECT_FACTS_READINESS_VALIDATOR_VERSION,
+  type ProjectContextDependencyResolutionV1,
   type ProjectContextFoundationCaptureInput,
   type ProjectContextFoundationFileDescriptor,
   type ProjectContextFoundationHostPorts,
   type ProjectContextFoundationRepositoryInput,
+  type ProjectContextRepositoryRevisionObservation,
   type ProjectContextRequestAuditPlan,
   type ProjectContextRequestDiagnosticV1,
   type ProjectContextRequestOutcomeV1,
+  type ProjectContextSnapshotVerificationV1,
   type ProjectFactsDetailDecisionV1,
   type ProjectFactsDetailPlaneV1,
   type ProjectFactsDetailSelectionV1,
@@ -168,7 +173,10 @@ async function assertSourceStateStable(
   try {
     verified = await captureRepositories(input, ports, includeExcludePolicyHash);
   } catch (error) {
-    if (input.signal?.aborted) {
+    if (isAbortLike(error, input.signal)) {
+      throw error;
+    }
+    if (error instanceof ProjectContextSourceStateDriftError) {
       throw error;
     }
     const repoId = captured.find((repository) =>
@@ -283,17 +291,68 @@ export function verifyCertifiedProjectFactsArtifact(
   if (expectedBinding !== artifact.certificationBindingHash) {
     throw new TypeError('Certified facts binding hash does not match its accepted inputs.');
   }
+  const chunksByHash = new Map<CanonicalSha256, Uint8Array>();
   const chunkTable = artifact.chunks
     .map((chunk) => {
       const bytes = Buffer.from(chunk.dataBase64, 'base64');
       if (bytes.byteLength !== chunk.byteLength || hashBytes(bytes) !== chunk.blobHash) {
         throw new TypeError(`Certified facts full chunk is corrupt: ${chunk.blobHash}.`);
       }
+      const previous = chunksByHash.get(chunk.blobHash);
+      if (previous && !Buffer.from(previous).equals(bytes)) {
+        throw new TypeError('Certified facts chunk hash is duplicated with different bytes.');
+      }
+      chunksByHash.set(chunk.blobHash, bytes);
       return { blobHash: chunk.blobHash, byteLength: chunk.byteLength };
     })
     .sort((left, right) => left.blobHash.localeCompare(right.blobHash));
   if (hashCanonicalJson(chunkTable) !== artifact.manifest.fullChunkManifestHash) {
     throw new TypeError('Certified facts full chunk table does not match its manifest hash.');
+  }
+  for (const selection of artifact.facts.detail.selections) {
+    const inventoryFile = artifact.facts.inventory.files.find(
+      (file) => file.repoId === selection.repoId && file.relativePath === selection.relativePath
+    );
+    if (!inventoryFile) {
+      throw new TypeError(
+        `Certified detail selection is outside inventory: ${selection.repoId}/${selection.relativePath}.`
+      );
+    }
+    const fullContent = Buffer.concat(
+      selection.fullChunkRefs.map((chunkRef) => {
+        const chunk = chunksByHash.get(chunkRef);
+        if (!chunk) {
+          throw new TypeError(
+            `Certified detail selection references a missing chunk: ${chunkRef}.`
+          );
+        }
+        return Buffer.from(chunk);
+      })
+    );
+    if (
+      hashBytes(fullContent) !== selection.fullContentHash ||
+      selection.fullContentHash !== inventoryFile.blobSha256 ||
+      fullContent.byteLength !== inventoryFile.sizeBytes
+    ) {
+      throw new TypeError(
+        `Certified detail content does not match inventory: ${selection.repoId}/${selection.relativePath}.`
+      );
+    }
+    const preview = Buffer.from(selection.previewBase64, 'base64');
+    const expectedPreviewLength = Math.min(
+      fullContent.byteLength,
+      artifact.facts.detail.policy.maxPreviewBytes
+    );
+    if (
+      preview.byteLength !== selection.previewByteLength ||
+      preview.byteLength !== expectedPreviewLength ||
+      !preview.equals(fullContent.subarray(0, expectedPreviewLength)) ||
+      selection.previewTruncated !== expectedPreviewLength < fullContent.byteLength
+    ) {
+      throw new TypeError(
+        `Certified detail preview does not match full content: ${selection.repoId}/${selection.relativePath}.`
+      );
+    }
   }
   for (const consumer of CERTIFIED_PROJECT_FACTS_CONSUMERS) {
     const projection = artifact.projections[consumer];
@@ -414,24 +473,31 @@ async function captureRepositories(
   const result: CapturedRepository[] = [];
   for (const repository of [...input.repositories].sort(compareRepositories)) {
     throwIfAborted(input.signal);
-    const [descriptors, observation] = await Promise.all([
-      ports.enumerateEligibleFiles({
-        repository,
-        policy: input.inventoryPolicy,
-        signal: input.signal,
-      }),
-      ports.observeRevision({ repository, signal: input.signal }),
-    ]);
+    const preRevision = await ports.observeRevision({ repository, signal: input.signal });
+    throwIfAborted(input.signal);
+    const descriptors = await ports.enumerateEligibleFiles({
+      repository,
+      policy: input.inventoryPolicy,
+      signal: input.signal,
+    });
     const normalizedDescriptors = normalizeFileDescriptors(descriptors);
     const contents = new Map<string, Uint8Array>();
     const files: ProjectFactsInventoryFileV1[] = [];
     for (const descriptor of normalizedDescriptors) {
       throwIfAborted(input.signal);
-      const content = await ports.readFile({
-        repository,
-        relativePath: descriptor.relativePath,
-        signal: input.signal,
-      });
+      let content: Uint8Array;
+      try {
+        content = await ports.readFile({
+          repository,
+          relativePath: descriptor.relativePath,
+          signal: input.signal,
+        });
+      } catch (error) {
+        if (isAbortLike(error, input.signal)) {
+          throw error;
+        }
+        throw new ProjectContextSourceStateDriftError(repository.repoId, error);
+      }
       const copied = Uint8Array.from(content);
       contents.set(descriptor.relativePath, copied);
       files.push({
@@ -448,17 +514,57 @@ async function captureRepositories(
     const workingTreeContentHash = hashCanonicalJson(
       files.map((file) => [file.relativePath, file.mode, file.blobSha256])
     );
+    throwIfAborted(input.signal);
+    const postRevision = await ports.observeRevision({ repository, signal: input.signal });
+    if (!sameRevisionObservation(preRevision, postRevision)) {
+      throw new ProjectContextSourceStateDriftError(repository.repoId);
+    }
+    let verification: ProjectContextSnapshotVerificationV1;
+    try {
+      verification = await verifyCapturedSnapshot({
+        candidate: {
+          version: PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
+          preRevision: { ...preRevision },
+          postRevision: { ...postRevision },
+          files: files.map((file) => ({
+            file: { ...file, ownerModuleIds: [...file.ownerModuleIds] },
+            content: Uint8Array.from(contents.get(file.relativePath)!),
+          })),
+          eligibleInventoryHash,
+          workingTreeContentHash,
+        },
+        input,
+        ports,
+        repository,
+      });
+    } catch (error) {
+      if (isAbortLike(error, input.signal)) {
+        throw error;
+      }
+      if (error instanceof ProjectContextSourceStateDriftError) {
+        throw error;
+      }
+      throw new ProjectContextSourceStateDriftError(repository.repoId, error);
+    }
+    if (
+      !isValidSnapshotVerification(verification, preRevision, {
+        eligibleInventoryHash,
+        workingTreeContentHash,
+      })
+    ) {
+      throw new ProjectContextSourceStateDriftError(repository.repoId);
+    }
     const revision =
-      observation.kind === 'content'
+      verification.finalRevision.kind === 'content'
         ? ({ kind: 'content', workingTreeContentHash } as const)
-        : observation.dirty
+        : verification.finalRevision.dirty
           ? ({
               kind: 'git-dirty',
-              commitId: observation.commitId,
-              treeId: observation.treeId,
+              commitId: verification.finalRevision.commitId,
+              treeId: verification.finalRevision.treeId,
               workingTreeContentHash,
             } as const)
-          : buildCleanRevision(observation, repository.repoId);
+          : buildCleanRevision(verification.finalRevision, repository.repoId);
     result.push({
       input: repository,
       descriptors: normalizedDescriptors,
@@ -477,6 +583,107 @@ async function captureRepositories(
     });
   }
   return result;
+}
+
+async function verifyCapturedSnapshot(input: {
+  candidate: Parameters<
+    NonNullable<ProjectContextFoundationHostPorts['verifySnapshot']>
+  >[0]['candidate'];
+  input: ProjectContextFoundationCaptureInput;
+  ports: ProjectContextFoundationHostPorts;
+  repository: ProjectContextFoundationRepositoryInput;
+}): Promise<ProjectContextSnapshotVerificationV1> {
+  throwIfAborted(input.input.signal);
+  if (input.ports.verifySnapshot) {
+    const verification = await input.ports.verifySnapshot({
+      repository: input.repository,
+      policy: input.input.inventoryPolicy,
+      candidate: input.candidate,
+      signal: input.input.signal,
+    });
+    throwIfAborted(input.input.signal);
+    return verification;
+  }
+  if (input.candidate.preRevision.kind !== 'content') {
+    return {
+      version: PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
+      verified: false,
+      binding: 'working-tree-content',
+      finalRevision: input.candidate.postRevision,
+      eligibleInventoryHash: input.candidate.eligibleInventoryHash,
+      workingTreeContentHash: input.candidate.workingTreeContentHash,
+      typedReason: 'git-snapshot-verifier-required',
+    };
+  }
+  return {
+    version: PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
+    verified: true,
+    binding: 'working-tree-content',
+    finalRevision: input.candidate.postRevision,
+    eligibleInventoryHash: input.candidate.eligibleInventoryHash,
+    workingTreeContentHash: input.candidate.workingTreeContentHash,
+    typedReason: 'content-revision-bound-to-complete-candidate',
+  };
+}
+
+function isValidSnapshotVerification(
+  verification: ProjectContextSnapshotVerificationV1,
+  expectedRevision: ProjectContextRepositoryRevisionObservation,
+  expectedHashes: {
+    eligibleInventoryHash: CanonicalSha256;
+    workingTreeContentHash: CanonicalSha256;
+  }
+): boolean {
+  const contentBoundPromotion = isContentBoundDirtyPromotion(
+    expectedRevision,
+    verification.finalRevision,
+    verification.cleanObservationContentPromotion
+  );
+  if (
+    verification.version !== PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION ||
+    !verification.verified ||
+    !verification.typedReason.trim() ||
+    (!sameRevisionObservation(expectedRevision, verification.finalRevision) &&
+      !contentBoundPromotion) ||
+    verification.eligibleInventoryHash !== expectedHashes.eligibleInventoryHash ||
+    verification.workingTreeContentHash !== expectedHashes.workingTreeContentHash
+  ) {
+    return false;
+  }
+  if (expectedRevision.kind === 'git' && !expectedRevision.dirty) {
+    if (contentBoundPromotion) {
+      return verification.binding === 'working-tree-content' && verification.treeId === undefined;
+    }
+    return (
+      verification.binding === 'git-tree' &&
+      Boolean(expectedRevision.treeId) &&
+      verification.treeId === expectedRevision.treeId
+    );
+  }
+  return verification.binding === 'working-tree-content';
+}
+
+function isContentBoundDirtyPromotion(
+  expected: ProjectContextRepositoryRevisionObservation,
+  verified: ProjectContextRepositoryRevisionObservation,
+  cleanObservationContentPromotion: true | undefined
+): boolean {
+  return (
+    cleanObservationContentPromotion === true &&
+    expected.kind === 'git' &&
+    !expected.dirty &&
+    verified.kind === 'git' &&
+    verified.dirty &&
+    expected.commitId === verified.commitId &&
+    expected.treeId === verified.treeId
+  );
+}
+
+function sameRevisionObservation(
+  left: ProjectContextRepositoryRevisionObservation,
+  right: ProjectContextRepositoryRevisionObservation
+): boolean {
+  return hashCanonicalJson(left) === hashCanonicalJson(right);
 }
 
 function buildInventoryPlane(
@@ -638,6 +845,9 @@ async function captureRequestOutcomes(
         outputHash: hashCanonicalJson(output),
         sourceRanges: [],
         errors: [],
+        dependencyResolutions: [],
+        dependencyObservationCount: 0,
+        dependencyGraphReconciliation: emptyDependencyGraphReconciliation(),
       });
       continue;
     }
@@ -666,6 +876,18 @@ async function captureRequestOutcomes(
         outputHash: hashCanonicalJson(output),
         sourceRanges,
         errors: normalizeRequestDiagnostics(result.errors ?? []),
+        dependencyResolutions: normalizeDependencyResolutions(
+          result.dependencyResolutions ?? [],
+          plan,
+          repositories
+        ),
+        dependencyObservationCount: normalizeNonnegativeCount(
+          result.dependencyObservationCount ?? 0,
+          'dependencyObservationCount'
+        ),
+        dependencyGraphReconciliation: normalizeDependencyGraphReconciliation(
+          result.dependencyGraphReconciliation ?? emptyDependencyGraphReconciliation()
+        ),
       });
     } catch (error) {
       if (input.signal?.aborted) {
@@ -685,6 +907,9 @@ async function captureRequestOutcomes(
         output,
         outputHash: hashCanonicalJson(output),
         sourceRanges: [],
+        dependencyResolutions: [],
+        dependencyObservationCount: 0,
+        dependencyGraphReconciliation: emptyDependencyGraphReconciliation(),
         errors: [
           {
             classification: 'confirmed-defect',
@@ -856,6 +1081,54 @@ function buildCaptureReadinessSummary(
             errors.push(`confirmed-request-defect:${repoId}/${kind}:${diagnostic.code}`);
           }
         }
+        const resolutions = row.dependencyResolutions ?? [];
+        if (
+          row.dependencyObservationCount !== undefined &&
+          row.dependencyObservationCount !== resolutions.length
+        ) {
+          errors.push(`dependency-observation-conservation:${repoId}/${kind}`);
+        }
+        const graph = row.dependencyGraphReconciliation;
+        if (
+          graph &&
+          graph.originalExternalHotspotCount !==
+            graph.internalResolvedHotspotCount +
+              graph.approvedSiblingHotspotCount +
+              graph.remainingExternalHotspotCount
+        ) {
+          errors.push(`dependency-graph-conservation:${repoId}/${kind}`);
+        }
+        if (graph && (graph.originalExternalHotspotCount > 0 || kind === 'map')) {
+          const resolutionNames = (...classifications: string[]) =>
+            uniqueStrings(
+              resolutions
+                .filter((resolution) => classifications.includes(resolution.classification))
+                .map((resolution) => resolution.dependencyName)
+            );
+          if (
+            hashCanonicalJson(
+              resolutionNames(
+                'internal-resolved',
+                'approved-sibling',
+                'expected-external',
+                'confirmed-defect'
+              )
+            ) !== hashCanonicalJson(graph.originalExternalDependencyNames ?? []) ||
+            hashCanonicalJson(resolutionNames('internal-resolved')) !==
+              hashCanonicalJson(graph.internalResolvedDependencyNames ?? []) ||
+            hashCanonicalJson(resolutionNames('approved-sibling')) !==
+              hashCanonicalJson(graph.approvedSiblingDependencyNames ?? []) ||
+            hashCanonicalJson(resolutionNames('expected-external', 'confirmed-defect')) !==
+              hashCanonicalJson(graph.remainingExternalDependencyNames ?? [])
+          ) {
+            errors.push(`dependency-warning-graph-alignment:${repoId}/${kind}`);
+          }
+        }
+        for (const resolution of resolutions) {
+          errors.push(
+            ...validateDependencyResolutionEvidence(resolution, row, facts.inventory.files)
+          );
+        }
         for (const range of row.sourceRanges) {
           if (!inventoryKeys.has(`${range.repoId}\u0000${range.relativePath}`)) {
             errors.push(`source-range-outside-inventory:${range.repoId}/${range.relativePath}`);
@@ -864,6 +1137,7 @@ function buildCaptureReadinessSummary(
       }
     }
   }
+  errors.push(...validateDependencyOwnershipCatalog(facts.requestOutcomes, facts.inventory.files));
   for (const entry of facts.legacyEntries) {
     if (
       entry.directProjectContextCallCount !== 0 ||
@@ -880,6 +1154,221 @@ function buildCaptureReadinessSummary(
     errors: normalizedErrors,
     errorsHash: hashCanonicalJson(normalizedErrors),
   };
+}
+
+function validateDependencyResolutionEvidence(
+  resolution: ProjectContextDependencyResolutionV1,
+  row: ProjectContextRequestOutcomeV1,
+  inventoryFiles: readonly ProjectFactsInventoryFileV1[]
+): string[] {
+  const prefix = `${row.repoId}/${row.kind}/${resolution.dependencyName}`;
+  const errors: string[] = [];
+  if (resolution.importerRepoId !== row.repoId || resolution.requestKind !== row.kind) {
+    errors.push(`dependency-resolution-row-mismatch:${prefix}`);
+  }
+  if (!['internal-resolved', 'approved-sibling'].includes(resolution.classification)) {
+    return errors;
+  }
+  if (
+    !resolution.ownerRepoId ||
+    !resolution.ownerModuleId ||
+    !resolution.ownershipSource ||
+    !resolution.matchedOwnershipKey ||
+    !resolution.ownershipEvidenceHash ||
+    !resolution.ownershipProvenancePath
+  ) {
+    errors.push(`dependency-ownership-evidence-missing:${prefix}`);
+    return errors;
+  }
+  const provenance = inventoryFiles.find(
+    (file) =>
+      file.repoId === resolution.ownerRepoId &&
+      file.relativePath === resolution.ownershipProvenancePath
+  );
+  if (!provenance || provenance.blobSha256 !== resolution.ownershipEvidenceHash) {
+    errors.push(`dependency-provenance-outside-inventory:${prefix}`);
+  }
+  if (
+    !inventoryFiles.some(
+      (file) =>
+        file.repoId === resolution.ownerRepoId &&
+        file.ownerModuleIds.includes(resolution.ownerModuleId!)
+    )
+  ) {
+    errors.push(`dependency-owner-module-outside-inventory:${prefix}`);
+  }
+  if (resolution.classification === 'internal-resolved') {
+    if (resolution.resolvedTargets?.length !== 1) {
+      errors.push(`dependency-internal-target-count:${prefix}`);
+    }
+    for (const target of resolution.resolvedTargets ?? []) {
+      const file = inventoryFiles.find(
+        (candidate) =>
+          candidate.repoId === row.repoId && candidate.relativePath === target.relativePath
+      );
+      if (
+        !file ||
+        resolution.ownerRepoId !== row.repoId ||
+        !file.ownerModuleIds.includes(resolution.ownerModuleId) ||
+        target.blobSha256 !== file.blobSha256
+      ) {
+        errors.push(`dependency-internal-target-outside-owned-inventory:${prefix}`);
+      }
+    }
+  }
+  return errors;
+}
+
+function validateDependencyOwnershipCatalog(
+  outcomes: readonly ProjectContextRequestOutcomeV1[],
+  inventoryFiles: readonly ProjectFactsInventoryFileV1[]
+): string[] {
+  const errors: string[] = [];
+  const catalogHashes = new Set<string>();
+  const entries = new Map<
+    string,
+    {
+      repoId: string;
+      ownerModuleId: string;
+      ownerPackageName?: string;
+      source: 'package-name' | 'package-export' | 'package-import' | 'module-alias';
+      pattern: string;
+      targetPatterns?: string[];
+      provenance: { relativePath: string; contentHash: CanonicalSha256 };
+    }
+  >();
+  for (const outcome of outcomes.filter((row) => row.kind === 'map')) {
+    visitSeed(outcome.selector, outcome.repoId);
+  }
+  if (entries.size === 0 && catalogHashes.size === 0) {
+    return errors;
+  }
+  if (entries.size === 0 || catalogHashes.size !== 1) {
+    errors.push('dependency-ownership-catalog-hash-coverage');
+    return errors;
+  }
+  const normalizedEntries = [...entries.values()].sort(
+    (left, right) =>
+      left.repoId.localeCompare(right.repoId) ||
+      left.ownerModuleId.localeCompare(right.ownerModuleId) ||
+      left.source.localeCompare(right.source) ||
+      left.pattern.localeCompare(right.pattern) ||
+      left.provenance.contentHash.localeCompare(right.provenance.contentHash)
+  );
+  const rebuiltHash = hashCanonicalJson({
+    version: PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION,
+    entries: normalizedEntries,
+  });
+  if (![...catalogHashes][0] || rebuiltHash !== [...catalogHashes][0]) {
+    errors.push('dependency-ownership-catalog-hash-mismatch');
+  }
+  return errors;
+
+  function visitSeed(value: ProjectFactsJson, repoId: string): void {
+    if (Array.isArray(value)) {
+      for (const entry of value) {
+        visitSeed(entry, repoId);
+      }
+      return;
+    }
+    if (!value || typeof value !== 'object') {
+      return;
+    }
+    if (
+      typeof value.ownerModuleId === 'string' &&
+      Array.isArray(value.dependencyOwnershipBindings)
+    ) {
+      if (typeof value.dependencyOwnershipHash !== 'string') {
+        errors.push(`dependency-ownership-catalog-hash-missing:${repoId}/${value.ownerModuleId}`);
+      } else {
+        catalogHashes.add(value.dependencyOwnershipHash);
+      }
+      for (const rawBinding of value.dependencyOwnershipBindings) {
+        const binding =
+          rawBinding && !Array.isArray(rawBinding) && typeof rawBinding === 'object'
+            ? rawBinding
+            : undefined;
+        const source = binding?.ownershipSource;
+        const pattern = binding?.matchedOwnershipKey;
+        const evidenceHash = binding?.ownershipEvidenceHash;
+        const provenancePath = binding?.ownershipProvenancePath;
+        if (
+          !binding ||
+          typeof source !== 'string' ||
+          !['package-name', 'package-export', 'package-import', 'module-alias'].includes(source) ||
+          typeof pattern !== 'string' ||
+          !pattern.trim() ||
+          typeof evidenceHash !== 'string' ||
+          !/^sha256:[a-f0-9]{64}$/.test(evidenceHash) ||
+          typeof provenancePath !== 'string'
+        ) {
+          errors.push(`dependency-ownership-binding-malformed:${repoId}/${value.ownerModuleId}`);
+          continue;
+        }
+        let normalizedProvenancePath: string;
+        let targetPatterns: string[] | undefined;
+        try {
+          normalizedProvenancePath = normalizePortableRelativePath(
+            provenancePath,
+            'ownershipProvenancePath'
+          );
+          targetPatterns = Array.isArray(binding.targetPatterns)
+            ? uniqueStrings(
+                binding.targetPatterns.map((target) => {
+                  if (typeof target !== 'string') {
+                    throw new TypeError('ownership target must be a string');
+                  }
+                  return normalizePortableRelativePath(target, 'ownershipTargetPattern');
+                })
+              )
+            : undefined;
+        } catch {
+          errors.push(`dependency-ownership-binding-path-invalid:${repoId}/${value.ownerModuleId}`);
+          continue;
+        }
+        if (source === 'package-import' && !targetPatterns?.length) {
+          errors.push(`dependency-ownership-import-target-missing:${repoId}/${pattern}`);
+        }
+        const provenance = inventoryFiles.find(
+          (file) => file.repoId === repoId && file.relativePath === normalizedProvenancePath
+        );
+        if (!provenance || provenance.blobSha256 !== evidenceHash) {
+          errors.push(`dependency-ownership-catalog-provenance:${repoId}/${pattern}`);
+        }
+        if (
+          !inventoryFiles.some(
+            (file) =>
+              file.repoId === repoId && file.ownerModuleIds.includes(value.ownerModuleId as string)
+          )
+        ) {
+          errors.push(`dependency-ownership-catalog-owner:${repoId}/${value.ownerModuleId}`);
+        }
+        const entry = {
+          repoId,
+          ownerModuleId: value.ownerModuleId,
+          ...(typeof binding.ownerPackageName === 'string' && binding.ownerPackageName.trim()
+            ? { ownerPackageName: binding.ownerPackageName.trim() }
+            : {}),
+          source: source as 'package-name' | 'package-export' | 'package-import' | 'module-alias',
+          pattern: pattern.trim(),
+          ...(targetPatterns ? { targetPatterns } : {}),
+          provenance: {
+            relativePath: normalizedProvenancePath,
+            contentHash: evidenceHash as CanonicalSha256,
+          },
+        };
+        const identity = hashCanonicalJson(entry);
+        if (entries.has(identity)) {
+          errors.push(`dependency-ownership-catalog-duplicate:${repoId}/${pattern}`);
+        } else {
+          entries.set(identity, entry);
+        }
+      }
+    }
+    for (const nested of Object.values(value)) {
+      visitSeed(nested, repoId);
+    }
+  }
 }
 
 function normalizeFileDescriptors(
@@ -1042,6 +1531,150 @@ function normalizeRequestDiagnostics(
   );
 }
 
+function normalizeDependencyResolutions(
+  resolutions: readonly ProjectContextDependencyResolutionV1[],
+  plan: ProjectContextRequestAuditPlan,
+  repositories: readonly CapturedRepository[]
+): ProjectContextDependencyResolutionV1[] {
+  const byIdentity = new Map<string, ProjectContextDependencyResolutionV1>();
+  for (const resolution of resolutions) {
+    if (
+      !resolution.dependencyName.trim() ||
+      !resolution.importerRepoId.trim() ||
+      !resolution.typedReason.trim() ||
+      !['internal-resolved', 'approved-sibling', 'expected-external', 'confirmed-defect'].includes(
+        resolution.classification
+      )
+    ) {
+      throw new TypeError('ProjectContext dependency resolution must be typed and attributable.');
+    }
+    if (resolution.importerRepoId !== plan.repoId || resolution.requestKind !== plan.kind) {
+      throw new TypeError('ProjectContext dependency resolution does not match its request row.');
+    }
+    const requiresOwner = ['internal-resolved', 'approved-sibling'].includes(
+      resolution.classification
+    );
+    if (
+      requiresOwner &&
+      (!resolution.ownerRepoId?.trim() ||
+        !resolution.ownerModuleId?.trim() ||
+        !resolution.ownershipSource ||
+        !resolution.matchedOwnershipKey?.trim() ||
+        !resolution.ownershipEvidenceHash ||
+        !resolution.ownershipProvenancePath?.trim())
+    ) {
+      throw new TypeError('Owned dependency resolution is missing canonical ownership evidence.');
+    }
+    const ownerRepository = resolution.ownerRepoId
+      ? repositories.find((repository) => repository.input.repoId === resolution.ownerRepoId)
+      : undefined;
+    const provenancePath = resolution.ownershipProvenancePath
+      ? normalizePortableRelativePath(resolution.ownershipProvenancePath, 'ownershipProvenancePath')
+      : undefined;
+    if (requiresOwner) {
+      const provenanceFile = ownerRepository?.files.find(
+        (file) => file.relativePath === provenancePath
+      );
+      if (!provenanceFile || provenanceFile.blobSha256 !== resolution.ownershipEvidenceHash) {
+        throw new TypeError('Dependency ownership provenance is not bound to certified inventory.');
+      }
+      if (
+        !ownerRepository?.files.some((file) =>
+          file.ownerModuleIds.includes(resolution.ownerModuleId!)
+        )
+      ) {
+        throw new TypeError('Dependency owner module is absent from certified inventory.');
+      }
+    }
+    const resolvedTargets = (resolution.resolvedTargets ?? []).map((target) => {
+      const relativePath = normalizePortableRelativePath(
+        target.relativePath,
+        'dependencyTarget.relativePath'
+      );
+      const file = ownerRepository?.files.find(
+        (candidate) => candidate.relativePath === relativePath
+      );
+      if (
+        !file ||
+        file.repoId !== plan.repoId ||
+        resolution.ownerRepoId !== plan.repoId ||
+        !file.ownerModuleIds.includes(resolution.ownerModuleId ?? '')
+      ) {
+        throw new TypeError('Internal dependency target is not a certified owned inventory file.');
+      }
+      if (target.blobSha256 && target.blobSha256 !== file.blobSha256) {
+        throw new TypeError('Internal dependency target hash does not match certified inventory.');
+      }
+      return { relativePath, blobSha256: file.blobSha256 };
+    });
+    if (resolution.classification === 'internal-resolved' && resolvedTargets.length !== 1) {
+      throw new TypeError('Internal dependency resolution must bind one certified owned target.');
+    }
+    const normalized = {
+      ...resolution,
+      dependencyName: resolution.dependencyName.trim(),
+      importerRepoId: resolution.importerRepoId.trim(),
+      typedReason: resolution.typedReason.trim(),
+      ...(provenancePath ? { ownershipProvenancePath: provenancePath } : {}),
+      ...(resolvedTargets.length > 0 ? { resolvedTargets } : {}),
+    };
+    byIdentity.set(hashCanonicalJson(normalized), normalized);
+  }
+  return [...byIdentity.values()].sort(
+    (left, right) =>
+      left.classification.localeCompare(right.classification) ||
+      left.dependencyName.localeCompare(right.dependencyName) ||
+      left.importerRepoId.localeCompare(right.importerRepoId)
+  );
+}
+
+function emptyDependencyGraphReconciliation() {
+  return {
+    originalExternalHotspotCount: 0,
+    internalResolvedHotspotCount: 0,
+    approvedSiblingHotspotCount: 0,
+    remainingExternalHotspotCount: 0,
+    originalExternalDependencyNames: [],
+    internalResolvedDependencyNames: [],
+    approvedSiblingDependencyNames: [],
+    remainingExternalDependencyNames: [],
+  };
+}
+
+function normalizeDependencyGraphReconciliation(
+  value: NonNullable<ProjectContextRequestOutcomeV1['dependencyGraphReconciliation']>
+): NonNullable<ProjectContextRequestOutcomeV1['dependencyGraphReconciliation']> {
+  return {
+    originalExternalHotspotCount: normalizeNonnegativeCount(
+      value.originalExternalHotspotCount,
+      'originalExternalHotspotCount'
+    ),
+    internalResolvedHotspotCount: normalizeNonnegativeCount(
+      value.internalResolvedHotspotCount,
+      'internalResolvedHotspotCount'
+    ),
+    approvedSiblingHotspotCount: normalizeNonnegativeCount(
+      value.approvedSiblingHotspotCount,
+      'approvedSiblingHotspotCount'
+    ),
+    remainingExternalHotspotCount: normalizeNonnegativeCount(
+      value.remainingExternalHotspotCount,
+      'remainingExternalHotspotCount'
+    ),
+    originalExternalDependencyNames: uniqueStrings(value.originalExternalDependencyNames ?? []),
+    internalResolvedDependencyNames: uniqueStrings(value.internalResolvedDependencyNames ?? []),
+    approvedSiblingDependencyNames: uniqueStrings(value.approvedSiblingDependencyNames ?? []),
+    remainingExternalDependencyNames: uniqueStrings(value.remainingExternalDependencyNames ?? []),
+  };
+}
+
+function normalizeNonnegativeCount(value: number, fieldName: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new TypeError(`${fieldName} must be a non-negative integer.`);
+  }
+  return value;
+}
+
 function isTypedRequestDiagnostic(value: unknown): value is ProjectContextRequestDiagnosticV1 {
   if (!value || typeof value !== 'object') {
     return false;
@@ -1200,6 +1833,13 @@ function throwIfAborted(signal: AbortSignal | undefined): void {
       ? signal.reason
       : new Error('ProjectContext capture aborted.');
   }
+}
+
+function isAbortLike(error: unknown, signal: AbortSignal | undefined): boolean {
+  return (
+    Boolean(signal?.aborted) ||
+    (error instanceof Error && (error.name === 'AbortError' || error.name === 'TimeoutError'))
+  );
 }
 
 function uniqueStrings(values: readonly string[]): string[] {

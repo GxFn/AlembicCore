@@ -5,6 +5,8 @@ import type {
 
 export const CERTIFIED_PROJECT_FACTS_SCHEMA_VERSION = 1 as const;
 export const SOURCE_REVISION_VECTOR_VERSION = 1 as const;
+export const PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION = 1 as const;
+export const PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION = 1 as const;
 export const PROJECT_FACTS_CANONICALIZER_VERSION = 'pcf-canonical-json-v1' as const;
 export const PROJECT_FACTS_READINESS_VALIDATOR_VERSION = 'pcf-readiness-v1' as const;
 
@@ -104,6 +106,97 @@ export type ProjectContextRepositoryRevisionObservation =
     }
   | { kind: 'content' };
 
+export type ProjectContextSnapshotBindingV1 = 'git-tree' | 'working-tree-content';
+
+export interface ProjectContextSnapshotCandidateFileV1 {
+  readonly file: Readonly<ProjectFactsInventoryFileV1>;
+  readonly content: Uint8Array;
+}
+
+export interface ProjectContextSnapshotCandidateV1 {
+  readonly version: typeof PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION;
+  readonly preRevision: Readonly<ProjectContextRepositoryRevisionObservation>;
+  readonly postRevision: Readonly<ProjectContextRepositoryRevisionObservation>;
+  readonly files: readonly ProjectContextSnapshotCandidateFileV1[];
+  readonly eligibleInventoryHash: CanonicalSha256;
+  readonly workingTreeContentHash: CanonicalSha256;
+}
+
+export interface ProjectContextSnapshotVerificationV1 {
+  version: typeof PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION;
+  verified: boolean;
+  binding: ProjectContextSnapshotBindingV1;
+  finalRevision: ProjectContextRepositoryRevisionObservation;
+  eligibleInventoryHash: CanonicalSha256;
+  workingTreeContentHash: CanonicalSha256;
+  treeId?: string;
+  /** Host observed Git clean at the terminal fence but eligible policy includes stable tree-external bytes. */
+  cleanObservationContentPromotion?: true;
+  typedReason: string;
+}
+
+export type ProjectContextDependencyOwnershipSourceV1 =
+  | 'package-name'
+  | 'package-export'
+  | 'package-import'
+  | 'module-alias';
+
+export interface ProjectContextDependencyOwnershipEntryV1 {
+  repoId: string;
+  ownerModuleId: string;
+  ownerPackageName?: string;
+  source: ProjectContextDependencyOwnershipSourceV1;
+  pattern: string;
+  /** Canonical repository-relative targets declared by package import metadata. */
+  targetPatterns?: string[];
+  provenance: {
+    relativePath: string;
+    contentHash: CanonicalSha256;
+  };
+}
+
+export interface ProjectContextDependencyOwnershipV1 {
+  version: typeof PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION;
+  entries: ProjectContextDependencyOwnershipEntryV1[];
+  ownershipHash: CanonicalSha256;
+}
+
+export type ProjectContextDependencyResolutionClassificationV1 =
+  | 'internal-resolved'
+  | 'approved-sibling'
+  | 'expected-external'
+  | 'confirmed-defect';
+
+export interface ProjectContextDependencyResolutionV1 {
+  dependencyName: string;
+  importerRepoId: string;
+  requestKind: ProjectContextRequestKind;
+  classification: ProjectContextDependencyResolutionClassificationV1;
+  typedReason: string;
+  ownerRepoId?: string;
+  ownerModuleId?: string;
+  ownerPackageName?: string;
+  ownershipSource?: ProjectContextDependencyOwnershipSourceV1;
+  matchedOwnershipKey?: string;
+  ownershipEvidenceHash?: CanonicalSha256;
+  ownershipProvenancePath?: string;
+  resolvedTargets?: Array<{
+    relativePath: string;
+    blobSha256?: CanonicalSha256;
+  }>;
+}
+
+export interface ProjectContextDependencyGraphReconciliationV1 {
+  originalExternalHotspotCount: number;
+  internalResolvedHotspotCount: number;
+  approvedSiblingHotspotCount: number;
+  remainingExternalHotspotCount: number;
+  originalExternalDependencyNames?: string[];
+  internalResolvedDependencyNames?: string[];
+  approvedSiblingDependencyNames?: string[];
+  remainingExternalDependencyNames?: string[];
+}
+
 export type ProjectContextRequestApplicability = 'applicable' | 'not-applicable';
 
 export interface ProjectContextRequestAuditPlan {
@@ -157,6 +250,9 @@ export interface ProjectContextRequestExecutionResult {
   continuation?: string;
   sourceRanges?: ProjectContextSourceRangeV1[];
   errors?: ProjectContextRequestDiagnosticV1[];
+  dependencyResolutions?: ProjectContextDependencyResolutionV1[];
+  dependencyObservationCount?: number;
+  dependencyGraphReconciliation?: ProjectContextDependencyGraphReconciliationV1;
 }
 
 export interface ProjectContextRequestOutcomeV1 {
@@ -175,6 +271,10 @@ export interface ProjectContextRequestOutcomeV1 {
   outputHash: CanonicalSha256;
   sourceRanges: ProjectContextSourceRangeV1[];
   errors: ProjectContextRequestDiagnosticV1[];
+  /** Additive V1 ownership evidence; absent on artifacts created before the ownership extension. */
+  dependencyResolutions?: ProjectContextDependencyResolutionV1[];
+  dependencyObservationCount?: number;
+  dependencyGraphReconciliation?: ProjectContextDependencyGraphReconciliationV1;
 }
 
 export interface ProjectContextLegacyEntryAuditRowV1 {
@@ -224,6 +324,17 @@ export interface ProjectContextFoundationHostPorts {
     relativePath: string;
     signal?: AbortSignal;
   }): Promise<Uint8Array>;
+  /**
+   * Versioned terminal snapshot fence. Git observations require this verifier;
+   * older host objects remain structurally compatible but fail closed when they
+   * attempt to certify a Git revision without binding the captured bytes.
+   */
+  verifySnapshot?(input: {
+    repository: ProjectContextFoundationRepositoryInput;
+    policy: ProjectContextInventoryPolicyV1;
+    candidate: ProjectContextSnapshotCandidateV1;
+    signal?: AbortSignal;
+  }): Promise<ProjectContextSnapshotVerificationV1>;
   executeRequest(input: {
     repository: ProjectContextFoundationRepositoryInput;
     plan: ProjectContextRequestAuditPlan;

@@ -20,6 +20,9 @@ export function evaluateCertifiedProjectFactsReadiness(
   } catch (error) {
     errors.push(error instanceof Error ? error.message : String(error));
   }
+  if (artifact.readiness.verdict !== 'passed') {
+    errors.push(...artifact.readiness.errors.map((error) => `Capture readiness failed: ${error}.`));
+  }
   const expectedRepoIds = uniqueStrings(options.expectedRepoIds);
   const vectorRepoIds = artifact.manifest.sourceRevisionVector.entries
     .map((entry) => entry.repoId)
