@@ -13,12 +13,14 @@ import { type DrizzleDB, initDrizzle } from './drizzle/index.js';
 
 const __dirname = import.meta.dirname;
 const PRIVATE_CORPUS_REVOKED_MARKER = '.alembic-private-corpus-revoked-v1.json';
+const ACTIVE_DATABASE_CONNECTIONS_BY_ROOT = new Map<string, Set<DatabaseConnection>>();
 
 export function revokeAlembicDatabaseRoot(
   dataRoot: string,
   evidence: { readonly rootManifestHash: string; readonly initReceiptHash: string }
 ): void {
   const resolvedRoot = path.resolve(dataRoot);
+  const canonicalRoot = canonicalDatabaseRoot(resolvedRoot);
   const markerPath = path.join(resolvedRoot, PRIVATE_CORPUS_REVOKED_MARKER);
   const tempPath = `${markerPath}.tmp-${process.pid}-${Date.now()}`;
   const bytes = Buffer.from(
@@ -42,6 +44,24 @@ export function revokeAlembicDatabaseRoot(
     fs.fsyncSync(directoryDescriptor);
   } finally {
     fs.closeSync(directoryDescriptor);
+  }
+
+  const activeConnections = [...ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.entries()]
+    .filter(([registeredRoot]) => isSameOrDescendantPath(registeredRoot, canonicalRoot))
+    .flatMap(([, connections]) => [...connections]);
+  const failures: unknown[] = [];
+  for (const connection of activeConnections) {
+    try {
+      connection.close();
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    process.stderr.write(
+      `[Alembic] Private database root revocation failed to close ${failures.length}/${activeConnections.length} active connection(s)\n`
+    );
+    throw new Error('ALEMBIC_DATABASE_ROOT_REVOCATION_FAILED', { cause: failures[0] });
   }
 }
 
@@ -148,6 +168,7 @@ export class DatabaseConnection {
   drizzle: DrizzleDB | null;
   /** 可选的 WorkspaceResolver，Ghost 模式下用于重定向 DB 路径 */
   #workspaceResolver: WorkspaceResolver | null;
+  #registeredRoot: string | null = null;
   constructor(
     config: { path: string; verbose?: boolean },
     workspaceResolver?: WorkspaceResolver | null
@@ -235,6 +256,13 @@ export class DatabaseConnection {
 
     // 初始化 Drizzle ORM 包装（与 raw db 共存，操作同一连接）
     this.drizzle = initDrizzle(this.db);
+    this.#registeredRoot = canonicalDatabaseRoot(dataRoot ?? path.dirname(resolvedDbPath));
+    let connections = ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.get(this.#registeredRoot);
+    if (!connections) {
+      connections = new Set();
+      ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.set(this.#registeredRoot, connections);
+    }
+    connections.add(this);
 
     return this.db;
   }
@@ -310,9 +338,19 @@ export class DatabaseConnection {
   /** 关闭数据库连接 */
   close() {
     if (this.db) {
-      this.db.close();
+      if (this.db.open) {
+        this.db.close();
+      }
       this.db = null;
       this.drizzle = null;
+    }
+    if (this.#registeredRoot) {
+      const connections = ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.get(this.#registeredRoot);
+      connections?.delete(this);
+      if (connections?.size === 0) {
+        ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.delete(this.#registeredRoot);
+      }
+      this.#registeredRoot = null;
     }
   }
 
@@ -331,6 +369,16 @@ export class DatabaseConnection {
     }
     return this.drizzle;
   }
+}
+
+function canonicalDatabaseRoot(dataRoot: string): string {
+  const resolvedRoot = path.resolve(dataRoot);
+  return fs.existsSync(resolvedRoot) ? fs.realpathSync.native(resolvedRoot) : resolvedRoot;
+}
+
+function isSameOrDescendantPath(candidate: string, root: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function assertDatabasePathNotRevoked(databasePath: string): void {

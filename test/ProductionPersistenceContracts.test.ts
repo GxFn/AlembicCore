@@ -111,6 +111,60 @@ describe('production persistence contracts', () => {
     second.runtime.close();
   });
 
+  it('terminates every public runtime opened before private revision replacement', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const first = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-public-bypass',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const publicBypass = await openAlembicDatabase(
+      { path: first.handle.resolver.databasePath },
+      { workspaceResolver: first.handle.resolver }
+    );
+    const ordinaryRuntime = await openAlembicDatabase(
+      { path: base.databasePath },
+      { workspaceResolver: base }
+    );
+    const preparedBypassRead = publicBypass.sqlite.prepare('SELECT 1 AS value');
+    const preparedBypassWrite = publicBypass.sqlite.prepare(
+      'CREATE TABLE forbidden_after_revoke (id INTEGER)'
+    );
+    expect(preparedBypassRead.get()).toEqual({ value: 1 });
+
+    const second = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-public-bypass',
+      revisionId: 'revision-2',
+      analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    PrivateCorpusRevisionHandleV1.replace(first.handle, second.handle, `sha256:${'f'.repeat(64)}`);
+
+    expect(() => preparedBypassRead.get()).toThrow();
+    expect(() => preparedBypassWrite.run()).toThrow();
+    expect(() => first.runtime.sqlite.prepare('SELECT 1 AS value').get()).toThrow();
+    await expect(
+      openAlembicDatabase(
+        { path: first.handle.resolver.databasePath },
+        { workspaceResolver: first.handle.resolver }
+      )
+    ).rejects.toThrow('ALEMBIC_DATABASE_ROOT_REVOKED');
+    expect(second.runtime.sqlite.prepare('SELECT 1 AS value').get()).toEqual({ value: 1 });
+    expect(ordinaryRuntime.sqlite.prepare('SELECT 1 AS value').get()).toEqual({ value: 1 });
+    second.runtime.sqlite.exec('CREATE TABLE next_revision_alive (id INTEGER)');
+    ordinaryRuntime.sqlite.exec('CREATE TABLE ordinary_root_alive (id INTEGER)');
+
+    ordinaryRuntime.close();
+    second.runtime.close();
+  });
+
   it('rejects arbitrary or escaping revision coordinates', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
     roots.push(root);
