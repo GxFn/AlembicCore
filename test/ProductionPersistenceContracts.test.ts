@@ -733,19 +733,45 @@ describe('production persistence contracts', () => {
     ).toBe('conflict');
   });
 
+  it('binds tool-neutral serving validation into the serving manifest', () => {
+    const validationA = createServingSnapshotManifestV1(
+      servingSnapshotInput(`sha256:${'a'.repeat(64)}`)
+    );
+    const validationB = createServingSnapshotManifestV1(
+      servingSnapshotInput(`sha256:${'b'.repeat(64)}`)
+    );
+    expect(validationA.servingSnapshotValidationHash).toBe(`sha256:${'a'.repeat(64)}`);
+    expect(validationA.manifestHash).not.toBe(validationB.manifestHash);
+    expect(validationA).not.toHaveProperty('candidateOracleHash');
+
+    const { servingSnapshotValidationHash: _missingValidation, ...missingValidation } =
+      servingSnapshotInput(`sha256:${'a'.repeat(64)}`);
+    expect(() => createServingSnapshotManifestV1(missingValidation as never)).toThrow(
+      'SERVING_SNAPSHOT_FIELDS_INVALID'
+    );
+    expect(() => createServingSnapshotManifestV1(servingSnapshotInput('') as never)).toThrow(
+      'SERVING_SNAPSHOT_FIELDS_INVALID'
+    );
+    expect(() =>
+      createServingSnapshotManifestV1(servingSnapshotInput('sha256:not-canonical') as never)
+    ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
+    expect(() =>
+      createServingSnapshotManifestV1({
+        ...servingSnapshotInput(`sha256:${'a'.repeat(64)}`),
+        candidateOracleHash: `sha256:${'c'.repeat(64)}`,
+      } as never)
+    ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
+
+    const route = publicRoute('2026-07-16T00:00:00.000Z');
+    expect(route.servingSnapshotManifestHash).toBe('sha256:serving');
+    expect(route).not.toHaveProperty('servingSnapshotValidationHash');
+    expect(route).not.toHaveProperty('candidateOracleHash');
+  });
+
   it('rejects unknown or nested private fields at public snapshot and route boundaries', () => {
     expect(() =>
       createServingSnapshotManifestV1({
-        sessionId: 'session-1',
-        snapshotId: 'snapshot-1',
-        candidateDataManifestHash: 'sha256:data',
-        finalCoverageBindingHash: 'sha256:coverage',
-        candidateOracleHash: 'sha256:oracle',
-        vectorGenerationId: 'vector-1',
-        vectorManifestHash: 'sha256:vector',
-        certifiedProjectFactsHash: 'sha256:facts',
-        sourceRevisionVectorHash: 'sha256:source',
-        analysisFixpointHash: 'sha256:fixpoint',
+        ...servingSnapshotInput(`sha256:${'a'.repeat(64)}`),
         privateCorpusRevision: 'revision-private',
       } as never)
     ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
@@ -758,6 +784,21 @@ describe('production persistence contracts', () => {
     ).toThrow('PUBLIC_ROUTE_FIELDS_INVALID');
   });
 });
+
+function servingSnapshotInput(servingSnapshotValidationHash: string) {
+  return {
+    sessionId: 'session-1',
+    snapshotId: 'snapshot-1',
+    candidateDataManifestHash: 'sha256:data',
+    finalCoverageBindingHash: 'sha256:coverage',
+    servingSnapshotValidationHash,
+    vectorGenerationId: 'vector-1',
+    vectorManifestHash: 'sha256:vector',
+    certifiedProjectFactsHash: 'sha256:facts',
+    sourceRevisionVectorHash: 'sha256:source',
+    analysisFixpointHash: 'sha256:fixpoint',
+  };
+}
 
 function publicRoute(committedAt: string): PublicKnowledgeRouteV1 & Record<string, unknown> {
   return {

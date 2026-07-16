@@ -1132,7 +1132,8 @@ export interface ServingSnapshotManifestV1 {
   readonly snapshotId: string;
   readonly candidateDataManifestHash: string;
   readonly finalCoverageBindingHash: string;
-  readonly candidateOracleHash: string;
+  // 只绑定消费者中立的 sealed-bundle validation，不承载 Plugin/MCP oracle 语义。
+  readonly servingSnapshotValidationHash: string;
   readonly vectorGenerationId: string;
   readonly vectorManifestHash: string;
   readonly certifiedProjectFactsHash: string;
@@ -1149,13 +1150,14 @@ export function createServingSnapshotManifestV1(
     SERVING_SNAPSHOT_INPUT_KEYS,
     'SERVING_SNAPSHOT_FIELDS_INVALID'
   );
+  requireSha256(input.servingSnapshotValidationHash, 'SERVING_SNAPSHOT_FIELDS_INVALID');
   const semantic = {
     schemaVersion: 1 as const,
     sessionId: input.sessionId,
     snapshotId: input.snapshotId,
     candidateDataManifestHash: input.candidateDataManifestHash,
     finalCoverageBindingHash: input.finalCoverageBindingHash,
-    candidateOracleHash: input.candidateOracleHash,
+    servingSnapshotValidationHash: input.servingSnapshotValidationHash,
     vectorGenerationId: input.vectorGenerationId,
     vectorManifestHash: input.vectorManifestHash,
     certifiedProjectFactsHash: input.certifiedProjectFactsHash,
@@ -1623,7 +1625,7 @@ const SERVING_SNAPSHOT_INPUT_KEYS = new Set<string>([
   'snapshotId',
   'candidateDataManifestHash',
   'finalCoverageBindingHash',
-  'candidateOracleHash',
+  'servingSnapshotValidationHash',
   'vectorGenerationId',
   'vectorManifestHash',
   'certifiedProjectFactsHash',
