@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  isAlembicDatabaseRootRevoked,
   readAlembicMigrationBundleManifest,
   revokeAlembicDatabaseRoot,
 } from '../../infrastructure/database/DatabaseConnection.js';
@@ -15,7 +16,10 @@ import {
   hashBytes,
   hashCanonicalJson,
 } from '../project-context/foundation/canonical.js';
-import { createPrivateCorpusRevisionResolverInternal } from './PrivateCorpusRevisionResolver.js';
+import {
+  createPrivateCorpusRevisionResolverInternal,
+  resolveExistingPrivateCorpusRevisionInternal,
+} from './PrivateCorpusRevisionResolver.js';
 
 export interface PrivateCorpusRevisionInitReceiptV1 {
   readonly schemaVersion: 1;
@@ -158,6 +162,11 @@ export interface InitializedPrivateCorpusRevisionV1 {
   readonly runtime: AlembicDatabaseRuntime;
 }
 
+export interface RehydratedPrivateCorpusRevisionV1 {
+  readonly handle: PrivateCorpusRevisionHandleV1;
+  readonly runtime: AlembicDatabaseRuntime;
+}
+
 export async function initializePrivateCorpusRevisionV1(
   baseResolver: WorkspaceResolver,
   input: InitializePrivateCorpusRevisionInputV1
@@ -276,10 +285,124 @@ export async function initializePrivateCorpusRevisionV1(
         candidateFileCount: 0 as const,
       },
     };
-    const initReceipt = {
+    const initReceipt = freezeDeep({
       ...semantic,
       initReceiptHash: hashCanonicalJson(semantic),
-    } satisfies PrivateCorpusRevisionInitReceiptV1;
+    } satisfies PrivateCorpusRevisionInitReceiptV1);
+    return {
+      handle: new PrivateCorpusRevisionHandleV1(
+        resolver,
+        initReceipt,
+        runtime,
+        PRIVATE_REVISION_INIT_AUTHORITY
+      ),
+      runtime,
+    };
+  } catch (error) {
+    runtime?.close();
+    throw error;
+  }
+}
+
+/**
+ * Reopens one already initialized private revision without creating or migrating it.
+ * The sealed init receipt is the only lineage input; all current filesystem,
+ * migration-bundle, ledger, and SQLite facts must still match it exactly.
+ */
+export async function rehydratePrivateCorpusRevisionV1(
+  baseResolver: WorkspaceResolver,
+  sealedInitReceipt: PrivateCorpusRevisionInitReceiptV1
+): Promise<RehydratedPrivateCorpusRevisionV1> {
+  try {
+    return await rehydratePrivateCorpusRevisionInternal(baseResolver, sealedInitReceipt);
+  } catch (error) {
+    const code = error instanceof Error ? error.message : 'UNKNOWN_REHYDRATE_FAILURE';
+    process.stderr.write(
+      `[Alembic] Private revision rehydrate rejected (${code}); no revision root was created or migrated\n`
+    );
+    throw error;
+  }
+}
+
+async function rehydratePrivateCorpusRevisionInternal(
+  baseResolver: WorkspaceResolver,
+  sealedInitReceipt: PrivateCorpusRevisionInitReceiptV1
+): Promise<RehydratedPrivateCorpusRevisionV1> {
+  if (!baseResolver.projectId || !baseResolver.projectScope?.projectScopeId) {
+    throw new Error('PRIVATE_CORPUS_REVISION_PROJECT_SCOPE_IDENTITY_REQUIRED');
+  }
+  const initReceipt = validatePrivateCorpusRevisionInitReceiptV1(sealedInitReceipt);
+  if (
+    initReceipt.projectRootHash !== hashPath(baseResolver.projectRoot) ||
+    initReceipt.projectId !== baseResolver.projectId ||
+    initReceipt.projectScopeId !== baseResolver.projectScope.projectScopeId
+  ) {
+    throw new Error('PRIVATE_CORPUS_REVISION_PROJECT_SCOPE_MISMATCH');
+  }
+
+  const resolver = resolveExistingPrivateCorpusRevisionInternal(baseResolver, {
+    schemaVersion: 1,
+    runId: initReceipt.runId,
+    revisionId: initReceipt.revisionId,
+  });
+  const leafRealpath = assertExistingConfinedRevisionLeaf(baseResolver.dataRoot, resolver.dataRoot);
+  const parentRealpath = fs.realpathSync(path.dirname(resolver.dataRoot));
+  if (
+    initReceipt.dataRootHash !== hashPath(resolver.dataRoot) ||
+    initReceipt.parentRealpathHash !== hashPath(parentRealpath) ||
+    initReceipt.leafRealpathHash !== hashPath(leafRealpath)
+  ) {
+    throw new Error('PRIVATE_CORPUS_REVISION_INIT_ROOT_MISMATCH');
+  }
+  assertExistingConfinedDatabase(resolver.dataRoot, resolver.databasePath, leafRealpath);
+
+  const migrationArtifacts = readAlembicMigrationBundleManifest();
+  const migrationLedgerSemanticHash = hashCanonicalJson(migrationArtifacts);
+  if (
+    migrationLedgerSemanticHash !== initReceipt.migrationLedgerSemanticHash ||
+    canonicalJsonStringify(migrationArtifacts) !==
+      canonicalJsonStringify(initReceipt.migrationArtifacts)
+  ) {
+    throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_BUNDLE_MISMATCH');
+  }
+
+  let runtime: AlembicDatabaseRuntime | null = null;
+  try {
+    runtime = await openAlembicDatabase(
+      { path: resolver.databasePath },
+      { workspaceResolver: resolver, runMigrations: false }
+    );
+    const sqlite = runtime.sqlite;
+    const migrationLedgerExists = sqlite
+      .prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='schema_migrations'")
+      .get();
+    if (!migrationLedgerExists) {
+      throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_LEDGER_MISSING');
+    }
+    const migrationVersions = (
+      sqlite.prepare('SELECT version FROM schema_migrations ORDER BY version').all() as Array<{
+        version: string;
+      }>
+    ).map((row) => row.version);
+    if (
+      canonicalJsonStringify(migrationVersions) !==
+        canonicalJsonStringify(initReceipt.migrationVersions) ||
+      canonicalJsonStringify(migrationVersions) !==
+        canonicalJsonStringify(migrationArtifacts.map((row) => row.version))
+    ) {
+      throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_SET_MISMATCH');
+    }
+    if (!migrationVersions.includes('017_recipe_retrieval_profile')) {
+      throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_017_MISSING');
+    }
+    if (sqlite.pragma('integrity_check', { simple: true }) !== 'ok') {
+      throw new Error('PRIVATE_CORPUS_REVISION_SQLITE_INTEGRITY_FAILED');
+    }
+    const foreignKeys = sqlite.pragma('foreign_key_check') as unknown[];
+    if (foreignKeys.length !== initReceipt.foreignKeyViolationCount) {
+      throw new Error('PRIVATE_CORPUS_REVISION_FOREIGN_KEY_FAILED');
+    }
+
     return {
       handle: new PrivateCorpusRevisionHandleV1(
         resolver,
@@ -296,7 +419,10 @@ export async function initializePrivateCorpusRevisionV1(
 }
 
 export function assertPrivateCorpusRevisionHandleV1(handle: PrivateCorpusRevisionHandleV1): void {
-  if (!ACTIVE_REVISION_HANDLES.has(handle)) {
+  if (
+    !ACTIVE_REVISION_HANDLES.has(handle) ||
+    isAlembicDatabaseRootRevoked(handle.resolver.dataRoot)
+  ) {
     throw new Error('PRIVATE_CORPUS_REVISION_HANDLE_INACTIVE');
   }
 }
@@ -1185,6 +1311,215 @@ function createConfinedRevisionLeaf(
     }
   }
   return fs.realpathSync(resolvedLeaf);
+}
+
+function assertExistingConfinedRevisionLeaf(approvedRoot: string, leaf: string): string {
+  const resolvedRoot = path.resolve(approvedRoot);
+  const resolvedLeaf = path.resolve(leaf);
+  const rootStat = fs.lstatSync(resolvedRoot);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) {
+    throw new Error('PRIVATE_CORPUS_REVISION_CONFINEMENT_FAILED');
+  }
+  const approvedRootRealpath = fs.realpathSync(resolvedRoot);
+  const relativeLeaf = path.relative(resolvedRoot, resolvedLeaf);
+  if (!relativeLeaf || relativeLeaf.startsWith('..') || path.isAbsolute(relativeLeaf)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_CONFINEMENT_FAILED');
+  }
+  let current = resolvedRoot;
+  for (const segment of relativeLeaf.split(path.sep)) {
+    current = path.join(current, segment);
+    if (!fs.existsSync(current)) {
+      throw new Error('PRIVATE_CORPUS_REVISION_LEAF_MISSING');
+    }
+    const stat = fs.lstatSync(current);
+    const realpath = fs.realpathSync(current);
+    if (
+      !stat.isDirectory() ||
+      stat.isSymbolicLink() ||
+      !realpath.startsWith(`${approvedRootRealpath}${path.sep}`)
+    ) {
+      throw new Error('PRIVATE_CORPUS_REVISION_CONFINEMENT_FAILED');
+    }
+  }
+  return fs.realpathSync(resolvedLeaf);
+}
+
+function assertExistingConfinedDatabase(
+  revisionRoot: string,
+  databasePath: string,
+  revisionRootRealpath: string
+): void {
+  const relativeDatabase = path.relative(path.resolve(revisionRoot), path.resolve(databasePath));
+  if (!relativeDatabase || relativeDatabase.startsWith('..') || path.isAbsolute(relativeDatabase)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_DATABASE_CONFINEMENT_FAILED');
+  }
+  let current = path.resolve(revisionRoot);
+  const segments = relativeDatabase.split(path.sep);
+  for (let index = 0; index < segments.length; index += 1) {
+    current = path.join(current, segments[index] ?? '');
+    if (!fs.existsSync(current)) {
+      throw new Error('PRIVATE_CORPUS_REVISION_DATABASE_MISSING');
+    }
+    const stat = fs.lstatSync(current);
+    const realpath = fs.realpathSync(current);
+    const databaseFile = index === segments.length - 1;
+    if (
+      stat.isSymbolicLink() ||
+      (databaseFile ? !stat.isFile() : !stat.isDirectory()) ||
+      !realpath.startsWith(`${revisionRootRealpath}${path.sep}`)
+    ) {
+      throw new Error('PRIVATE_CORPUS_REVISION_DATABASE_CONFINEMENT_FAILED');
+    }
+  }
+}
+
+function validatePrivateCorpusRevisionInitReceiptV1(
+  receipt: PrivateCorpusRevisionInitReceiptV1
+): PrivateCorpusRevisionInitReceiptV1 {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_INVALID');
+  }
+  assertExactKeys(
+    receipt as unknown as Record<string, unknown>,
+    new Set([
+      'schemaVersion',
+      'runId',
+      'revisionId',
+      'analysisFixpointHash',
+      'projectRootHash',
+      'projectId',
+      'projectScopeId',
+      'dataRootHash',
+      'parentRealpathHash',
+      'leafRealpathHash',
+      'noSymlink',
+      'migrationVersions',
+      'migrationArtifacts',
+      'migrationLedgerSemanticHash',
+      'requiredMigration017Present',
+      'sqliteIntegrity',
+      'foreignKeyViolationCount',
+      'configReceiptHash',
+      'credentialLocationSymbol',
+      'blankState',
+      'initReceiptHash',
+    ]),
+    'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_FIELDS_INVALID'
+  );
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.noSymlink !== true ||
+    receipt.requiredMigration017Present !== true ||
+    receipt.sqliteIntegrity !== 'ok' ||
+    receipt.foreignKeyViolationCount !== 0
+  ) {
+    throw new Error('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_INVALID');
+  }
+  for (const value of [
+    receipt.analysisFixpointHash,
+    receipt.projectRootHash,
+    receipt.dataRootHash,
+    receipt.parentRealpathHash,
+    receipt.leafRealpathHash,
+    receipt.migrationLedgerSemanticHash,
+    receipt.configReceiptHash,
+    receipt.initReceiptHash,
+  ]) {
+    requireSha256(value, 'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_INVALID');
+  }
+  if (!/^(env|keychain|config-ref):[A-Za-z0-9_.-]+$/.test(receipt.credentialLocationSymbol)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_CREDENTIAL_LOCATION_INVALID');
+  }
+  for (const value of [
+    receipt.runId,
+    receipt.revisionId,
+    receipt.projectId,
+    receipt.projectScopeId,
+  ]) {
+    requireText(value, 'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_IDENTITY_INVALID');
+  }
+  if (!Array.isArray(receipt.migrationVersions) || !Array.isArray(receipt.migrationArtifacts)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_RECEIPT_INVALID');
+  }
+  const migrationVersions = [...receipt.migrationVersions];
+  const migrationArtifacts = receipt.migrationArtifacts.map((artifact) => {
+    if (!artifact || typeof artifact !== 'object' || Array.isArray(artifact)) {
+      throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_RECEIPT_INVALID');
+    }
+    assertExactKeys(
+      artifact as unknown as Record<string, unknown>,
+      new Set(['version', 'migrationArtifactSha256']),
+      'PRIVATE_CORPUS_REVISION_MIGRATION_RECEIPT_INVALID'
+    );
+    requireText(artifact.version, 'PRIVATE_CORPUS_REVISION_MIGRATION_RECEIPT_INVALID');
+    requireSha256(
+      artifact.migrationArtifactSha256,
+      'PRIVATE_CORPUS_REVISION_MIGRATION_RECEIPT_INVALID'
+    );
+    return { ...artifact };
+  });
+  if (
+    new Set(migrationVersions).size !== migrationVersions.length ||
+    canonicalJsonStringify([...migrationVersions].sort()) !==
+      canonicalJsonStringify(migrationVersions) ||
+    canonicalJsonStringify(migrationArtifacts.map((row) => row.version)) !==
+      canonicalJsonStringify(migrationVersions)
+  ) {
+    throw new Error('PRIVATE_CORPUS_REVISION_MIGRATION_RECEIPT_INVALID');
+  }
+  if (!receipt.blankState || typeof receipt.blankState !== 'object') {
+    throw new Error('PRIVATE_CORPUS_REVISION_BLANK_RECEIPT_INVALID');
+  }
+  assertExactKeys(
+    receipt.blankState as unknown as Record<string, unknown>,
+    new Set([
+      'knowledgeEntries',
+      'sourceRefs',
+      'coverageRows',
+      'vectorRoutePresent',
+      'publicationRoutePresent',
+      'recipeFileCount',
+      'candidateFileCount',
+    ]),
+    'PRIVATE_CORPUS_REVISION_BLANK_RECEIPT_INVALID'
+  );
+  if (Object.values(receipt.blankState).some((value) => value !== 0 && value !== false)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_BLANK_RECEIPT_INVALID');
+  }
+  const semantic = {
+    schemaVersion: 1 as const,
+    runId: receipt.runId,
+    revisionId: receipt.revisionId,
+    analysisFixpointHash: receipt.analysisFixpointHash,
+    projectRootHash: receipt.projectRootHash,
+    projectId: receipt.projectId,
+    projectScopeId: receipt.projectScopeId,
+    dataRootHash: receipt.dataRootHash,
+    parentRealpathHash: receipt.parentRealpathHash,
+    leafRealpathHash: receipt.leafRealpathHash,
+    noSymlink: true as const,
+    migrationVersions,
+    migrationArtifacts,
+    migrationLedgerSemanticHash: receipt.migrationLedgerSemanticHash,
+    requiredMigration017Present: true as const,
+    sqliteIntegrity: 'ok' as const,
+    foreignKeyViolationCount: 0 as const,
+    configReceiptHash: receipt.configReceiptHash,
+    credentialLocationSymbol: receipt.credentialLocationSymbol,
+    blankState: {
+      knowledgeEntries: 0 as const,
+      sourceRefs: 0 as const,
+      coverageRows: 0 as const,
+      vectorRoutePresent: false as const,
+      publicationRoutePresent: false as const,
+      recipeFileCount: 0 as const,
+      candidateFileCount: 0 as const,
+    },
+  };
+  if (hashCanonicalJson(semantic) !== receipt.initReceiptHash) {
+    throw new Error('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH');
+  }
+  return freezeDeep({ ...semantic, initReceiptHash: receipt.initReceiptHash });
 }
 
 function countRows(sqlite: AlembicDatabaseRuntime['sqlite'], table: string): number {

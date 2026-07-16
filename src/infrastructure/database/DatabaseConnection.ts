@@ -15,6 +15,21 @@ const __dirname = import.meta.dirname;
 const PRIVATE_CORPUS_REVOKED_MARKER = '.alembic-private-corpus-revoked-v1.json';
 const ACTIVE_DATABASE_CONNECTIONS_BY_ROOT = new Map<string, Set<DatabaseConnection>>();
 
+/** Internal durable-root authority check used by private revision handles. */
+export function isAlembicDatabaseRootRevoked(dataRoot: string): boolean {
+  let cursor = path.resolve(dataRoot);
+  while (true) {
+    if (fs.existsSync(path.join(cursor, PRIVATE_CORPUS_REVOKED_MARKER))) {
+      return true;
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      return false;
+    }
+    cursor = parent;
+  }
+}
+
 export function revokeAlembicDatabaseRoot(
   dataRoot: string,
   evidence: { readonly rootManifestHash: string; readonly initReceiptHash: string }
@@ -397,16 +412,8 @@ function isSameOrDescendantPath(candidate: string, root: string): boolean {
 }
 
 function assertDatabasePathNotRevoked(databasePath: string): void {
-  let cursor = path.dirname(path.resolve(databasePath));
-  while (true) {
-    if (fs.existsSync(path.join(cursor, PRIVATE_CORPUS_REVOKED_MARKER))) {
-      throw new Error('ALEMBIC_DATABASE_ROOT_REVOKED');
-    }
-    const parent = path.dirname(cursor);
-    if (parent === cursor) {
-      return;
-    }
-    cursor = parent;
+  if (isAlembicDatabaseRootRevoked(path.dirname(databasePath))) {
+    throw new Error('ALEMBIC_DATABASE_ROOT_REVOKED');
   }
 }
 

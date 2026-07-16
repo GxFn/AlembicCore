@@ -6,6 +6,8 @@ export {
   openPrivateCorpusRevisionDatabaseV1,
   PrivateCorpusRevisionHandleV1,
   type PrivateCorpusRevisionInitReceiptV1,
+  type RehydratedPrivateCorpusRevisionV1,
+  rehydratePrivateCorpusRevisionV1,
 } from './service/production/ProductionPersistenceContracts.js';
 export {
   type AlembicFolderNames,

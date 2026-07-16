@@ -10,6 +10,29 @@ export function createPrivateCorpusRevisionResolverInternal(
   base: WorkspaceResolver,
   coordinates: PrivateCorpusRevisionCoordinatesV1
 ): WorkspaceResolver {
+  const resolver = resolvePrivateCorpusRevisionResolver(base, coordinates);
+  if (fs.existsSync(resolver.dataRoot)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_LEAF_ALREADY_EXISTS');
+  }
+  return resolver;
+}
+
+/** Strict-production rehydrate detail; resolves one existing leaf without creating it. */
+export function resolveExistingPrivateCorpusRevisionInternal(
+  base: WorkspaceResolver,
+  coordinates: PrivateCorpusRevisionCoordinatesV1
+): WorkspaceResolver {
+  const resolver = resolvePrivateCorpusRevisionResolver(base, coordinates);
+  if (!fs.existsSync(resolver.dataRoot)) {
+    throw new Error('PRIVATE_CORPUS_REVISION_LEAF_MISSING');
+  }
+  return resolver;
+}
+
+function resolvePrivateCorpusRevisionResolver(
+  base: WorkspaceResolver,
+  coordinates: PrivateCorpusRevisionCoordinatesV1
+): WorkspaceResolver {
   const runId = validatePrivateRevisionSegment(coordinates.runId, 'runId');
   const revisionId = validatePrivateRevisionSegment(coordinates.revisionId, 'revisionId');
   const dataRoot = path.join(
@@ -25,9 +48,6 @@ export function createPrivateCorpusRevisionResolverInternal(
   const resolved = path.resolve(dataRoot);
   if (!resolved.startsWith(`${confinedParent}${path.sep}`)) {
     throw new Error('PRIVATE_CORPUS_REVISION_PATH_ESCAPE');
-  }
-  if (fs.existsSync(resolved)) {
-    throw new Error('PRIVATE_CORPUS_REVISION_LEAF_ALREADY_EXISTS');
   }
   const resolver = Object.create(WorkspaceResolver.prototype) as WorkspaceResolver;
   Object.defineProperties(resolver, {

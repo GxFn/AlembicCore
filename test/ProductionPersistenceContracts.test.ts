@@ -24,12 +24,15 @@ import {
   STRICT_G1_HARD_AXES_V1,
   validateSerialAdmissionLedgerV1,
 } from '../src/knowledge.js';
+import { createAlembicRepositories } from '../src/repositories.js';
 import { hashCanonicalJson } from '../src/service/project-context/foundation/canonical.js';
 import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 import {
   assertPrivateCorpusRevisionHandleV1,
   initializePrivateCorpusRevisionV1,
   PrivateCorpusRevisionHandleV1,
+  type PrivateCorpusRevisionInitReceiptV1,
+  rehydratePrivateCorpusRevisionV1,
   WorkspaceResolver,
 } from '../src/workspace.js';
 
@@ -44,6 +47,187 @@ afterEach(() => {
 });
 
 describe('production persistence contracts', () => {
+  it('rehydrates an initialized private revision through the public workspace API', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const initialized = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-rehydrate',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const repositories = createAlembicRepositories(initialized.runtime.connection);
+    await repositories.sessionRepository.create({
+      id: 'durable-session',
+      scope: 'strict-run',
+      scopeId: 'run-rehydrate',
+      context: { durableStage: 'PERSIST_PREPARED' },
+      metadata: { revisionId: 'revision-1' },
+      actor: 'alembic-main',
+      createdAt: 1,
+    });
+    const expectedDataRoot = initialized.handle.resolver.dataRoot;
+    const sealedReceipt = JSON.parse(
+      JSON.stringify(initialized.handle.initReceipt)
+    ) as typeof initialized.handle.initReceipt;
+    initialized.runtime.close();
+
+    const rehydrated = await rehydratePrivateCorpusRevisionV1(base, sealedReceipt);
+    expect(rehydrated.handle.resolver.dataRoot).toBe(expectedDataRoot);
+    expect(rehydrated.handle.initReceipt).toEqual(sealedReceipt);
+    const reopenedRepositories = createAlembicRepositories(rehydrated.runtime.connection);
+    await expect(
+      reopenedRepositories.sessionRepository.findById('durable-session')
+    ).resolves.toMatchObject({
+      id: 'durable-session',
+      context: { durableStage: 'PERSIST_PREPARED' },
+      metadata: { revisionId: 'revision-1' },
+    });
+    const next = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-rehydrate',
+      revisionId: 'revision-2',
+      analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    PrivateCorpusRevisionHandleV1.replace(
+      rehydrated.handle,
+      next.handle,
+      `sha256:${'f'.repeat(64)}`
+    );
+    expect(() => assertPrivateCorpusRevisionHandleV1(initialized.handle)).toThrow(
+      'PRIVATE_CORPUS_REVISION_HANDLE_INACTIVE'
+    );
+    expect(() => rehydrated.runtime.sqlite.prepare('SELECT 1').get()).toThrow();
+    expect(next.runtime.sqlite.prepare('SELECT 1 AS value').get()).toEqual({ value: 1 });
+    next.runtime.close();
+  });
+
+  it('fails closed on tampered init receipts and mismatched project scope', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const initialized = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-rehydrate-negative',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const sealedReceipt = cloneReceipt(initialized.handle.initReceipt);
+    initialized.runtime.close();
+
+    await expect(rehydratePrivateCorpusRevisionV1(base, undefined as never)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_INVALID'
+    );
+
+    const tamperedConfig = cloneReceipt(sealedReceipt) as unknown as {
+      configReceiptHash: string;
+    };
+    tamperedConfig.configReceiptHash = `sha256:${'d'.repeat(64)}`;
+    await expect(rehydratePrivateCorpusRevisionV1(base, tamperedConfig as never)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH'
+    );
+
+    const tamperedScope = cloneReceipt(sealedReceipt) as unknown as { projectScopeId: string };
+    tamperedScope.projectScopeId = 'scope-tampered';
+    await expect(rehydratePrivateCorpusRevisionV1(base, tamperedScope as never)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH'
+    );
+
+    const tamperedMigration = cloneReceipt(sealedReceipt) as unknown as {
+      migrationArtifacts: Array<{ migrationArtifactSha256: string }>;
+    };
+    const firstArtifact = tamperedMigration.migrationArtifacts[0];
+    if (!firstArtifact) {
+      throw new Error('Expected at least one migration artifact.');
+    }
+    firstArtifact.migrationArtifactSha256 = `sha256:${'e'.repeat(64)}`;
+    await expect(
+      rehydratePrivateCorpusRevisionV1(base, tamperedMigration as never)
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH');
+
+    const wrongScopeBase = privateScopeResolver(root, {
+      projectId: 'project-private-corpus-other',
+      projectScopeId: 'scope-private-corpus-other',
+    });
+    await expect(rehydratePrivateCorpusRevisionV1(wrongScopeBase, sealedReceipt)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_PROJECT_SCOPE_MISMATCH'
+    );
+  });
+
+  it('fails closed when an initialized revision is missing or symlinked', async () => {
+    const missingRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    const symlinkRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-outside-'));
+    roots.push(missingRoot, symlinkRoot, outside);
+
+    const missingBase = privateScopeResolver(missingRoot);
+    const missing = await initializePrivateCorpusRevisionV1(missingBase, {
+      runId: 'run-missing',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const missingReceipt = cloneReceipt(missing.handle.initReceipt);
+    const missingLeaf = missing.handle.resolver.dataRoot;
+    missing.runtime.close();
+    fs.rmSync(missingLeaf, { recursive: true });
+    await expect(rehydratePrivateCorpusRevisionV1(missingBase, missingReceipt)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_LEAF_MISSING'
+    );
+    expect(fs.existsSync(missingLeaf)).toBe(false);
+
+    const symlinkBase = privateScopeResolver(symlinkRoot);
+    const symlinked = await initializePrivateCorpusRevisionV1(symlinkBase, {
+      runId: 'run-symlink',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const symlinkReceipt = cloneReceipt(symlinked.handle.initReceipt);
+    const symlinkLeaf = symlinked.handle.resolver.dataRoot;
+    const movedLeaf = path.join(outside, 'revision-1');
+    symlinked.runtime.close();
+    fs.renameSync(symlinkLeaf, movedLeaf);
+    fs.symlinkSync(movedLeaf, symlinkLeaf, 'dir');
+    await expect(rehydratePrivateCorpusRevisionV1(symlinkBase, symlinkReceipt)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_CONFINEMENT_FAILED'
+    );
+  });
+
+  it('fails closed when the existing database migration ledger drifts', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const initialized = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-migration-drift',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const sealedReceipt = cloneReceipt(initialized.handle.initReceipt);
+    initialized.runtime.sqlite
+      .prepare('DELETE FROM schema_migrations WHERE version = ?')
+      .run('017_recipe_retrieval_profile');
+    initialized.runtime.close();
+
+    await expect(rehydratePrivateCorpusRevisionV1(base, sealedReceipt)).rejects.toThrow(
+      'PRIVATE_CORPUS_REVISION_MIGRATION_SET_MISMATCH'
+    );
+  });
+
   it('allocates each private revision under a fixed absent-before-create namespace and revokes the old handle', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
     roots.push(root);
@@ -61,6 +245,8 @@ describe('production persistence contracts', () => {
       path.join('.asd', 'context', 'recipe-runs', 'run-1', 'corpora', 'revision-1')
     );
     expect(first.handle.initReceipt.requiredMigration017Present).toBe(true);
+    expect(Object.isFrozen(first.handle.initReceipt)).toBe(true);
+    expect(Object.isFrozen(first.handle.initReceipt.migrationArtifacts)).toBe(true);
     expect(
       first.handle.initReceipt.migrationArtifacts.some((row) => row.version.startsWith('017'))
     ).toBe(true);
@@ -107,6 +293,9 @@ describe('production persistence contracts', () => {
         { path: first.handle.resolver.databasePath },
         { workspaceResolver: first.handle.resolver }
       )
+    ).rejects.toThrow('ALEMBIC_DATABASE_ROOT_REVOKED');
+    await expect(
+      rehydratePrivateCorpusRevisionV1(base, cloneReceipt(first.handle.initReceipt))
     ).rejects.toThrow('ALEMBIC_DATABASE_ROOT_REVOKED');
     expect(first.handle.sealedRootManifestHash).toBe(sealedRootManifestHash);
     expect(() => second.handle.assertResolver(first.handle.resolver)).toThrow(
@@ -611,13 +800,25 @@ function candidateAttempt(
   };
 }
 
-function privateScopeResolver(root: string): WorkspaceResolver {
+function cloneReceipt(
+  receipt: PrivateCorpusRevisionInitReceiptV1
+): PrivateCorpusRevisionInitReceiptV1 {
+  return JSON.parse(JSON.stringify(receipt)) as PrivateCorpusRevisionInitReceiptV1;
+}
+
+function privateScopeResolver(
+  root: string,
+  identity: {
+    projectId?: string;
+    projectScopeId?: string;
+  } = {}
+): WorkspaceResolver {
   const folderId = 'folder-private-corpus';
   const projectScope = createProjectDescriptor({
     controlRoot: path.dirname(root),
     dataRoot: root,
-    projectId: 'project-private-corpus',
-    projectScopeId: 'scope-private-corpus',
+    projectId: identity.projectId ?? 'project-private-corpus',
+    projectScopeId: identity.projectScopeId ?? 'scope-private-corpus',
     currentFolderId: folderId,
     folders: [{ id: folderId, path: root }],
   });
