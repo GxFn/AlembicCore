@@ -18,6 +18,7 @@ import {
   createServingSnapshotManifestV1,
   createStrictG1ReceiptV1,
   createStrictPersistenceReceiptV1,
+  createStrictPublicationMarkerV1,
   type PublicKnowledgeRouteV1,
   preparePublicKnowledgeRouteV1,
   prepareRecipePersistenceV1,
@@ -733,6 +734,89 @@ describe('production persistence contracts', () => {
     ).toBe('conflict');
   });
 
+  it('creates an exact consumer-neutral strict publication marker', () => {
+    const marker = createStrictPublicationMarkerV1(
+      strictPublicationMarkerInput(`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`)
+    );
+    expect(marker).toMatchObject({
+      schemaVersion: 1,
+      mode: 'strict-v1',
+      routeSchemaVersion: 1,
+      projectIdentityHash: `sha256:${'a'.repeat(64)}`,
+      migrationBundleHash: `sha256:${'b'.repeat(64)}`,
+    });
+    expect(marker.markerHash).toBe(
+      hashCanonicalJson({
+        schemaVersion: 1,
+        mode: 'strict-v1',
+        routeSchemaVersion: 1,
+        projectIdentityHash: `sha256:${'a'.repeat(64)}`,
+        migrationBundleHash: `sha256:${'b'.repeat(64)}`,
+      })
+    );
+    expect(Object.isFrozen(marker)).toBe(true);
+    expect(
+      createStrictPublicationMarkerV1(
+        strictPublicationMarkerInput(`sha256:${'c'.repeat(64)}`, `sha256:${'b'.repeat(64)}`)
+      ).markerHash
+    ).not.toBe(marker.markerHash);
+    expect(
+      createStrictPublicationMarkerV1(
+        strictPublicationMarkerInput(`sha256:${'a'.repeat(64)}`, `sha256:${'d'.repeat(64)}`)
+      ).markerHash
+    ).not.toBe(marker.markerHash);
+
+    const validInput = strictPublicationMarkerInput(
+      `sha256:${'a'.repeat(64)}`,
+      `sha256:${'b'.repeat(64)}`
+    );
+    for (const key of Object.keys(validInput)) {
+      const missingField = { ...validInput } as Record<string, unknown>;
+      delete missingField[key];
+      expect(() => createStrictPublicationMarkerV1(missingField as never)).toThrow(
+        'STRICT_PUBLICATION_MARKER_FIELDS_INVALID'
+      );
+    }
+    expect(() =>
+      createStrictPublicationMarkerV1({
+        ...validInput,
+        dataRoot: '/tmp/leak',
+      } as never)
+    ).toThrow('STRICT_PUBLICATION_MARKER_FIELDS_INVALID');
+    expect(() =>
+      createStrictPublicationMarkerV1({
+        projectId: 'project-old',
+        projectScopeId: 'scope-old',
+        strictConfigReceiptHash: `sha256:${'a'.repeat(64)}`,
+        publicationModeVersion: 'strict-v1',
+      } as never)
+    ).toThrow('STRICT_PUBLICATION_MARKER_FIELDS_INVALID');
+
+    for (const invalid of [
+      strictPublicationMarkerInput('', `sha256:${'b'.repeat(64)}`),
+      strictPublicationMarkerInput(`sha256:${'a'.repeat(64)}`, ''),
+      strictPublicationMarkerInput('sha256:not-canonical', `sha256:${'b'.repeat(64)}`),
+      strictPublicationMarkerInput(`sha256:${'a'.repeat(64)}`, 'sha256:not-canonical'),
+      strictPublicationMarkerInput(`SHA256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`),
+      {
+        ...strictPublicationMarkerInput(`sha256:${'a'.repeat(64)}`, `sha256:${'b'.repeat(64)}`),
+        mode: 'legacy',
+      },
+      {
+        ...validInput,
+        routeSchemaVersion: 0,
+      },
+      {
+        ...validInput,
+        routeSchemaVersion: 2,
+      },
+    ]) {
+      expect(() => createStrictPublicationMarkerV1(invalid as never)).toThrow(
+        'STRICT_PUBLICATION_MARKER_FIELDS_INVALID'
+      );
+    }
+  });
+
   it('binds tool-neutral serving validation into the serving manifest', () => {
     const validationA = createServingSnapshotManifestV1(
       servingSnapshotInput(`sha256:${'a'.repeat(64)}`)
@@ -784,6 +868,15 @@ describe('production persistence contracts', () => {
     ).toThrow('PUBLIC_ROUTE_FIELDS_INVALID');
   });
 });
+
+function strictPublicationMarkerInput(projectIdentityHash: string, migrationBundleHash: string) {
+  return {
+    mode: 'strict-v1' as const,
+    routeSchemaVersion: 1 as const,
+    projectIdentityHash,
+    migrationBundleHash,
+  };
+}
 
 function servingSnapshotInput(servingSnapshotValidationHash: string) {
   return {

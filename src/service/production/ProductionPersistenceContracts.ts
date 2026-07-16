@@ -1109,20 +1109,34 @@ export function createFinalCoverageBindingReceiptV1(input: {
 
 export interface StrictPublicationMarkerV1 {
   readonly schemaVersion: 1;
-  readonly projectId: string;
-  readonly projectScopeId: string;
-  readonly strictConfigReceiptHash: string;
-  readonly publicationModeVersion: string;
+  readonly mode: 'strict-v1';
+  readonly routeSchemaVersion: 1;
+  readonly projectIdentityHash: string;
+  readonly migrationBundleHash: string;
   readonly markerHash: string;
 }
 
 export function createStrictPublicationMarkerV1(
   input: Omit<StrictPublicationMarkerV1, 'schemaVersion' | 'markerHash'>
 ): StrictPublicationMarkerV1 {
-  if (!input.projectId || !input.projectScopeId || !input.strictConfigReceiptHash) {
-    throw new Error('STRICT_PUBLICATION_MARKER_IDENTITY_MISSING');
+  assertExactKeys(
+    input as unknown as Record<string, unknown>,
+    STRICT_PUBLICATION_MARKER_INPUT_KEYS,
+    'STRICT_PUBLICATION_MARKER_FIELDS_INVALID'
+  );
+  if (input.mode !== 'strict-v1' || input.routeSchemaVersion !== 1) {
+    throw new Error('STRICT_PUBLICATION_MARKER_FIELDS_INVALID');
   }
-  const semantic = { schemaVersion: 1 as const, ...input };
+  requireSha256(input.projectIdentityHash, 'STRICT_PUBLICATION_MARKER_FIELDS_INVALID');
+  requireSha256(input.migrationBundleHash, 'STRICT_PUBLICATION_MARKER_FIELDS_INVALID');
+  // Core 只冻结消费者中立语义；marker 路径、写入和解析属于外层运行时。
+  const semantic = {
+    schemaVersion: 1 as const,
+    mode: 'strict-v1' as const,
+    routeSchemaVersion: 1 as const,
+    projectIdentityHash: input.projectIdentityHash,
+    migrationBundleHash: input.migrationBundleHash,
+  };
   return freezeDeep({ ...semantic, markerHash: hashCanonicalJson(semantic) });
 }
 
@@ -1619,6 +1633,12 @@ const FINAL_COVERAGE_DISPOSITIONS = new Set<FinalCoverageDisposition>([
   'investigated-empty',
   'failed',
   'unknown',
+]);
+const STRICT_PUBLICATION_MARKER_INPUT_KEYS = new Set<string>([
+  'mode',
+  'routeSchemaVersion',
+  'projectIdentityHash',
+  'migrationBundleHash',
 ]);
 const SERVING_SNAPSHOT_INPUT_KEYS = new Set<string>([
   'sessionId',
