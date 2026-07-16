@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,6 +12,113 @@ import type { WorkspaceResolver } from '../../shared/WorkspaceResolver.js';
 import { type DrizzleDB, initDrizzle } from './drizzle/index.js';
 
 const __dirname = import.meta.dirname;
+const PRIVATE_CORPUS_REVOKED_MARKER = '.alembic-private-corpus-revoked-v1.json';
+
+export function revokeAlembicDatabaseRoot(
+  dataRoot: string,
+  evidence: { readonly rootManifestHash: string; readonly initReceiptHash: string }
+): void {
+  const resolvedRoot = path.resolve(dataRoot);
+  const markerPath = path.join(resolvedRoot, PRIVATE_CORPUS_REVOKED_MARKER);
+  const tempPath = `${markerPath}.tmp-${process.pid}-${Date.now()}`;
+  const bytes = Buffer.from(
+    JSON.stringify({
+      schemaVersion: 1,
+      status: 'evidence-only',
+      rootManifestHash: evidence.rootManifestHash,
+      initReceiptHash: evidence.initReceiptHash,
+    })
+  );
+  const descriptor = fs.openSync(tempPath, 'wx', 0o600);
+  try {
+    fs.writeFileSync(descriptor, bytes);
+    fs.fsyncSync(descriptor);
+  } finally {
+    fs.closeSync(descriptor);
+  }
+  fs.renameSync(tempPath, markerPath);
+  const directoryDescriptor = fs.openSync(resolvedRoot, 'r');
+  try {
+    fs.fsyncSync(directoryDescriptor);
+  } finally {
+    fs.closeSync(directoryDescriptor);
+  }
+}
+
+export interface AlembicMigrationArtifactV1 {
+  readonly version: string;
+  readonly migrationArtifactSha256: string;
+}
+
+export function readAlembicMigrationBundleManifest(): readonly AlembicMigrationArtifactV1[] {
+  const migrationsDir = path.join(__dirname, 'migrations');
+  return listMigrationFiles(migrationsDir).map((file) => ({
+    version: file.replace(/\.(sql|js|ts)$/, ''),
+    migrationArtifactSha256: computeAlembicMigrationSemanticHash(
+      file.replace(/\.(sql|js|ts)$/, ''),
+      fs.readFileSync(path.join(migrationsDir, file), 'utf8')
+    ),
+  }));
+}
+
+export function computeAlembicMigrationSemanticHash(version: string, source: string): string {
+  const tokens = extractStringLiteralTokens(source).filter((token) => token !== 'better-sqlite3');
+  return `sha256:${createHash('sha256')
+    .update(JSON.stringify({ schemaVersion: 1, version, tokens }))
+    .digest('hex')}`;
+}
+
+function listMigrationFiles(migrationsDir: string): string[] {
+  return fs
+    .readdirSync(migrationsDir)
+    .filter((file) => /\.(sql|js|ts)$/.test(file) && !file.endsWith('.d.ts'))
+    .sort();
+}
+
+function extractStringLiteralTokens(source: string): string[] {
+  const tokens: string[] = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    const next = source[index + 1];
+    if (char === '/' && next === '/') {
+      index = source.indexOf('\n', index + 2);
+      if (index < 0) {
+        break;
+      }
+      continue;
+    }
+    if (char === '/' && next === '*') {
+      const end = source.indexOf('*/', index + 2);
+      if (end < 0) {
+        break;
+      }
+      index = end + 1;
+      continue;
+    }
+    if (char !== "'" && char !== '"' && char !== '`') {
+      continue;
+    }
+    const delimiter = char;
+    let token = '';
+    for (index += 1; index < source.length; index += 1) {
+      const current = source[index];
+      if (current === '\\') {
+        token += current;
+        if (index + 1 < source.length) {
+          token += source[index + 1];
+          index += 1;
+        }
+        continue;
+      }
+      if (current === delimiter) {
+        break;
+      }
+      token += current;
+    }
+    tokens.push(token.replace(/\s+/g, ' ').trim());
+  }
+  return tokens;
+}
 
 /**
  * Classify a SQLite contention error (CO3 C7 busy diagnostics).
@@ -67,6 +175,8 @@ export class DatabaseConnection {
       projectRoot && !path.isAbsolute(dbPath)
         ? path.resolve(projectRoot, dbPath)
         : path.resolve(dbPath);
+
+    assertDatabasePathNotRevoked(resolvedDbPath);
 
     // ── 排除项目保护 ──────────────────────────────────────────
     // 检测 DB 即将落地到不适合创建知识库的项目 → 重定向到临时目录
@@ -145,10 +255,7 @@ export class DatabaseConnection {
     //   without a 002 (010 was added later).
     // - 003_add_remote_commands was deleted in 0c64fd7 together with the
     //   remote database schema removal.
-    const migrationFiles = fs
-      .readdirSync(migrationsDir)
-      .filter((file) => /\.(sql|js|ts)$/.test(file) && !file.endsWith('.d.ts'))
-      .sort();
+    const migrationFiles = listMigrationFiles(migrationsDir);
 
     // 确保 schema_migrations 表存在
     db.exec(`
@@ -223,6 +330,20 @@ export class DatabaseConnection {
       throw new Error('Drizzle not initialized. Call connect() first.');
     }
     return this.drizzle;
+  }
+}
+
+function assertDatabasePathNotRevoked(databasePath: string): void {
+  let cursor = path.dirname(path.resolve(databasePath));
+  while (true) {
+    if (fs.existsSync(path.join(cursor, PRIVATE_CORPUS_REVOKED_MARKER))) {
+      throw new Error('ALEMBIC_DATABASE_ROOT_REVOKED');
+    }
+    const parent = path.dirname(cursor);
+    if (parent === cursor) {
+      return;
+    }
+    cursor = parent;
   }
 }
 

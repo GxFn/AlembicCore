@@ -23,6 +23,7 @@ export {
   PRE_SUBMIT_CHECKLIST,
   resolveDimensionLanguageApplicability,
   resolvePlanDimensionDefinitions,
+  SYNTHESIS_DIM_IDS,
   sopToCompactText,
   UNIVERSAL_DIM_IDS,
 } from './domain/dimension/index.js';
@@ -38,6 +39,7 @@ export type {
   DimensionId,
   FrameworkDimId,
   LanguageDimId,
+  SynthesisDimId,
   UnifiedDimension,
   UniversalDimId,
 } from './domain/dimension/UnifiedDimension.js';

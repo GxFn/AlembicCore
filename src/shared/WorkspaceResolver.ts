@@ -58,6 +58,12 @@ export interface WorkspaceFacts {
   wikiDir: string;
 }
 
+export interface PrivateCorpusRevisionCoordinatesV1 {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly revisionId: string;
+}
+
 export class WorkspaceResolver {
   /** 真实项目根目录（用于代码分析） */
   readonly projectRoot: string;

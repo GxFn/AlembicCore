@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import { RECIPE_RETRIEVAL_PROJECTION_SCHEMA_VERSION } from '../knowledge/RecipeRetrieval.js';
+import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 import { asEmbeddingPort, type EmbeddingCapabilityDescriptor } from './EmbeddingPort.js';
 import {
   buildRecipeSemanticRegionChunks,
@@ -102,6 +103,17 @@ export interface RecipeVectorGenerationBuildResult {
   errors: string[];
 }
 
+export interface StrictRecipeVectorGenerationReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly generationId: string;
+  readonly manifestHash: string;
+  readonly expectedRecipeIds: readonly string[];
+  readonly expectedVectorIds: readonly string[];
+  readonly status: 'ready';
+  readonly inspectionHealthy: true;
+  readonly receiptHash: string;
+}
+
 export class RecipeVectorGenerationManager {
   readonly #factory: RecipeVectorGenerationStoreFactory;
   readonly #router: RecipeVectorGenerationRouter;
@@ -150,11 +162,13 @@ export class RecipeVectorGenerationManager {
         });
         if (inspection.healthy) {
           const storedManifest = await this.#factory.readManifest?.(previous.generationId);
-          manifest =
-            storedManifest?.manifestHash === previous.manifestHash &&
-            storedManifest.status === 'ready'
-              ? storedManifest
-              : { ...draft, generationId: previous.generationId, status: 'ready' };
+          if (
+            storedManifest?.manifestHash !== previous.manifestHash ||
+            storedManifest.status !== 'ready'
+          ) {
+            throw new Error('active-generation-ready-manifest-missing');
+          }
+          manifest = storedManifest;
           return {
             status: 'already-active',
             generationId: previous.generationId,
@@ -264,6 +278,58 @@ export class RecipeVectorGenerationManager {
     await this.#factory.open(target.generationId);
     return this.#router.activate(target, current.generationId);
   }
+}
+
+/**
+ * Strict assembly wrapper: explicit entries only, and `planned`/partial/failed
+ * results are never completion. It delegates all storage/build/inspect/CAS work
+ * to the existing RecipeVectorGenerationManager.
+ */
+export async function buildStrictRecipeVectorGenerationV1(
+  manager: RecipeVectorGenerationManager,
+  entries: readonly RecipeRegionSourceEntry[],
+  embedProvider: EmbedProvider,
+  options: RecipeVectorGenerationBuildOptions = {}
+): Promise<StrictRecipeVectorGenerationReceiptV1> {
+  const expectedRecipeIds = [...new Set(entries.map((entry) => entry.id))].sort();
+  if (expectedRecipeIds.length !== entries.length) {
+    throw new Error('STRICT_VECTOR_RECIPE_ID_DUPLICATE');
+  }
+  const result = await manager.buildAndActivate([...entries], embedProvider, options);
+  if (
+    (result.status !== 'activated' && result.status !== 'already-active') ||
+    !result.generationId ||
+    result.manifest?.status !== 'ready' ||
+    result.inspection?.healthy !== true
+  ) {
+    throw new Error('STRICT_VECTOR_GENERATION_NOT_READY');
+  }
+  if (
+    JSON.stringify([...Object.keys(result.manifest.expectedIdsByRecipe)].sort()) !==
+    JSON.stringify(expectedRecipeIds)
+  ) {
+    throw new Error('STRICT_VECTOR_GENERATION_RECIPE_SET_MISMATCH');
+  }
+  const semantic = {
+    schemaVersion: 1 as const,
+    generationId: result.generationId,
+    manifestHash: result.manifest.manifestHash,
+    expectedRecipeIds,
+    expectedVectorIds: [...result.manifest.expectedIds].sort(),
+    status: 'ready' as const,
+    inspectionHealthy: true as const,
+  };
+  return freezeDeep({ ...semantic, receiptHash: hashCanonicalJson(semantic) });
+}
+
+function freezeDeep<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      freezeDeep(child);
+    }
+  }
+  return value;
 }
 
 export function buildRecipeVectorGenerationManifest(

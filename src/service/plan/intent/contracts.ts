@@ -47,6 +47,34 @@ export interface PlanNextAction {
   order: number;
   dimensionIds?: readonly string[];
   modulePaths?: readonly string[];
+  /** Strict-v2 cognition fields are additive so legacy PlanIntent consumers remain wire-compatible. */
+  questionId?: string;
+  anatomyLensIds?: readonly string[];
+  subjectRefs?: readonly string[];
+  analysisScales?: readonly (
+    | 'source-range'
+    | 'symbol'
+    | 'file'
+    | 'module'
+    | 'package'
+    | 'repository'
+    | 'project'
+  )[];
+  capabilityId?: string;
+  queryFamilyId?: string;
+  expectedSupport?: readonly string[];
+  expectedCounterevidence?: readonly string[];
+  synthesisTarget?: string;
+  uncertainty?: string;
+  priority?: 'critical' | 'high' | 'standard' | 'support';
+  stopCondition?: string;
+  escalationCondition?: string;
+  budget?: {
+    initialBreadth: number;
+    expansionReserve: number;
+    counterqueryReserve: number;
+    starvationGuard: number;
+  };
 }
 
 export interface PlanEvidenceRef {
@@ -64,6 +92,10 @@ export interface PlanIntent {
   plannedNextActions: readonly PlanNextAction[];
   evidenceRefs: readonly PlanEvidenceRef[];
   draftSource?: PlanDraftSource;
+  /** Present only on the strict-v2 cognition path; legacy validators do not synthesize it. */
+  investigationDecomposition?: import('./coldStartProductionPlan.js').PlanInvestigationDecompositionV1;
+  /** Plan may allocate attention only inside accepted hard caps. */
+  budgetStrategy?: import('./coldStartProductionPlan.js').PlanBudgetStrategyV1;
 }
 
 export interface PlanSelection {

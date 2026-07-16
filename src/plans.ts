@@ -1,4 +1,14 @@
 export type {
+  AnatomyLensCatalogSnapshotV1,
+  ColdStartExecutionProjectionV2,
+  ColdStartPlanSelectionV2,
+  DimensionCatalogSnapshotV1,
+  MiningWorkScheduleV1,
+  PlanCognitionReceiptV1,
+  RequiredFactApplicabilityUniverseV1,
+} from './service/plan/intent/coldStartProductionPlan.js';
+export * from './service/plan/intent/coldStartProductionPlan.js';
+export type {
   ApplyPlanSelectionOptions,
   PlanDraftSource,
   PlanEvidenceRef,

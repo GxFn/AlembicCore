@@ -3,6 +3,7 @@ import type {
   ProjectContextPresenterInput,
   ProjectContextResult,
 } from '../../../../../domain/project-context/index.js';
+import type { StrictHostAgentAnalysisUnitProjectionV1 } from '../../../../../service/production/StrictAnalysisContracts.js';
 import type {
   DimensionDef,
   ProjectSnapshot,
@@ -135,6 +136,11 @@ export interface HostAgentAnalysisUnit {
   completionContract: HostAgentCompletionContract;
   degraded: HostAgentAnalysisDegradedReason[];
   warnings: string[];
+  /**
+   * Strict production adds a dimension-free, multiscale projection without changing
+   * the legacy dimension-first packet or its builder limits.
+   */
+  strictProjection?: StrictHostAgentAnalysisUnitProjectionV1;
 }
 
 export interface HostAgentAnalysisUnitCheckpointLink {

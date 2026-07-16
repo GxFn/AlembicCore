@@ -1,65 +1,27 @@
 import {
+  type AlembicMigrationArtifactV1,
   DatabaseConnection,
+  readAlembicMigrationBundleManifest,
   type SqliteDatabase,
 } from './infrastructure/database/DatabaseConnection.js';
 import type { DrizzleDB } from './infrastructure/database/drizzle/index.js';
-import type { WorkspaceResolver } from './shared/WorkspaceResolver.js';
 
-export { DatabaseConnection };
-export type { DrizzleDB, SqliteDatabase };
+export {
+  type AlembicDatabaseConfig,
+  type AlembicDatabaseRuntime,
+  createDatabaseConnection,
+  type OpenAlembicDatabaseOptions,
+  openAlembicDatabase,
+} from './infrastructure/database/openAlembicDatabase.js';
 
-export interface AlembicDatabaseConfig {
-  path: string;
-  verbose?: boolean;
-}
+export { DatabaseConnection, readAlembicMigrationBundleManifest };
+export type { AlembicMigrationArtifactV1, DrizzleDB, SqliteDatabase };
 
 export interface AlembicDatabaseHandle {
   getDb(): SqliteDatabase;
   getDrizzle(): DrizzleDB;
   runMigrations?(): Promise<void> | void;
   close?(): void;
-}
-
-export interface OpenAlembicDatabaseOptions {
-  workspaceResolver?: WorkspaceResolver | null;
-  runMigrations?: boolean;
-}
-
-export interface AlembicDatabaseRuntime {
-  connection: DatabaseConnection;
-  sqlite: SqliteDatabase;
-  drizzle: DrizzleDB;
-  migrated: boolean;
-  close(): void;
-}
-
-export function createDatabaseConnection(
-  config: AlembicDatabaseConfig,
-  workspaceResolver?: WorkspaceResolver | null
-): DatabaseConnection {
-  return new DatabaseConnection(config, workspaceResolver);
-}
-
-export async function openAlembicDatabase(
-  config: AlembicDatabaseConfig,
-  options: OpenAlembicDatabaseOptions = {}
-): Promise<AlembicDatabaseRuntime> {
-  const connection = createDatabaseConnection(config, options.workspaceResolver ?? null);
-  const sqlite = await connection.connect();
-  let migrated = false;
-
-  if (options.runMigrations !== false) {
-    await connection.runMigrations();
-    migrated = true;
-  }
-
-  return {
-    connection,
-    sqlite,
-    drizzle: connection.getDrizzle(),
-    migrated,
-    close: () => connection.close(),
-  };
 }
 
 export function assertAlembicDatabaseHandle(

@@ -44,6 +44,7 @@ export type {
   DimensionId,
   FrameworkDimId,
   LanguageDimId,
+  SynthesisDimId,
   UnifiedDimension,
   UniversalDimId,
 } from './UnifiedDimension.js';
@@ -51,5 +52,6 @@ export {
   ALL_DIMENSION_IDS,
   FRAMEWORK_DIM_IDS,
   LANGUAGE_DIM_IDS,
+  SYNTHESIS_DIM_IDS,
   UNIVERSAL_DIM_IDS,
 } from './UnifiedDimension.js';

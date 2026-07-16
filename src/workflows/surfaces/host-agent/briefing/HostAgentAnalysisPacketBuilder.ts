@@ -3,6 +3,15 @@ import type {
   ProjectContextPresenterInput,
   ProjectContextRef,
 } from '../../../../domain/project-context/index.js';
+import type {
+  AnalysisScale,
+  AnatomyLensId,
+} from '../../../../service/plan/intent/coldStartProductionPlan.js';
+import type {
+  FactRecordV1,
+  StrictHostAgentAnalysisUnitProjectionV1,
+} from '../../../../service/production/StrictAnalysisContracts.js';
+import { createStrictHostAgentAnalysisUnitProjectionFromFactsV1 } from '../../../../service/production/StrictAnalysisContracts.js';
 import type { CanonicalSourceIdentity } from '../../../../shared/ProjectScope.js';
 import type {
   AstClassInfo,
@@ -116,6 +125,30 @@ interface SourceRefCandidate {
 
 interface SourceIdentityIndex {
   byComparablePath: ReadonlyMap<string, CanonicalSourceIdentity>;
+}
+
+/**
+ * Bind the strict, dimension-free fact plane to the existing HostAgent unit type.
+ * The projection is derived from canonical FactRecords rather than caller-supplied IDs.
+ */
+export function bindStrictProductionProjectionToHostAgentAnalysisUnitV1(
+  unit: HostAgentAnalysisUnit,
+  input: {
+    readonly canonicalSubjectRef: string;
+    readonly parentSubjectRefs: readonly string[];
+    readonly primaryScale: AnalysisScale;
+    readonly anatomyLensIds: readonly AnatomyLensId[];
+    readonly facts: readonly FactRecordV1[];
+  }
+): HostAgentAnalysisUnit & { strictProjection: StrictHostAgentAnalysisUnitProjectionV1 } {
+  const strictProjection = createStrictHostAgentAnalysisUnitProjectionFromFactsV1(input);
+  if (
+    unit.strictProjection &&
+    JSON.stringify(unit.strictProjection) !== JSON.stringify(strictProjection)
+  ) {
+    throw new Error('STRICT_ANALYSIS_UNIT_PROJECTION_CONFLICT');
+  }
+  return Object.freeze({ ...unit, strictProjection });
 }
 
 const DEFAULT_MAX_UNITS = 12;

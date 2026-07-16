@@ -872,31 +872,36 @@ export class KnowledgeService {
       // 当 authority 从未手动设置（仍为 0）时，从 quality.overall 自动推导
       const currentAuthority = entry.stats?.authority ?? 0;
       const updatePayload: Record<string, unknown> = {
-        quality: JSON.stringify(qualityJson),
+        quality: qualityJson,
         updatedAt: Math.floor(Date.now() / 1000),
       };
       if (currentAuthority === 0 && result.score > 0) {
         const statsObj =
           entry.stats?.toJSON?.() ?? (typeof entry.stats === 'object' ? { ...entry.stats } : {});
-        updatePayload.stats = JSON.stringify({
+        updatePayload.stats = {
           ...statsObj,
           authority: Math.round(result.score * 5),
+        };
+      }
+
+      // Quality uses the same file-first boundary as create/update/lifecycle.
+      // A failed file write must never advance the DB, and a DB failure after
+      // this durable write remains an explicit file/DB divergence for repair.
+      if (this._fileWriter) {
+        const prospective = KnowledgeEntry.fromJSON({
+          ...entry.toJSON(),
+          ...updatePayload,
         });
+        const persistedPath = this._fileWriter.persist(prospective);
+        if (persistedPath === null) {
+          throw new Error(
+            `Knowledge file persist failed for "${entry.title}" — aborting quality update`
+          );
+        }
+        updatePayload.sourceFile = prospective.sourceFile;
       }
 
       await this.repository.update(id, updatePayload);
-
-      // ── .md 文件同步: quality 更新后重新落盘，保持文件=真相源 ──
-      if (this._fileWriter) {
-        try {
-          const updated = await this.repository.findById(id);
-          if (updated) {
-            this._fileWriter.persist(updated);
-          }
-        } catch {
-          /* best effort — 不阻塞质量更新流程 */
-        }
-      }
 
       if (context.userId) {
         await this._audit('update_knowledge_quality', id, context.userId, {
@@ -996,7 +1001,12 @@ export class KnowledgeService {
 
       // ── file-first: 先迁移 .md 文件，再更新 DB lifecycle（文件=真相源） ──
       if (this._fileWriter) {
-        this._fileWriter.moveOnLifecycleChange(entry);
+        const movedPath = this._fileWriter.moveOnLifecycleChange(entry);
+        if (movedPath === null) {
+          throw new Error(
+            `Knowledge file lifecycle move failed for "${entry.title}" — aborting DB transition`
+          );
+        }
         if (entry.sourceFile) {
           dbUpdates.sourceFile = entry.sourceFile;
         }

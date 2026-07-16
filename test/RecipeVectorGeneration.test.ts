@@ -9,6 +9,7 @@ import {
   type RecipeRegionSourceEntry,
 } from '../src/service/vector/RecipeRegionVectorIndex.js';
 import {
+  buildStrictRecipeVectorGenerationV1,
   inspectRecipeVectorGeneration,
   RecipeVectorGenerationManager,
   type RecipeVectorGenerationManifest,
@@ -180,6 +181,24 @@ function provider(options: { fail?: boolean; model?: string } = {}): EmbeddingPo
 }
 
 describe('Recipe vector generation lifecycle', () => {
+  it('strict assembly accepts only an explicit, ready, inspected generation', async () => {
+    const runtime = new MemoryGenerationRuntime();
+    const receipt = await buildStrictRecipeVectorGenerationV1(
+      new RecipeVectorGenerationManager(runtime, runtime),
+      [entry()],
+      provider()
+    );
+
+    expect(receipt).toMatchObject({
+      status: 'ready',
+      inspectionHealthy: true,
+      expectedRecipeIds: [entry().id],
+    });
+    expect(runtime.active).toEqual({
+      generationId: receipt.generationId,
+      manifestHash: receipt.manifestHash,
+    });
+  });
   it('makes projection schema, canonical role, and content identity explicit in vector IDs', () => {
     const schema1 = buildRecipeSemanticRegionChunks(entry(), { projectionSchemaVersion: '1' });
     const schema2 = buildRecipeSemanticRegionChunks(entry(), { projectionSchemaVersion: '2' });

@@ -1,4 +1,13 @@
 export {
+  assertPrivateCorpusRevisionHandleV1,
+  type InitializedPrivateCorpusRevisionV1,
+  type InitializePrivateCorpusRevisionInputV1,
+  initializePrivateCorpusRevisionV1,
+  openPrivateCorpusRevisionDatabaseV1,
+  PrivateCorpusRevisionHandleV1,
+  type PrivateCorpusRevisionInitReceiptV1,
+} from './service/production/ProductionPersistenceContracts.js';
+export {
   type AlembicFolderNames,
   DEFAULT_FOLDER_NAMES,
   type PartialAlembicFolderNames,
@@ -37,4 +46,8 @@ export {
   resolveProjectRoot,
   resolveWorkspace,
 } from './shared/resolveProjectRoot.js';
-export { type WorkspaceFacts, WorkspaceResolver } from './shared/WorkspaceResolver.js';
+export {
+  type PrivateCorpusRevisionCoordinatesV1,
+  type WorkspaceFacts,
+  WorkspaceResolver,
+} from './shared/WorkspaceResolver.js';

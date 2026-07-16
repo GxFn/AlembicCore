@@ -25,7 +25,7 @@
  *  - 不存在第二份文件写实现；新增写能力先改接口、再改本实现。
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { recipeStorageBucket } from '../../domain/dimension/RecipeDimension.js';
@@ -263,6 +263,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
    * @returns 写入的文件路径，失败返回 null
    */
   persist(entry: KnowledgeEntry): string | null {
+    const previousSourceFile = entry?.sourceFile ?? null;
     try {
       if (!entry?.id || !entry?.title) {
         this.logger.warn('Cannot persist knowledge entry: missing id or title');
@@ -272,25 +273,14 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       const { dir, filename } = this._resolveFilePath(entry);
       const filePath = path.join(dir, filename);
 
-      // 清理旧文件（lifecycle 切换或 category 变更场景）
-      this._cleanupOldFile(entry, filePath);
-
       // sourceFile is part of persisted truth, so set the destination before
       // serializing frontmatter rather than repairing it after the write.
       entry.sourceFile = path.relative(this.projectRoot, filePath);
       const markdown = this.serialize(entry);
-      if (this.#wz) {
-        const rel = dir.replace(this.#wz.dataRoot, '').replace(/^\//, '');
-        this.#wz.ensureDir(this.#wz.data(rel));
-        const fileRel = filePath.replace(this.#wz.dataRoot, '').replace(/^\//, '');
-        this.#wz.writeFile(this.#wz.data(fileRel), markdown);
-      } else {
-        pathGuard.assertProjectWriteSafe(dir);
-        if (!fs.existsSync(dir)) {
-          fs.mkdirSync(dir, { recursive: true });
-        }
-        fs.writeFileSync(filePath, markdown, 'utf8');
-      }
+      this._writeDurable(filePath, markdown);
+
+      // The old path is deleted only after the replacement is durable.
+      this._cleanupOldFile(entry, filePath, previousSourceFile);
 
       this.logger.info('Knowledge entry persisted to file', {
         entryId: entry.id,
@@ -300,6 +290,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
 
       return filePath;
     } catch (error: unknown) {
+      entry.sourceFile = previousSourceFile;
       this.logger.error('Failed to persist knowledge entry to file', {
         entryId: entry?.id,
         error: error instanceof Error ? error.message : String(error),
@@ -335,7 +326,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
 
     // fallback: 按文件名在 candidates/ 和 recipes/ 中扫描
     const { filename } = this._resolveFilePath(entry);
-    const bucket = recipeStorageBucket(entry).toLowerCase();
+    const bucket = normalizeKnowledgeStorageBucket(recipeStorageBucket(entry));
     const searchDirs = [path.join(this.candidatesDir, bucket), path.join(this.recipesDir, bucket)];
 
     for (const dir of searchDirs) {
@@ -364,32 +355,8 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
    * @returns 新的文件路径
    */
   moveOnLifecycleChange(entry: KnowledgeEntry): string | null {
-    const oldPath = entry.sourceFile ? path.join(this.projectRoot, entry.sourceFile) : null;
-
-    const { dir: newDir, filename } = this._resolveFilePath(entry);
-    const newPath = path.join(newDir, filename);
-
-    // 如果路径没变，直接重新序列化
-    if (oldPath && path.resolve(oldPath) === path.resolve(newPath)) {
-      return this.persist(entry);
-    }
-
-    // 删除旧文件
-    if (oldPath && fs.existsSync(oldPath)) {
-      if (this.#wz) {
-        const rel = oldPath.replace(this.#wz.dataRoot, '').replace(/^\//, '');
-        this.#wz.remove(this.#wz.data(rel));
-      } else {
-        pathGuard.assertSafe(oldPath);
-        fs.unlinkSync(oldPath);
-      }
-      this.logger.info('Removed old knowledge entry file on lifecycle change', {
-        entryId: entry.id,
-        oldPath: entry.sourceFile,
-      });
-    }
-
-    // 写入新位置
+    // persist performs temp-write → fsync → rename → dir-fsync, then removes
+    // an old different path. It is therefore also the only safe move path.
     return this.persist(entry);
   }
 
@@ -401,18 +368,18 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
    */
   _resolveFilePath(entry: KnowledgeEntry): { dir: string; filename: string } {
     const baseDir = entry.isCandidate() ? this.candidatesDir : this.recipesDir;
-    const bucket = recipeStorageBucket(entry).toLowerCase();
+    const bucket = normalizeKnowledgeStorageBucket(recipeStorageBucket(entry));
     const dir = path.join(baseDir, bucket);
     const filename = _slugFilename(entry.trigger, entry.title, entry.id);
     return { dir, filename };
   }
 
   /** 清理旧文件（category 变更或 lifecycle 切换场景） */
-  _cleanupOldFile(entry: KnowledgeEntry, newPath: string) {
-    if (!entry.sourceFile) {
+  _cleanupOldFile(entry: KnowledgeEntry, newPath: string, oldSourceFile = entry.sourceFile) {
+    if (!oldSourceFile) {
       return;
     }
-    const oldPath = path.join(this.projectRoot, entry.sourceFile);
+    const oldPath = path.join(this.projectRoot, oldSourceFile);
     if (oldPath === newPath) {
       return;
     }
@@ -426,7 +393,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
     if (!isInsideKnowledge) {
       this.logger.warn('_cleanupOldFile skipped: path outside knowledge dirs', {
         entryId: entry.id,
-        oldPath: entry.sourceFile,
+        oldPath: oldSourceFile,
       });
       return;
     }
@@ -441,7 +408,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       if (!stat.isFile()) {
         this.logger.warn('_cleanupOldFile skipped: not a regular file', {
           entryId: entry.id,
-          oldPath: entry.sourceFile,
+          oldPath: oldSourceFile,
         });
         return;
       }
@@ -458,8 +425,43 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
     }
     this.logger.info('Cleaned up old knowledge entry file', {
       entryId: entry.id,
-      oldPath: entry.sourceFile,
+      oldPath: oldSourceFile,
     });
+  }
+
+  _writeDurable(filePath: string, content: string): void {
+    const dir = path.dirname(filePath);
+    const tempPath = path.join(
+      dir,
+      `.${path.basename(filePath)}.${process.pid}.${randomUUID()}.tmp`
+    );
+    try {
+      if (this.#wz) {
+        const dirRel = path.relative(this.#wz.dataRoot, dir);
+        const tempRel = path.relative(this.#wz.dataRoot, tempPath);
+        const fileRel = path.relative(this.#wz.dataRoot, filePath);
+        this.#wz.ensureDir(this.#wz.data(dirRel));
+        this.#wz.writeFile(this.#wz.data(tempRel), content);
+        fsyncFile(tempPath);
+        this.#wz.rename(this.#wz.data(tempRel), this.#wz.data(fileRel));
+      } else {
+        pathGuard.assertProjectWriteSafe(dir);
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(tempPath, content, 'utf8');
+        fsyncFile(tempPath);
+        fs.renameSync(tempPath, filePath);
+      }
+      fsyncDirectory(dir);
+    } catch (error) {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch {
+        // Preserve the original failure; the temp path remains non-authoritative.
+      }
+      throw error;
+    }
   }
 
   _removeByIdScan(id: string): boolean {
@@ -492,6 +494,36 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
 export function computeKnowledgeHash(content: string): string {
   const cleaned = content.replace(/^_contentHash:.*\n?/m, '').trim();
   return createHash('sha256').update(cleaned, 'utf8').digest('hex').slice(0, 16);
+}
+
+function normalizeKnowledgeStorageBucket(value: string): string {
+  const normalized = value.trim().toLowerCase();
+  if (
+    !/^[a-z0-9][a-z0-9._-]{0,127}$/.test(normalized) ||
+    normalized === '.' ||
+    normalized === '..'
+  ) {
+    throw new Error('KNOWLEDGE_STORAGE_BUCKET_INVALID');
+  }
+  return normalized;
+}
+
+function fsyncFile(filePath: string): void {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function fsyncDirectory(dirPath: string): void {
+  const fd = fs.openSync(dirPath, 'r');
+  try {
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 /**

@@ -25,6 +25,11 @@ import {
 } from '../../shared/sourceContracts.js';
 import type { StructuredPatch } from '../../types/evolution.js';
 import type { CandidateSummary, GenerateDedup } from '../bootstrap/GenerateDedup.js';
+import {
+  createRecipeCandidateFingerprintProjectionV1,
+  type PreparedRecipePersistenceV1,
+  type RecipeCandidateFingerprintProjectionV1,
+} from '../production/ProductionPersistenceContracts.js';
 import type { RetrievalReadinessReport } from './RecipeRetrieval.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
@@ -253,6 +258,30 @@ export interface RecipeProductionPort {
   publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord>;
 }
 
+export interface StrictPreparedRecipePersistenceContextV1 {
+  readonly source: RecipeProductionSource;
+  readonly userId: string;
+  readonly journalToken: string;
+  /** Exact G1-reviewed authoring projection; the Gateway recomputes it from `item`. */
+  readonly reviewedProjection: RecipeCandidateFingerprintProjectionV1;
+}
+
+export interface StrictPreparedRecipePersistenceResultV1 {
+  readonly status: 'created' | 'recovered';
+  readonly recipe: RecipeProductionRecord;
+  readonly prepared: PreparedRecipePersistenceV1;
+  /** A strict prepared path never invokes the entity's random UUID fallback. */
+  readonly strictUuidAllocations: 0;
+}
+
+export interface StrictPreparedRecipePersistencePortV1 {
+  persistPreparedReviewedCandidate(
+    item: CreateRecipeItem,
+    prepared: PreparedRecipePersistenceV1,
+    context: StrictPreparedRecipePersistenceContextV1
+  ): Promise<StrictPreparedRecipePersistenceResultV1>;
+}
+
 /* ═══════════════════ Dependencies ═══════════════════ */
 
 interface GatewayKnowledgeService {
@@ -363,11 +392,29 @@ export interface GatewayDeps {
   knownModuleNames?: readonly string[];
   /** U1 #5：从 candidate sourceRefs 落点派生 canonical 模块 name（U1-Plugin 从 ProjectContextMap 注入）。 */
   resolveModuleFromSourceRefs?: (sourceRefs: string[]) => string | undefined;
+  /** Strict-only journal authority; ordinary create requests never carry this token or an ID. */
+  authorizePreparedRecipe?: (
+    journalToken: string,
+    prepared: PreparedRecipePersistenceV1,
+    reviewedProjection: RecipeCandidateFingerprintProjectionV1
+  ) => boolean | Promise<boolean>;
+  /** Revision-scoped DB/file inspection used for exact crash recovery and readback. */
+  inspectPreparedRecipe?: (
+    prepared: PreparedRecipePersistenceV1
+  ) => Promise<PreparedRecipeInspectionV1 | null>;
+}
+
+export interface PreparedRecipeInspectionV1 extends RecipeProductionRecord {
+  readonly privateCorpusRevision: string;
+  readonly dbHash: string;
+  readonly fileHash: string;
 }
 
 /* ═══════════════════ Gateway ═══════════════════ */
 
-export class RecipeProductionGateway implements RecipeProductionPort {
+export class RecipeProductionGateway
+  implements RecipeProductionPort, StrictPreparedRecipePersistencePortV1
+{
   readonly #knowledgeService: GatewayKnowledgeService;
   readonly #projectRoot: string;
   readonly #logger?: GatewayLogger;
@@ -377,6 +424,8 @@ export class RecipeProductionGateway implements RecipeProductionPort {
   readonly #findSimilarRecipes: GatewaySimilarityFn | null;
   readonly #knownModuleNames: Set<string> | null;
   readonly #resolveModuleFromSourceRefs: ((sourceRefs: string[]) => string | undefined) | null;
+  readonly #authorizePreparedRecipe: GatewayDeps['authorizePreparedRecipe'];
+  readonly #inspectPreparedRecipe: GatewayDeps['inspectPreparedRecipe'];
 
   constructor(deps: GatewayDeps) {
     this.#knowledgeService = deps.knowledgeService;
@@ -388,6 +437,56 @@ export class RecipeProductionGateway implements RecipeProductionPort {
     this.#findSimilarRecipes = deps.findSimilarRecipes ?? null;
     this.#knownModuleNames = deps.knownModuleNames ? new Set(deps.knownModuleNames) : null;
     this.#resolveModuleFromSourceRefs = deps.resolveModuleFromSourceRefs ?? null;
+    this.#authorizePreparedRecipe = deps.authorizePreparedRecipe;
+    this.#inspectPreparedRecipe = deps.inspectPreparedRecipe;
+  }
+
+  async persistPreparedReviewedCandidate(
+    item: CreateRecipeItem,
+    prepared: PreparedRecipePersistenceV1,
+    context: StrictPreparedRecipePersistenceContextV1
+  ): Promise<StrictPreparedRecipePersistenceResultV1> {
+    const source = admitRecipeProductionSource(context.source);
+    if (!this.#authorizePreparedRecipe || !this.#inspectPreparedRecipe) {
+      throw new Error('STRICT_PREPARED_PERSISTENCE_AUTHORITY_UNAVAILABLE');
+    }
+    assertPreparedRecipeAuthoringProjection(item, prepared, context.reviewedProjection);
+    if (
+      !(await this.#authorizePreparedRecipe(
+        context.journalToken,
+        prepared,
+        context.reviewedProjection
+      ))
+    ) {
+      throw new Error('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+    }
+    const existing = await this.#inspectPreparedRecipe(prepared);
+    if (existing) {
+      assertPreparedRecipeInspection(existing, prepared);
+      return {
+        status: 'recovered',
+        recipe: existing,
+        prepared,
+        strictUuidAllocations: 0,
+      };
+    }
+
+    const data = this.#prepareCreateData(item, source, context.userId, prepared.preparedRecipeId);
+    const saved = await this.#knowledgeService.create(data, { userId: context.userId });
+    if (saved.id !== prepared.preparedRecipeId) {
+      throw new Error('STRICT_PREPARED_ID_DIVERGENCE');
+    }
+    const inspected = await this.#inspectPreparedRecipe(prepared);
+    if (!inspected) {
+      throw new Error('STRICT_PREPARED_PERSISTENCE_READBACK_MISSING');
+    }
+    assertPreparedRecipeInspection(inspected, prepared);
+    return {
+      status: 'created',
+      recipe: inspected,
+      prepared,
+      strictUuidAllocations: 0,
+    };
   }
 
   async createOrStage(
@@ -875,7 +974,8 @@ export class RecipeProductionGateway implements RecipeProductionPort {
   #prepareCreateData(
     item: CreateRecipeItem,
     source: GatewaySource,
-    _userId: string
+    _userId: string,
+    preparedRecipeId?: string
   ): Record<string, unknown> {
     const metadata = this.#readMetadata(item);
     const contentObj =
@@ -893,6 +993,7 @@ export class RecipeProductionGateway implements RecipeProductionPort {
     }
 
     return {
+      ...(preparedRecipeId ? { id: preparedRecipeId } : {}),
       language: item.language || '',
       dimensionId: item.dimensionId || '',
       category: item.category || (item as Record<string, unknown>)._category || 'general',
@@ -1291,5 +1392,70 @@ export class RecipeProductionGateway implements RecipeProductionPort {
     }
 
     return null;
+  }
+}
+
+function assertPreparedRecipeInspection(
+  inspection: PreparedRecipeInspectionV1,
+  prepared: PreparedRecipePersistenceV1
+): void {
+  if (
+    inspection.id !== prepared.preparedRecipeId ||
+    inspection.privateCorpusRevision !== prepared.privateCorpusRevision ||
+    inspection.dbHash !== prepared.expectedDbHash ||
+    inspection.fileHash !== prepared.expectedFileHash
+  ) {
+    throw new Error('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+  }
+}
+
+function assertPreparedRecipeAuthoringProjection(
+  item: CreateRecipeItem,
+  prepared: PreparedRecipePersistenceV1,
+  reviewed: RecipeCandidateFingerprintProjectionV1
+): void {
+  const canonicalReviewed = createRecipeCandidateFingerprintProjectionV1({
+    title: reviewed.title,
+    kind: reviewed.kind,
+    doText: reviewed.doText,
+    dontText: reviewed.dontText,
+    markdown: reviewed.markdown,
+    usageGuide: reviewed.usageGuide,
+    retrievalProfile: reviewed.retrievalProfile,
+    negativeIntents: reviewed.negativeIntents,
+    scopeId: reviewed.scopeId,
+    moduleId: reviewed.moduleId,
+    dimensionId: reviewed.dimensionId,
+    evidenceRefs: reviewed.evidenceRefs,
+    lineageHashes: reviewed.lineageHashes,
+  });
+  if (
+    reviewed.schemaVersion !== 1 ||
+    reviewed.authoredFingerprint !== canonicalReviewed.authoredFingerprint ||
+    prepared.authoredFingerprint !== canonicalReviewed.authoredFingerprint ||
+    prepared.cellId !== `${canonicalReviewed.moduleId}::${canonicalReviewed.dimensionId}`
+  ) {
+    throw new Error('STRICT_PREPARED_AUTHORING_FINGERPRINT_MISMATCH');
+  }
+
+  const negativeIntents =
+    item.retrievalProfile?.exclusions?.map((exclusion) => exclusion.text) ?? [];
+  const itemProjection = createRecipeCandidateFingerprintProjectionV1({
+    title: item.title ?? '',
+    kind: item.kind ?? '',
+    doText: item.doClause ?? '',
+    dontText: item.dontClause ?? '',
+    markdown: item.content?.markdown ?? '',
+    usageGuide: item.usageGuide ?? '',
+    retrievalProfile: item.retrievalProfile,
+    negativeIntents,
+    scopeId: item.scope ?? '',
+    moduleId: item.moduleName ?? '',
+    dimensionId: item.dimensionId ?? '',
+    evidenceRefs: item.sourceRefs ?? [],
+    lineageHashes: canonicalReviewed.lineageHashes,
+  });
+  if (itemProjection.authoredFingerprint !== canonicalReviewed.authoredFingerprint) {
+    throw new Error('STRICT_PREPARED_AUTHORING_FINGERPRINT_MISMATCH');
   }
 }

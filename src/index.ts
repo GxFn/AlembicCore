@@ -2,6 +2,7 @@ export * from './core/index.js';
 export * from './daemon/index.js';
 export * from './domain/index.js';
 export {
+  bindStrictProductionProjectionToHostAgentAnalysisUnitV1,
   buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
   buildProjectContextMissionBriefing,

@@ -7,6 +7,17 @@
  */
 
 export type {
+  AnalysisArtifactProjectionV1,
+  AnalysisFixpointReceiptV1,
+  FactRecordV1,
+  FinalExpandedMiningScheduleReceiptV1,
+  HypothesisExpressionSetReceiptV1,
+  KnowledgeClusterV1,
+  ObservationPopulationV1,
+  TypedGateReturnV1,
+} from './service/production/StrictAnalysisContracts.js';
+export * from './service/production/StrictAnalysisContracts.js';
+export type {
   DimensionDef,
   MissionBriefingResult,
 } from './types/ProjectSnapshot.js';
@@ -24,6 +35,7 @@ export {
 } from './workflows/project-index/index.js';
 export * from './workflows/shared/index.js';
 export {
+  bindStrictProductionProjectionToHostAgentAnalysisUnitV1,
   buildHostAgentAnalysisPacketFromProjectContext,
   buildIDEAgentAnalysisPacketFromProjectContext,
   createHostAgentAnalysisProgressSeed,
