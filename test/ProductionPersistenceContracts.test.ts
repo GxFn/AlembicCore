@@ -2,7 +2,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openAlembicDatabase, readAlembicMigrationBundleManifest } from '../src/database.js';
+import {
+  createDatabaseConnection,
+  openAlembicDatabase,
+  readAlembicMigrationBundleManifest,
+} from '../src/database.js';
 import {
   canonicalizeCandidateAttemptBatchV1,
   classifyPublicKnowledgeRouteRecoveryV1,
@@ -163,6 +167,81 @@ describe('production persistence contracts', () => {
 
     ordinaryRuntime.close();
     second.runtime.close();
+  });
+
+  it('rejects a second active native handle on one public DatabaseConnection', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const first = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-double-connect',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const connection = createDatabaseConnection(
+      { path: first.handle.resolver.databasePath },
+      first.handle.resolver
+    );
+    const firstNativeHandle = await connection.connect();
+    const preparedRead = firstNativeHandle.prepare('SELECT 1 AS value');
+    const preparedWrite = firstNativeHandle.prepare(
+      'CREATE TABLE forbidden_double_connect_write (id INTEGER)'
+    );
+    let secondRevision: Awaited<ReturnType<typeof initializePrivateCorpusRevisionV1>> | null = null;
+
+    try {
+      await expect(connection.connect()).rejects.toThrow('ALEMBIC_DATABASE_ALREADY_CONNECTED');
+      expect(preparedRead.get()).toEqual({ value: 1 });
+      secondRevision = await initializePrivateCorpusRevisionV1(base, {
+        runId: 'run-double-connect',
+        revisionId: 'revision-2',
+        analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
+        configReceiptHash,
+        credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+        acceptedMigrationBundleSemanticHash,
+      });
+      PrivateCorpusRevisionHandleV1.replace(
+        first.handle,
+        secondRevision.handle,
+        `sha256:${'f'.repeat(64)}`
+      );
+
+      expect(() => preparedRead.get()).toThrow();
+      expect(() => preparedWrite.run()).toThrow();
+      expect(secondRevision.runtime.sqlite.prepare('SELECT 1 AS value').get()).toEqual({
+        value: 1,
+      });
+    } finally {
+      connection.close();
+      if (firstNativeHandle.open) {
+        firstNativeHandle.close();
+      }
+      secondRevision?.runtime.close();
+      first.runtime.close();
+    }
+  });
+
+  it('allows a public DatabaseConnection to reconnect after explicit close', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-database-reconnect-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const connection = createDatabaseConnection({ path: base.databasePath }, base);
+
+    try {
+      const firstNativeHandle = await connection.connect();
+      expect(firstNativeHandle.prepare('SELECT 1 AS value').get()).toEqual({ value: 1 });
+      connection.close();
+      expect(firstNativeHandle.open).toBe(false);
+
+      const secondNativeHandle = await connection.connect();
+      expect(secondNativeHandle).not.toBe(firstNativeHandle);
+      expect(secondNativeHandle.prepare('SELECT 1 AS value').get()).toEqual({ value: 1 });
+    } finally {
+      connection.close();
+    }
   });
 
   it('rejects arbitrary or escaping revision coordinates', async () => {

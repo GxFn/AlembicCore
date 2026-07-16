@@ -181,6 +181,12 @@ export class DatabaseConnection {
 
   /** 连接数据库 */
   async connect(): Promise<SqliteDatabase> {
+    if (this.db !== null || this.#registeredRoot !== null) {
+      process.stderr.write(
+        '[Alembic] Rejected DatabaseConnection.connect(): close the active native handle before reconnecting\n'
+      );
+      throw new Error('ALEMBIC_DATABASE_ALREADY_CONNECTED');
+    }
     const dbPath = this.config.path;
 
     // Ghost 模式：直接使用 WorkspaceResolver 提供的 DB 路径
@@ -232,7 +238,7 @@ export class DatabaseConnection {
       }
     }
 
-    this.db = new Database(resolvedDbPath, {
+    const database = new Database(resolvedDbPath, {
       verbose: this.config.verbose
         ? (msg: unknown) => {
             process.stderr.write(`[SQL] ${msg}\n`);
@@ -250,21 +256,30 @@ export class DatabaseConnection {
     // propagates to the caller and diagnostics tag it via isSqliteBusyError
     // (stable code core.diagnostic.db.sqlite-busy) so contention evidence
     // accumulates in logs rather than being retried away invisibly.
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
-    this.db.pragma('busy_timeout = 3000');
+    try {
+      database.pragma('journal_mode = WAL');
+      database.pragma('foreign_keys = ON');
+      database.pragma('busy_timeout = 3000');
 
-    // 初始化 Drizzle ORM 包装（与 raw db 共存，操作同一连接）
-    this.drizzle = initDrizzle(this.db);
-    this.#registeredRoot = canonicalDatabaseRoot(dataRoot ?? path.dirname(resolvedDbPath));
-    let connections = ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.get(this.#registeredRoot);
-    if (!connections) {
-      connections = new Set();
-      ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.set(this.#registeredRoot, connections);
+      // 初始化和 root 登记全部成功后才发布对象状态，失败时不会遗失 native handle。
+      const drizzle = initDrizzle(database);
+      const registeredRoot = canonicalDatabaseRoot(dataRoot ?? path.dirname(resolvedDbPath));
+      let connections = ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.get(registeredRoot);
+      if (!connections) {
+        connections = new Set();
+        ACTIVE_DATABASE_CONNECTIONS_BY_ROOT.set(registeredRoot, connections);
+      }
+      connections.add(this);
+      this.db = database;
+      this.drizzle = drizzle;
+      this.#registeredRoot = registeredRoot;
+      return database;
+    } catch (error) {
+      if (database.open) {
+        database.close();
+      }
+      throw error;
     }
-    connections.add(this);
-
-    return this.db;
   }
 
   /** 运行所有 migration（支持 .sql、.js、.ts） */
