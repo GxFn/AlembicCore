@@ -50,6 +50,71 @@ afterEach(() => {
 });
 
 describe('strict frozen-fact execution', () => {
+  it('accepts direct witnesses only when full-file and declared range content match frozen bytes', async () => {
+    const artifact = await createStrictArtifact([
+      {
+        language: 'typescript',
+        relativePath: 'src/index.ts',
+        content: 'export const alpha = 1;\nexport const beta = 2;\nexport const gamma = 3;\n',
+      },
+    ]);
+    const file = artifact.facts.inventory.files[0]!;
+    const frozenContent = Buffer.from(readCertifiedProjectFactsFrozenFile(artifact, file)).toString(
+      'utf8'
+    );
+
+    const fullFile = createDirectWitnessInput(artifact, {
+      content: frozenContent,
+    });
+    const fullFileWithDeclaredRange = createDirectWitnessInput(artifact, {
+      content: frozenContent,
+      range: { start: 1, end: 4 },
+    });
+    const ranged = createDirectWitnessInput(artifact, {
+      content: 'export const beta = 2;',
+      range: { start: 2, end: 2 },
+    });
+
+    expect(() => createStrictFactDirectWitnessBindingV1(fullFile)).not.toThrow();
+    expect(() => createStrictFactDirectWitnessBindingV1(fullFileWithDeclaredRange)).not.toThrow();
+    expect(() => createStrictFactDirectWitnessBindingV1(ranged)).not.toThrow();
+  });
+
+  it('rejects a self-consistent forged full-file direct witness', async () => {
+    const artifact = await createStrictArtifact([
+      {
+        language: 'typescript',
+        relativePath: 'src/index.ts',
+        content: 'export const accepted = 1;\n',
+      },
+    ]);
+    const forged = createDirectWitnessInput(artifact, {
+      content: 'export const forged = 1;\n',
+    });
+
+    expect(() => createStrictFactDirectWitnessBindingV1(forged)).toThrow(
+      'STRICT_FACT_WITNESS_AUTHORITY_INVALID'
+    );
+  });
+
+  it('rejects direct witness content that is misaligned with its declared frozen line range', async () => {
+    const artifact = await createStrictArtifact([
+      {
+        language: 'typescript',
+        relativePath: 'src/index.ts',
+        content: 'export const alpha = 1;\nexport const beta = 2;\nexport const gamma = 3;\n',
+      },
+    ]);
+    const misaligned = createDirectWitnessInput(artifact, {
+      content: 'export const gamma = 3;',
+      range: { start: 2, end: 2 },
+    });
+
+    expect(() => createStrictFactDirectWitnessBindingV1(misaligned)).toThrow(
+      'STRICT_FACT_WITNESS_AUTHORITY_INVALID'
+    );
+  });
+
   it('executes a real AST backend over every frozen subject file and binds direct witnesses', async () => {
     const artifact = await createStrictArtifact();
     const family = factFamily();
@@ -417,6 +482,41 @@ const AST_QUERY_PACK = createStrictAstFactQueryPackV1({
   queryVersion: '1',
   extractorId: 'declarations-v1',
 });
+
+function createDirectWitnessInput(
+  artifact: Awaited<ReturnType<typeof createStrictArtifact>>,
+  evidence: {
+    readonly content: string;
+    readonly range?: { readonly start: number; readonly end: number };
+  }
+) {
+  const file = artifact.facts.inventory.files[0]!;
+  const evidenceEntry = {
+    id: 'E-1',
+    sessionId: 'strict-fact-direct-witness-test',
+    dimensionId: 'strict-fact-execution',
+    tool: 'code.read' as const,
+    callId: 'call-1',
+    file: file.relativePath,
+    ...(evidence.range ? { range: { ...evidence.range } } : {}),
+    content: evidence.content,
+    contentHash: hashBytes(Buffer.from(evidence.content)),
+    capturedAt: 1,
+  };
+  return {
+    artifact,
+    repoId: file.repoId,
+    relativePath: file.relativePath,
+    evidenceEntry,
+    evidenceLedgerSnapshot: createStrictEvidenceLedgerSnapshotV1([evidenceEntry]),
+    projectContextRef: createProjectContextFileRef({
+      projectRoot: '/certified/strict-fact-test',
+      repoId: file.repoId,
+      filePath: file.relativePath,
+      hash: file.blobSha256,
+    }),
+  };
+}
 
 function subjectBindings(artifact: Awaited<ReturnType<typeof createStrictArtifact>>) {
   return [

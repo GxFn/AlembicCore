@@ -557,7 +557,7 @@ export function createStrictFactDirectWitnessBindingV1(input: {
     throw new Error('STRICT_FACT_WITNESS_AUTHORITY_INVALID');
   }
   const frozenBytes = readCertifiedProjectFactsFrozenFile(input.artifact, file);
-  const frozenLineCount = Math.max(1, Buffer.from(frozenBytes).toString('utf8').split('\n').length);
+  const expectedEvidenceBytes = selectFrozenEvidenceBytes(frozenBytes, input.evidenceEntry.range);
   const expectedProjectContextRef = createProjectContextFileRef({
     projectRoot: input.projectContextRef.scope.projectRoot,
     repoId: file.repoId,
@@ -577,7 +577,8 @@ export function createStrictFactDirectWitnessBindingV1(input: {
     input.evidenceEntry.file !== file.relativePath ||
     !/^sha256:[0-9a-f]{64}$/.test(input.evidenceEntry.contentHash) ||
     hashBytes(Buffer.from(input.evidenceEntry.content)) !== input.evidenceEntry.contentHash ||
-    (input.evidenceEntry.range !== undefined && input.evidenceEntry.range.end > frozenLineCount) ||
+    !expectedEvidenceBytes ||
+    !Buffer.from(input.evidenceEntry.content).equals(Buffer.from(expectedEvidenceBytes)) ||
     input.evidenceLedgerSnapshot.complete !== true ||
     input.evidenceLedgerSnapshot.truncated !== false ||
     input.evidenceLedgerSnapshot.continuation !== null ||
@@ -606,6 +607,32 @@ export function createStrictFactDirectWitnessBindingV1(input: {
     projectContextRef: { ...input.projectContextRef },
   };
   return freezeDeep({ ...semantic, bindingHash: hashCanonicalJson(semantic) });
+}
+
+/**
+ * Evidence Ledger 的 `code.read` 行段使用 1-indexed 闭区间，并以 LF 分行、保留 CR 字节。
+ * 这里直接在冻结字节上定位边界，避免先解码再编码把非法 UTF-8 或换行差异变成相同文本。
+ */
+function selectFrozenEvidenceBytes(
+  frozenBytes: Uint8Array,
+  range: EvidenceEntry['range']
+): Uint8Array | null {
+  if (!range) {
+    return frozenBytes;
+  }
+  const lineStarts = [0];
+  for (let index = 0; index < frozenBytes.byteLength; index += 1) {
+    if (frozenBytes[index] === 0x0a) {
+      lineStarts.push(index + 1);
+    }
+  }
+  if (range.start > lineStarts.length || range.end > lineStarts.length) {
+    return null;
+  }
+  const startOffset = lineStarts[range.start - 1]!;
+  const endOffset =
+    range.end < lineStarts.length ? lineStarts[range.end]! - 1 : frozenBytes.byteLength;
+  return frozenBytes.slice(startOffset, endOffset);
 }
 
 export function createStrictFactBackendRegistryV1(
