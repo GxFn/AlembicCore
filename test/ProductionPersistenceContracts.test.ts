@@ -8,6 +8,7 @@ import {
   readAlembicMigrationBundleManifest,
 } from '../src/database.js';
 import {
+  assertStrictAdmissionReceiptV1,
   canonicalizeCandidateAttemptBatchV1,
   classifyPublicKnowledgeRouteRecoveryV1,
   createCandidateCoverageReceiptV1,
@@ -16,13 +17,20 @@ import {
   createRecipeProductionBindingV1,
   createRefReconciliationReceiptV1,
   createServingSnapshotManifestV1,
+  createStrictAcceptedCorpusInspectionV1,
+  createStrictAdmissionReceiptV1,
   createStrictG1ReceiptV1,
+  createStrictG2ReceiptV1,
   createStrictPersistenceReceiptV1,
   createStrictPublicationMarkerV1,
+  createStrictPublicationSnapshotIdV1,
+  createStrictRecipePersistedPayloadV1,
   type PublicKnowledgeRouteV1,
+  parseStrictPublicationSnapshotIdV1,
   preparePublicKnowledgeRouteV1,
   prepareRecipePersistenceV1,
   STRICT_G1_HARD_AXES_V1,
+  STRICT_G2_HARD_AXES_V1,
   validateSerialAdmissionLedgerV1,
 } from '../src/knowledge.js';
 import { createAlembicRepositories } from '../src/repositories.js';
@@ -474,6 +482,7 @@ describe('production persistence contracts', () => {
       runId: 'run-1',
       analysisFixpointHash: 'sha256:fixpoint',
       privateCorpusRevision: 'revision-1',
+      admissionId: 'admission:one',
       cellId: 'core::architecture',
       authoredFingerprint: 'sha256:authored',
       causalParentIds: ['parent-2', 'parent-1'],
@@ -487,6 +496,16 @@ describe('production persistence contracts', () => {
       causalParentIds: [...input.causalParentIds].reverse(),
     });
     expect(right.preparedRecipeId).toBe(left.preparedRecipeId);
+    const relocated = prepareRecipePersistenceV1({
+      ...input,
+      cellId: 'knowledge::reliability',
+      causalParentIds: ['different-parent'],
+    });
+    expect(relocated.preparedRecipeId).toBe(left.preparedRecipeId);
+    expect(relocated.preparedHash).not.toBe(left.preparedHash);
+    expect(
+      prepareRecipePersistenceV1({ ...input, admissionId: 'admission:two' }).preparedRecipeId
+    ).not.toBe(left.preparedRecipeId);
     expect(left.preparedRecipeId).toMatch(
       /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
     );
@@ -515,12 +534,118 @@ describe('production persistence contracts', () => {
     ).toThrow('STRICT_G1_AXIS_SET_MISMATCH');
   });
 
+  it('rejects corpus summaries that diverge from the sealed authored projection', () => {
+    const projection = createRecipeCandidateFingerprintProjectionV1({
+      title: 'Sealed accepted Recipe',
+      kind: 'pattern',
+      category: 'architecture',
+      trigger: '@sealed-recipe',
+      whenClause: 'When admitting a reviewed candidate',
+      doText: 'Compare against the complete accepted corpus',
+      dontText: 'Do not trust an unsealed summary',
+      coreCode: 'inspectAcceptedCorpus()',
+      pattern: 'inspectAcceptedCorpus(*)',
+      markdown: '# Sealed accepted Recipe',
+      usageGuide: 'Use during serial admission.',
+      retrievalProfile: { intents: ['serial admission'] },
+      negativeIntents: ['unsealed summary'],
+      scopeId: 'repo:core',
+      moduleId: 'knowledge',
+      dimensionId: 'reliability',
+      evidenceRefs: ['E-17'],
+      lineageHashes: ['sha256:fixpoint'],
+      persistedPayload: createStrictRecipePersistedPayloadV1(
+        {
+          title: 'Sealed accepted Recipe',
+          kind: 'pattern',
+          category: 'architecture',
+          trigger: '@sealed-recipe',
+          whenClause: 'When admitting a reviewed candidate',
+          doClause: 'Compare against the complete accepted corpus',
+          dontClause: 'Do not trust an unsealed summary',
+          coreCode: 'inspectAcceptedCorpus()',
+          content: {
+            pattern: 'inspectAcceptedCorpus(*)',
+            markdown: '# Sealed accepted Recipe',
+          },
+          usageGuide: 'Use during serial admission.',
+          retrievalProfile: { intents: ['serial admission'] } as never,
+          scope: 'repo:core',
+          moduleName: 'knowledge',
+          dimensionId: 'reliability',
+          sourceRefs: ['E-17'],
+        },
+        'alembic-agent'
+      ),
+    });
+
+    expect(() =>
+      createStrictAcceptedCorpusInspectionV1({
+        runId: 'run-1',
+        analysisFixpointHash: 'sha256:fixpoint',
+        privateCorpusRevision: 'revision-1',
+        revisionRootManifestHash: `sha256:${'9'.repeat(64)}`,
+        entries: [
+          {
+            recipeId: 'accepted-1',
+            projection,
+            admissionSummary: {
+              title: 'Hidden duplicate title',
+              category: projection.category,
+              trigger: projection.trigger,
+              whenClause: projection.whenClause,
+              doClause: projection.doText,
+              dontClause: projection.dontText,
+              coreCode: projection.coreCode,
+              guardPattern: projection.pattern,
+              markdown: projection.markdown,
+            },
+          },
+        ],
+      })
+    ).toThrow('STRICT_ADMISSION_CORPUS_ENTRY_PROJECTION_MISMATCH');
+  });
+
+  it('rejects a rehashed admit receipt that contains a corpus match', () => {
+    const authority = strictPersistenceAuthority('sha256:candidate');
+    const {
+      receiptHash: _receiptHash,
+      admissionId: _admissionId,
+      ...baseSemantic
+    } = authority.admissionReceipt;
+    const semantic = {
+      ...baseSemantic,
+      semanticMatches: [
+        {
+          recipeId: 'ghost',
+          fingerprint: 'sha256:ghost',
+          similarity: 0.99,
+        },
+      ],
+    };
+    const admissionId = `admission:${hashCanonicalJson(semantic).slice('sha256:'.length)}`;
+    const forged = {
+      ...semantic,
+      admissionId,
+      receiptHash: hashCanonicalJson({ ...semantic, admissionId }),
+    };
+
+    expect(() => assertStrictAdmissionReceiptV1(forged)).toThrow(
+      'STRICT_ADMISSION_RECEIPT_INVALID'
+    );
+  });
+
   it('separates authored fingerprint, persistence, refs, and production binding receipts', () => {
     const authored = createRecipeCandidateFingerprintProjectionV1({
       title: 'Atomic file replacement',
       kind: 'pattern',
+      category: 'reliability',
+      trigger: '@atomic-file-replacement',
+      whenClause: 'When replacing a durable file',
       doText: 'fsync the file before rename',
       dontText: 'do not expose partial bytes',
+      coreCode: 'await fsyncAndRename()',
+      pattern: 'rename(tempPath, finalPath)',
       markdown: 'Use a same-directory temporary file.',
       usageGuide: 'Apply to durable knowledge writes.',
       retrievalProfile: { intents: ['safe write'] },
@@ -530,11 +655,36 @@ describe('production persistence contracts', () => {
       dimensionId: 'reliability',
       evidenceRefs: ['E-17'],
       lineageHashes: ['sha256:fixpoint'],
+      persistedPayload: createStrictRecipePersistedPayloadV1(
+        {
+          title: 'Atomic file replacement',
+          kind: 'pattern',
+          category: 'reliability',
+          trigger: '@atomic-file-replacement',
+          whenClause: 'When replacing a durable file',
+          doClause: 'fsync the file before rename',
+          dontClause: 'do not expose partial bytes',
+          coreCode: 'await fsyncAndRename()',
+          content: {
+            pattern: 'rename(tempPath, finalPath)',
+            markdown: 'Use a same-directory temporary file.',
+          },
+          usageGuide: 'Apply to durable knowledge writes.',
+          retrievalProfile: { intents: ['safe write'] } as never,
+          scope: 'repo:core',
+          moduleName: 'knowledge',
+          dimensionId: 'reliability',
+          sourceRefs: ['E-17'],
+        },
+        'alembic-agent'
+      ),
     });
+    const authority = strictPersistenceAuthority(authored.authoredFingerprint);
     const prepared = prepareRecipePersistenceV1({
       runId: 'run-1',
       analysisFixpointHash: 'sha256:fixpoint',
       privateCorpusRevision: 'revision-1',
+      admissionId: authority.admissionReceipt.admissionId,
       cellId: 'knowledge::reliability',
       authoredFingerprint: authored.authoredFingerprint,
       causalParentIds: ['root-1'],
@@ -544,9 +694,7 @@ describe('production persistence contracts', () => {
     });
     const persistence = createStrictPersistenceReceiptV1({
       prepared,
-      g1ReceiptHash: 'sha256:g1',
-      admissionReceiptHash: 'sha256:admission',
-      g2ReceiptHash: 'sha256:g2',
+      ...authority,
       actualRecipeId: prepared.preparedRecipeId,
       actualAuthoredFingerprint: authored.authoredFingerprint,
       storageHash: 'sha256:storage',
@@ -574,9 +722,7 @@ describe('production persistence contracts', () => {
     expect(() =>
       createStrictPersistenceReceiptV1({
         prepared,
-        g1ReceiptHash: 'sha256:g1',
-        admissionReceiptHash: 'sha256:admission',
-        g2ReceiptHash: 'sha256:g2',
+        ...authority,
         actualRecipeId: '00000000-0000-5000-8000-000000000000',
         actualAuthoredFingerprint: authored.authoredFingerprint,
         storageHash: 'sha256:storage',
@@ -585,6 +731,22 @@ describe('production persistence contracts', () => {
         actualLifecycle: 'pending',
       })
     ).toThrow('STRICT_PERSISTENCE_PREPARED_ID_MISMATCH');
+    expect(() =>
+      createStrictPersistenceReceiptV1({
+        prepared,
+        ...authority,
+        admissionReceipt: {
+          ...authority.admissionReceipt,
+          finalAdmittedFingerprint: 'sha256:tampered',
+        },
+        actualRecipeId: prepared.preparedRecipeId,
+        actualAuthoredFingerprint: authored.authoredFingerprint,
+        storageHash: 'sha256:storage',
+        databaseRowHash: 'sha256:db-row',
+        fileHash: 'sha256:file',
+        actualLifecycle: 'pending',
+      })
+    ).toThrow('STRICT_PERSISTENCE_AUTHORITY_MISMATCH');
   });
 
   it('buffers and sorts a whole candidate pass before enforcing caps', () => {
@@ -852,6 +1014,53 @@ describe('production persistence contracts', () => {
     expect(route).not.toHaveProperty('candidateOracleHash');
   });
 
+  it('shares one canonical base/repaired snapshot ID parser across serving boundaries', () => {
+    const dataManifestHash = `sha256:${'d'.repeat(64)}`;
+    const base = createStrictPublicationSnapshotIdV1(dataManifestHash);
+    const repaired = createStrictPublicationSnapshotIdV1(
+      dataManifestHash,
+      '123e4567-e89b-42d3-a456-426614174000'
+    );
+
+    expect(base).toBe(`snapshot-${'d'.repeat(64)}`);
+    expect(parseStrictPublicationSnapshotIdV1(base)).toEqual({
+      schemaVersion: 1,
+      snapshotId: base,
+      baseSnapshotId: base,
+      candidateDataManifestHash: dataManifestHash,
+      collisionUuid: null,
+    });
+    expect(parseStrictPublicationSnapshotIdV1(repaired)).toMatchObject({
+      baseSnapshotId: base,
+      candidateDataManifestHash: dataManifestHash,
+      collisionUuid: '123e4567-e89b-42d3-a456-426614174000',
+    });
+    expect(() =>
+      createServingSnapshotManifestV1({
+        ...servingSnapshotInput(`sha256:${'a'.repeat(64)}`),
+        snapshotId: repaired,
+      })
+    ).not.toThrow();
+    expect(() =>
+      createServingSnapshotManifestV1({
+        ...servingSnapshotInput(`sha256:${'a'.repeat(64)}`),
+        snapshotId: `snapshot-${'e'.repeat(64)}`,
+      })
+    ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
+    for (const invalid of [
+      'snapshot-1',
+      `snapshot-${'D'.repeat(64)}`,
+      `snapshot-${'d'.repeat(63)}`,
+      `snapshot-${'d'.repeat(64)}-../escape`,
+      `snapshot-${'d'.repeat(64)}-123e4567-e89b-12d3-a456-426614174000`,
+      `snapshot-${'d'.repeat(64)}-123e4567-e89b-42d3-7456-426614174000`,
+    ]) {
+      expect(() => parseStrictPublicationSnapshotIdV1(invalid)).toThrow(
+        'STRICT_PUBLICATION_SNAPSHOT_ID_INVALID'
+      );
+    }
+  });
+
   it('rejects unknown or nested private fields at public snapshot and route boundaries', () => {
     expect(() =>
       createServingSnapshotManifestV1({
@@ -869,6 +1078,87 @@ describe('production persistence contracts', () => {
   });
 });
 
+function strictPersistenceAuthority(candidateFingerprint: string) {
+  const g1Receipt = createStrictG1ReceiptV1({
+    candidateFingerprint,
+    retrievalReadinessHash: 'sha256:retrieval-ready',
+    rows: STRICT_G1_HARD_AXES_V1.map((axis) => ({
+      axis,
+      verdict: 'pass' as const,
+      reasonCode: 'verified',
+      evidenceRefs: [`evidence:${axis}`],
+    })),
+  });
+  const corpusInspection = createStrictAcceptedCorpusInspectionV1({
+    runId: 'run-1',
+    analysisFixpointHash: 'sha256:fixpoint',
+    privateCorpusRevision: 'revision-1',
+    revisionRootManifestHash: `sha256:${'9'.repeat(64)}`,
+    entries: [],
+  });
+  const admissionReceipt = createStrictAdmissionReceiptV1({
+    g1Receipt,
+    corpusInspection,
+    inputFingerprint: candidateFingerprint,
+    finalAdmittedFingerprint: candidateFingerprint,
+    exactMatches: [],
+    semanticMatches: [],
+    consolidation: {
+      action: 'create',
+      reasonCode: 'strict-test-novel-candidate',
+      targetRecipeId: null,
+      targetFingerprint: null,
+    },
+    algorithmVersion: 'gateway-admission-v1',
+  });
+  const g2Receipt = createStrictG2ReceiptV1({
+    g1Receipt,
+    admissionReceipt,
+    reviewedFingerprint: candidateFingerprint,
+    producer: {
+      identity: 'producer-model',
+      method: 'recipe-expression-v1',
+      modelHash: 'sha256:producer-model',
+      promptHash: 'sha256:producer-prompt',
+    },
+    reviewer: {
+      identity: 'independent-reviewer',
+      method: 'value-gate-v1',
+      modelHash: 'sha256:reviewer-model',
+      promptHash: 'sha256:reviewer-prompt',
+    },
+    rows: STRICT_G2_HARD_AXES_V1.map((axis) => ({
+      axis,
+      axisVerdict: 'pass' as const,
+      score: 2 as const,
+      reasonCode: 'verified',
+      evidenceRefs: [`evidence:${axis}`],
+      repairable: false,
+    })),
+    novelty: {
+      decision: 'novel-project-specific',
+      reasonCode: 'project-specific-mechanism',
+      evidenceRefs: ['E-1'],
+    },
+    duplicate: {
+      decision: 'no-match',
+      reasonCode: 'complete-corpus-no-match',
+      evidenceRefs: ['E-1'],
+      admissionAlgorithmVersion: admissionReceipt.algorithmVersion,
+      comparedPrivateCorpusRevision: admissionReceipt.privateCorpusRevision,
+      matchedRecipeIds: [],
+      matchedFingerprints: [],
+      targetRecipeId: null,
+      consolidationFingerprint: null,
+    },
+    repairAttempt: 0,
+    calibrationReceiptHash: 'sha256:calibration',
+    ruleVersion: 'strict-g2-rule-v1',
+    permittedRepairFields: [],
+  });
+  return { g1Receipt, admissionReceipt, g2Receipt };
+}
+
 function strictPublicationMarkerInput(projectIdentityHash: string, migrationBundleHash: string) {
   return {
     mode: 'strict-v1' as const,
@@ -879,10 +1169,11 @@ function strictPublicationMarkerInput(projectIdentityHash: string, migrationBund
 }
 
 function servingSnapshotInput(servingSnapshotValidationHash: string) {
+  const candidateDataManifestHash = `sha256:${'d'.repeat(64)}`;
   return {
     sessionId: 'session-1',
-    snapshotId: 'snapshot-1',
-    candidateDataManifestHash: 'sha256:data',
+    snapshotId: createStrictPublicationSnapshotIdV1(candidateDataManifestHash),
+    candidateDataManifestHash,
     finalCoverageBindingHash: 'sha256:coverage',
     servingSnapshotValidationHash,
     vectorGenerationId: 'vector-1',
@@ -897,7 +1188,7 @@ function publicRoute(committedAt: string): PublicKnowledgeRouteV1 & Record<strin
   return {
     schemaVersion: 1,
     sessionId: 'session-1',
-    snapshotId: 'snapshot-1',
+    snapshotId: createStrictPublicationSnapshotIdV1(`sha256:${'d'.repeat(64)}`),
     servingSnapshotManifestHash: 'sha256:serving',
     vectorGenerationId: 'vector-1',
     vectorManifestHash: 'sha256:vector',

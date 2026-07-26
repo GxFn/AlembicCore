@@ -50,7 +50,7 @@ export class GenerateDedup {
   findDuplicate(candidate: CandidateSummary, threshold = DEFAULT_THRESHOLD): DedupMatch | null {
     let best: DedupMatch | null = null;
     for (const existing of this.#candidates) {
-      const sim = computeSimilarity(candidate, existing);
+      const sim = computeCandidateSummarySimilarityV1(candidate, existing);
       if (sim >= threshold && (best === null || sim > best.similarity)) {
         best = {
           existingId: existing.id,
@@ -81,7 +81,10 @@ export class GenerateDedup {
 
 /* ────────────────────── Similarity ────────────────────── */
 
-function computeSimilarity(a: CandidateSummary, b: CandidateSummary): number {
+export function computeCandidateSummarySimilarityV1(
+  a: CandidateSummary,
+  b: CandidateSummary
+): number {
   const d1 = titleJaccard(a.title, b.title);
   const d2 = clauseJaccard([a.doClause, a.dontClause], [b.doClause, b.dontClause]);
   const d3 = codeSimilarity(a.coreCode, b.coreCode);

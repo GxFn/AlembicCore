@@ -17,6 +17,7 @@ export type {
   TypedGateReturnV1,
 } from './service/production/StrictAnalysisContracts.js';
 export * from './service/production/StrictAnalysisContracts.js';
+export * from './service/production/StrictFactExecution.js';
 export type {
   DimensionDef,
   MissionBriefingResult,

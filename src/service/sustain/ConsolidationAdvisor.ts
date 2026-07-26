@@ -155,6 +155,35 @@ export class ConsolidationAdvisor {
       ? this.#mergeUnique(dbRelated, options.sessionRecipes)
       : dbRelated;
 
+    return this.#analyzeAgainstRelated(candidate, substanceScore, related);
+  }
+
+  /**
+   * 严格准入使用调用方已认证的完整 accepted corpus，禁止再次访问内部 repository，
+   * 也不应用普通交互路径的 30 条展示/性能上限。
+   */
+  analyzeAgainstAcceptedCorpus(
+    candidate: CandidateForConsolidation,
+    acceptedCorpus: readonly RecipeSummary[]
+  ): ConsolidationAdvice {
+    const ids = acceptedCorpus.map((recipe) => recipe.id);
+    if (
+      ids.some((id) => !id?.trim()) ||
+      new Set(ids).size !== ids.length ||
+      acceptedCorpus.some((recipe) => !recipe.title?.trim())
+    ) {
+      throw new Error('STRICT_CONSOLIDATION_CORPUS_INVALID');
+    }
+    return this.#analyzeAgainstRelated(candidate, this.#assessSubstance(candidate), [
+      ...acceptedCorpus,
+    ]);
+  }
+
+  #analyzeAgainstRelated(
+    candidate: CandidateForConsolidation,
+    substanceScore: number,
+    related: RecipeSummary[]
+  ): ConsolidationAdvice {
     // ── Step 3: insufficient — 独立价值不足，交给 Agent 与开发者决定 ──
     if (substanceScore < MIN_SUBSTANCE_SCORE) {
       if (related.length > 0) {

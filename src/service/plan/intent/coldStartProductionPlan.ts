@@ -291,6 +291,8 @@ export interface FactQueryFamilyV1 {
   readonly id: string;
   readonly capabilityId: string;
   readonly supportedScales: readonly AnalysisScale[];
+  /** Strict executor query/occurrence pack identity; legacy catalogs may omit it and cannot execute strictly. */
+  readonly queryPackHash?: CanonicalSha256;
   readonly loadedProducer: string;
   readonly producerManifestHash: CanonicalSha256;
   readonly loadReceiptHash: CanonicalSha256;

@@ -69,4 +69,21 @@ describe('Core package baseline', () => {
     expect(Object.hasOwn(rootModule, 'SourceGraphService')).toBe(false);
     expect(Object.hasOwn(rootModule, 'SourceGraphQueryService')).toBe(false);
   });
+
+  it('exports strict fact execution, admission authority, and snapshot identity from stable facades', async () => {
+    const hostAgentWorkflows = await import('../src/host-agent-workflows.js');
+    const knowledge = await import('../src/knowledge.js');
+
+    expect(hostAgentWorkflows.executeStrictFactScheduleV1).toBeInstanceOf(Function);
+    expect(hostAgentWorkflows.createAstFactQueryBackendV1).toBeInstanceOf(Function);
+    expect(hostAgentWorkflows.createAstFactQueryFamilyV1).toBeInstanceOf(Function);
+    expect(hostAgentWorkflows.createStrictAstFactQueryPackV1).toBeInstanceOf(Function);
+    expect(hostAgentWorkflows.createStrictFactWitnessAuthorityV1).toBeInstanceOf(Function);
+    expect(hostAgentWorkflows.createStrictEvidenceLedgerSnapshotV1).toBeInstanceOf(Function);
+    expect(knowledge.createStrictAcceptedCorpusInspectionV1).toBeInstanceOf(Function);
+    expect(knowledge.createStrictAdmissionReceiptV1).toBeInstanceOf(Function);
+    expect(knowledge.createStrictG2ReceiptV1).toBeInstanceOf(Function);
+    expect(knowledge.createStrictRecipePersistedPayloadV1).toBeInstanceOf(Function);
+    expect(knowledge.parseStrictPublicationSnapshotIdV1).toBeInstanceOf(Function);
+  });
 });

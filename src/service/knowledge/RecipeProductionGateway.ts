@@ -24,12 +24,27 @@ import {
   normalizeGatewaySource,
 } from '../../shared/sourceContracts.js';
 import type { StructuredPatch } from '../../types/evolution.js';
-import type { CandidateSummary, GenerateDedup } from '../bootstrap/GenerateDedup.js';
 import {
+  type CandidateSummary,
+  computeCandidateSummarySimilarityV1,
+  type GenerateDedup,
+} from '../bootstrap/GenerateDedup.js';
+import {
+  assertStrictAcceptedCorpusInspectionV1,
+  assertStrictG1ReceiptV1,
+  assertStrictPersistenceAuthorityV1,
   createRecipeCandidateFingerprintProjectionV1,
+  createStrictAdmissionReceiptV1,
   type PreparedRecipePersistenceV1,
   type RecipeCandidateFingerprintProjectionV1,
+  type StrictAcceptedCorpusEntryV1,
+  type StrictAcceptedCorpusInspectionV1,
+  type StrictAdmissionReceiptV1,
+  type StrictG1ReceiptV1,
+  type StrictG2ReceiptV1,
 } from '../production/ProductionPersistenceContracts.js';
+import { toProjectFactsJson } from '../project-context/foundation/canonical.js';
+import type { ProjectFactsJson } from '../project-context/foundation/contracts.js';
 import type { RetrievalReadinessReport } from './RecipeRetrieval.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */
@@ -84,6 +99,104 @@ export interface CreateRecipeItem {
   stableRelationKey?: string;
   metadata?: Record<string, unknown>;
   [key: string]: unknown;
+}
+
+/**
+ * strict 路径唯一允许写入的 Recipe payload。
+ *
+ * 这里故意不读取 metadata、`_category` 或模块推断器：这些兼容 fallback 只服务 legacy
+ * create；若 strict 路径在 G2 后再次解释隐藏字段，写入内容就可能逃逸已封存指纹。
+ */
+export function createStrictRecipePersistedPayloadV1(
+  item: CreateRecipeItem,
+  source: RecipeProductionSource
+): Record<string, ProjectFactsJson> {
+  assertStrictRecipeFallbackFields(item);
+  const content = strictObjectOrDefault(item.content, { markdown: '', pattern: '' });
+  const reasoning = createStrictRecipeReasoning(item.reasoning);
+  return requireStrictRecipePayload(
+    toProjectFactsJson({
+      language: strictString(item.language),
+      dimensionId: strictString(item.dimensionId),
+      category: strictString(item.category, 'general'),
+      knowledgeType: strictString(item.knowledgeType, 'code-pattern'),
+      source: strictString(item.source, getGatewaySourceLabel(source)),
+      title: strictString(item.title),
+      description: strictString(item.description),
+      tags: strictArray(item.tags),
+      trigger: strictString(item.trigger),
+      kind: strictString(item.kind, 'pattern'),
+      topicHint: strictString(item.topicHint),
+      whenClause: strictString(item.whenClause),
+      doClause: strictString(item.doClause),
+      dontClause: strictString(item.dontClause),
+      coreCode: strictString(item.coreCode),
+      sourceRefs: strictArray(item.sourceRefs),
+      content,
+      relations: item.relations ?? {},
+      reasoning,
+      headers: strictArray(item.headers),
+      headerPaths: strictArray(item.headerPaths),
+      moduleName: strictString(item.moduleName),
+      includeHeaders: item.includeHeaders ?? false,
+      usageGuide: strictString(item.usageGuide),
+      retrievalProfile: item.retrievalProfile ?? null,
+      scope: strictString(item.scope),
+      complexity: strictString(item.complexity),
+      sourceFile: strictString(item.sourceFile),
+      sourceCandidateId: item.sourceCandidateId || null,
+      agentNotes: item.agentNotes ?? null,
+      aiInsight: item.aiInsight ?? reasoning.whyStandard ?? item.description ?? null,
+    })
+  );
+}
+
+function assertStrictRecipeFallbackFields(item: CreateRecipeItem): void {
+  if (
+    Object.hasOwn(item, '_category') ||
+    (item.metadata !== undefined &&
+      (!item.metadata ||
+        typeof item.metadata !== 'object' ||
+        Array.isArray(item.metadata) ||
+        Object.keys(item.metadata).length > 0))
+  ) {
+    throw new Error('STRICT_PREPARED_HIDDEN_FALLBACK_FIELDS_PROHIBITED');
+  }
+}
+
+function createStrictRecipeReasoning(
+  value: CreateRecipeItem['reasoning']
+): NonNullable<CreateRecipeItem['reasoning']> {
+  return value
+    ? {
+        ...value,
+        sources:
+          Array.isArray(value.sources) && value.sources.length > 0 ? [...value.sources] : ['agent'],
+      }
+    : {
+        whyStandard: '',
+        sources: ['agent'],
+        confidence: 0.7,
+      };
+}
+
+function strictString(value: string | undefined, fallback = ''): string {
+  return value || fallback;
+}
+
+function strictArray<T>(value: readonly T[] | undefined): readonly T[] {
+  return value || [];
+}
+
+function strictObjectOrDefault<T extends object>(value: T | undefined, fallback: T): T {
+  return value && typeof value === 'object' ? value : fallback;
+}
+
+function requireStrictRecipePayload(canonical: ProjectFactsJson): Record<string, ProjectFactsJson> {
+  if (!canonical || typeof canonical !== 'object' || Array.isArray(canonical)) {
+    throw new Error('STRICT_PREPARED_PAYLOAD_INVALID');
+  }
+  return canonical;
 }
 
 export interface CreateRecipeRequest {
@@ -264,6 +377,24 @@ export interface StrictPreparedRecipePersistenceContextV1 {
   readonly journalToken: string;
   /** Exact G1-reviewed authoring projection; the Gateway recomputes it from `item`. */
   readonly reviewedProjection: RecipeCandidateFingerprintProjectionV1;
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly admissionReceipt: StrictAdmissionReceiptV1;
+  readonly g2Receipt: StrictG2ReceiptV1;
+}
+
+export interface StrictCandidateAdmissionContextV1 {
+  readonly source: RecipeProductionSource;
+  readonly runId: string;
+  readonly analysisFixpointHash: string;
+  readonly privateCorpusRevision: string;
+  readonly revisionRootManifestHash: string;
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly reviewedProjection: RecipeCandidateFingerprintProjectionV1;
+}
+
+export interface StrictCandidateAdmissionResultV1 {
+  readonly projection: RecipeCandidateFingerprintProjectionV1;
+  readonly receipt: StrictAdmissionReceiptV1;
 }
 
 export interface StrictPreparedRecipePersistenceResultV1 {
@@ -311,23 +442,40 @@ interface GatewayKnowledgeService {
   publish?(id: string, context: { userId: string }): Promise<RecipeProductionRecord>;
 }
 
+interface GatewayConsolidationAdvice {
+  action: string;
+  confidence: number;
+  reason: string;
+  targetRecipe?: { id: string; title: string; similarity: number };
+  reorganizeTargets?: { id: string; title: string; similarity: number }[];
+  coveredBy?: { id: string; title: string; similarity: number }[];
+  mergeDirection?: { addedDimensions: string[]; summary: string };
+  mergePatch?: StructuredPatch;
+  pendingSemanticReview?: boolean;
+}
+
 interface GatewayConsolidationAdvisor {
+  analyzeAgainstAcceptedCorpus?(
+    candidate: { title: string; category?: string; [key: string]: unknown },
+    acceptedCorpus: Array<{
+      id: string;
+      title: string;
+      doClause: string | null;
+      dontClause: string | null;
+      coreCode: string | null;
+      category: string | null;
+      trigger: string | null;
+      whenClause: string | null;
+      guardPattern: string | null;
+      content: { markdown?: string; pattern?: string } | null;
+    }>
+  ): GatewayConsolidationAdvice | Promise<GatewayConsolidationAdvice>;
   analyzeBatch(
     candidates: Array<{ title: string; category?: string; [key: string]: unknown }>
   ): Promise<{
     items: Array<{
       index: number;
-      advice: {
-        action: string;
-        confidence: number;
-        reason: string;
-        targetRecipe?: { id: string; title: string; similarity: number };
-        reorganizeTargets?: { id: string; title: string; similarity: number }[];
-        coveredBy?: { id: string; title: string; similarity: number }[];
-        mergeDirection?: { addedDimensions: string[]; summary: string };
-        mergePatch?: StructuredPatch;
-        pendingSemanticReview?: boolean;
-      };
+      advice: GatewayConsolidationAdvice;
     }>;
     internalOverlaps: Array<{ indexA: number; indexB: number; similarity: number }>;
   }>;
@@ -402,10 +550,26 @@ export interface GatewayDeps {
   inspectPreparedRecipe?: (
     prepared: PreparedRecipePersistenceV1
   ) => Promise<PreparedRecipeInspectionV1 | null>;
+  /**
+   * 严格准入只接受当前物理 revision root 的全量 accepted corpus。
+   * 端口返回后 Core 会重算 inspection/corpus hash，并拒绝截断或跨 revision 数据。
+   */
+  inspectAcceptedRecipeCorpus?: (input: {
+    readonly runId: string;
+    readonly analysisFixpointHash: string;
+    readonly privateCorpusRevision: string;
+    readonly revisionRootManifestHash: string;
+  }) => Promise<StrictAcceptedCorpusInspectionV1>;
 }
 
 export interface PreparedRecipeInspectionV1 extends RecipeProductionRecord {
   readonly privateCorpusRevision: string;
+  readonly preparedHash: string;
+  readonly admissionId: string;
+  readonly g1ReceiptHash: string;
+  readonly admissionReceiptHash: string;
+  readonly g2ReceiptHash: string;
+  readonly authoredFingerprint: string;
   readonly dbHash: string;
   readonly fileHash: string;
 }
@@ -426,6 +590,7 @@ export class RecipeProductionGateway
   readonly #resolveModuleFromSourceRefs: ((sourceRefs: string[]) => string | undefined) | null;
   readonly #authorizePreparedRecipe: GatewayDeps['authorizePreparedRecipe'];
   readonly #inspectPreparedRecipe: GatewayDeps['inspectPreparedRecipe'];
+  readonly #inspectAcceptedRecipeCorpus: GatewayDeps['inspectAcceptedRecipeCorpus'];
 
   constructor(deps: GatewayDeps) {
     this.#knowledgeService = deps.knowledgeService;
@@ -439,6 +604,38 @@ export class RecipeProductionGateway
     this.#resolveModuleFromSourceRefs = deps.resolveModuleFromSourceRefs ?? null;
     this.#authorizePreparedRecipe = deps.authorizePreparedRecipe;
     this.#inspectPreparedRecipe = deps.inspectPreparedRecipe;
+    this.#inspectAcceptedRecipeCorpus = deps.inspectAcceptedRecipeCorpus;
+  }
+
+  async admitCandidate(
+    item: CreateRecipeItem,
+    context: StrictCandidateAdmissionContextV1
+  ): Promise<StrictCandidateAdmissionResultV1> {
+    const source = admitRecipeProductionSource(context.source);
+    const analyzeAgainstAcceptedCorpus =
+      this.#consolidationAdvisor?.analyzeAgainstAcceptedCorpus?.bind(this.#consolidationAdvisor);
+    if (!this.#inspectAcceptedRecipeCorpus || !analyzeAgainstAcceptedCorpus) {
+      throw new Error('STRICT_ADMISSION_AUTHORITY_UNAVAILABLE');
+    }
+    assertStrictG1ReceiptV1(context.g1Receipt);
+    const projection = assertRecipeItemAuthoringProjection(
+      item,
+      context.reviewedProjection,
+      source
+    );
+    if (
+      context.g1Receipt.verdict !== 'pass' ||
+      context.g1Receipt.candidateFingerprint !== projection.authoredFingerprint
+    ) {
+      throw new Error('STRICT_ADMISSION_G1_MISMATCH');
+    }
+    return executeStrictCandidateAdmission({
+      item,
+      context,
+      projection,
+      inspectAcceptedRecipeCorpus: this.#inspectAcceptedRecipeCorpus,
+      analyzeAgainstAcceptedCorpus,
+    });
   }
 
   async persistPreparedReviewedCandidate(
@@ -450,7 +647,19 @@ export class RecipeProductionGateway
     if (!this.#authorizePreparedRecipe || !this.#inspectPreparedRecipe) {
       throw new Error('STRICT_PREPARED_PERSISTENCE_AUTHORITY_UNAVAILABLE');
     }
-    assertPreparedRecipeAuthoringProjection(item, prepared, context.reviewedProjection);
+    const strictPayload = assertPreparedRecipeAuthoringProjection(
+      item,
+      prepared,
+      context.reviewedProjection,
+      source
+    );
+    assertStrictPersistenceAuthorityV1({
+      prepared,
+      g1Receipt: context.g1Receipt,
+      admissionReceipt: context.admissionReceipt,
+      g2Receipt: context.g2Receipt,
+      reviewedFingerprint: context.reviewedProjection.authoredFingerprint,
+    });
     if (
       !(await this.#authorizePreparedRecipe(
         context.journalToken,
@@ -462,7 +671,7 @@ export class RecipeProductionGateway
     }
     const existing = await this.#inspectPreparedRecipe(prepared);
     if (existing) {
-      assertPreparedRecipeInspection(existing, prepared);
+      assertPreparedRecipeInspection(existing, prepared, context);
       return {
         status: 'recovered',
         recipe: existing,
@@ -471,7 +680,7 @@ export class RecipeProductionGateway
       };
     }
 
-    const data = this.#prepareCreateData(item, source, context.userId, prepared.preparedRecipeId);
+    const data = { id: prepared.preparedRecipeId, ...strictPayload };
     const saved = await this.#knowledgeService.create(data, { userId: context.userId });
     if (saved.id !== prepared.preparedRecipeId) {
       throw new Error('STRICT_PREPARED_ID_DIVERGENCE');
@@ -480,7 +689,7 @@ export class RecipeProductionGateway
     if (!inspected) {
       throw new Error('STRICT_PREPARED_PERSISTENCE_READBACK_MISSING');
     }
-    assertPreparedRecipeInspection(inspected, prepared);
+    assertPreparedRecipeInspection(inspected, prepared, context);
     return {
       status: 'created',
       recipe: inspected,
@@ -1395,13 +1604,261 @@ export class RecipeProductionGateway
   }
 }
 
+async function executeStrictCandidateAdmission(input: {
+  readonly item: CreateRecipeItem;
+  readonly context: StrictCandidateAdmissionContextV1;
+  readonly projection: RecipeCandidateFingerprintProjectionV1;
+  readonly inspectAcceptedRecipeCorpus: NonNullable<GatewayDeps['inspectAcceptedRecipeCorpus']>;
+  readonly analyzeAgainstAcceptedCorpus: NonNullable<
+    GatewayConsolidationAdvisor['analyzeAgainstAcceptedCorpus']
+  >;
+}): Promise<StrictCandidateAdmissionResultV1> {
+  const corpusInspection = await loadStrictAcceptedCorpus(
+    input.context,
+    input.inspectAcceptedRecipeCorpus
+  );
+  const uniquenessValidation = validateStrictAdmissionCandidate(input.item, corpusInspection);
+  const exactMatches = findStrictAdmissionExactMatches(
+    input.item,
+    input.projection,
+    corpusInspection
+  );
+  const semanticMatches = findStrictAdmissionSemanticMatches(
+    input.item,
+    input.projection,
+    corpusInspection
+  );
+  const advice = await resolveStrictAdmissionAdvice(
+    input.item,
+    input.projection,
+    corpusInspection,
+    uniquenessValidation,
+    exactMatches,
+    input.analyzeAgainstAcceptedCorpus
+  );
+  const receipt = createStrictAdmissionReceiptFromAdvice(
+    input.context,
+    input.projection,
+    corpusInspection,
+    exactMatches,
+    semanticMatches,
+    advice
+  );
+  return { projection: input.projection, receipt };
+}
+
+async function loadStrictAcceptedCorpus(
+  context: StrictCandidateAdmissionContextV1,
+  inspect: NonNullable<GatewayDeps['inspectAcceptedRecipeCorpus']>
+): Promise<StrictAcceptedCorpusInspectionV1> {
+  const corpus = await inspect({
+    runId: context.runId,
+    analysisFixpointHash: context.analysisFixpointHash,
+    privateCorpusRevision: context.privateCorpusRevision,
+    revisionRootManifestHash: context.revisionRootManifestHash,
+  });
+  const invalid = [
+    corpus.runId !== context.runId,
+    corpus.analysisFixpointHash !== context.analysisFixpointHash,
+    corpus.privateCorpusRevision !== context.privateCorpusRevision,
+    corpus.revisionRootManifestHash !== context.revisionRootManifestHash,
+    corpus.complete !== true,
+    corpus.truncated !== false,
+    corpus.continuation !== null,
+  ];
+  if (invalid.some(Boolean)) {
+    throw new Error('STRICT_ADMISSION_CORPUS_INCOMPLETE');
+  }
+  assertStrictAcceptedCorpusInspectionV1(corpus);
+  return corpus;
+}
+
+function validateStrictAdmissionCandidate(
+  item: CreateRecipeItem,
+  corpus: StrictAcceptedCorpusInspectionV1
+): ReturnType<UnifiedValidator['validate']> {
+  const validator = new UnifiedValidator();
+  for (const entry of corpus.entries) {
+    validator.recordSubmission(
+      entry.admissionSummary.title,
+      entry.admissionSummary.guardPattern,
+      entry.admissionSummary.trigger
+    );
+  }
+  const structural = validator.validate(item as Record<string, unknown>, {
+    skipUniqueness: true,
+  });
+  if (!structural.pass) {
+    throw new Error(`STRICT_ADMISSION_VALIDATION_FAILED:${structural.errors.join(';')}`);
+  }
+  return validator.validate(item as Record<string, unknown>);
+}
+
+function findStrictAdmissionExactMatches(
+  item: CreateRecipeItem,
+  projection: RecipeCandidateFingerprintProjectionV1,
+  corpus: StrictAcceptedCorpusInspectionV1
+): StrictAdmissionReceiptV1['exactMatches'] {
+  return corpus.entries
+    .filter((entry) => strictAdmissionEntryMatches(item, projection, entry))
+    .map((entry) => ({
+      recipeId: entry.recipeId,
+      fingerprint: entry.projection.authoredFingerprint,
+    }));
+}
+
+function strictAdmissionEntryMatches(
+  item: CreateRecipeItem,
+  projection: RecipeCandidateFingerprintProjectionV1,
+  entry: StrictAcceptedCorpusEntryV1
+): boolean {
+  return [
+    entry.projection.authoredFingerprint === projection.authoredFingerprint,
+    entry.admissionSummary.title.toLowerCase() === projection.title.toLowerCase(),
+    Boolean(
+      item.trigger && entry.admissionSummary.trigger?.toLowerCase() === item.trigger.toLowerCase()
+    ),
+    Boolean(item.content?.pattern && entry.admissionSummary.guardPattern === item.content.pattern),
+  ].some(Boolean);
+}
+
+function findStrictAdmissionSemanticMatches(
+  item: CreateRecipeItem,
+  projection: RecipeCandidateFingerprintProjectionV1,
+  corpus: StrictAcceptedCorpusInspectionV1
+): StrictAdmissionReceiptV1['semanticMatches'] {
+  const candidateSummary = candidateSummaryFromItem('', item, projection);
+  return corpus.entries
+    .map((entry) => ({
+      recipeId: entry.recipeId,
+      fingerprint: entry.projection.authoredFingerprint,
+      similarity: computeCandidateSummarySimilarityV1(
+        candidateSummary,
+        candidateSummaryFromAcceptedEntry(entry)
+      ),
+    }))
+    .filter((match) => match.similarity >= 0.65)
+    .sort(
+      (left, right) =>
+        right.similarity - left.similarity || left.recipeId.localeCompare(right.recipeId)
+    );
+}
+
+async function resolveStrictAdmissionAdvice(
+  item: CreateRecipeItem,
+  projection: RecipeCandidateFingerprintProjectionV1,
+  corpus: StrictAcceptedCorpusInspectionV1,
+  uniqueness: ReturnType<UnifiedValidator['validate']>,
+  exactMatches: StrictAdmissionReceiptV1['exactMatches'],
+  analyze: NonNullable<GatewayConsolidationAdvisor['analyzeAgainstAcceptedCorpus']>
+): Promise<GatewayConsolidationAdvice> {
+  try {
+    const advice = await analyze(
+      consolidationCandidateFromItem(item, projection),
+      corpus.entries.map(strictAcceptedEntryForAdvisor)
+    );
+    if (advice.pendingSemanticReview) {
+      throw new Error('nonterminal consolidation result');
+    }
+    return uniqueness.pass
+      ? advice
+      : createStrictExactDuplicateAdvice(uniqueness, exactMatches, corpus);
+  } catch (_error: unknown) {
+    throw new Error('STRICT_ADMISSION_CONSOLIDATION_FAILED');
+  }
+}
+
+function strictAcceptedEntryForAdvisor(entry: StrictAcceptedCorpusEntryV1) {
+  return {
+    id: entry.recipeId,
+    ...entry.admissionSummary,
+    content: {
+      ...(entry.admissionSummary.markdown ? { markdown: entry.admissionSummary.markdown } : {}),
+      ...(entry.admissionSummary.guardPattern
+        ? { pattern: entry.admissionSummary.guardPattern }
+        : {}),
+    },
+  };
+}
+
+function createStrictExactDuplicateAdvice(
+  uniqueness: ReturnType<UnifiedValidator['validate']>,
+  exactMatches: StrictAdmissionReceiptV1['exactMatches'],
+  corpus: StrictAcceptedCorpusInspectionV1
+): GatewayConsolidationAdvice {
+  const duplicateTarget = exactMatches[0];
+  if (!duplicateTarget) {
+    throw new Error('validation uniqueness did not resolve to the inspected corpus');
+  }
+  const target = corpus.entries.find((entry) => entry.recipeId === duplicateTarget.recipeId);
+  return {
+    action: 'insufficient',
+    confidence: 1,
+    reason: `VALIDATION_EXACT_DUPLICATE:${uniqueness.errors.join(';')}`,
+    coveredBy: target
+      ? [{ id: target.recipeId, title: target.projection.title, similarity: 1 }]
+      : [],
+  };
+}
+
+function createStrictAdmissionReceiptFromAdvice(
+  context: StrictCandidateAdmissionContextV1,
+  projection: RecipeCandidateFingerprintProjectionV1,
+  corpus: StrictAcceptedCorpusInspectionV1,
+  exactMatches: StrictAdmissionReceiptV1['exactMatches'],
+  semanticMatches: StrictAdmissionReceiptV1['semanticMatches'],
+  advice: GatewayConsolidationAdvice
+): StrictAdmissionReceiptV1 {
+  try {
+    const targetId =
+      advice.targetRecipe?.id ??
+      advice.reorganizeTargets?.[0]?.id ??
+      advice.coveredBy?.[0]?.id ??
+      null;
+    const target = targetId
+      ? corpus.entries.find((entry) => entry.recipeId === targetId)
+      : undefined;
+    const action = normalizeStrictAdmissionAction(advice.action);
+    if (
+      (action === 'create' && targetId !== null) ||
+      (['merge', 'reorganize', 'insufficient'].includes(action) && !target)
+    ) {
+      throw new Error('consolidation target mismatch');
+    }
+    return createStrictAdmissionReceiptV1({
+      g1Receipt: context.g1Receipt,
+      corpusInspection: corpus,
+      inputFingerprint: projection.authoredFingerprint,
+      finalAdmittedFingerprint: projection.authoredFingerprint,
+      exactMatches,
+      semanticMatches,
+      consolidation: {
+        action,
+        reasonCode: advice.reason,
+        targetRecipeId: target?.recipeId ?? null,
+        targetFingerprint: target?.projection.authoredFingerprint ?? null,
+      },
+      algorithmVersion: 'gateway-admission-v1+generate-dedup-v1+consolidation-advisor-v1',
+    });
+  } catch (_error: unknown) {
+    throw new Error('STRICT_ADMISSION_CONSOLIDATION_FAILED');
+  }
+}
+
 function assertPreparedRecipeInspection(
   inspection: PreparedRecipeInspectionV1,
-  prepared: PreparedRecipePersistenceV1
+  prepared: PreparedRecipePersistenceV1,
+  context: StrictPreparedRecipePersistenceContextV1
 ): void {
   if (
     inspection.id !== prepared.preparedRecipeId ||
     inspection.privateCorpusRevision !== prepared.privateCorpusRevision ||
+    inspection.preparedHash !== prepared.preparedHash ||
+    inspection.admissionId !== prepared.admissionId ||
+    inspection.g1ReceiptHash !== context.g1Receipt.receiptHash ||
+    inspection.admissionReceiptHash !== context.admissionReceipt.receiptHash ||
+    inspection.g2ReceiptHash !== context.g2Receipt.receiptHash ||
+    inspection.authoredFingerprint !== prepared.authoredFingerprint ||
     inspection.dbHash !== prepared.expectedDbHash ||
     inspection.fileHash !== prepared.expectedFileHash
   ) {
@@ -1412,13 +1869,33 @@ function assertPreparedRecipeInspection(
 function assertPreparedRecipeAuthoringProjection(
   item: CreateRecipeItem,
   prepared: PreparedRecipePersistenceV1,
+  reviewed: RecipeCandidateFingerprintProjectionV1,
+  source: RecipeProductionSource
+): Record<string, ProjectFactsJson> {
+  const canonicalReviewed = canonicalRecipeCandidateProjection(reviewed);
+  if (
+    prepared.authoredFingerprint !== canonicalReviewed.authoredFingerprint ||
+    prepared.cellId !== `${canonicalReviewed.moduleId}::${canonicalReviewed.dimensionId}`
+  ) {
+    throw new Error('STRICT_PREPARED_AUTHORING_FINGERPRINT_MISMATCH');
+  }
+  return assertRecipeItemAuthoringProjection(item, canonicalReviewed, source)
+    .persistedPayload as Record<string, ProjectFactsJson>;
+}
+
+function canonicalRecipeCandidateProjection(
   reviewed: RecipeCandidateFingerprintProjectionV1
-): void {
-  const canonicalReviewed = createRecipeCandidateFingerprintProjectionV1({
+): RecipeCandidateFingerprintProjectionV1 {
+  const canonical = createRecipeCandidateFingerprintProjectionV1({
     title: reviewed.title,
     kind: reviewed.kind,
+    category: reviewed.category,
+    trigger: reviewed.trigger,
+    whenClause: reviewed.whenClause,
     doText: reviewed.doText,
     dontText: reviewed.dontText,
+    coreCode: reviewed.coreCode,
+    pattern: reviewed.pattern,
     markdown: reviewed.markdown,
     usageGuide: reviewed.usageGuide,
     retrievalProfile: reviewed.retrievalProfile,
@@ -1428,23 +1905,36 @@ function assertPreparedRecipeAuthoringProjection(
     dimensionId: reviewed.dimensionId,
     evidenceRefs: reviewed.evidenceRefs,
     lineageHashes: reviewed.lineageHashes,
+    persistedPayload: reviewed.persistedPayload,
   });
   if (
     reviewed.schemaVersion !== 1 ||
-    reviewed.authoredFingerprint !== canonicalReviewed.authoredFingerprint ||
-    prepared.authoredFingerprint !== canonicalReviewed.authoredFingerprint ||
-    prepared.cellId !== `${canonicalReviewed.moduleId}::${canonicalReviewed.dimensionId}`
+    reviewed.authoredFingerprint !== canonical.authoredFingerprint
   ) {
     throw new Error('STRICT_PREPARED_AUTHORING_FINGERPRINT_MISMATCH');
   }
+  return canonical;
+}
 
+function assertRecipeItemAuthoringProjection(
+  item: CreateRecipeItem,
+  reviewed: RecipeCandidateFingerprintProjectionV1,
+  source: RecipeProductionSource
+): RecipeCandidateFingerprintProjectionV1 {
+  const canonicalReviewed = canonicalRecipeCandidateProjection(reviewed);
+  const persistedPayload = createStrictRecipePersistedPayloadV1(item, source);
   const negativeIntents =
     item.retrievalProfile?.exclusions?.map((exclusion) => exclusion.text) ?? [];
   const itemProjection = createRecipeCandidateFingerprintProjectionV1({
     title: item.title ?? '',
-    kind: item.kind ?? '',
+    kind: item.kind || 'pattern',
+    category: item.category || 'general',
+    trigger: item.trigger ?? '',
+    whenClause: item.whenClause ?? '',
     doText: item.doClause ?? '',
     dontText: item.dontClause ?? '',
+    coreCode: item.coreCode ?? '',
+    pattern: item.content?.pattern ?? '',
     markdown: item.content?.markdown ?? '',
     usageGuide: item.usageGuide ?? '',
     retrievalProfile: item.retrievalProfile,
@@ -1454,8 +1944,79 @@ function assertPreparedRecipeAuthoringProjection(
     dimensionId: item.dimensionId ?? '',
     evidenceRefs: item.sourceRefs ?? [],
     lineageHashes: canonicalReviewed.lineageHashes,
+    persistedPayload,
   });
   if (itemProjection.authoredFingerprint !== canonicalReviewed.authoredFingerprint) {
     throw new Error('STRICT_PREPARED_AUTHORING_FINGERPRINT_MISMATCH');
   }
+  return itemProjection;
+}
+
+function candidateSummaryFromItem(
+  id: string,
+  item: CreateRecipeItem,
+  projection: RecipeCandidateFingerprintProjectionV1
+): CandidateSummary {
+  return {
+    id,
+    title: projection.title,
+    category: projection.category || projection.dimensionId,
+    coreCode: projection.coreCode || projection.pattern,
+    doClause: projection.doText,
+    dontClause: projection.dontText,
+    guardPattern: projection.pattern || undefined,
+  };
+}
+
+function candidateSummaryFromAcceptedEntry(entry: StrictAcceptedCorpusEntryV1): CandidateSummary {
+  return {
+    id: entry.recipeId,
+    title: entry.admissionSummary.title,
+    category: entry.admissionSummary.category ?? entry.projection.dimensionId,
+    coreCode: entry.admissionSummary.coreCode ?? '',
+    doClause: entry.admissionSummary.doClause ?? '',
+    dontClause: entry.admissionSummary.dontClause ?? '',
+    ...(entry.admissionSummary.guardPattern
+      ? { guardPattern: entry.admissionSummary.guardPattern }
+      : {}),
+  };
+}
+
+function consolidationCandidateFromItem(
+  item: CreateRecipeItem,
+  projection: RecipeCandidateFingerprintProjectionV1
+): {
+  title: string;
+  category?: string;
+  [key: string]: unknown;
+} {
+  return {
+    title: projection.title,
+    category: projection.category || projection.dimensionId,
+    trigger: projection.trigger || undefined,
+    whenClause: projection.whenClause || undefined,
+    doClause: projection.doText,
+    dontClause: projection.dontText,
+    coreCode: projection.coreCode || projection.pattern,
+    kind: projection.kind,
+    content: {
+      pattern: projection.pattern || undefined,
+      markdown: projection.markdown,
+    },
+  };
+}
+
+function normalizeStrictAdmissionAction(
+  action: string
+): 'create' | 'merge' | 'reorganize' | 'insufficient' | 'reject' {
+  if (
+    action !== 'create' &&
+    action !== 'merge' &&
+    action !== 'reorganize' &&
+    action !== 'insufficient' &&
+    action !== 'reject'
+  ) {
+    throw new Error('STRICT_ADMISSION_CONSOLIDATION_FAILED');
+  }
+  return action;
 }

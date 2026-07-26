@@ -15,6 +15,7 @@ import {
   canonicalJsonStringify,
   hashBytes,
   hashCanonicalJson,
+  toProjectFactsJson,
 } from '../project-context/foundation/canonical.js';
 import {
   createPrivateCorpusRevisionResolverInternal,
@@ -501,11 +502,364 @@ export function createStrictG1ReceiptV1(input: {
   return freezeDeep({ ...semantic, receiptHash: hashCanonicalJson(semantic) });
 }
 
+export interface StrictAcceptedCorpusEntryV1 {
+  readonly recipeId: string;
+  readonly projection: RecipeCandidateFingerprintProjectionV1;
+  /**
+   * 现有 validation/dedup/consolidation 算法所需的真实字段投影。
+   * 该投影与 accepted corpus 一起被 inspectionHash 封印，严格准入不得回读其他 repository。
+   */
+  readonly admissionSummary: StrictAcceptedRecipeAdmissionSummaryV1;
+}
+
+export interface StrictAcceptedRecipeAdmissionSummaryV1 {
+  readonly title: string;
+  readonly category: string | null;
+  readonly trigger: string | null;
+  readonly whenClause: string | null;
+  readonly doClause: string | null;
+  readonly dontClause: string | null;
+  readonly coreCode: string | null;
+  readonly guardPattern: string | null;
+  readonly markdown: string | null;
+}
+
+export interface StrictAcceptedCorpusInspectionV1 {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly analysisFixpointHash: string;
+  readonly privateCorpusRevision: string;
+  readonly revisionRootManifestHash: string;
+  readonly entries: readonly StrictAcceptedCorpusEntryV1[];
+  readonly inspectedAcceptedCorpusCount: number;
+  readonly complete: true;
+  readonly truncated: false;
+  readonly continuation: null;
+  readonly acceptedCorpusHash: string;
+  readonly inspectionHash: string;
+}
+
+export function createStrictAcceptedCorpusInspectionV1(input: {
+  readonly runId: string;
+  readonly analysisFixpointHash: string;
+  readonly privateCorpusRevision: string;
+  readonly revisionRootManifestHash: string;
+  readonly entries: readonly StrictAcceptedCorpusEntryV1[];
+}): StrictAcceptedCorpusInspectionV1 {
+  requireText(input.runId, 'STRICT_ADMISSION_CORPUS_COORDINATES_INVALID');
+  requireText(input.analysisFixpointHash, 'STRICT_ADMISSION_CORPUS_COORDINATES_INVALID');
+  requireText(input.privateCorpusRevision, 'STRICT_ADMISSION_CORPUS_COORDINATES_INVALID');
+  requireSha256(input.revisionRootManifestHash, 'STRICT_ADMISSION_CORPUS_COORDINATES_INVALID');
+  const entries = input.entries
+    .map((entry) => {
+      const projection = canonicalRecipeCandidateProjection(entry.projection);
+      const admissionSummary = normalizeStrictAcceptedRecipeAdmissionSummary(
+        entry.admissionSummary
+      );
+      if (
+        admissionSummary.title !== projection.title ||
+        admissionSummary.category !== (projection.category || null) ||
+        admissionSummary.trigger !== (projection.trigger || null) ||
+        admissionSummary.whenClause !== (projection.whenClause || null) ||
+        admissionSummary.doClause !== (projection.doText || null) ||
+        admissionSummary.dontClause !== (projection.dontText || null) ||
+        admissionSummary.coreCode !== (projection.coreCode || null) ||
+        admissionSummary.guardPattern !== (projection.pattern || null) ||
+        admissionSummary.markdown !== (projection.markdown || null)
+      ) {
+        throw new Error('STRICT_ADMISSION_CORPUS_ENTRY_PROJECTION_MISMATCH');
+      }
+      return {
+        recipeId: entry.recipeId.trim(),
+        projection,
+        admissionSummary,
+      };
+    })
+    .sort((left, right) => left.recipeId.localeCompare(right.recipeId));
+  if (
+    entries.some((entry) => !entry.recipeId) ||
+    new Set(entries.map((entry) => entry.recipeId)).size !== entries.length
+  ) {
+    throw new Error('STRICT_ADMISSION_CORPUS_ENTRY_INVALID');
+  }
+  const acceptedCorpusHash = hashCanonicalJson(entries);
+  const semantic = {
+    schemaVersion: 1 as const,
+    runId: input.runId,
+    analysisFixpointHash: input.analysisFixpointHash,
+    privateCorpusRevision: input.privateCorpusRevision,
+    revisionRootManifestHash: input.revisionRootManifestHash,
+    entries,
+    inspectedAcceptedCorpusCount: entries.length,
+    complete: true as const,
+    truncated: false as const,
+    continuation: null,
+    acceptedCorpusHash,
+  };
+  return freezeDeep({ ...semantic, inspectionHash: hashCanonicalJson(semantic) });
+}
+
+export interface StrictAdmissionExactMatchV1 {
+  readonly recipeId: string;
+  readonly fingerprint: string;
+}
+
+export interface StrictAdmissionSemanticMatchV1 extends StrictAdmissionExactMatchV1 {
+  readonly similarity: number;
+}
+
+export interface StrictAdmissionConsolidationV1 {
+  readonly action: 'create' | 'merge' | 'reorganize' | 'insufficient' | 'reject';
+  readonly reasonCode: string;
+  readonly targetRecipeId: string | null;
+  readonly targetFingerprint: string | null;
+}
+
+export interface StrictAdmissionReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly admissionId: string;
+  readonly runId: string;
+  readonly analysisFixpointHash: string;
+  readonly privateCorpusRevision: string;
+  readonly revisionRootManifestHash: string;
+  readonly g1ReceiptHash: string;
+  readonly inputFingerprint: string;
+  readonly finalAdmittedFingerprint: string;
+  readonly acceptedCorpusInspectionHash: string;
+  readonly acceptedCorpusHash: string;
+  readonly inspectedAcceptedCorpusCount: number;
+  readonly complete: true;
+  readonly truncated: false;
+  readonly continuation: null;
+  readonly exactMatches: readonly StrictAdmissionExactMatchV1[];
+  readonly semanticMatches: readonly StrictAdmissionSemanticMatchV1[];
+  readonly consolidation: StrictAdmissionConsolidationV1;
+  readonly algorithmVersion: string;
+  readonly disposition: 'admit' | 'merge' | 'duplicate' | 'reject';
+  readonly receiptHash: string;
+}
+
+export function createStrictAdmissionReceiptV1(input: {
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly corpusInspection: StrictAcceptedCorpusInspectionV1;
+  readonly inputFingerprint: string;
+  readonly finalAdmittedFingerprint: string;
+  readonly exactMatches: readonly StrictAdmissionExactMatchV1[];
+  readonly semanticMatches: readonly StrictAdmissionSemanticMatchV1[];
+  readonly consolidation: StrictAdmissionConsolidationV1;
+  readonly algorithmVersion: string;
+}): StrictAdmissionReceiptV1 {
+  assertStrictG1ReceiptV1(input.g1Receipt);
+  assertStrictAcceptedCorpusInspectionV1(input.corpusInspection);
+  if (
+    input.g1Receipt.verdict !== 'pass' ||
+    input.g1Receipt.candidateFingerprint !== input.inputFingerprint
+  ) {
+    throw new Error('STRICT_ADMISSION_G1_MISMATCH');
+  }
+  requireText(input.finalAdmittedFingerprint, 'STRICT_ADMISSION_FINGERPRINT_INVALID');
+  requireText(input.algorithmVersion, 'STRICT_ADMISSION_ALGORITHM_INVALID');
+  const corpusById = new Map(
+    input.corpusInspection.entries.map((entry) => [entry.recipeId, entry])
+  );
+  const exactMatches = normalizeAdmissionMatches(input.exactMatches, corpusById);
+  const semanticMatches = normalizeAdmissionSemanticMatches(input.semanticMatches, corpusById);
+  const consolidation = normalizeAdmissionConsolidation(input.consolidation, corpusById);
+  const disposition = deriveAdmissionDisposition(consolidation);
+  if (
+    disposition === 'admit' &&
+    (exactMatches.length > 0 ||
+      semanticMatches.length > 0 ||
+      input.finalAdmittedFingerprint !== input.inputFingerprint)
+  ) {
+    throw new Error('STRICT_ADMISSION_CONSOLIDATION_MISMATCH');
+  }
+  const semantic = {
+    schemaVersion: 1 as const,
+    runId: input.corpusInspection.runId,
+    analysisFixpointHash: input.corpusInspection.analysisFixpointHash,
+    privateCorpusRevision: input.corpusInspection.privateCorpusRevision,
+    revisionRootManifestHash: input.corpusInspection.revisionRootManifestHash,
+    g1ReceiptHash: input.g1Receipt.receiptHash,
+    inputFingerprint: input.inputFingerprint,
+    finalAdmittedFingerprint: input.finalAdmittedFingerprint,
+    acceptedCorpusInspectionHash: input.corpusInspection.inspectionHash,
+    acceptedCorpusHash: input.corpusInspection.acceptedCorpusHash,
+    inspectedAcceptedCorpusCount: input.corpusInspection.inspectedAcceptedCorpusCount,
+    complete: true as const,
+    truncated: false as const,
+    continuation: null,
+    exactMatches,
+    semanticMatches,
+    consolidation,
+    algorithmVersion: input.algorithmVersion,
+    disposition,
+  };
+  const semanticHash = hashCanonicalJson(semantic);
+  const withId = {
+    ...semantic,
+    admissionId: `admission:${semanticHash.slice('sha256:'.length)}`,
+  };
+  return freezeDeep({ ...withId, receiptHash: hashCanonicalJson(withId) });
+}
+
+export const STRICT_G2_HARD_AXES_V1 = [
+  'entailment',
+  'contradiction-free',
+  'project-specificity-nontriviality',
+  'actionability',
+  'scope-generalization-correctness',
+  'retrieval-negative-intent-fitness',
+] as const;
+
+export type StrictG2HardAxisV1 = (typeof STRICT_G2_HARD_AXES_V1)[number];
+
+export interface StrictG2AxisResultV1 {
+  readonly axis: StrictG2HardAxisV1;
+  readonly axisVerdict: 'pass' | 'revise' | 'fail' | 'unknown';
+  readonly score: 2 | 1 | 0 | null;
+  readonly reasonCode: string;
+  readonly evidenceRefs: readonly string[];
+  readonly repairable: boolean;
+}
+
+export interface StrictG2ActorV1 {
+  readonly identity: string;
+  readonly method: string;
+  readonly modelHash: string;
+  readonly promptHash: string;
+}
+
+export interface StrictG2NoveltyDecisionV1 {
+  readonly decision:
+    | 'novel-project-specific'
+    | 'useful-extension'
+    | 'generic'
+    | 'already-covered'
+    | 'unknown';
+  readonly reasonCode: string;
+  readonly evidenceRefs: readonly string[];
+}
+
+export interface StrictG2DuplicateDecisionV1 {
+  readonly decision: 'no-match' | 'exact-match' | 'semantic-match' | 'consolidated' | 'unknown';
+  readonly reasonCode: string;
+  readonly evidenceRefs: readonly string[];
+  readonly admissionAlgorithmVersion: string;
+  readonly comparedPrivateCorpusRevision: string;
+  readonly matchedRecipeIds: readonly string[];
+  readonly matchedFingerprints: readonly string[];
+  readonly targetRecipeId: string | null;
+  readonly consolidationFingerprint: string | null;
+}
+
+export interface StrictG2ReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly runId: string;
+  readonly analysisFixpointHash: string;
+  readonly privateCorpusRevision: string;
+  readonly revisionRootManifestHash: string;
+  readonly candidateFingerprint: string;
+  readonly reviewedFingerprint: string;
+  readonly g1ReceiptHash: string;
+  readonly admissionReceiptHash: string;
+  readonly producer: StrictG2ActorV1;
+  readonly reviewer: StrictG2ActorV1;
+  readonly rows: readonly StrictG2AxisResultV1[];
+  readonly novelty: StrictG2NoveltyDecisionV1;
+  readonly duplicate: StrictG2DuplicateDecisionV1;
+  readonly repairAttempt: number;
+  readonly calibrationReceiptHash: string;
+  readonly ruleVersion: string;
+  readonly permittedRepairFields: readonly string[];
+  readonly verdict: 'pass' | 'revise' | 'reject';
+  readonly receiptHash: string;
+}
+
+export function createStrictG2ReceiptV1(input: {
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly admissionReceipt: StrictAdmissionReceiptV1;
+  readonly reviewedFingerprint: string;
+  readonly producer: StrictG2ActorV1;
+  readonly reviewer: StrictG2ActorV1;
+  readonly rows: readonly StrictG2AxisResultV1[];
+  readonly novelty: StrictG2NoveltyDecisionV1;
+  readonly duplicate: StrictG2DuplicateDecisionV1;
+  readonly repairAttempt: number;
+  readonly calibrationReceiptHash: string;
+  readonly ruleVersion: string;
+  readonly permittedRepairFields: readonly string[];
+}): StrictG2ReceiptV1 {
+  assertStrictG1ReceiptV1(input.g1Receipt);
+  assertStrictAdmissionReceiptV1(input.admissionReceipt);
+  if (
+    input.g1Receipt.verdict !== 'pass' ||
+    input.admissionReceipt.disposition !== 'admit' ||
+    input.admissionReceipt.g1ReceiptHash !== input.g1Receipt.receiptHash ||
+    input.admissionReceipt.inputFingerprint !== input.reviewedFingerprint ||
+    input.admissionReceipt.finalAdmittedFingerprint !== input.reviewedFingerprint
+  ) {
+    throw new Error('STRICT_G2_AUTHORITY_MISMATCH');
+  }
+  const producer = normalizeStrictG2Actor(input.producer);
+  const reviewer = normalizeStrictG2Actor(input.reviewer);
+  if (producer.identity === reviewer.identity) {
+    throw new Error('STRICT_G2_REVIEWER_NOT_INDEPENDENT');
+  }
+  const rows = normalizeStrictG2Rows(input.rows);
+  const novelty = normalizeStrictG2Novelty(input.novelty);
+  const duplicate = normalizeStrictG2Duplicate(input.duplicate);
+  if (
+    duplicate.decision !== 'no-match' ||
+    duplicate.admissionAlgorithmVersion !== input.admissionReceipt.algorithmVersion ||
+    duplicate.comparedPrivateCorpusRevision !== input.admissionReceipt.privateCorpusRevision ||
+    duplicate.matchedRecipeIds.length !== 0 ||
+    duplicate.matchedFingerprints.length !== 0 ||
+    duplicate.targetRecipeId !== null ||
+    duplicate.consolidationFingerprint !== null
+  ) {
+    throw new Error('STRICT_G2_ADMISSION_DUPLICATE_MISMATCH');
+  }
+  if (!Number.isSafeInteger(input.repairAttempt) || input.repairAttempt < 0) {
+    throw new Error('STRICT_G2_REPAIR_ATTEMPT_INVALID');
+  }
+  requireText(input.calibrationReceiptHash, 'STRICT_G2_CALIBRATION_REQUIRED');
+  requireText(input.ruleVersion, 'STRICT_G2_RULE_VERSION_REQUIRED');
+  const permittedRepairFields = normalizeStrings(input.permittedRepairFields);
+  const verdict = deriveStrictG2Verdict(rows, novelty, duplicate);
+  if (verdict !== 'revise' && permittedRepairFields.length > 0) {
+    throw new Error('STRICT_G2_REPAIR_FIELDS_INVALID');
+  }
+  const semantic = {
+    schemaVersion: 1 as const,
+    runId: input.admissionReceipt.runId,
+    analysisFixpointHash: input.admissionReceipt.analysisFixpointHash,
+    privateCorpusRevision: input.admissionReceipt.privateCorpusRevision,
+    revisionRootManifestHash: input.admissionReceipt.revisionRootManifestHash,
+    candidateFingerprint: input.admissionReceipt.finalAdmittedFingerprint,
+    reviewedFingerprint: input.reviewedFingerprint,
+    g1ReceiptHash: input.g1Receipt.receiptHash,
+    admissionReceiptHash: input.admissionReceipt.receiptHash,
+    producer,
+    reviewer,
+    rows,
+    novelty,
+    duplicate,
+    repairAttempt: input.repairAttempt,
+    calibrationReceiptHash: input.calibrationReceiptHash,
+    ruleVersion: input.ruleVersion,
+    permittedRepairFields,
+    verdict,
+  };
+  return freezeDeep({ ...semantic, receiptHash: hashCanonicalJson(semantic) });
+}
+
 export interface PreparedRecipePersistenceV1 {
   readonly schemaVersion: 1;
   readonly runId: string;
   readonly analysisFixpointHash: string;
   readonly privateCorpusRevision: string;
+  readonly admissionId: string;
   readonly cellId: string;
   readonly authoredFingerprint: string;
   readonly causalParentIds: readonly string[];
@@ -520,6 +874,7 @@ export function prepareRecipePersistenceV1(input: {
   readonly runId: string;
   readonly analysisFixpointHash: string;
   readonly privateCorpusRevision: string;
+  readonly admissionId: string;
   readonly cellId: string;
   readonly authoredFingerprint: string;
   readonly causalParentIds: readonly string[];
@@ -527,18 +882,32 @@ export function prepareRecipePersistenceV1(input: {
   readonly expectedFileHash: string;
   readonly journalStepHash: string;
 }): PreparedRecipePersistenceV1 {
-  const identity = {
+  for (const value of [
+    input.runId,
+    input.analysisFixpointHash,
+    input.privateCorpusRevision,
+    input.admissionId,
+    input.cellId,
+    input.authoredFingerprint,
+    input.expectedDbHash,
+    input.expectedFileHash,
+    input.journalStepHash,
+  ]) {
+    requireText(value, 'STRICT_PREPARED_RECEIPT_INVALID');
+  }
+  const preparedIdentity = {
     runId: input.runId,
     analysisFixpointHash: input.analysisFixpointHash,
     privateCorpusRevision: input.privateCorpusRevision,
-    cellId: input.cellId,
+    admissionId: input.admissionId,
     authoredFingerprint: input.authoredFingerprint,
-    causalParentIds: normalizeStrings(input.causalParentIds),
   };
-  const preparedRecipeId = deterministicUuid(hashCanonicalJson(identity));
+  const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));
   const semantic = {
     schemaVersion: 1 as const,
-    ...identity,
+    ...preparedIdentity,
+    cellId: input.cellId,
+    causalParentIds: normalizeStrings(input.causalParentIds),
     preparedRecipeId,
     expectedDbHash: input.expectedDbHash,
     expectedFileHash: input.expectedFileHash,
@@ -551,8 +920,13 @@ export interface RecipeCandidateFingerprintProjectionV1 {
   readonly schemaVersion: 1;
   readonly title: string;
   readonly kind: string;
+  readonly category: string;
+  readonly trigger: string;
+  readonly whenClause: string;
   readonly doText: string;
   readonly dontText: string;
+  readonly coreCode: string;
+  readonly pattern: string;
   readonly markdown: string;
   readonly usageGuide: string;
   readonly retrievalProfile: unknown;
@@ -562,6 +936,8 @@ export interface RecipeCandidateFingerprintProjectionV1 {
   readonly dimensionId: string;
   readonly evidenceRefs: readonly string[];
   readonly lineageHashes: readonly string[];
+  /** strict Gateway 最终写入（不含 prepared id）的完整 caller-controlled canonical payload。 */
+  readonly persistedPayload: ReturnType<typeof toProjectFactsJson>;
   readonly authoredFingerprint: string;
 }
 
@@ -572,8 +948,13 @@ export function createRecipeCandidateFingerprintProjectionV1(
     schemaVersion: 1 as const,
     title: input.title.trim(),
     kind: input.kind.trim(),
+    category: input.category.trim(),
+    trigger: input.trigger.trim(),
+    whenClause: input.whenClause.trim(),
     doText: input.doText.trim(),
     dontText: input.dontText.trim(),
+    coreCode: input.coreCode.trim(),
+    pattern: input.pattern.trim(),
     markdown: input.markdown.trim(),
     usageGuide: input.usageGuide.trim(),
     retrievalProfile: input.retrievalProfile,
@@ -583,6 +964,7 @@ export function createRecipeCandidateFingerprintProjectionV1(
     dimensionId: input.dimensionId.trim(),
     evidenceRefs: normalizeStrings(input.evidenceRefs),
     lineageHashes: normalizeStrings(input.lineageHashes),
+    persistedPayload: toProjectFactsJson(input.persistedPayload),
   };
   if (
     !semantic.title ||
@@ -597,12 +979,130 @@ export function createRecipeCandidateFingerprintProjectionV1(
   ) {
     throw new Error('RECIPE_CANDIDATE_FINGERPRINT_INCOMPLETE');
   }
+  assertRecipeProjectionPayloadAlignment(semantic);
   return freezeDeep({ ...semantic, authoredFingerprint: hashCanonicalJson(semantic) });
+}
+
+function assertRecipeProjectionPayloadAlignment(input: {
+  readonly title: string;
+  readonly kind: string;
+  readonly category: string;
+  readonly trigger: string;
+  readonly whenClause: string;
+  readonly doText: string;
+  readonly dontText: string;
+  readonly coreCode: string;
+  readonly pattern: string;
+  readonly markdown: string;
+  readonly usageGuide: string;
+  readonly retrievalProfile: unknown;
+  readonly scopeId: string;
+  readonly moduleId: string;
+  readonly dimensionId: string;
+  readonly evidenceRefs: readonly string[];
+  readonly persistedPayload: ReturnType<typeof toProjectFactsJson>;
+}): void {
+  if (
+    !input.persistedPayload ||
+    typeof input.persistedPayload !== 'object' ||
+    Array.isArray(input.persistedPayload)
+  ) {
+    throw new Error('RECIPE_CANDIDATE_PERSISTED_PAYLOAD_INVALID');
+  }
+  const payload = input.persistedPayload as Record<string, ReturnType<typeof toProjectFactsJson>>;
+  const content =
+    payload.content && typeof payload.content === 'object' && !Array.isArray(payload.content)
+      ? (payload.content as Record<string, ReturnType<typeof toProjectFactsJson>>)
+      : {};
+  const scalarPairs: ReadonlyArray<readonly [unknown, string]> = [
+    [payload.title, input.title],
+    [payload.kind, input.kind],
+    [payload.category, input.category],
+    [payload.trigger, input.trigger],
+    [payload.whenClause, input.whenClause],
+    [payload.doClause, input.doText],
+    [payload.dontClause, input.dontText],
+    [payload.coreCode, input.coreCode],
+    [content.pattern ?? '', input.pattern],
+    [content.markdown ?? '', input.markdown],
+    [payload.usageGuide, input.usageGuide],
+    [payload.scope, input.scopeId],
+    [payload.moduleName, input.moduleId],
+    [payload.dimensionId, input.dimensionId],
+  ];
+  if (
+    scalarPairs.some(([actual, expected]) => actual !== expected) ||
+    canonicalJsonStringify(payload.retrievalProfile ?? null) !==
+      canonicalJsonStringify(input.retrievalProfile ?? null) ||
+    canonicalJsonStringify(payload.sourceRefs ?? []) !== canonicalJsonStringify(input.evidenceRefs)
+  ) {
+    throw new Error('RECIPE_CANDIDATE_PERSISTED_PAYLOAD_MISMATCH');
+  }
+}
+
+export function assertStrictPersistenceAuthorityV1(input: {
+  readonly prepared: PreparedRecipePersistenceV1;
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly admissionReceipt: StrictAdmissionReceiptV1;
+  readonly g2Receipt: StrictG2ReceiptV1;
+  readonly reviewedFingerprint: string;
+}): void {
+  try {
+    assertPreparedRecipePersistenceV1(input.prepared);
+    assertStrictG1ReceiptV1(input.g1Receipt);
+    assertStrictAdmissionReceiptV1(input.admissionReceipt);
+    assertStrictG2ReceiptV1(input.g2Receipt);
+    if (strictPersistenceAuthorityMismatches(input).some(Boolean)) {
+      throw new Error('authority mismatch');
+    }
+  } catch (_error: unknown) {
+    throw new Error('STRICT_PERSISTENCE_AUTHORITY_MISMATCH');
+  }
+}
+
+function strictPersistenceAuthorityMismatches(input: {
+  readonly prepared: PreparedRecipePersistenceV1;
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly admissionReceipt: StrictAdmissionReceiptV1;
+  readonly g2Receipt: StrictG2ReceiptV1;
+  readonly reviewedFingerprint: string;
+}): readonly boolean[] {
+  return [
+    input.g1Receipt.verdict !== 'pass',
+    input.g2Receipt.verdict !== 'pass',
+    input.admissionReceipt.disposition !== 'admit',
+    input.prepared.authoredFingerprint !== input.reviewedFingerprint,
+    input.g1Receipt.candidateFingerprint !== input.reviewedFingerprint,
+    input.admissionReceipt.inputFingerprint !== input.reviewedFingerprint,
+    input.admissionReceipt.finalAdmittedFingerprint !== input.reviewedFingerprint,
+    input.g2Receipt.candidateFingerprint !== input.reviewedFingerprint,
+    input.g2Receipt.reviewedFingerprint !== input.reviewedFingerprint,
+    input.g2Receipt.duplicate.decision !== 'no-match',
+    input.g2Receipt.duplicate.admissionAlgorithmVersion !== input.admissionReceipt.algorithmVersion,
+    input.g2Receipt.duplicate.comparedPrivateCorpusRevision !==
+      input.admissionReceipt.privateCorpusRevision,
+    input.g2Receipt.duplicate.matchedRecipeIds.length !== 0,
+    input.g2Receipt.duplicate.matchedFingerprints.length !== 0,
+    input.g2Receipt.duplicate.targetRecipeId !== null,
+    input.g2Receipt.duplicate.consolidationFingerprint !== null,
+    input.admissionReceipt.g1ReceiptHash !== input.g1Receipt.receiptHash,
+    input.g2Receipt.g1ReceiptHash !== input.g1Receipt.receiptHash,
+    input.g2Receipt.admissionReceiptHash !== input.admissionReceipt.receiptHash,
+    input.prepared.admissionId !== input.admissionReceipt.admissionId,
+    input.admissionReceipt.runId !== input.prepared.runId,
+    input.g2Receipt.runId !== input.prepared.runId,
+    input.admissionReceipt.analysisFixpointHash !== input.prepared.analysisFixpointHash,
+    input.g2Receipt.analysisFixpointHash !== input.prepared.analysisFixpointHash,
+    input.admissionReceipt.privateCorpusRevision !== input.prepared.privateCorpusRevision,
+    input.g2Receipt.privateCorpusRevision !== input.prepared.privateCorpusRevision,
+    input.g2Receipt.revisionRootManifestHash !== input.admissionReceipt.revisionRootManifestHash,
+  ];
 }
 
 export interface StrictPersistenceReceiptV1 {
   readonly schemaVersion: 1;
   readonly preparedHash: string;
+  readonly admissionId: string;
   readonly g1ReceiptHash: string;
   readonly admissionReceiptHash: string;
   readonly g2ReceiptHash: string;
@@ -621,9 +1121,9 @@ export interface StrictPersistenceReceiptV1 {
 
 export function createStrictPersistenceReceiptV1(input: {
   readonly prepared: PreparedRecipePersistenceV1;
-  readonly g1ReceiptHash: string;
-  readonly admissionReceiptHash: string;
-  readonly g2ReceiptHash: string;
+  readonly g1Receipt: StrictG1ReceiptV1;
+  readonly admissionReceipt: StrictAdmissionReceiptV1;
+  readonly g2Receipt: StrictG2ReceiptV1;
   readonly actualRecipeId: string;
   readonly actualAuthoredFingerprint: string;
   readonly storageHash: string;
@@ -631,6 +1131,13 @@ export function createStrictPersistenceReceiptV1(input: {
   readonly fileHash: string;
   readonly actualLifecycle: StrictPersistenceReceiptV1['lifecycle'];
 }): StrictPersistenceReceiptV1 {
+  assertStrictPersistenceAuthorityV1({
+    prepared: input.prepared,
+    g1Receipt: input.g1Receipt,
+    admissionReceipt: input.admissionReceipt,
+    g2Receipt: input.g2Receipt,
+    reviewedFingerprint: input.actualAuthoredFingerprint,
+  });
   if (input.actualRecipeId !== input.prepared.preparedRecipeId) {
     throw new Error('STRICT_PERSISTENCE_PREPARED_ID_MISMATCH');
   }
@@ -649,9 +1156,10 @@ export function createStrictPersistenceReceiptV1(input: {
   const semantic = {
     schemaVersion: 1 as const,
     preparedHash: input.prepared.preparedHash,
-    g1ReceiptHash: input.g1ReceiptHash,
-    admissionReceiptHash: input.admissionReceiptHash,
-    g2ReceiptHash: input.g2ReceiptHash,
+    admissionId: input.admissionReceipt.admissionId,
+    g1ReceiptHash: input.g1Receipt.receiptHash,
+    admissionReceiptHash: input.admissionReceipt.receiptHash,
+    g2ReceiptHash: input.g2Receipt.receiptHash,
     analysisFixpointHash: input.prepared.analysisFixpointHash,
     privateCorpusRevision: input.prepared.privateCorpusRevision,
     runId: input.prepared.runId,
@@ -1140,6 +1648,46 @@ export function createStrictPublicationMarkerV1(
   return freezeDeep({ ...semantic, markerHash: hashCanonicalJson(semantic) });
 }
 
+export interface StrictPublicationSnapshotIdV1 {
+  readonly schemaVersion: 1;
+  readonly snapshotId: string;
+  readonly baseSnapshotId: string;
+  readonly candidateDataManifestHash: string;
+  readonly collisionUuid: string | null;
+}
+
+const STRICT_PUBLICATION_SNAPSHOT_ID_RE =
+  /^snapshot-([a-f0-9]{64})(?:-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}))?$/;
+
+export function createStrictPublicationSnapshotIdV1(
+  candidateDataManifestHash: string,
+  collisionUuid?: string
+): string {
+  requireSha256(candidateDataManifestHash, 'STRICT_PUBLICATION_SNAPSHOT_ID_INVALID');
+  const snapshotId = `snapshot-${candidateDataManifestHash.slice('sha256:'.length)}${
+    collisionUuid ? `-${collisionUuid}` : ''
+  }`;
+  parseStrictPublicationSnapshotIdV1(snapshotId);
+  return snapshotId;
+}
+
+export function parseStrictPublicationSnapshotIdV1(
+  snapshotId: string
+): StrictPublicationSnapshotIdV1 {
+  const match = STRICT_PUBLICATION_SNAPSHOT_ID_RE.exec(snapshotId);
+  if (!match) {
+    throw new Error('STRICT_PUBLICATION_SNAPSHOT_ID_INVALID');
+  }
+  const baseSnapshotId = `snapshot-${match[1]}`;
+  return freezeDeep({
+    schemaVersion: 1,
+    snapshotId,
+    baseSnapshotId,
+    candidateDataManifestHash: `sha256:${match[1]}`,
+    collisionUuid: match[2] ?? null,
+  });
+}
+
 export interface ServingSnapshotManifestV1 {
   readonly schemaVersion: 1;
   readonly sessionId: string;
@@ -1165,6 +1713,15 @@ export function createServingSnapshotManifestV1(
     'SERVING_SNAPSHOT_FIELDS_INVALID'
   );
   requireSha256(input.servingSnapshotValidationHash, 'SERVING_SNAPSHOT_FIELDS_INVALID');
+  let parsedSnapshot: StrictPublicationSnapshotIdV1;
+  try {
+    parsedSnapshot = parseStrictPublicationSnapshotIdV1(input.snapshotId);
+  } catch (_error: unknown) {
+    throw new Error('SERVING_SNAPSHOT_FIELDS_INVALID');
+  }
+  if (parsedSnapshot.candidateDataManifestHash !== input.candidateDataManifestHash) {
+    throw new Error('SERVING_SNAPSHOT_FIELDS_INVALID');
+  }
   const semantic = {
     schemaVersion: 1 as const,
     sessionId: input.sessionId,
@@ -1222,6 +1779,11 @@ export function preparePublicKnowledgeRouteV1(
     'PUBLIC_ROUTE_FIELDS_INVALID'
   );
   if (input.schemaVersion !== 1) {
+    throw new Error('PUBLIC_ROUTE_FIELDS_INVALID');
+  }
+  try {
+    parseStrictPublicationSnapshotIdV1(input.snapshotId);
+  } catch (_error: unknown) {
     throw new Error('PUBLIC_ROUTE_FIELDS_INVALID');
   }
   const committed = Date.parse(input.committedAt);
@@ -1574,6 +2136,414 @@ function deterministicUuid(hash: string): string {
 
 function criticalityRank(value: CandidateAttemptInputV1['criticality']): number {
   return value === 'critical' ? 0 : value === 'standard' ? 1 : 2;
+}
+
+function canonicalRecipeCandidateProjection(
+  projection: RecipeCandidateFingerprintProjectionV1
+): RecipeCandidateFingerprintProjectionV1 {
+  const canonical = createRecipeCandidateFingerprintProjectionV1({
+    title: projection.title,
+    kind: projection.kind,
+    category: projection.category,
+    trigger: projection.trigger,
+    whenClause: projection.whenClause,
+    doText: projection.doText,
+    dontText: projection.dontText,
+    coreCode: projection.coreCode,
+    pattern: projection.pattern,
+    markdown: projection.markdown,
+    usageGuide: projection.usageGuide,
+    retrievalProfile: projection.retrievalProfile,
+    negativeIntents: projection.negativeIntents,
+    scopeId: projection.scopeId,
+    moduleId: projection.moduleId,
+    dimensionId: projection.dimensionId,
+    evidenceRefs: projection.evidenceRefs,
+    lineageHashes: projection.lineageHashes,
+    persistedPayload: projection.persistedPayload,
+  });
+  if (
+    projection.schemaVersion !== 1 ||
+    canonical.authoredFingerprint !== projection.authoredFingerprint
+  ) {
+    throw new Error('RECIPE_CANDIDATE_FINGERPRINT_INVALID');
+  }
+  return canonical;
+}
+
+export function assertStrictG1ReceiptV1(receipt: StrictG1ReceiptV1): void {
+  const rebuilt = createStrictG1ReceiptV1({
+    candidateFingerprint: receipt.candidateFingerprint,
+    retrievalReadinessHash: receipt.retrievalReadinessHash,
+    rows: receipt.rows,
+  });
+  if (canonicalJsonStringify(rebuilt) !== canonicalJsonStringify(receipt)) {
+    throw new Error('STRICT_G1_RECEIPT_INVALID');
+  }
+}
+
+export function assertStrictAcceptedCorpusInspectionV1(
+  inspection: StrictAcceptedCorpusInspectionV1
+): void {
+  if (
+    inspection.schemaVersion !== 1 ||
+    inspection.complete !== true ||
+    inspection.truncated !== false ||
+    inspection.continuation !== null
+  ) {
+    throw new Error('STRICT_ADMISSION_CORPUS_INCOMPLETE');
+  }
+  const rebuilt = createStrictAcceptedCorpusInspectionV1({
+    runId: inspection.runId,
+    analysisFixpointHash: inspection.analysisFixpointHash,
+    privateCorpusRevision: inspection.privateCorpusRevision,
+    revisionRootManifestHash: inspection.revisionRootManifestHash,
+    entries: inspection.entries,
+  });
+  if (canonicalJsonStringify(rebuilt) !== canonicalJsonStringify(inspection)) {
+    throw new Error('STRICT_ADMISSION_CORPUS_INSPECTION_INVALID');
+  }
+}
+
+export function assertStrictAdmissionReceiptV1(receipt: StrictAdmissionReceiptV1): void {
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.complete !== true ||
+    receipt.truncated !== false ||
+    receipt.continuation !== null ||
+    !receipt.admissionId.startsWith('admission:') ||
+    receipt.inspectedAcceptedCorpusCount < 0 ||
+    !Number.isSafeInteger(receipt.inspectedAcceptedCorpusCount)
+  ) {
+    throw new Error('STRICT_ADMISSION_RECEIPT_INVALID');
+  }
+  const exactMatches = [...receipt.exactMatches].sort(compareAdmissionMatches);
+  const semanticMatches = [...receipt.semanticMatches].sort(compareAdmissionMatches);
+  if (
+    canonicalJsonStringify(exactMatches) !== canonicalJsonStringify(receipt.exactMatches) ||
+    canonicalJsonStringify(semanticMatches) !== canonicalJsonStringify(receipt.semanticMatches) ||
+    semanticMatches.some(
+      (match) => !Number.isFinite(match.similarity) || match.similarity < 0 || match.similarity > 1
+    ) ||
+    receipt.disposition !== deriveAdmissionDisposition(receipt.consolidation) ||
+    (receipt.disposition === 'admit' &&
+      (exactMatches.length > 0 ||
+        semanticMatches.length > 0 ||
+        receipt.finalAdmittedFingerprint !== receipt.inputFingerprint))
+  ) {
+    throw new Error('STRICT_ADMISSION_RECEIPT_INVALID');
+  }
+  const { receiptHash: _receiptHash, admissionId: _admissionId, ...semantic } = receipt;
+  const semanticHash = hashCanonicalJson(semantic);
+  const admissionId = `admission:${semanticHash.slice('sha256:'.length)}`;
+  if (
+    admissionId !== receipt.admissionId ||
+    hashCanonicalJson({ ...semantic, admissionId }) !== receipt.receiptHash
+  ) {
+    throw new Error('STRICT_ADMISSION_RECEIPT_INVALID');
+  }
+}
+
+export function assertStrictG2ReceiptV1(receipt: StrictG2ReceiptV1): void {
+  if (receipt.schemaVersion !== 1) {
+    throw new Error('STRICT_G2_RECEIPT_INVALID');
+  }
+  const producer = normalizeStrictG2Actor(receipt.producer);
+  const reviewer = normalizeStrictG2Actor(receipt.reviewer);
+  const rows = normalizeStrictG2Rows(receipt.rows);
+  const novelty = normalizeStrictG2Novelty(receipt.novelty);
+  const duplicate = normalizeStrictG2Duplicate(receipt.duplicate);
+  const permittedRepairFields = normalizeStrings(receipt.permittedRepairFields);
+  const verdict = deriveStrictG2Verdict(rows, novelty, duplicate);
+  if (
+    producer.identity === reviewer.identity ||
+    verdict !== receipt.verdict ||
+    canonicalJsonStringify(rows) !== canonicalJsonStringify(receipt.rows) ||
+    canonicalJsonStringify(permittedRepairFields) !==
+      canonicalJsonStringify(receipt.permittedRepairFields) ||
+    (verdict !== 'revise' && permittedRepairFields.length > 0)
+  ) {
+    throw new Error('STRICT_G2_RECEIPT_INVALID');
+  }
+  const { receiptHash: _receiptHash, ...semantic } = receipt;
+  if (hashCanonicalJson(semantic) !== receipt.receiptHash) {
+    throw new Error('STRICT_G2_RECEIPT_INVALID');
+  }
+}
+
+function assertPreparedRecipePersistenceV1(prepared: PreparedRecipePersistenceV1): void {
+  const rebuilt = prepareRecipePersistenceV1({
+    runId: prepared.runId,
+    analysisFixpointHash: prepared.analysisFixpointHash,
+    privateCorpusRevision: prepared.privateCorpusRevision,
+    admissionId: prepared.admissionId,
+    cellId: prepared.cellId,
+    authoredFingerprint: prepared.authoredFingerprint,
+    causalParentIds: prepared.causalParentIds,
+    expectedDbHash: prepared.expectedDbHash,
+    expectedFileHash: prepared.expectedFileHash,
+    journalStepHash: prepared.journalStepHash,
+  });
+  if (canonicalJsonStringify(rebuilt) !== canonicalJsonStringify(prepared)) {
+    throw new Error('STRICT_PREPARED_RECEIPT_INVALID');
+  }
+}
+
+function normalizeStrictAcceptedRecipeAdmissionSummary(
+  summary: StrictAcceptedRecipeAdmissionSummaryV1
+): StrictAcceptedRecipeAdmissionSummaryV1 {
+  const textOrNull = (value: string | null): string | null => {
+    const normalized = value?.trim() ?? '';
+    return normalized || null;
+  };
+  const normalized = {
+    title: summary.title.trim(),
+    category: textOrNull(summary.category),
+    trigger: textOrNull(summary.trigger),
+    whenClause: textOrNull(summary.whenClause),
+    doClause: textOrNull(summary.doClause),
+    dontClause: textOrNull(summary.dontClause),
+    coreCode: textOrNull(summary.coreCode),
+    guardPattern: textOrNull(summary.guardPattern),
+    markdown: textOrNull(summary.markdown),
+  };
+  if (!normalized.title) {
+    throw new Error('STRICT_ADMISSION_CORPUS_ENTRY_INVALID');
+  }
+  return normalized;
+}
+
+function normalizeAdmissionMatches(
+  matches: readonly StrictAdmissionExactMatchV1[],
+  corpusById: ReadonlyMap<string, StrictAcceptedCorpusEntryV1>
+): StrictAdmissionExactMatchV1[] {
+  const normalized = matches
+    .map((match) => ({
+      recipeId: match.recipeId.trim(),
+      fingerprint: match.fingerprint.trim(),
+    }))
+    .sort(compareAdmissionMatches);
+  if (
+    new Set(normalized.map((match) => match.recipeId)).size !== normalized.length ||
+    normalized.some(
+      (match) =>
+        !match.recipeId ||
+        !match.fingerprint ||
+        corpusById.get(match.recipeId)?.projection.authoredFingerprint !== match.fingerprint
+    )
+  ) {
+    throw new Error('STRICT_ADMISSION_MATCH_INVALID');
+  }
+  return normalized;
+}
+
+function normalizeAdmissionSemanticMatches(
+  matches: readonly StrictAdmissionSemanticMatchV1[],
+  corpusById: ReadonlyMap<string, StrictAcceptedCorpusEntryV1>
+): StrictAdmissionSemanticMatchV1[] {
+  const normalized = matches
+    .map((match) => ({
+      recipeId: match.recipeId.trim(),
+      fingerprint: match.fingerprint.trim(),
+      similarity: match.similarity,
+    }))
+    .sort(compareAdmissionMatches);
+  if (
+    new Set(normalized.map((match) => match.recipeId)).size !== normalized.length ||
+    normalized.some(
+      (match) =>
+        !match.recipeId ||
+        !match.fingerprint ||
+        !Number.isFinite(match.similarity) ||
+        match.similarity < 0 ||
+        match.similarity > 1 ||
+        corpusById.get(match.recipeId)?.projection.authoredFingerprint !== match.fingerprint
+    )
+  ) {
+    throw new Error('STRICT_ADMISSION_MATCH_INVALID');
+  }
+  return normalized;
+}
+
+function compareAdmissionMatches(
+  left: StrictAdmissionExactMatchV1,
+  right: StrictAdmissionExactMatchV1
+): number {
+  return (
+    left.recipeId.localeCompare(right.recipeId) || left.fingerprint.localeCompare(right.fingerprint)
+  );
+}
+
+function normalizeAdmissionConsolidation(
+  consolidation: StrictAdmissionConsolidationV1,
+  corpusById: ReadonlyMap<string, StrictAcceptedCorpusEntryV1>
+): StrictAdmissionConsolidationV1 {
+  if (!['create', 'merge', 'reorganize', 'insufficient', 'reject'].includes(consolidation.action)) {
+    throw new Error('STRICT_ADMISSION_CONSOLIDATION_INVALID');
+  }
+  requireText(consolidation.reasonCode, 'STRICT_ADMISSION_CONSOLIDATION_INVALID');
+  const targetRecipeId = consolidation.targetRecipeId?.trim() || null;
+  const targetFingerprint = consolidation.targetFingerprint?.trim() || null;
+  if (
+    (targetRecipeId === null) !== (targetFingerprint === null) ||
+    (targetRecipeId !== null &&
+      corpusById.get(targetRecipeId)?.projection.authoredFingerprint !== targetFingerprint) ||
+    (consolidation.action === 'create' && targetRecipeId !== null) ||
+    (['merge', 'reorganize', 'insufficient'].includes(consolidation.action) &&
+      targetRecipeId === null)
+  ) {
+    throw new Error('STRICT_ADMISSION_CONSOLIDATION_INVALID');
+  }
+  return {
+    action: consolidation.action,
+    reasonCode: consolidation.reasonCode.trim(),
+    targetRecipeId,
+    targetFingerprint,
+  };
+}
+
+function deriveAdmissionDisposition(
+  consolidation: StrictAdmissionConsolidationV1
+): StrictAdmissionReceiptV1['disposition'] {
+  if (consolidation.action === 'create') {
+    return 'admit';
+  }
+  if (consolidation.action === 'merge' || consolidation.action === 'reorganize') {
+    return 'merge';
+  }
+  if (consolidation.action === 'insufficient') {
+    return 'duplicate';
+  }
+  return 'reject';
+}
+
+function normalizeStrictG2Actor(actor: StrictG2ActorV1): StrictG2ActorV1 {
+  for (const value of [actor.identity, actor.method, actor.modelHash, actor.promptHash]) {
+    requireText(value, 'STRICT_G2_ACTOR_INVALID');
+  }
+  return {
+    identity: actor.identity.trim(),
+    method: actor.method.trim(),
+    modelHash: actor.modelHash.trim(),
+    promptHash: actor.promptHash.trim(),
+  };
+}
+
+function normalizeStrictG2Rows(rows: readonly StrictG2AxisResultV1[]): StrictG2AxisResultV1[] {
+  const normalized = rows
+    .map((row) => ({
+      ...row,
+      reasonCode: row.reasonCode.trim(),
+      evidenceRefs: normalizeStrings(row.evidenceRefs),
+    }))
+    .sort((left, right) => left.axis.localeCompare(right.axis));
+  const expected = new Set<string>(STRICT_G2_HARD_AXES_V1);
+  if (
+    normalized.length !== STRICT_G2_HARD_AXES_V1.length ||
+    new Set(normalized.map((row) => row.axis)).size !== normalized.length ||
+    normalized.some(
+      (row) =>
+        !expected.has(row.axis) ||
+        !row.reasonCode ||
+        row.evidenceRefs.length === 0 ||
+        !strictG2ScoreMatchesVerdict(row)
+    )
+  ) {
+    throw new Error('STRICT_G2_AXIS_SET_INVALID');
+  }
+  return normalized;
+}
+
+function strictG2ScoreMatchesVerdict(row: StrictG2AxisResultV1): boolean {
+  return (
+    (row.axisVerdict === 'pass' && row.score === 2 && !row.repairable) ||
+    (row.axisVerdict === 'revise' && row.score === 1 && row.repairable) ||
+    (row.axisVerdict === 'fail' && row.score === 0) ||
+    (row.axisVerdict === 'unknown' && row.score === null)
+  );
+}
+
+function normalizeStrictG2Novelty(novelty: StrictG2NoveltyDecisionV1): StrictG2NoveltyDecisionV1 {
+  if (
+    ![
+      'novel-project-specific',
+      'useful-extension',
+      'generic',
+      'already-covered',
+      'unknown',
+    ].includes(novelty.decision)
+  ) {
+    throw new Error('STRICT_G2_NOVELTY_INVALID');
+  }
+  requireText(novelty.reasonCode, 'STRICT_G2_NOVELTY_INVALID');
+  const evidenceRefs = normalizeStrings(novelty.evidenceRefs);
+  if (evidenceRefs.length === 0) {
+    throw new Error('STRICT_G2_NOVELTY_INVALID');
+  }
+  return { ...novelty, reasonCode: novelty.reasonCode.trim(), evidenceRefs };
+}
+
+function normalizeStrictG2Duplicate(
+  duplicate: StrictG2DuplicateDecisionV1
+): StrictG2DuplicateDecisionV1 {
+  if (
+    !['no-match', 'exact-match', 'semantic-match', 'consolidated', 'unknown'].includes(
+      duplicate.decision
+    )
+  ) {
+    throw new Error('STRICT_G2_DUPLICATE_INVALID');
+  }
+  requireText(duplicate.reasonCode, 'STRICT_G2_DUPLICATE_INVALID');
+  requireText(duplicate.admissionAlgorithmVersion, 'STRICT_G2_DUPLICATE_INVALID');
+  requireText(duplicate.comparedPrivateCorpusRevision, 'STRICT_G2_DUPLICATE_INVALID');
+  const evidenceRefs = normalizeStrings(duplicate.evidenceRefs);
+  const matchedRecipeIds = normalizeStrings(duplicate.matchedRecipeIds);
+  const matchedFingerprints = normalizeStrings(duplicate.matchedFingerprints);
+  const targetRecipeId = duplicate.targetRecipeId?.trim() || null;
+  const consolidationFingerprint = duplicate.consolidationFingerprint?.trim() || null;
+  if (
+    evidenceRefs.length === 0 ||
+    matchedRecipeIds.length !== matchedFingerprints.length ||
+    (targetRecipeId === null) !== (consolidationFingerprint === null)
+  ) {
+    throw new Error('STRICT_G2_DUPLICATE_INVALID');
+  }
+  return {
+    ...duplicate,
+    reasonCode: duplicate.reasonCode.trim(),
+    evidenceRefs,
+    admissionAlgorithmVersion: duplicate.admissionAlgorithmVersion.trim(),
+    comparedPrivateCorpusRevision: duplicate.comparedPrivateCorpusRevision.trim(),
+    matchedRecipeIds,
+    matchedFingerprints,
+    targetRecipeId,
+    consolidationFingerprint,
+  };
+}
+
+function deriveStrictG2Verdict(
+  rows: readonly StrictG2AxisResultV1[],
+  novelty: StrictG2NoveltyDecisionV1,
+  duplicate: StrictG2DuplicateDecisionV1
+): StrictG2ReceiptV1['verdict'] {
+  const noveltyPass = ['novel-project-specific', 'useful-extension'].includes(novelty.decision);
+  const duplicatePass = ['no-match', 'consolidated'].includes(duplicate.decision);
+  if (
+    rows.every((row) => row.axisVerdict === 'pass' && row.score === 2) &&
+    noveltyPass &&
+    duplicatePass
+  ) {
+    return 'pass';
+  }
+  if (
+    rows.some((row) => row.axisVerdict === 'revise') &&
+    rows.every((row) => ['pass', 'revise'].includes(row.axisVerdict)) &&
+    noveltyPass &&
+    duplicatePass
+  ) {
+    return 'revise';
+  }
+  return 'reject';
 }
 
 function hashPath(value: string): string {
