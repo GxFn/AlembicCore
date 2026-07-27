@@ -689,6 +689,11 @@ export interface KnowledgeDispositionReviewV1 {
   readonly producer: ProductionActorIdentityV1;
   readonly reviewer: ProductionActorIdentityV1;
   readonly calibrationReceiptHash: string;
+  /**
+   * Agent 真实 evaluator execution 的完整 authority 留在 companion registry；这里绑定其
+   * canonical hash。旧 analyst review 不带此字段，以保持既有 V1 receipt hash 兼容。
+   */
+  readonly semanticExecutionResultHash?: string;
   readonly verdict: 'pass' | 'revise' | 'reject';
   readonly reasonCode: string;
   readonly reviewReceiptId: string;
@@ -1585,7 +1590,7 @@ function validateNonClusteredDisposition(
   }
 }
 
-export function createKnowledgeDispositionReviewV1(input: {
+interface CreateKnowledgeDispositionReviewInputV1 {
   readonly reviewKind: KnowledgeDispositionReviewKindV1;
   readonly currentAnalysisFixpointHash: string;
   readonly populationHash: string;
@@ -1596,37 +1601,15 @@ export function createKnowledgeDispositionReviewV1(input: {
   readonly producer: ProductionActorIdentityV1;
   readonly reviewer: ProductionActorIdentityV1;
   readonly calibrationReceiptHash: string;
+  readonly semanticExecutionResultHash?: string;
   readonly verdict: KnowledgeDispositionReviewV1['verdict'];
   readonly reasonCode: string;
-}): KnowledgeDispositionReviewV1 {
-  if (!KNOWLEDGE_DISPOSITION_REVIEW_KINDS.has(input.reviewKind)) {
-    fail('KNOWLEDGE_DISPOSITION_REVIEW_KIND_INVALID');
-  }
-  for (const [value, code] of [
-    [input.currentAnalysisFixpointHash, 'KNOWLEDGE_DISPOSITION_FIXPOINT_INVALID'],
-    [input.populationHash, 'KNOWLEDGE_DISPOSITION_POPULATION_INVALID'],
-    [input.proposedDispositionHash, 'KNOWLEDGE_DISPOSITION_PROPOSAL_INVALID'],
-    [input.calibrationReceiptHash, 'KNOWLEDGE_DISPOSITION_CALIBRATION_INVALID'],
-  ] as const) {
-    requireSha256(value, code);
-  }
-  requireText(input.reasonCode, 'KNOWLEDGE_DISPOSITION_REASON_REQUIRED');
-  if (!KNOWLEDGE_DISPOSITION_REVIEW_VERDICTS.has(input.verdict)) {
-    fail('KNOWLEDGE_DISPOSITION_REVIEW_VERDICT_INVALID');
-  }
-  assertProductionActorIdentityV1(input.producer);
-  assertProductionActorIdentityV1(input.reviewer);
-  if (
-    input.producer.runId !== input.reviewer.runId ||
-    input.producer.actorHash === input.reviewer.actorHash ||
-    input.producer.invocationId === input.reviewer.invocationId ||
-    input.producer.outputHash === input.reviewer.outputHash
-  ) {
-    fail('KNOWLEDGE_DISPOSITION_REVIEW_NOT_INDEPENDENT');
-  }
-  if (input.executionReceipts.length === 0) {
-    fail('KNOWLEDGE_DISPOSITION_EXECUTION_REQUIRED');
-  }
+}
+
+export function createKnowledgeDispositionReviewV1(
+  input: CreateKnowledgeDispositionReviewInputV1
+): KnowledgeDispositionReviewV1 {
+  validateKnowledgeDispositionReviewInput(input);
   assertFinalExpandedScheduleReceiptV1(input.finalExpandedSchedule);
   const receipts = [...input.executionReceipts].sort((left, right) =>
     left.obligationId.localeCompare(right.obligationId)
@@ -1701,6 +1684,9 @@ export function createKnowledgeDispositionReviewV1(input: {
     producer: input.producer,
     reviewer: input.reviewer,
     calibrationReceiptHash: input.calibrationReceiptHash,
+    ...(input.semanticExecutionResultHash
+      ? { semanticExecutionResultHash: input.semanticExecutionResultHash }
+      : {}),
     verdict: input.verdict,
     reasonCode: input.reasonCode.trim(),
   };
@@ -1710,6 +1696,51 @@ export function createKnowledgeDispositionReviewV1(input: {
     reviewReceiptId: `knowledge-review:${receiptHash.slice(7, 31)}`,
     receiptHash,
   });
+}
+
+function validateKnowledgeDispositionReviewInput(
+  input: CreateKnowledgeDispositionReviewInputV1
+): void {
+  if (!KNOWLEDGE_DISPOSITION_REVIEW_KINDS.has(input.reviewKind)) {
+    fail('KNOWLEDGE_DISPOSITION_REVIEW_KIND_INVALID');
+  }
+  for (const [value, code] of [
+    [input.currentAnalysisFixpointHash, 'KNOWLEDGE_DISPOSITION_FIXPOINT_INVALID'],
+    [input.populationHash, 'KNOWLEDGE_DISPOSITION_POPULATION_INVALID'],
+    [input.proposedDispositionHash, 'KNOWLEDGE_DISPOSITION_PROPOSAL_INVALID'],
+    [input.calibrationReceiptHash, 'KNOWLEDGE_DISPOSITION_CALIBRATION_INVALID'],
+  ] as const) {
+    requireSha256(value, code);
+  }
+  if (input.semanticExecutionResultHash !== undefined) {
+    if (input.reviewKind !== 'producer-non-draft' && input.reviewKind !== 'investigated-empty') {
+      fail('KNOWLEDGE_DISPOSITION_SEMANTIC_EXECUTION_UNEXPECTED');
+    }
+    requireSha256(
+      input.semanticExecutionResultHash,
+      'KNOWLEDGE_DISPOSITION_SEMANTIC_EXECUTION_INVALID'
+    );
+  }
+  requireText(input.reasonCode, 'KNOWLEDGE_DISPOSITION_REASON_REQUIRED');
+  if (!KNOWLEDGE_DISPOSITION_REVIEW_VERDICTS.has(input.verdict)) {
+    fail('KNOWLEDGE_DISPOSITION_REVIEW_VERDICT_INVALID');
+  }
+  assertProductionActorIdentityV1(input.producer);
+  assertProductionActorIdentityV1(input.reviewer);
+  const hasSemanticExecution = input.semanticExecutionResultHash !== undefined;
+  if (
+    (hasSemanticExecution
+      ? input.producer.runId === input.reviewer.runId
+      : input.producer.runId !== input.reviewer.runId) ||
+    input.producer.actorHash === input.reviewer.actorHash ||
+    input.producer.invocationId === input.reviewer.invocationId ||
+    input.producer.outputHash === input.reviewer.outputHash
+  ) {
+    fail('KNOWLEDGE_DISPOSITION_REVIEW_NOT_INDEPENDENT');
+  }
+  if (input.executionReceipts.length === 0) {
+    fail('KNOWLEDGE_DISPOSITION_EXECUTION_REQUIRED');
+  }
 }
 
 /**
@@ -2823,7 +2854,11 @@ function knowledgeReviewEnvelopeInvalid(
     !/^sha256:[0-9a-f]{64}$/.test(review.calibrationReceiptHash) ||
     hashCanonicalJson(semantic) !== receiptHash ||
     reviewReceiptId !== `knowledge-review:${receiptHash.slice(7, 31)}` ||
-    review.producer.runId !== review.reviewer.runId ||
+    (review.semanticExecutionResultHash !== undefined &&
+      !/^sha256:[0-9a-f]{64}$/.test(review.semanticExecutionResultHash)) ||
+    (review.semanticExecutionResultHash !== undefined
+      ? review.producer.runId === review.reviewer.runId
+      : review.producer.runId !== review.reviewer.runId) ||
     review.producer.actorHash === review.reviewer.actorHash ||
     review.producer.invocationId === review.reviewer.invocationId ||
     review.producer.outputHash === review.reviewer.outputHash

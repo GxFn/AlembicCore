@@ -15,6 +15,10 @@ import {
   validateSerialAdmissionLedgerV1,
 } from './ProductionPersistenceContracts.js';
 import {
+  assertSemanticDispositionReviewExecutionV1,
+  type SemanticDispositionReviewExecutionV1,
+} from './SemanticDispositionReviewExecution.js';
+import {
   type AnalysisFixpointReceiptV1,
   type AnalysisScheduleExpansionReceiptV1,
   assertKnowledgeDispositionReviewV1,
@@ -75,6 +79,7 @@ export interface StrictProductionAuthorityReceiptV1 {
   readonly falsificationReceiptHashes: readonly string[];
   readonly investigatedEmptyDecisionHashes: readonly string[];
   readonly dispositionReviewReceiptHashes: readonly string[];
+  readonly semanticDispositionReviewExecutionHashes?: readonly string[];
   readonly expressionSetReceiptHashes: readonly string[];
   readonly candidateAttemptBatchHashes: readonly string[];
   readonly terminalEvidenceReceiptHashes: readonly string[];
@@ -241,6 +246,13 @@ export interface StrictProductionAuthorityInputV1 {
   readonly falsifications: readonly FalsificationReceiptV1[];
   readonly investigatedEmptyDecisions?: readonly InvestigatedEmptyDecisionV1[];
   readonly dispositionReviews: readonly KnowledgeDispositionReviewV1[];
+  /**
+   * Agent 产生、Main 只读消费的 evaluator execution registry。普通 analyst review 保持 V1
+   * 兼容；producer-non-draft / investigated-empty 必须在这里 exact-one 连接。
+   */
+  readonly semanticDispositionReviewExecutions?: readonly SemanticDispositionReviewExecutionV1[];
+  /** 恢复时由宿主传入上一 checkpoint 已消费集合，防止 execution 跨 resume 重放。 */
+  readonly priorSemanticDispositionReviewExecutionHashes?: readonly string[];
   readonly expressionSets: readonly HypothesisExpressionSetReceiptV1[];
   readonly candidateAttemptBatches: readonly CandidateAttemptBatchV1[];
   readonly serialAdmissionLedger: SerialAdmissionLedgerV1 | null;
@@ -277,6 +289,11 @@ export function createStrictProductionAuthorityReceiptV1(
   const factIndex = validateFactExecution(input);
   const populationHashes = validatePopulations(input, factIndex);
   const reviewById = validateDispositionReviews(input, factIndex.receiptsByHash);
+  const semanticDispositionReviewExecutionHashes = validateSemanticDispositionReviewExecutions(
+    input,
+    reviewById,
+    factIndex.receiptsByHash
+  );
   const clusterSetHashes = validateClusters(
     input,
     populationHashes,
@@ -324,6 +341,9 @@ export function createStrictProductionAuthorityReceiptV1(
     dispositionReviewReceiptHashes: [...reviewById.values()]
       .map((review) => review.receiptHash)
       .sort(),
+    ...(semanticDispositionReviewExecutionHashes.length > 0
+      ? { semanticDispositionReviewExecutionHashes }
+      : {}),
     expressionSetReceiptHashes: input.expressionSets.map((receipt) => receipt.receiptHash).sort(),
     candidateAttemptBatchHashes: input.candidateAttemptBatches
       .map((batch) => batch.batchHash)
@@ -739,7 +759,9 @@ function dispositionReviewLineageInvalid(
     JSON.stringify(review.executionScope.terminalObligations) !==
       JSON.stringify(input.analysisFixpoint.terminalObligations) ||
     review.producer.runId !== input.runId ||
-    review.reviewer.runId !== input.runId ||
+    (review.semanticExecutionResultHash
+      ? review.reviewer.runId === input.runId
+      : review.reviewer.runId !== input.runId) ||
     executionReceipts.some((receipt) => !receipt) ||
     executionReceipts.some((receipt) =>
       executionReceiptTerminalMismatch(receipt, terminalObligations)
@@ -748,6 +770,203 @@ function dispositionReviewLineageInvalid(
       executionBindingReceiptMismatch(binding, executionReceipts[index])
     ) ||
     reviewById.has(review.reviewReceiptId)
+  );
+}
+
+function validateSemanticDispositionReviewExecutions(
+  input: StrictProductionAuthorityInputV1,
+  reviewById: ReadonlyMap<string, KnowledgeDispositionReviewV1>,
+  receiptsByHash: ReturnType<typeof validateFactExecution>['receiptsByHash']
+): readonly string[] {
+  const executions = [...(input.semanticDispositionReviewExecutions ?? [])];
+  const priorHashes = new Set(input.priorSemanticDispositionReviewExecutionHashes ?? []);
+  const byHash = new Map<string, SemanticDispositionReviewExecutionV1>();
+  const executionIds = new Set<string>();
+  const invocationCoordinates = new Set<string>();
+  const outputHashes = new Set<string>();
+  const decisionHashes = new Set<string>();
+  for (const execution of executions) {
+    assertSemanticDispositionReviewExecutionV1(execution);
+    const invocationCoordinate = `${execution.invocation.evaluatorRunId}\u0000${execution.invocation.invocationId}`;
+    if (
+      priorHashes.has(execution.executionHash) ||
+      byHash.has(execution.executionHash) ||
+      executionIds.has(execution.executionId) ||
+      invocationCoordinates.has(invocationCoordinate) ||
+      outputHashes.has(execution.invocation.responseOutputHash) ||
+      decisionHashes.has(execution.decisionHash)
+    ) {
+      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_REUSED');
+    }
+    byHash.set(execution.executionHash, execution);
+    executionIds.add(execution.executionId);
+    invocationCoordinates.add(invocationCoordinate);
+    outputHashes.add(execution.invocation.responseOutputHash);
+    decisionHashes.add(execution.decisionHash);
+  }
+
+  const consumed = new Set<string>();
+  for (const review of reviewById.values()) {
+    const requiresSemanticExecution =
+      review.reviewKind === 'producer-non-draft' || review.reviewKind === 'investigated-empty';
+    if (!requiresSemanticExecution) {
+      if (review.semanticExecutionResultHash) {
+        fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_UNEXPECTED');
+      }
+      continue;
+    }
+    const execution = review.semanticExecutionResultHash
+      ? byHash.get(review.semanticExecutionResultHash)
+      : undefined;
+    if (
+      !execution ||
+      consumed.has(execution.executionHash) ||
+      semanticDispositionReviewExecutionMismatch(input, review, execution, receiptsByHash)
+    ) {
+      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_MISMATCH');
+    }
+    consumed.add(execution.executionHash);
+  }
+  if (
+    consumed.size !== byHash.size ||
+    [...byHash.keys()].some((executionHash) => !consumed.has(executionHash))
+  ) {
+    fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_ORPHANED');
+  }
+  return [...consumed].sort();
+}
+
+function semanticDispositionReviewExecutionMismatch(
+  input: StrictProductionAuthorityInputV1,
+  review: KnowledgeDispositionReviewV1,
+  execution: SemanticDispositionReviewExecutionV1,
+  receiptsByHash: ReturnType<typeof validateFactExecution>['receiptsByHash']
+): boolean {
+  const request = execution.request;
+  const actualPopulation = input.populations.find(
+    (population) => population.populationHash === request.populationHash
+  );
+  const contextPopulation = request.context.population;
+  const requestReceiptHashes = request.executionReceipts.map((receipt) => receipt.receiptHash);
+  const actualRequestReceipts = requestReceiptHashes.map((receiptHash) =>
+    receiptsByHash.get(receiptHash)
+  );
+  return (
+    request.strictWorkflowRunId !== input.runId ||
+    request.sourceRevisionVectorHash !== input.sourceRevisionVectorHash ||
+    request.currentAnalysisFixpointHash !== input.analysisFixpoint.fixpointHash ||
+    request.reviewKind !== review.reviewKind ||
+    request.populationHash !== review.populationHash ||
+    request.proposedDispositionHash !== review.proposedDispositionHash ||
+    semanticDispositionReviewScheduleMismatch(input, request) ||
+    hashCanonicalJson(request.context.analysisFixpoint) !==
+      hashCanonicalJson(input.analysisFixpoint) ||
+    !actualPopulation ||
+    hashCanonicalJson(contextPopulation) !== hashCanonicalJson(actualPopulation) ||
+    actualRequestReceipts.some((receipt) => !receipt) ||
+    actualRequestReceipts.some(
+      (receipt, index) =>
+        hashCanonicalJson(receipt) !== hashCanonicalJson(request.executionReceipts[index])
+    ) ||
+    !sameStrings(requestReceiptHashes, review.executionReceiptHashes) ||
+    request.producer.actorHash !== review.producer.actorHash ||
+    execution.reviewer.actorHash !== review.reviewer.actorHash ||
+    request.calibration.calibrationReceiptHash !== review.calibrationReceiptHash ||
+    execution.decision.verdict !== review.verdict ||
+    execution.decision.reasonCode !== review.reasonCode ||
+    execution.executionHash !== review.semanticExecutionResultHash ||
+    semanticDispositionReviewContextMissing(input, execution)
+  );
+}
+
+function semanticDispositionReviewScheduleMismatch(
+  input: StrictProductionAuthorityInputV1,
+  request: SemanticDispositionReviewExecutionV1['request']
+): boolean {
+  return (
+    request.finalExpandedSchedule.finalExpandedScheduleHash !==
+      input.finalExpandedSchedule.finalExpandedScheduleHash ||
+    hashCanonicalJson(request.finalExpandedSchedule) !==
+      hashCanonicalJson(input.finalExpandedSchedule)
+  );
+}
+
+function semanticDispositionReviewContextMissing(
+  input: StrictProductionAuthorityInputV1,
+  execution: SemanticDispositionReviewExecutionV1
+): boolean {
+  const context = execution.request.context;
+  if (context.reviewKind === 'investigated-empty') {
+    return false;
+  }
+  const induction = input.inductions.find(
+    (candidate) =>
+      candidate.hypotheses.some(
+        (hypothesis) => hypothesis.hypothesisId === context.proposal.hypothesisId
+      ) && candidate.populationHash === context.population.populationHash
+  );
+  const falsification = input.falsifications.find(
+    (candidate) => candidate.hypothesisId === context.proposal.hypothesisId
+  );
+  const admission = context.admissionReceipt
+    ? input.terminalEvidence.admissionReceipts.find(
+        (candidate) => candidate.receiptHash === context.admissionReceipt?.receiptHash
+      )
+    : null;
+  return (
+    context.privateCorpusRevision !== input.privateCorpusRevision ||
+    semanticDispositionExpressionSetMissing(input, execution) ||
+    !induction ||
+    hashCanonicalJson(induction) !== hashCanonicalJson(context.induction) ||
+    !falsification ||
+    hashCanonicalJson(falsification) !== hashCanonicalJson(context.falsification) ||
+    (context.admissionReceipt !== null &&
+      (!admission || hashCanonicalJson(admission) !== hashCanonicalJson(context.admissionReceipt)))
+  );
+}
+
+function semanticDispositionExpressionSetMissing(
+  input: StrictProductionAuthorityInputV1,
+  execution: SemanticDispositionReviewExecutionV1
+): boolean {
+  const context = execution.request.context;
+  if (context.reviewKind !== 'producer-non-draft') {
+    return false;
+  }
+  const expressionSet = input.expressionSets.find(
+    (candidate) => candidate.receiptId === context.expressionSetReceiptId
+  );
+  if (
+    !expressionSet ||
+    expressionSet.hypothesisId !== context.proposal.hypothesisId ||
+    expressionSet.analysisFixpointHash !== input.analysisFixpoint.fixpointHash ||
+    expressionSet.privateCorpusRevision !== context.privateCorpusRevision
+  ) {
+    return true;
+  }
+  const proposalExpression = context.proposal.expression;
+  if (!proposalExpression) {
+    return (
+      !context.proposal.zeroDisposition ||
+      expressionSet.expressions.length !== 0 ||
+      expressionSet.zeroDisposition?.reasonCode !== context.proposal.zeroDisposition.reasonCode ||
+      expressionSet.zeroDisposition?.terminalFate !==
+        context.proposal.zeroDisposition.terminalFate ||
+      expressionSet.zeroDisposition?.dispositionReview.semanticExecutionResultHash !==
+        execution.executionHash
+    );
+  }
+  const expression = expressionSet.expressions.find(
+    (candidate) => candidate.expressionId === proposalExpression.expressionId
+  );
+  return (
+    !expression ||
+    expression.authoredFingerprint !== proposalExpression.authoredFingerprint ||
+    expression.terminalFate !== proposalExpression.terminalFate ||
+    (expression.matchingRepresentativeId ?? null) !== proposalExpression.matchingRepresentativeId ||
+    (expression.matchingContentReadyRecipeId ?? null) !==
+      proposalExpression.matchingContentReadyRecipeId ||
+    expression.dispositionReview?.semanticExecutionResultHash !== execution.executionHash
   );
 }
 
@@ -2094,7 +2313,37 @@ function consumeExpressionTerminalEvidence(
     expression.terminalFate === 'reviewed-merge' ||
     expression.terminalFate === 'reviewed-duplicate'
   ) {
-    // 这两种处置的 typed receipt 已由 expression-set 与 disposition-review conservation 重放。
+    const review = expression.dispositionReview;
+    const execution = input.semanticDispositionReviewExecutions?.find(
+      (candidate) => candidate.executionHash === review?.semanticExecutionResultHash
+    );
+    const admission =
+      execution?.request.context.reviewKind === 'producer-non-draft'
+        ? execution.request.context.admissionReceipt
+        : null;
+    const registeredAdmission = admission
+      ? registry.admissionByHash.get(admission.receiptHash)
+      : undefined;
+    if (
+      !review ||
+      !execution ||
+      !admission ||
+      !registeredAdmission ||
+      registeredAdmission.admissionId !== admission.admissionId ||
+      expression.authoredFingerprint !== admission.inputFingerprint ||
+      (expression.terminalFate === 'reviewed-merge'
+        ? admission.disposition !== 'merge'
+        : admission.disposition !== 'duplicate')
+    ) {
+      fail('STRICT_PRODUCTION_TERMINAL_ADMISSION_CHAIN_INVALID');
+    }
+    // review 是 expression 的 terminal receipt；真实 Admission/G1/corpus inspection 则从
+    // Agent execution 的完整 context 回放并消费，不能再因 terminal id 不同而旁路。
+    consumeAdmissionEvidence(registry, consumption, registeredAdmission);
+    consumption.acceptedCorpusHashByTerminalId.set(
+      expression.terminalReceiptId,
+      registeredAdmission.acceptedCorpusHash
+    );
     return;
   }
   const g1TerminalBinding = registry.g1TerminalBindingById.get(expression.terminalReceiptId);

@@ -8,6 +8,7 @@
 export { buildFactQueryCatalogSnapshot } from './service/plan/intent/coldStartProductionPlan.js';
 export * from './service/production/ProductionActorIdentity.js';
 export * from './service/production/ProductionPersistenceContracts.js';
+export * from './service/production/SemanticDispositionReviewExecution.js';
 export * from './service/production/StrictAnalysisContracts.js';
 export * from './service/production/StrictFactExecution.js';
 export * from './service/production/StrictProductionAuthority.js';

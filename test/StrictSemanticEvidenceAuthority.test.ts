@@ -1957,7 +1957,7 @@ describe('strict semantic evidence authority', () => {
           maxAuthoredCandidatesPerCellPass: 1,
         },
       })
-    ).toThrow('STRICT_PRODUCTION_INVESTIGATED_EMPTY_LINEAGE_MISMATCH');
+    ).toThrow('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_MISMATCH');
 
     const historicalExpressionSet = validateHypothesisExpressionSetReceiptV1({
       schemaVersion: 1,

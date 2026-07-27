@@ -207,9 +207,13 @@ const requiredSubpathExports = {
     'createProjectContextFileRef',
   ],
   '@alembic/core/production': [
+    'assertSemanticDispositionReviewExecutionV1',
     'assertMiningWorkScheduleV1',
     'buildFactQueryCatalogSnapshot',
     'canonicalizeCandidateAttemptBatchV1',
+    'consumeMainSemanticDispositionReviewExecutionV1',
+    'createAgentSemanticDispositionReviewExecutionV1',
+    'createAgentSemanticDispositionReviewRequestV1',
     'createKnowledgeClusterSemanticTransitionV1',
     'createStrictExpressionTerminalReturnReceiptV1',
     'createStrictG1TerminalBindingReceiptV1',

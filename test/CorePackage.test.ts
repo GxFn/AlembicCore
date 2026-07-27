@@ -88,6 +88,10 @@ describe('Core package baseline', () => {
     expect(knowledge.createStrictRecipePersistedPayloadV1).toBeInstanceOf(Function);
     expect(knowledge.parseStrictPublicationSnapshotIdV1).toBeInstanceOf(Function);
     expect(production.createStrictProductionAuthorityReceiptV1).toBeInstanceOf(Function);
+    expect(production.createAgentSemanticDispositionReviewRequestV1).toBeInstanceOf(Function);
+    expect(production.createAgentSemanticDispositionReviewExecutionV1).toBeInstanceOf(Function);
+    expect(production.consumeMainSemanticDispositionReviewExecutionV1).toBeInstanceOf(Function);
+    expect(production.assertSemanticDispositionReviewExecutionV1).toBeInstanceOf(Function);
     expect(production.createStrictExpressionTerminalReturnReceiptV1).toBeInstanceOf(Function);
     expect(production.createStrictG1TerminalBindingReceiptV1).toBeInstanceOf(Function);
     expect(production.assertMiningWorkScheduleV1).toBeInstanceOf(Function);
