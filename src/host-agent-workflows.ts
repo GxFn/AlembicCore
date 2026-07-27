@@ -6,6 +6,14 @@
  * AI provider 和多渠道交付仍由外层仓库负责。
  */
 
+export {
+  createAgentSemanticDispositionReviewDurableGatewayV3,
+  type SemanticDispositionReviewAgentReviewerHostAdapterV3,
+  type SemanticDispositionReviewDurableGatewayV3,
+  type SemanticDispositionReviewEvidenceStoreAdapterV3,
+  type SemanticDispositionReviewEvidenceStoreLoadCallV3,
+  type SemanticDispositionReviewEvidenceStoreLoadResultV3,
+} from './service/production/DurableSemanticDispositionReviewAuthority.js';
 export type {
   AnalysisArtifactProjectionV1,
   AnalysisFixpointReceiptV1,

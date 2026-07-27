@@ -106,4 +106,31 @@ describe('Core package baseline', () => {
     expect(workspace.validatePrivateCorpusRevisionInitReceiptV1).toBeInstanceOf(Function);
     expect(workspace.validatePrivateCorpusRevisionCheckpointV1).toBeInstanceOf(Function);
   });
+
+  it('keeps semantic-review minting outside the Main production facade', async () => {
+    const hostAgentWorkflows = await import('../src/host-agent-workflows.js');
+    const production = await import('../src/production.js');
+
+    expect(hostAgentWorkflows.createAgentSemanticDispositionReviewDurableGatewayV3).toBeInstanceOf(
+      Function
+    );
+    expect(production.assertSemanticDispositionReviewDurableAttestationV3).toBeInstanceOf(Function);
+    expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewHostGatewayV2')).toBe(
+      false
+    );
+    expect(Object.hasOwn(production, 'createSemanticDispositionReviewEvidenceAuthorityV2')).toBe(
+      false
+    );
+    expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewRequestV2')).toBe(false);
+    expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewDurableGatewayV3')).toBe(
+      false
+    );
+    expect(Object.hasOwn(production, 'assertSemanticDispositionReviewExecutionV2')).toBe(false);
+    expect(Object.hasOwn(production, 'consumeMainSemanticDispositionReviewExecutionV2')).toBe(
+      false
+    );
+    expect(
+      Object.hasOwn(hostAgentWorkflows, 'createAgentSemanticDispositionReviewHostGatewayV2')
+    ).toBe(false);
+  });
 });

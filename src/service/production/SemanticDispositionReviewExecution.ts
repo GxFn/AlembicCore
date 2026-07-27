@@ -324,7 +324,8 @@ export function createAgentSemanticDispositionReviewRequestV1(input: {
 
 /**
  * @deprecated V1 仅保留历史结构回读/迁移测试；它只能做字段一致性校验，不能证明 host call
- * 的因果来源，StrictProductionAuthority 不再接受 V1。新调用必须走 V2 live gateway。
+ * 的因果来源，StrictProductionAuthority 不再接受 V1。新生产调用必须走 V3 durable
+ * Agent/evidence attestation gateway。
  */
 export function createAgentSemanticDispositionReviewExecutionV1(input: {
   readonly request: SemanticDispositionReviewRequestV1;
@@ -425,7 +426,7 @@ export function assertSemanticDispositionReviewExecutionV1(
 
 /**
  * @deprecated 该兼容 consumer 生成的 review 不具备统一生产 authority；仅供历史数据迁移。
- * Main 的生产路径必须调用 consumeMainSemanticDispositionReviewExecutionV2。
+ * Main 的生产路径必须调用 V3 durable attestation consumer。
  */
 export function consumeMainSemanticDispositionReviewExecutionV1(input: {
   readonly execution: SemanticDispositionReviewExecutionV1;
@@ -1023,6 +1024,18 @@ export function createProducerZeroDispositionAdmissionAuthorityV1(input: {
     execution: input.execution,
     hostAuthority: input.hostAuthority,
   });
+  return createProducerZeroDispositionAdmissionAuthorityFromVerifiedExecutionV1(input);
+}
+
+/**
+ * 仅供同包内 durable verifier 在验签完成后复用 zero-chain canonicalizer。该入口不从
+ * `@alembic/core/production` 导出；外层调用必须走 durable attestation wrapper。
+ */
+export function createProducerZeroDispositionAdmissionAuthorityFromVerifiedExecutionV1(input: {
+  readonly execution: SemanticDispositionReviewExecutionV2;
+  readonly expressionSet: HypothesisExpressionSetReceiptV1;
+  readonly corpusInspection: StrictAcceptedCorpusInspectionV1;
+}): ProducerZeroDispositionAdmissionAuthorityV1 {
   assertStrictAcceptedCorpusInspectionV1(input.corpusInspection);
   const request = input.execution.request.semanticRequest;
   const context = request.context;
@@ -1069,7 +1082,9 @@ export function createProducerZeroDispositionAdmissionAuthorityV1(input: {
 }
 
 function zeroExpressionSetAuthorityInvalid(
-  input: Parameters<typeof createProducerZeroDispositionAdmissionAuthorityV1>[0],
+  input: Parameters<
+    typeof createProducerZeroDispositionAdmissionAuthorityFromVerifiedExecutionV1
+  >[0],
   request: SemanticDispositionReviewRequestV1,
   context: ProducerNonDraftDispositionReviewContextV1,
   zeroProposal: NonNullable<
@@ -1230,6 +1245,22 @@ function assertSemanticDispositionReviewExecutionStructureV2(
   ) {
     fail('SEMANTIC_DISPOSITION_REVIEW_EXECUTION_V2_INVALID');
   }
+}
+
+/**
+ * Durable V3 只复用 V2 的结构与因果字段校验，不读取 process-local registry。最终 authority
+ * 由 V3 对完整 execution + frozen-store load receipts 的 detached signature 提供。
+ */
+export function assertSemanticDispositionReviewExecutionStructureV2ForDurableTrust(
+  execution: SemanticDispositionReviewExecutionV2
+): void {
+  assertSemanticDispositionReviewExecutionStructureV2(execution, {
+    schemaVersion: 2,
+    authorityId: 'durable-attestation-embedded-host-authority',
+    reviewerModelLoadReceiptHash:
+      execution.request.semanticRequest.calibration.reviewerModelLoadReceipt.loadReceiptHash,
+    authorityHash: execution.hostAuthorityHash,
+  });
 }
 
 function hostExecutionRequestLineageInvalid(

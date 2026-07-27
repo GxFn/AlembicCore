@@ -1,21 +1,26 @@
-import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  createAgentSemanticDispositionReviewDurableGatewayV3,
+  type SemanticDispositionReviewDurableGatewayV3,
+} from '../src/host-agent-workflows.js';
+import {
+  assertSemanticDispositionReviewDurableAttestationV3,
   assertSemanticDispositionReviewExecutionV1,
-  assertSemanticDispositionReviewExecutionV2,
   canonicalizeObservationPopulationV1,
+  consumeMainSemanticDispositionReviewDurableAttestationV3,
   consumeMainSemanticDispositionReviewExecutionV1,
-  consumeMainSemanticDispositionReviewExecutionV2,
   createAgentSemanticDispositionReviewExecutionV1,
-  createAgentSemanticDispositionReviewHostGatewayV2,
   createAgentSemanticDispositionReviewRequestV1,
-  createAgentSemanticDispositionReviewRequestV2,
   createAnalysisFixpointReceiptV1,
   createFinalExpandedMiningScheduleReceiptV1,
   createInvestigatedEmptyDecisionV1,
   createProducerZeroDispositionAdmissionAuthorityV1,
   createProductionActorIdentityV1,
-  createSemanticDispositionReviewEvidenceAuthorityV2,
   createStrictAcceptedCorpusInspectionV1,
   createStrictAdmissionReceiptV1,
   createStrictEvidenceLedgerSnapshotV1,
@@ -26,16 +31,25 @@ import {
   type SemanticDispositionReviewAxisIdV1,
   type SemanticDispositionReviewDecisionV1,
   type SemanticDispositionReviewDecisionV2,
+  type SemanticDispositionReviewDurableAttestationV3,
   type SemanticDispositionReviewExecutionV2,
   type SemanticDispositionReviewerHostInvocationV1,
   type SemanticDispositionReviewRequestV1,
   type SemanticDispositionReviewRequestV2,
+  type SemanticDispositionReviewTrustPolicyV3,
   STRICT_G1_HARD_AXES_V1,
   type StrictAdmissionReceiptV1,
   type StrictG1ReceiptV1,
   validateHypothesisExpressionSetReceiptV1,
 } from '../src/production.js';
 import { createProjectContextFileRef } from '../src/projectContextFoundation.js';
+import {
+  assertSemanticDispositionReviewExecutionV2,
+  consumeMainSemanticDispositionReviewExecutionV2,
+  createAgentSemanticDispositionReviewHostGatewayV2,
+  createAgentSemanticDispositionReviewRequestV2,
+  createSemanticDispositionReviewEvidenceAuthorityV2,
+} from '../src/service/production/SemanticDispositionReviewExecution.js';
 import { hashCanonicalJson } from '../src/service/project-context/foundation/canonical.js';
 
 const WORKFLOW_RUN = 'strict-workflow:semantic-review';
@@ -129,16 +143,24 @@ describe('semantic disposition-review execution authority', () => {
     expect(review.reviewer.runId).toBe(EVALUATOR_RUN);
   });
 
-  it('requires exact-one V2 semantic execution in unified authority and rejects resume reuse', async () => {
+  it('requires exact-one durable semantic attestation in unified authority and rejects resume reuse', async () => {
     const semanticRequest = investigatedEmptyRequest();
-    const { request, execution, gateway } = await executeSemanticRequestV2(
+    const { attestation, trustPolicy, gateway } = await executeSemanticRequestV3(
       semanticRequest,
-      INVESTIGATED_EMPTY_AXES
+      INVESTIGATED_EMPTY_AXES,
+      {
+        trustRootId: 'semantic-review-trust:unified-authority',
+        keyId: 'semantic-review-key:unified-authority',
+      }
     );
-    const review = consumeMainSemanticDispositionReviewExecutionV2({
-      execution,
-      expectedRequest: request,
-      hostAuthority: gateway.authority,
+    const durableAttestation = JSON.parse(
+      JSON.stringify(attestation)
+    ) as SemanticDispositionReviewDurableAttestationV3;
+    const execution = durableAttestation.execution;
+    const review = consumeMainSemanticDispositionReviewDurableAttestationV3({
+      attestation: durableAttestation,
+      expectedSemanticRequest: semanticRequest,
+      expectedTrustPolicy: trustPolicy,
     });
     const receipt = semanticRequest.executionReceipts[0]!;
     const context = semanticRequest.context;
@@ -168,8 +190,8 @@ describe('semantic disposition-review execution authority', () => {
       falsifications: [],
       investigatedEmptyDecisions: [investigatedEmptyDecision],
       dispositionReviews: [review],
-      semanticDispositionReviewExecutions: [execution],
-      semanticDispositionReviewHostAuthority: gateway.authority,
+      semanticDispositionReviewAttestations: [durableAttestation],
+      semanticDispositionReviewTrustPolicy: trustPolicy,
       expressionSets: [],
       candidateAttemptBatches: [],
       serialAdmissionLedger: null,
@@ -189,6 +211,8 @@ describe('semantic disposition-review execution authority', () => {
 
     expect(createStrictProductionAuthorityReceiptV1(authorityInput)).toMatchObject({
       semanticDispositionReviewExecutionHashes: [execution.executionHash],
+      semanticDispositionReviewAttestationHashes: [durableAttestation.attestationHash],
+      semanticDispositionReviewTrustPolicyHash: trustPolicy.policyHash,
       investigatedEmptyDecisionHashes: [investigatedEmptyDecision.decisionHash],
     });
     expect(() =>
@@ -200,15 +224,14 @@ describe('semantic disposition-review execution authority', () => {
     expect(() =>
       createStrictProductionAuthorityReceiptV1({
         ...authorityInput,
-        semanticDispositionReviewExecutions: [],
+        semanticDispositionReviewAttestations: [],
       })
     ).toThrow('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_MISMATCH');
-    const orphanRequest = semanticRequestV2(investigatedEmptyRequest('orphan')).request;
-    const orphanExecution = await gateway.execute(orphanRequest);
+    const orphanAttestation = await gateway.execute(investigatedEmptyRequest('orphan'));
     expect(() =>
       createStrictProductionAuthorityReceiptV1({
         ...authorityInput,
-        semanticDispositionReviewExecutions: [execution, orphanExecution],
+        semanticDispositionReviewAttestations: [durableAttestation, orphanAttestation],
       })
     ).toThrow('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_ORPHANED');
   });
@@ -540,6 +563,136 @@ describe('semantic disposition-review execution authority', () => {
     ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EXECUTION_V2_INVALID');
   });
 
+  it('verifies approved durable Agent/evidence attestation after serialization and rejects caller-minted roots', async () => {
+    const semanticRequest = producerRequest();
+    const approved = await executeSemanticRequestV3(semanticRequest, PRODUCER_AXES, {
+      trustRootId: 'semantic-review-trust:approved',
+      keyId: 'semantic-review-key:approved',
+    });
+    const rehydrated = JSON.parse(
+      JSON.stringify(approved.attestation)
+    ) as SemanticDispositionReviewDurableAttestationV3;
+
+    expect(() =>
+      assertSemanticDispositionReviewDurableAttestationV3({
+        attestation: rehydrated,
+        expectedTrustPolicy: approved.trustPolicy,
+      })
+    ).not.toThrow();
+    const freshProcessRoot = mkdtempSync(
+      path.join(tmpdir(), 'alembic-semantic-review-attestation-')
+    );
+    const freshProcessFixturePath = path.join(freshProcessRoot, 'attestation.json');
+    try {
+      writeFileSync(
+        freshProcessFixturePath,
+        JSON.stringify({
+          attestation: rehydrated,
+          expectedTrustPolicy: approved.trustPolicy,
+        }),
+        'utf8'
+      );
+      const freshProcessOutput = execFileSync(
+        process.execPath,
+        [
+          path.join(process.cwd(), 'node_modules/vitest/vitest.mjs'),
+          'run',
+          'test/DurableSemanticDispositionFreshProcess.test.ts',
+          '--reporter=dot',
+        ],
+        {
+          cwd: process.cwd(),
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            ALEMBIC_DURABLE_ATTESTATION_FIXTURE: freshProcessFixturePath,
+          },
+        }
+      );
+      expect(freshProcessOutput).toContain('1 passed');
+    } finally {
+      rmSync(freshProcessRoot, { force: true, recursive: true });
+    }
+    const review = consumeMainSemanticDispositionReviewDurableAttestationV3({
+      attestation: rehydrated,
+      expectedSemanticRequest: semanticRequest,
+      expectedTrustPolicy: approved.trustPolicy,
+    });
+    expect(rehydrated.execution.request.compiledPrompt).toBe(
+      rehydrated.execution.hostExecution.compiledPrompt
+    );
+    expect(rehydrated.execution.hostExecution.reviewerModelLoadReceipt.loadReceiptHash).toBe(
+      approved.trustPolicy.reviewerModelLoadReceiptHash
+    );
+    expect(JSON.parse(rehydrated.execution.hostExecution.responseOutput)).toEqual(
+      rehydrated.execution.decision
+    );
+    expect(rehydrated.execution.request.semanticRequest.strictWorkflowRunId).toBe(WORKFLOW_RUN);
+    expect(rehydrated.execution.hostExecution.evaluatorRunId).toBe(EVALUATOR_RUN);
+    expect(rehydrated.execution.hostExecution.evaluatorRunId).not.toBe(WORKFLOW_RUN);
+    expect(review.semanticExecutionResultHash).toBe(rehydrated.execution.executionHash);
+    expect(rehydrated.evidenceLoadReceipts[0]).toMatchObject({
+      evidenceStoreId: 'evidence-store:strict-review-fixture',
+      evidenceEntryId: 'E-1',
+      evidenceSessionId: 'session:semantic-review',
+      evidenceLedgerSnapshotHash:
+        rehydrated.execution.request.evidenceAuthorities[0]?.evidenceLedgerSnapshot.snapshotHash,
+      executionReceiptHash: semanticRequest.executionReceipts[0]?.receiptHash,
+    });
+
+    const callerMinted = await executeSemanticRequestV3(semanticRequest, PRODUCER_AXES, {
+      trustRootId: 'semantic-review-trust:caller-minted',
+      keyId: 'semantic-review-key:caller-minted',
+    });
+    expect(() =>
+      assertSemanticDispositionReviewDurableAttestationV3({
+        attestation: callerMinted.attestation,
+        expectedTrustPolicy: approved.trustPolicy,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_TRUST_POLICY_MISMATCH');
+
+    expect(() =>
+      assertSemanticDispositionReviewDurableAttestationV3({
+        attestation: approved.attestation.execution as never,
+        expectedTrustPolicy: approved.trustPolicy,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_TRUST_POLICY_MISMATCH');
+
+    const copiedLoadReceipts = callerMinted.attestation.evidenceLoadReceipts.map((receipt) => {
+      const { loadReceiptHash: _loadReceiptHash, ...semantic } = receipt;
+      const reboundSemantic = {
+        ...semantic,
+        trustRootId: approved.trustPolicy.trustRootId,
+      };
+      return {
+        ...reboundSemantic,
+        loadReceiptHash: hashCanonicalJson(reboundSemantic),
+      };
+    });
+    const selfHashed = restampDurableAttestation({
+      ...callerMinted.attestation,
+      trustPolicyHash: approved.trustPolicy.policyHash,
+      evidenceLoadReceipts: copiedLoadReceipts,
+    });
+    expect(() =>
+      assertSemanticDispositionReviewDurableAttestationV3({
+        attestation: selfHashed,
+        expectedTrustPolicy: approved.trustPolicy,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_DURABLE_ATTESTATION_INVALID');
+
+    const callerBuiltGraphWithoutStoreReceipt = restampDurableAttestation({
+      ...rehydrated,
+      evidenceLoadReceipts: [],
+    });
+    expect(() =>
+      assertSemanticDispositionReviewDurableAttestationV3({
+        attestation: callerBuiltGraphWithoutStoreReceipt,
+        expectedTrustPolicy: approved.trustPolicy,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_INVALID');
+  });
+
   it('rejects generic/unrelated execution post-hoc stamping even when every public hash is recomputed', async () => {
     const unrelatedSemanticRequest = investigatedEmptyRequest();
     const unrelated = await executeSemanticRequestV2(
@@ -646,11 +799,14 @@ describe('semantic disposition-review execution authority', () => {
       })
     ).toThrow('SEMANTIC_DISPOSITION_REVIEW_ADMISSION_CONTEXT_MISMATCH');
 
-    const v2 = await executeSemanticRequestV2(request, PRODUCER_AXES);
-    const review = consumeMainSemanticDispositionReviewExecutionV2({
-      execution: v2.execution,
-      expectedRequest: v2.request,
-      hostAuthority: v2.gateway.authority,
+    const v3 = await executeSemanticRequestV3(request, PRODUCER_AXES, {
+      trustRootId: 'semantic-review-trust:zero',
+      keyId: 'semantic-review-key:zero',
+    });
+    const review = consumeMainSemanticDispositionReviewDurableAttestationV3({
+      attestation: v3.attestation,
+      expectedSemanticRequest: request,
+      expectedTrustPolicy: v3.trustPolicy,
     });
     const expressionSet = validateHypothesisExpressionSetReceiptV1({
       schemaVersion: 1,
@@ -672,8 +828,8 @@ describe('semantic disposition-review execution authority', () => {
     const corpusInspection = zeroCorpusInspection(context.analysisFixpoint.fixpointHash);
     expect(
       createProducerZeroDispositionAdmissionAuthorityV1({
-        execution: v2.execution,
-        hostAuthority: v2.gateway.authority,
+        attestation: v3.attestation,
+        expectedTrustPolicy: v3.trustPolicy,
         expressionSet,
         corpusInspection,
       })
@@ -685,8 +841,8 @@ describe('semantic disposition-review execution authority', () => {
     });
     expect(() =>
       createProducerZeroDispositionAdmissionAuthorityV1({
-        execution: v2.execution,
-        hostAuthority: v2.gateway.authority,
+        attestation: v3.attestation,
+        expectedTrustPolicy: v3.trustPolicy,
         expressionSet,
         corpusInspection: createStrictAcceptedCorpusInspectionV1({
           runId: WORKFLOW_RUN,
@@ -1236,6 +1392,92 @@ async function executeSemanticRequestV2(
   });
   const execution = await gateway.execute(request);
   return { request, evidenceAuthority, gateway, execution };
+}
+
+async function executeSemanticRequestV3(
+  semanticRequest: SemanticDispositionReviewRequestV1,
+  axisIds: readonly SemanticDispositionReviewAxisIdV1[],
+  identity: { readonly trustRootId: string; readonly keyId: string }
+): Promise<{
+  readonly attestation: SemanticDispositionReviewDurableAttestationV3;
+  readonly trustPolicy: SemanticDispositionReviewTrustPolicyV3;
+  readonly gateway: SemanticDispositionReviewDurableGatewayV3;
+}> {
+  const evidence = strictEvidenceFixture();
+  const { privateKey } = generateKeyPairSync('ed25519');
+  let invocationOrdinal = 0;
+  let loadOrdinal = 0;
+  const gateway = createAgentSemanticDispositionReviewDurableGatewayV3({
+    ...identity,
+    privateKey,
+    reviewerHost: {
+      reviewerModelLoadReceipt: semanticRequest.calibration.reviewerModelLoadReceipt,
+      invoke: async (call) => {
+        invocationOrdinal += 1;
+        return {
+          evaluatorRunId: EVALUATOR_RUN,
+          invocationId: `agent-host-invocation:semantic-review:v3:${invocationOrdinal}`,
+          responseOutput: JSON.stringify(passingDecisionV2(call.request, axisIds)),
+          status: 'success',
+          toolCallCount: 0,
+        };
+      },
+    },
+    evidenceStore: {
+      evidenceStoreId: 'evidence-store:strict-review-fixture',
+      evidenceStoreConfigHash: shaText('evidence-store:strict-review-fixture:config'),
+      load: async (call) => {
+        loadOrdinal += 1;
+        const executionReceipt = call.semanticRequest.executionReceipts.find((receipt) =>
+          receipt.fileExecutions.some(
+            (fileExecution) => fileExecution.evidenceEntryId === call.evidence.evidenceEntryId
+          )
+        );
+        const fileExecution = executionReceipt?.fileExecutions.find(
+          (candidate) => candidate.evidenceEntryId === call.evidence.evidenceEntryId
+        );
+        if (!executionReceipt || !fileExecution) {
+          throw new Error('durable evidence-store fixture requires an exact file execution');
+        }
+        return {
+          loadOperationId: `evidence-load:strict-review:${loadOrdinal}`,
+          evidenceEntry: evidence.evidenceEntry,
+          evidenceLedgerSnapshot: evidence.evidenceLedgerSnapshot,
+          witnessBinding: evidence.witnessBinding,
+          executionReceipt,
+          fileExecutionHash: fileExecution.executionHash,
+          semanticRole: call.evidence.semanticRole,
+        };
+      },
+    },
+  });
+  return {
+    attestation: await gateway.execute(semanticRequest),
+    trustPolicy: gateway.trustPolicy,
+    gateway,
+  };
+}
+
+function restampDurableAttestation(
+  input: SemanticDispositionReviewDurableAttestationV3
+): SemanticDispositionReviewDurableAttestationV3 {
+  const signedSemantic = {
+    schemaVersion: 3 as const,
+    trustPolicyHash: input.trustPolicyHash,
+    execution: input.execution,
+    evidenceLoadReceipts: input.evidenceLoadReceipts,
+  };
+  const attestedPayloadHash = hashCanonicalJson(signedSemantic);
+  const semantic = {
+    ...signedSemantic,
+    attestedPayloadHash,
+    signatureAlgorithm: input.signatureAlgorithm,
+    signatureBase64: input.signatureBase64,
+  };
+  return {
+    ...semantic,
+    attestationHash: hashCanonicalJson(semantic),
+  };
 }
 
 function postHocStampedExecution(

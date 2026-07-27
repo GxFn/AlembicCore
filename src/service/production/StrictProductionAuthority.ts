@@ -1,6 +1,12 @@
 import type { MiningWorkScheduleV1 } from '../plan/intent/coldStartProductionPlan.js';
 import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 import {
+  assertSemanticDispositionReviewDurableAttestationV3,
+  createProducerZeroDispositionAdmissionAuthorityV1,
+  type SemanticDispositionReviewDurableAttestationV3,
+  type SemanticDispositionReviewTrustPolicyV3,
+} from './DurableSemanticDispositionReviewAuthority.js';
+import {
   assertStrictAcceptedCorpusInspectionV1,
   assertStrictG1ReceiptV1,
   type CandidateAttemptBatchV1,
@@ -14,12 +20,7 @@ import {
   type StrictG2ReceiptV1,
   validateSerialAdmissionLedgerV1,
 } from './ProductionPersistenceContracts.js';
-import {
-  assertSemanticDispositionReviewExecutionV2,
-  createProducerZeroDispositionAdmissionAuthorityV1,
-  type SemanticDispositionReviewAgentHostExecutionAuthorityV2,
-  type SemanticDispositionReviewExecutionV2,
-} from './SemanticDispositionReviewExecution.js';
+import type { SemanticDispositionReviewExecutionV2 } from './SemanticDispositionReviewExecution.js';
 import {
   type AnalysisFixpointReceiptV1,
   type AnalysisScheduleExpansionReceiptV1,
@@ -82,6 +83,8 @@ export interface StrictProductionAuthorityReceiptV1 {
   readonly investigatedEmptyDecisionHashes: readonly string[];
   readonly dispositionReviewReceiptHashes: readonly string[];
   readonly semanticDispositionReviewExecutionHashes?: readonly string[];
+  readonly semanticDispositionReviewAttestationHashes?: readonly string[];
+  readonly semanticDispositionReviewTrustPolicyHash?: string;
   readonly expressionSetReceiptHashes: readonly string[];
   readonly candidateAttemptBatchHashes: readonly string[];
   readonly terminalEvidenceReceiptHashes: readonly string[];
@@ -249,12 +252,15 @@ export interface StrictProductionAuthorityInputV1 {
   readonly investigatedEmptyDecisions?: readonly InvestigatedEmptyDecisionV1[];
   readonly dispositionReviews: readonly KnowledgeDispositionReviewV1[];
   /**
-   * Agent 产生、Main 只读消费的 evaluator execution registry。普通 analyst review 保持 V1
-   * 兼容；producer-non-draft / investigated-empty 必须在这里 exact-one 连接。
+   * Agent 产生、Main 只读消费的 durable evaluator attestation registry。普通 analyst review
+   * 保持 V1 兼容；producer-non-draft / investigated-empty 必须在这里 exact-one 连接。
    */
-  readonly semanticDispositionReviewExecutions?: readonly SemanticDispositionReviewExecutionV2[];
-  /** Agent live capability；普通 JSON execution 即使重算全部 hash，也不能由 Main 自行盖章。 */
-  readonly semanticDispositionReviewHostAuthority?: SemanticDispositionReviewAgentHostExecutionAuthorityV2;
+  readonly semanticDispositionReviewAttestations?: readonly SemanticDispositionReviewDurableAttestationV3[];
+  /**
+   * Main 从 durable configuration / trust store 取得的预批准 public policy。禁止从 task payload
+   * 或 attestation 自身回填，否则任意调用方仍可自建 key root。
+   */
+  readonly semanticDispositionReviewTrustPolicy?: SemanticDispositionReviewTrustPolicyV3;
   /** 恢复时由宿主传入上一 checkpoint 已消费集合，防止 execution 跨 resume 重放。 */
   readonly priorSemanticDispositionReviewExecutionHashes?: readonly string[];
   readonly expressionSets: readonly HypothesisExpressionSetReceiptV1[];
@@ -293,7 +299,7 @@ export function createStrictProductionAuthorityReceiptV1(
   const factIndex = validateFactExecution(input);
   const populationHashes = validatePopulations(input, factIndex);
   const reviewById = validateDispositionReviews(input, factIndex.receiptsByHash);
-  const semanticDispositionReviewExecutionHashes = validateSemanticDispositionReviewExecutions(
+  const semanticReviewAuthority = validateSemanticDispositionReviewExecutions(
     input,
     reviewById,
     factIndex.receiptsByHash
@@ -345,8 +351,12 @@ export function createStrictProductionAuthorityReceiptV1(
     dispositionReviewReceiptHashes: [...reviewById.values()]
       .map((review) => review.receiptHash)
       .sort(),
-    ...(semanticDispositionReviewExecutionHashes.length > 0
-      ? { semanticDispositionReviewExecutionHashes }
+    ...(semanticReviewAuthority.executionHashes.length > 0
+      ? {
+          semanticDispositionReviewExecutionHashes: semanticReviewAuthority.executionHashes,
+          semanticDispositionReviewAttestationHashes: semanticReviewAuthority.attestationHashes,
+          semanticDispositionReviewTrustPolicyHash: semanticReviewAuthority.trustPolicyHash,
+        }
       : {}),
     expressionSetReceiptHashes: input.expressionSets.map((receipt) => receipt.receiptHash).sort(),
     candidateAttemptBatchHashes: input.candidateAttemptBatches
@@ -781,26 +791,29 @@ function validateSemanticDispositionReviewExecutions(
   input: StrictProductionAuthorityInputV1,
   reviewById: ReadonlyMap<string, KnowledgeDispositionReviewV1>,
   receiptsByHash: ReturnType<typeof validateFactExecution>['receiptsByHash']
-): readonly string[] {
-  const executions = [...(input.semanticDispositionReviewExecutions ?? [])];
+): {
+  readonly executionHashes: readonly string[];
+  readonly attestationHashes: readonly string[];
+  readonly trustPolicyHash: string | undefined;
+} {
+  const attestations = [...(input.semanticDispositionReviewAttestations ?? [])];
   const priorHashes = new Set(input.priorSemanticDispositionReviewExecutionHashes ?? []);
   const byHash = new Map<string, SemanticDispositionReviewExecutionV2>();
+  const attestationHashes = new Set<string>();
   const executionIds = new Set<string>();
   const invocationCoordinates = new Set<string>();
   const outputHashes = new Set<string>();
   const decisionHashes = new Set<string>();
-  for (const execution of executions) {
-    if (!input.semanticDispositionReviewHostAuthority) {
-      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
-    }
-    assertSemanticDispositionReviewExecutionV2({
-      execution,
-      hostAuthority: input.semanticDispositionReviewHostAuthority,
-    });
+  for (const attestation of attestations) {
+    const execution = requireDurableSemanticDispositionReviewExecution(
+      attestation,
+      input.semanticDispositionReviewTrustPolicy
+    );
     const invocationCoordinate = `${execution.hostExecution.evaluatorRunId}\u0000${execution.hostExecution.invocationId}`;
     if (
       priorHashes.has(execution.executionHash) ||
       byHash.has(execution.executionHash) ||
+      attestationHashes.has(attestation.attestationHash) ||
       executionIds.has(execution.executionId) ||
       invocationCoordinates.has(invocationCoordinate) ||
       outputHashes.has(execution.hostExecution.responseOutputHash) ||
@@ -809,6 +822,7 @@ function validateSemanticDispositionReviewExecutions(
       fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_REUSED');
     }
     byHash.set(execution.executionHash, execution);
+    attestationHashes.add(attestation.attestationHash);
     executionIds.add(execution.executionId);
     invocationCoordinates.add(invocationCoordinate);
     outputHashes.add(execution.hostExecution.responseOutputHash);
@@ -843,7 +857,28 @@ function validateSemanticDispositionReviewExecutions(
   ) {
     fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_ORPHANED');
   }
-  return [...consumed].sort();
+  return {
+    executionHashes: [...consumed].sort(),
+    attestationHashes: [...attestationHashes].sort(),
+    trustPolicyHash:
+      attestationHashes.size > 0
+        ? input.semanticDispositionReviewTrustPolicy?.policyHash
+        : undefined,
+  };
+}
+
+function requireDurableSemanticDispositionReviewExecution(
+  attestation: SemanticDispositionReviewDurableAttestationV3,
+  trustPolicy: SemanticDispositionReviewTrustPolicyV3 | undefined
+): SemanticDispositionReviewExecutionV2 {
+  if (!trustPolicy) {
+    fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_TRUST_POLICY_REQUIRED');
+  }
+  assertSemanticDispositionReviewDurableAttestationV3({
+    attestation,
+    expectedTrustPolicy: trustPolicy,
+  });
+  return attestation.execution;
 }
 
 function semanticDispositionReviewExecutionMismatch(
@@ -2065,7 +2100,8 @@ function consumeZeroDispositionTerminalEvidence(
   registry: TerminalEvidenceRegistry,
   consumption: TerminalEvidenceConsumption
 ): void {
-  for (const execution of input.semanticDispositionReviewExecutions ?? []) {
+  for (const attestation of input.semanticDispositionReviewAttestations ?? []) {
+    const execution = attestation.execution;
     const request = execution.request.semanticRequest;
     const context = request.context;
     if (context.reviewKind !== 'producer-non-draft' || context.proposal.expression !== null) {
@@ -2098,12 +2134,12 @@ function consumeZeroDispositionTerminalEvidence(
     ) {
       fail('STRICT_PRODUCTION_ZERO_DISPOSITION_ADMISSION_CHAIN_INVALID');
     }
-    if (!input.semanticDispositionReviewHostAuthority) {
-      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
+    if (!input.semanticDispositionReviewTrustPolicy) {
+      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_TRUST_POLICY_REQUIRED');
     }
     createProducerZeroDispositionAdmissionAuthorityV1({
-      execution,
-      hostAuthority: input.semanticDispositionReviewHostAuthority,
+      attestation,
+      expectedTrustPolicy: input.semanticDispositionReviewTrustPolicy,
       expressionSet,
       corpusInspection,
     });
@@ -2385,9 +2421,9 @@ function consumeExpressionTerminalEvidence(
     expression.terminalFate === 'reviewed-duplicate'
   ) {
     const review = expression.dispositionReview;
-    const execution = input.semanticDispositionReviewExecutions?.find(
-      (candidate) => candidate.executionHash === review?.semanticExecutionResultHash
-    );
+    const execution = input.semanticDispositionReviewAttestations
+      ?.map((attestation) => attestation.execution)
+      .find((candidate) => candidate.executionHash === review?.semanticExecutionResultHash);
     const admission =
       execution?.request.semanticRequest.context.reviewKind === 'producer-non-draft'
         ? execution.request.semanticRequest.context.admissionReceipt
