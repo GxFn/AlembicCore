@@ -88,8 +88,17 @@ describe('Core package baseline', () => {
     expect(knowledge.createStrictRecipePersistedPayloadV1).toBeInstanceOf(Function);
     expect(knowledge.parseStrictPublicationSnapshotIdV1).toBeInstanceOf(Function);
     expect(production.createStrictProductionAuthorityReceiptV1).toBeInstanceOf(Function);
+    expect(production.createStrictExpressionTerminalReturnReceiptV1).toBeInstanceOf(Function);
+    expect(production.createStrictG1TerminalBindingReceiptV1).toBeInstanceOf(Function);
+    expect(production.assertMiningWorkScheduleV1).toBeInstanceOf(Function);
     expect(production.createKnowledgeDispositionReviewV1).toBeInstanceOf(Function);
     expect(production.createInvestigatedEmptyDecisionV1).toBeInstanceOf(Function);
+    expect(production.createKnowledgeClusterSemanticTransitionV1).toBeInstanceOf(Function);
+    expect(production.hashKnowledgeDispositionProposalV1).toBeInstanceOf(Function);
+    expect(production.hashKnowledgeClusterSetProposalV1).toBeInstanceOf(Function);
+    expect(production.buildFactQueryCatalogSnapshot).toBeInstanceOf(Function);
+    const projectContextFoundation = await import('../src/projectContextFoundation.js');
+    expect(projectContextFoundation.createProjectContextFileRef).toBeInstanceOf(Function);
     expect(workspace.validatePrivateCorpusRevisionInitReceiptV1).toBeInstanceOf(Function);
     expect(workspace.validatePrivateCorpusRevisionCheckpointV1).toBeInstanceOf(Function);
   });

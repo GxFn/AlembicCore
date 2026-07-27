@@ -1364,6 +1364,11 @@ export interface CandidateAttemptInputV1 {
   readonly runId: string;
   readonly analysisFixpointHash: string;
   readonly privateCorpusRevision: string;
+  readonly hypothesisId: string;
+  readonly expressionSetReceiptId: string;
+  readonly expressionId: string;
+  readonly terminalReceiptId: string;
+  readonly terminalReceiptHash: string;
   readonly cellId: string;
   readonly criticality: 'critical' | 'standard' | 'non-critical';
   readonly passOrdinal: number;
@@ -1371,10 +1376,15 @@ export interface CandidateAttemptInputV1 {
   readonly causalParentIds: readonly string[];
 }
 
+export interface CandidateAttemptV1 extends CandidateAttemptInputV1 {
+  readonly attemptId: string;
+  readonly attemptHash: string;
+}
+
 export interface CandidateAttemptBatchV1 {
   readonly schemaVersion: 1;
   readonly passOrdinal: number;
-  readonly attempts: readonly CandidateAttemptInputV1[];
+  readonly attempts: readonly CandidateAttemptV1[];
   readonly batchHash: string;
 }
 
@@ -1392,7 +1402,28 @@ export function canonicalizeCandidateAttemptBatchV1(input: {
     throw new Error('CANDIDATE_BATCH_MIXED_PASS');
   }
   const attempts = input.attempts
-    .map((row) => ({ ...row, causalParentIds: normalizeStrings(row.causalParentIds) }))
+    .map((row) => {
+      const normalized = { ...row, causalParentIds: normalizeStrings(row.causalParentIds) };
+      const identity = {
+        runId: normalized.runId,
+        analysisFixpointHash: normalized.analysisFixpointHash,
+        privateCorpusRevision: normalized.privateCorpusRevision,
+        hypothesisId: normalized.hypothesisId,
+        expressionSetReceiptId: normalized.expressionSetReceiptId,
+        expressionId: normalized.expressionId,
+        terminalReceiptId: normalized.terminalReceiptId,
+        terminalReceiptHash: normalized.terminalReceiptHash,
+        cellId: normalized.cellId,
+        authoredFingerprint: normalized.authoredFingerprint,
+        causalParentIds: normalized.causalParentIds,
+      };
+      const attemptHash = hashCanonicalJson(identity);
+      return {
+        ...normalized,
+        attemptId: `candidate-attempt:${attemptHash.slice(7, 31)}`,
+        attemptHash,
+      };
+    })
     .sort(
       (left, right) =>
         criticalityRank(left.criticality) - criticalityRank(right.criticality) ||
@@ -1403,14 +1434,10 @@ export function canonicalizeCandidateAttemptBatchV1(input: {
   const identities = new Set<string>();
   const perCell = new Map<string, number>();
   for (const attempt of attempts) {
-    const identity = canonicalJsonStringify({
-      runId: attempt.runId,
-      analysisFixpointHash: attempt.analysisFixpointHash,
-      privateCorpusRevision: attempt.privateCorpusRevision,
-      cellId: attempt.cellId,
-      authoredFingerprint: attempt.authoredFingerprint,
-      causalParentIds: attempt.causalParentIds,
-    });
+    if (candidateAttemptIdentityInvalid(attempt)) {
+      throw new Error('CANDIDATE_ATTEMPT_IDENTITY_INVALID');
+    }
+    const identity = attempt.attemptHash;
     if (identities.has(identity)) {
       throw new Error('CANDIDATE_BATCH_DUPLICATE_ATTEMPT');
     }
@@ -1431,12 +1458,35 @@ export function canonicalizeCandidateAttemptBatchV1(input: {
   return freezeDeep({ ...semantic, batchHash: hashCanonicalJson(semantic) });
 }
 
+function candidateAttemptIdentityInvalid(attempt: CandidateAttemptV1): boolean {
+  const requiredText = [
+    attempt.runId,
+    attempt.analysisFixpointHash,
+    attempt.privateCorpusRevision,
+    attempt.hypothesisId,
+    attempt.expressionSetReceiptId,
+    attempt.expressionId,
+    attempt.terminalReceiptId,
+    attempt.cellId,
+    attempt.authoredFingerprint,
+  ];
+  return (
+    requiredText.some((value) => !value.trim()) ||
+    !/^sha256:[0-9a-f]{64}$/.test(attempt.terminalReceiptHash) ||
+    !Number.isSafeInteger(attempt.passOrdinal) ||
+    attempt.passOrdinal < 0
+  );
+}
+
 export interface SerialAdmissionRowV1 {
   readonly proposalId: string;
+  readonly attemptHash: string;
+  readonly authoredFingerprint: string;
   readonly observedAcceptedCorpusHash: string;
   readonly terminalFate: 'accepted' | 'rejected' | 'revise';
   readonly resultingAcceptedCorpusHash: string;
   readonly terminalReceiptId: string;
+  readonly terminalReceiptHash: string;
 }
 
 export interface SerialAdmissionLedgerV1 {
@@ -1459,10 +1509,17 @@ export function validateSerialAdmissionLedgerV1(input: {
       throw new Error('SERIAL_ADMISSION_PROPOSAL_DUPLICATE');
     }
     proposalIds.add(row.proposalId);
+    if (
+      !row.proposalId.startsWith('candidate-attempt:') ||
+      !/^sha256:[0-9a-f]{64}$/.test(row.attemptHash) ||
+      !row.authoredFingerprint.trim()
+    ) {
+      throw new Error('SERIAL_ADMISSION_ATTEMPT_IDENTITY_INVALID');
+    }
     if (row.observedAcceptedCorpusHash !== acceptedCorpusHash) {
       throw new Error('SERIAL_ADMISSION_STALE_PREDECESSOR');
     }
-    if (!row.terminalReceiptId) {
+    if (!row.terminalReceiptId || !/^sha256:[0-9a-f]{64}$/.test(row.terminalReceiptHash)) {
       throw new Error('SERIAL_ADMISSION_TERMINAL_RECEIPT_REQUIRED');
     }
     if (row.terminalFate === 'accepted') {

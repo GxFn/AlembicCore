@@ -12,6 +12,7 @@ import {
 } from './ProductionActorIdentity.js';
 import {
   assertFactQueryExecutionReceiptV1,
+  assertReviewAuthorizingFactExecutionV1,
   type FactQueryExecutionReceiptV1,
 } from './StrictFactExecutionReceipt.js';
 
@@ -239,6 +240,247 @@ export interface KnowledgeClusterSetV1 {
   readonly clusterSetHash: string;
 }
 
+export interface KnowledgeClusterSemanticTransitionV1 {
+  readonly schemaVersion: 1;
+  readonly reviewKind: 'semantic-merge' | 'semantic-split';
+  readonly populationHash: string;
+  readonly sourceClusterSetHash: string;
+  readonly targetClusterSetHash: string;
+  readonly sourceClusterIds: readonly string[];
+  readonly targetClusterIds: readonly string[];
+  readonly observationIds: readonly string[];
+  readonly reasonCode: string;
+  readonly dispositionReviewReceiptId: string;
+  readonly transitionHash: string;
+}
+
+export function hashKnowledgeClusterV1(cluster: KnowledgeClusterV1): string {
+  const { clusterId, ...semantic } = cluster;
+  const clusterHash = hashCanonicalJson(semantic);
+  if (clusterId !== `cluster:${clusterHash.slice(7)}`) {
+    fail('CLUSTER_IDENTITY_INVALID');
+  }
+  return clusterHash;
+}
+
+export function hashKnowledgeClusterSetV1(clusterSet: KnowledgeClusterSetV1): string {
+  return hashCanonicalJson({
+    schemaVersion: clusterSet.schemaVersion,
+    populationHash: clusterSet.populationHash,
+    clusters: clusterSet.clusters,
+    dispositions: clusterSet.dispositions.map(
+      ({ reviewerReceiptId: _reviewerReceiptId, ...disposition }) => disposition
+    ),
+  });
+}
+
+/**
+ * cluster review 在最终 cluster set 之前发生。proposal hash 排除尚不存在的 review ID，
+ * 从而形成 population→cluster proposal→review→reviewed cluster set 的无环构造顺序。
+ */
+export function hashKnowledgeClusterSetProposalV1(
+  population: ObservationPopulationV1,
+  input: {
+    readonly clusters: readonly KnowledgeClusterInputV1[];
+    readonly nonClusteredDispositions: readonly {
+      readonly observationId: string;
+      readonly status: 'discarded' | 'unresolved';
+      readonly reasonCode: string;
+      readonly owner?: string;
+      readonly resumePoint?: string;
+    }[];
+  }
+): string {
+  const observations = new Map(population.observations.map((row) => [row.observationId, row]));
+  const clusters = input.clusters
+    .map((candidate) => canonicalizeKnowledgeCluster(population, candidate, observations))
+    .sort(byId('clusterId'));
+  const nonClustered = new Map(
+    input.nonClusteredDispositions.map((row) => [row.observationId, row] as const)
+  );
+  if (
+    new Set(clusters.map((cluster) => cluster.clusterId)).size !== clusters.length ||
+    nonClustered.size !== input.nonClusteredDispositions.length
+  ) {
+    fail('CLUSTER_PROPOSAL_DUPLICATE');
+  }
+  const dispositions = [...observations.keys()].sort().map((observationId) => {
+    const clusterIds = clusters
+      .filter((cluster) => cluster.observationIds.includes(observationId))
+      .map((cluster) => cluster.clusterId);
+    const nonClusteredDisposition = nonClustered.get(observationId);
+    if (clusterIds.length > 0) {
+      if (nonClusteredDisposition) {
+        fail('CLUSTER_DISPOSITION_DUPLICATE');
+      }
+      return {
+        observationId,
+        status: 'clustered' as const,
+        clusterIds,
+        reasonCode: null,
+        reviewerReceiptId: null,
+        owner: null,
+        resumePoint: null,
+      };
+    }
+    if (!nonClusteredDisposition?.reasonCode.trim()) {
+      fail('CLUSTER_DISPOSITION_MISSING');
+    }
+    if (
+      nonClusteredDisposition.status === 'unresolved' &&
+      (!nonClusteredDisposition.owner?.trim() || !nonClusteredDisposition.resumePoint?.trim())
+    ) {
+      fail('CLUSTER_UNRESOLVED_OWNER_REQUIRED');
+    }
+    return {
+      observationId,
+      status: nonClusteredDisposition.status,
+      clusterIds,
+      reasonCode: nonClusteredDisposition.reasonCode.trim(),
+      reviewerReceiptId: null,
+      owner: nonClusteredDisposition.owner?.trim() ?? null,
+      resumePoint: nonClusteredDisposition.resumePoint?.trim() ?? null,
+    };
+  });
+  if ([...nonClustered.keys()].some((observationId) => !observations.has(observationId))) {
+    fail('CLUSTER_OBSERVATION_UNKNOWN');
+  }
+  return hashKnowledgeClusterSetV1({
+    schemaVersion: 1,
+    populationHash: population.populationHash,
+    clusters,
+    dispositions,
+    clusterSetHash: '',
+  });
+}
+
+/**
+ * merge/split 只有在 before/after cluster set 对同一 observation 集守恒时才成为真实处置。
+ * review kind 本身不构成 consumer；该 transition receipt 才是 unified authority 可消费的事实。
+ */
+export function createKnowledgeClusterSemanticTransitionV1(input: {
+  readonly reviewKind: 'semantic-merge' | 'semantic-split';
+  readonly sourceClusterSet: KnowledgeClusterSetV1;
+  readonly targetClusterSet: KnowledgeClusterSetV1;
+  readonly sourceClusterIds: readonly string[];
+  readonly targetClusterIds: readonly string[];
+  readonly reasonCode: string;
+  readonly dispositionReview: KnowledgeDispositionReviewV1;
+}): KnowledgeClusterSemanticTransitionV1 {
+  if (input.sourceClusterSet.clusterSetHash !== hashKnowledgeClusterSetV1(input.sourceClusterSet)) {
+    fail('CLUSTER_TRANSITION_SOURCE_INVALID');
+  }
+  if (input.targetClusterSet.clusterSetHash !== hashKnowledgeClusterSetV1(input.targetClusterSet)) {
+    fail('CLUSTER_TRANSITION_TARGET_INVALID');
+  }
+  const sourceClusterIds = normalizeStrings(input.sourceClusterIds);
+  const targetClusterIds = normalizeStrings(input.targetClusterIds);
+  const sourceClusters = selectTransitionClusters(
+    input.sourceClusterSet,
+    sourceClusterIds,
+    'CLUSTER_TRANSITION_SOURCE_INVALID'
+  );
+  const targetClusters = selectTransitionClusters(
+    input.targetClusterSet,
+    targetClusterIds,
+    'CLUSTER_TRANSITION_TARGET_INVALID'
+  );
+  const sourceObservationRows = sourceClusters.flatMap((cluster) => cluster.observationIds);
+  const targetObservationRows = targetClusters.flatMap((cluster) => cluster.observationIds);
+  const sourceObservationIds = normalizeStrings(sourceObservationRows);
+  const targetObservationIds = normalizeStrings(targetObservationRows);
+  const selectedObservationIds = new Set(sourceObservationIds);
+  const sourceUnselectedClusters = input.sourceClusterSet.clusters.filter(
+    (cluster) => !sourceClusterIds.includes(cluster.clusterId)
+  );
+  const targetUnselectedClusters = input.targetClusterSet.clusters.filter(
+    (cluster) => !targetClusterIds.includes(cluster.clusterId)
+  );
+  const transitionSelectionIncomplete =
+    sourceUnselectedClusters.some((cluster) =>
+      cluster.observationIds.some((observationId) => selectedObservationIds.has(observationId))
+    ) ||
+    targetUnselectedClusters.some((cluster) =>
+      cluster.observationIds.some((observationId) => selectedObservationIds.has(observationId))
+    );
+  const sourceComplement = {
+    clusters: sourceUnselectedClusters,
+    dispositions: input.sourceClusterSet.dispositions.filter(
+      (row) => !selectedObservationIds.has(row.observationId)
+    ),
+  };
+  const targetComplement = {
+    clusters: targetUnselectedClusters,
+    dispositions: input.targetClusterSet.dispositions.filter(
+      (row) => !selectedObservationIds.has(row.observationId)
+    ),
+  };
+  const sourceObligationIds = normalizeStrings(
+    sourceClusters.flatMap((cluster) =>
+      cluster.memberLineage.flatMap((member) => member.obligationIds)
+    )
+  );
+  const shapeInvalid =
+    input.reviewKind === 'semantic-merge'
+      ? sourceClusterIds.length < 2 || targetClusterIds.length !== 1
+      : sourceClusterIds.length !== 1 || targetClusterIds.length < 2;
+  requireText(input.reasonCode, 'CLUSTER_TRANSITION_REASON_REQUIRED');
+  assertKnowledgeDispositionReviewIntegrity(input.dispositionReview);
+  if (
+    shapeInvalid ||
+    input.sourceClusterSet.clusterSetHash === input.targetClusterSet.clusterSetHash ||
+    transitionSelectionIncomplete ||
+    hashCanonicalJson(sourceComplement) !== hashCanonicalJson(targetComplement) ||
+    sourceObservationRows.length !== sourceObservationIds.length ||
+    targetObservationRows.length !== targetObservationIds.length ||
+    input.sourceClusterSet.populationHash !== input.targetClusterSet.populationHash ||
+    !sameStringSet(sourceObservationIds, targetObservationIds) ||
+    input.dispositionReview.reviewKind !== input.reviewKind ||
+    input.dispositionReview.verdict !== 'pass' ||
+    input.dispositionReview.populationHash !== input.sourceClusterSet.populationHash ||
+    !sameStringSet(input.dispositionReview.obligationIds, sourceObligationIds) ||
+    input.dispositionReview.proposedDispositionHash !==
+      hashKnowledgeDispositionProposalV1({
+        reviewKind: input.reviewKind,
+        populationHash: input.sourceClusterSet.populationHash,
+        sourceClusterSetHash: input.sourceClusterSet.clusterSetHash,
+        targetClusterSetHash: input.targetClusterSet.clusterSetHash,
+        sourceClusterIds,
+        targetClusterIds,
+        observationIds: sourceObservationIds,
+        reasonCode: input.reasonCode,
+      })
+  ) {
+    fail('CLUSTER_TRANSITION_REVIEW_INVALID');
+  }
+  const semantic = {
+    schemaVersion: 1 as const,
+    reviewKind: input.reviewKind,
+    populationHash: input.sourceClusterSet.populationHash,
+    sourceClusterSetHash: input.sourceClusterSet.clusterSetHash,
+    targetClusterSetHash: input.targetClusterSet.clusterSetHash,
+    sourceClusterIds,
+    targetClusterIds,
+    observationIds: sourceObservationIds,
+    reasonCode: input.reasonCode.trim(),
+    dispositionReviewReceiptId: input.dispositionReview.reviewReceiptId,
+  };
+  return freezeDeep({ ...semantic, transitionHash: hashCanonicalJson(semantic) });
+}
+
+function selectTransitionClusters(
+  clusterSet: KnowledgeClusterSetV1,
+  clusterIds: readonly string[],
+  code: string
+): KnowledgeClusterV1[] {
+  const byId = new Map(clusterSet.clusters.map((cluster) => [cluster.clusterId, cluster]));
+  const clusters = clusterIds.map((clusterId) => byId.get(clusterId));
+  if (clusterIds.length === 0 || clusters.some((cluster) => !cluster)) {
+    fail(code);
+  }
+  return clusters as KnowledgeClusterV1[];
+}
+
 export interface KnowledgeClusterCanonicalizationInputV1 {
   readonly clusters: readonly KnowledgeClusterInputV1[];
   readonly nonClusteredDispositions: readonly {
@@ -262,6 +504,171 @@ export type KnowledgeDispositionReviewKindV1 =
   | 'producer-non-draft'
   | 'investigated-empty';
 
+/**
+ * 评审签名的不是调用者自报字符串，而是由实际处置 consumer 可重建的规范语义。
+ * `currentAnalysisFixpointHash`、执行分母和 actor identity 由 review receipt 另行封印。
+ */
+export type KnowledgeDispositionProposalV1 =
+  | {
+      readonly reviewKind: 'cluster-discard';
+      readonly populationHash: string;
+      readonly observationId: string;
+      readonly status: 'discarded';
+      readonly reasonCode: string;
+    }
+  | {
+      readonly reviewKind: 'zero-hypothesis';
+      readonly populationHash: string;
+      readonly clusterHash: string;
+      readonly clusterId: string;
+      readonly observationIds: readonly string[];
+      readonly mode: InductionReceiptV1['mode'];
+      readonly zeroHypothesisReason: NonNullable<InductionReceiptV1['zeroHypothesisReason']>;
+    }
+  | {
+      readonly reviewKind: 'falsification';
+      readonly populationHash: string;
+      readonly hypothesisId: string;
+      readonly enrolledCounterqueryIds: readonly string[];
+      readonly executions: readonly {
+        readonly counterqueryId: string;
+        readonly obligationId: string;
+        readonly executionReceiptHash: string;
+        readonly executionOutputHash: string;
+        readonly denominatorHash: string;
+        readonly counterexampleFactIds: readonly string[];
+      }[];
+      readonly counterqueryApplicability: {
+        readonly status: FalsificationReceiptV1['counterqueryApplicability']['status'];
+        readonly reasonCode: string;
+      };
+    }
+  | {
+      readonly reviewKind: 'producer-non-draft';
+      readonly populationHash: string;
+      readonly hypothesisId: string;
+      readonly expression: {
+        readonly expressionId: string;
+        readonly authoredFingerprint: string;
+        readonly terminalFate: HypothesisExpressionTerminalFate;
+        readonly matchingRepresentativeId: string | null;
+        readonly matchingContentReadyRecipeId: string | null;
+      } | null;
+      readonly zeroDisposition: {
+        readonly reasonCode: string;
+        readonly terminalFate:
+          | 'reviewed-non-draft'
+          | 'rejected'
+          | 'repair-superseded'
+          | 'failed'
+          | 'unknown';
+      } | null;
+    }
+  | {
+      readonly reviewKind: 'investigated-empty';
+      readonly populationHash: string;
+      readonly sourceRevisionVectorHash: string;
+      readonly finalExpandedScheduleHash: string;
+      readonly currentAnalysisFixpointHash: string;
+      readonly expectedObligationIds: readonly string[];
+      readonly executionBindings: readonly KnowledgeDispositionExecutionBindingV1[];
+      readonly evidenceEntryIds: readonly string[];
+    }
+  | {
+      readonly reviewKind: 'semantic-merge' | 'semantic-split';
+      readonly populationHash: string;
+      readonly sourceClusterSetHash: string;
+      readonly targetClusterSetHash: string;
+      readonly sourceClusterIds: readonly string[];
+      readonly targetClusterIds: readonly string[];
+      readonly observationIds: readonly string[];
+      readonly reasonCode: string;
+    };
+
+export function hashKnowledgeDispositionProposalV1(
+  proposal: KnowledgeDispositionProposalV1
+): string {
+  let normalized: KnowledgeDispositionProposalV1;
+  switch (proposal.reviewKind) {
+    case 'cluster-discard':
+      normalized = { ...proposal, reasonCode: proposal.reasonCode.trim() };
+      break;
+    case 'zero-hypothesis':
+      normalized = { ...proposal, observationIds: normalizeStrings(proposal.observationIds) };
+      break;
+    case 'falsification':
+      normalized = {
+        ...proposal,
+        enrolledCounterqueryIds: normalizeStrings(proposal.enrolledCounterqueryIds),
+        executions: proposal.executions
+          .map((execution) => ({
+            ...execution,
+            counterexampleFactIds: normalizeStrings(execution.counterexampleFactIds),
+          }))
+          .sort(byId('obligationId')),
+        counterqueryApplicability: {
+          ...proposal.counterqueryApplicability,
+          reasonCode: proposal.counterqueryApplicability.reasonCode.trim(),
+        },
+      };
+      break;
+    case 'producer-non-draft':
+      normalized = {
+        ...proposal,
+        expression: proposal.expression
+          ? {
+              ...proposal.expression,
+              matchingRepresentativeId: proposal.expression.matchingRepresentativeId ?? null,
+              matchingContentReadyRecipeId:
+                proposal.expression.matchingContentReadyRecipeId ?? null,
+            }
+          : null,
+        zeroDisposition: proposal.zeroDisposition
+          ? {
+              ...proposal.zeroDisposition,
+              reasonCode: proposal.zeroDisposition.reasonCode.trim(),
+            }
+          : null,
+      };
+      break;
+    case 'investigated-empty':
+      normalized = {
+        ...proposal,
+        expectedObligationIds: normalizeStrings(proposal.expectedObligationIds),
+        executionBindings: [...proposal.executionBindings].sort(byId('obligationId')),
+        evidenceEntryIds: normalizeStrings(proposal.evidenceEntryIds),
+      };
+      break;
+    case 'semantic-merge':
+    case 'semantic-split':
+      normalized = {
+        ...proposal,
+        sourceClusterIds: normalizeStrings(proposal.sourceClusterIds),
+        targetClusterIds: normalizeStrings(proposal.targetClusterIds),
+        observationIds: normalizeStrings(proposal.observationIds),
+        reasonCode: proposal.reasonCode.trim(),
+      };
+      break;
+  }
+  return hashCanonicalJson({ schemaVersion: 1, ...normalized });
+}
+
+export interface KnowledgeDispositionExecutionBindingV1 {
+  readonly obligationId: string;
+  readonly executionReceiptHash: string;
+  readonly executionOutputHash: string;
+  readonly denominatorHash: string;
+  readonly disposition: FactQueryExecutionReceiptV1['disposition'];
+  readonly terminalReceiptId: string;
+}
+
+export interface KnowledgeDispositionExecutionScopeV1 {
+  readonly finalExpandedScheduleHash: string;
+  readonly scheduledObligationIds: readonly string[];
+  readonly terminalObligations: AnalysisFixpointReceiptV1['terminalObligations'];
+  readonly scopeHash: string;
+}
+
 export interface KnowledgeDispositionReviewV1 {
   readonly schemaVersion: 1;
   readonly reviewKind: KnowledgeDispositionReviewKindV1;
@@ -269,10 +676,16 @@ export interface KnowledgeDispositionReviewV1 {
   readonly populationHash: string;
   readonly proposedDispositionHash: string;
   readonly sourceRevisionVectorHash: string;
+  readonly executionScope: KnowledgeDispositionExecutionScopeV1;
   readonly obligationIds: readonly string[];
   readonly executionReceiptHashes: readonly string[];
   readonly executionOutputHashes: readonly string[];
   readonly denominatorHashes: readonly string[];
+  /**
+   * 三个兼容数组不能表达逐条关系；binding rows 才是 review 授权所依据的不可交换 tuple。
+   * authority 会同时核对 tuple 与兼容数组，防止交换 output/denominator 后重算 hash 自证。
+   */
+  readonly executionBindings: readonly KnowledgeDispositionExecutionBindingV1[];
   readonly producer: ProductionActorIdentityV1;
   readonly reviewer: ProductionActorIdentityV1;
   readonly calibrationReceiptHash: string;
@@ -370,6 +783,7 @@ export interface HypothesisExpressionRowV1 {
   readonly authoredFingerprint: string;
   readonly terminalFate: HypothesisExpressionTerminalFate;
   readonly terminalReceiptId: string;
+  readonly terminalReceiptHash: string;
   readonly dispositionReview?: KnowledgeDispositionReviewV1;
   readonly matchingRepresentativeId?: string;
   readonly matchingContentReadyRecipeId?: string;
@@ -1006,7 +1420,8 @@ export function canonicalizeKnowledgeClustersV1(
     clusters,
     dispositions,
   };
-  return freezeDeep({ ...semantic, clusterSetHash: hashCanonicalJson(semantic) });
+  const clusterSet = { ...semantic, clusterSetHash: '' };
+  return freezeDeep({ ...semantic, clusterSetHash: hashKnowledgeClusterSetV1(clusterSet) });
 }
 
 function canonicalizeKnowledgeCluster(
@@ -1156,7 +1571,15 @@ function validateNonClusteredDisposition(
   if (
     review.reviewKind !== 'cluster-discard' ||
     review.verdict !== 'pass' ||
-    review.populationHash !== populationHash
+    review.populationHash !== populationHash ||
+    review.proposedDispositionHash !==
+      hashKnowledgeDispositionProposalV1({
+        reviewKind: 'cluster-discard',
+        populationHash,
+        observationId: disposition.observationId,
+        status: 'discarded',
+        reasonCode: disposition.reasonCode.trim(),
+      })
   ) {
     fail('CLUSTER_DISCARD_REVIEW_INVALID');
   }
@@ -1168,6 +1591,8 @@ export function createKnowledgeDispositionReviewV1(input: {
   readonly populationHash: string;
   readonly proposedDispositionHash: string;
   readonly executionReceipts: readonly FactQueryExecutionReceiptV1[];
+  readonly finalExpandedSchedule: FinalExpandedMiningScheduleReceiptV1;
+  readonly terminalObligations: AnalysisFixpointReceiptV1['terminalObligations'];
   readonly producer: ProductionActorIdentityV1;
   readonly reviewer: ProductionActorIdentityV1;
   readonly calibrationReceiptHash: string;
@@ -1202,6 +1627,7 @@ export function createKnowledgeDispositionReviewV1(input: {
   if (input.executionReceipts.length === 0) {
     fail('KNOWLEDGE_DISPOSITION_EXECUTION_REQUIRED');
   }
+  assertFinalExpandedScheduleReceiptV1(input.finalExpandedSchedule);
   const receipts = [...input.executionReceipts].sort((left, right) =>
     left.obligationId.localeCompare(right.obligationId)
   );
@@ -1209,7 +1635,11 @@ export function createKnowledgeDispositionReviewV1(input: {
     fail('KNOWLEDGE_DISPOSITION_EXECUTION_DUPLICATE');
   }
   for (const receipt of receipts) {
-    assertFactQueryExecutionReceiptV1(receipt);
+    if (input.verdict === 'pass') {
+      assertReviewAuthorizingFactExecutionV1(receipt);
+    } else {
+      assertFactQueryExecutionReceiptV1(receipt);
+    }
   }
   const sourceRevisionVectorHashes = normalizeStrings(
     receipts.map((receipt) => receipt.sourceRevisionVectorHash)
@@ -1217,6 +1647,37 @@ export function createKnowledgeDispositionReviewV1(input: {
   if (sourceRevisionVectorHashes.length !== 1) {
     fail('KNOWLEDGE_DISPOSITION_SOURCE_REVISION_MISMATCH');
   }
+  const terminalObligations = [...input.terminalObligations].sort(byId('obligationId'));
+  const scheduledObligationIds = normalizeStrings(input.finalExpandedSchedule.obligationIds);
+  if (
+    new Set(terminalObligations.map((obligation) => obligation.obligationId)).size !==
+      terminalObligations.length ||
+    !sameOrderedStrings(
+      terminalObligations.map((obligation) => obligation.obligationId),
+      scheduledObligationIds
+    ) ||
+    receipts.some((receipt) => {
+      const terminal = terminalObligations.find(
+        (obligation) => obligation.obligationId === receipt.obligationId
+      );
+      return (
+        !terminal ||
+        terminal.terminalReceiptId !== receipt.terminalReceiptId ||
+        terminal.disposition !== receipt.disposition
+      );
+    })
+  ) {
+    fail('KNOWLEDGE_DISPOSITION_EXECUTION_SCOPE_MISMATCH');
+  }
+  const executionScopeSemantic = {
+    finalExpandedScheduleHash: input.finalExpandedSchedule.finalExpandedScheduleHash,
+    scheduledObligationIds,
+    terminalObligations,
+  };
+  const executionScope = {
+    ...executionScopeSemantic,
+    scopeHash: hashCanonicalJson(executionScopeSemantic),
+  };
   const semantic = {
     schemaVersion: 1 as const,
     reviewKind: input.reviewKind,
@@ -1224,10 +1685,19 @@ export function createKnowledgeDispositionReviewV1(input: {
     populationHash: input.populationHash,
     proposedDispositionHash: input.proposedDispositionHash,
     sourceRevisionVectorHash: sourceRevisionVectorHashes[0]!,
+    executionScope,
     obligationIds: receipts.map((receipt) => receipt.obligationId),
     executionReceiptHashes: receipts.map((receipt) => receipt.receiptHash),
     executionOutputHashes: receipts.map((receipt) => receipt.outputHash),
-    denominatorHashes: normalizeStrings(receipts.map((receipt) => receipt.denominatorHash)),
+    denominatorHashes: receipts.map((receipt) => receipt.denominatorHash),
+    executionBindings: receipts.map((receipt) => ({
+      obligationId: receipt.obligationId,
+      executionReceiptHash: receipt.receiptHash,
+      executionOutputHash: receipt.outputHash,
+      denominatorHash: receipt.denominatorHash,
+      disposition: receipt.disposition,
+      terminalReceiptId: receipt.terminalReceiptId,
+    })),
     producer: input.producer,
     reviewer: input.reviewer,
     calibrationReceiptHash: input.calibrationReceiptHash,
@@ -1265,43 +1735,14 @@ export function createInvestigatedEmptyDecisionV1(input: {
     left.obligationId.localeCompare(right.obligationId)
   );
   for (const receipt of receipts) {
-    assertFactQueryExecutionReceiptV1(receipt);
+    assertReviewAuthorizingFactExecutionV1(receipt);
   }
-  let reasonCode = 'COMPLETE_DENOMINATOR_INVESTIGATED_EMPTY';
-  if (expectedObligationIds.length === 0) {
-    reasonCode = 'EMPTY_DENOMINATOR_REQUIRED';
-  } else if (
-    JSON.stringify(expectedObligationIds) !==
-    JSON.stringify(receipts.map((receipt) => receipt.obligationId))
-  ) {
-    reasonCode = 'EMPTY_DENOMINATOR_INCOMPLETE';
-  } else if (
-    receipts.some(
-      (receipt) =>
-        receipt.sourceRevisionVectorHash !== input.sourceRevisionVectorHash ||
-        receipt.disposition !== 'inspected-no-pattern' ||
-        receipt.expectedFileCount === 0 ||
-        receipt.inspectedFileCount !== receipt.expectedFileCount ||
-        receipt.emittedFactIds.length > 0 ||
-        receipt.truncated ||
-        receipt.continuation !== null
-    )
-  ) {
-    reasonCode = 'EMPTY_EXECUTION_NONTERMINAL';
-  } else if (
-    input.dispositionReview.reviewKind !== 'investigated-empty' ||
-    input.dispositionReview.verdict !== 'pass' ||
-    input.dispositionReview.currentAnalysisFixpointHash !== input.currentAnalysisFixpointHash ||
-    input.dispositionReview.sourceRevisionVectorHash !== input.sourceRevisionVectorHash ||
-    JSON.stringify(input.dispositionReview.obligationIds) !==
-      JSON.stringify(expectedObligationIds) ||
-    JSON.stringify(input.dispositionReview.executionReceiptHashes) !==
-      JSON.stringify(receipts.map((receipt) => receipt.receiptHash))
-  ) {
-    reasonCode = 'EMPTY_INDEPENDENT_REVIEW_INVALID';
-  } else if (evidenceEntryIds.length === 0) {
-    reasonCode = 'EMPTY_EVIDENCE_REQUIRED';
-  }
+  const reasonCode = resolveInvestigatedEmptyReason(
+    input,
+    expectedObligationIds,
+    evidenceEntryIds,
+    receipts
+  );
   const semantic = {
     schemaVersion: 1 as const,
     sourceRevisionVectorHash: input.sourceRevisionVectorHash,
@@ -1317,6 +1758,86 @@ export function createInvestigatedEmptyDecisionV1(input: {
     reasonCode,
   };
   return freezeDeep({ ...semantic, decisionHash: hashCanonicalJson(semantic) });
+}
+
+function resolveInvestigatedEmptyReason(
+  input: Parameters<typeof createInvestigatedEmptyDecisionV1>[0],
+  expectedObligationIds: readonly string[],
+  evidenceEntryIds: readonly string[],
+  receipts: readonly FactQueryExecutionReceiptV1[]
+): string {
+  if (expectedObligationIds.length === 0) {
+    return 'EMPTY_DENOMINATOR_REQUIRED';
+  }
+  if (
+    JSON.stringify(expectedObligationIds) !==
+    JSON.stringify(receipts.map((receipt) => receipt.obligationId))
+  ) {
+    return 'EMPTY_DENOMINATOR_INCOMPLETE';
+  }
+  if (receipts.some((receipt) => investigatedEmptyExecutionInvalid(receipt, input))) {
+    return 'EMPTY_EXECUTION_NONTERMINAL';
+  }
+  if (investigatedEmptyReviewInvalid(input, expectedObligationIds, evidenceEntryIds, receipts)) {
+    return 'EMPTY_INDEPENDENT_REVIEW_INVALID';
+  }
+  return evidenceEntryIds.length === 0
+    ? 'EMPTY_EVIDENCE_REQUIRED'
+    : 'COMPLETE_DENOMINATOR_INVESTIGATED_EMPTY';
+}
+
+function investigatedEmptyExecutionInvalid(
+  receipt: FactQueryExecutionReceiptV1,
+  input: Parameters<typeof createInvestigatedEmptyDecisionV1>[0]
+): boolean {
+  return (
+    receipt.sourceRevisionVectorHash !== input.sourceRevisionVectorHash ||
+    receipt.disposition !== 'inspected-no-pattern' ||
+    receipt.expectedFileCount === 0 ||
+    receipt.inspectedFileCount !== receipt.expectedFileCount ||
+    receipt.emittedFactIds.length > 0 ||
+    receipt.truncated ||
+    receipt.continuation !== null
+  );
+}
+
+function investigatedEmptyReviewInvalid(
+  input: Parameters<typeof createInvestigatedEmptyDecisionV1>[0],
+  expectedObligationIds: readonly string[],
+  evidenceEntryIds: readonly string[],
+  receipts: readonly FactQueryExecutionReceiptV1[]
+): boolean {
+  const review = input.dispositionReview;
+  return (
+    review.reviewKind !== 'investigated-empty' ||
+    review.verdict !== 'pass' ||
+    review.currentAnalysisFixpointHash !== input.currentAnalysisFixpointHash ||
+    review.sourceRevisionVectorHash !== input.sourceRevisionVectorHash ||
+    review.executionScope.finalExpandedScheduleHash !== input.finalExpandedScheduleHash ||
+    JSON.stringify(review.executionScope.scheduledObligationIds) !==
+      JSON.stringify(expectedObligationIds) ||
+    JSON.stringify(review.obligationIds) !== JSON.stringify(expectedObligationIds) ||
+    JSON.stringify(review.executionReceiptHashes) !==
+      JSON.stringify(receipts.map((receipt) => receipt.receiptHash)) ||
+    review.proposedDispositionHash !==
+      hashKnowledgeDispositionProposalV1({
+        reviewKind: 'investigated-empty',
+        populationHash: review.populationHash,
+        sourceRevisionVectorHash: input.sourceRevisionVectorHash,
+        finalExpandedScheduleHash: input.finalExpandedScheduleHash,
+        currentAnalysisFixpointHash: input.currentAnalysisFixpointHash,
+        expectedObligationIds,
+        executionBindings: receipts.map((receipt) => ({
+          obligationId: receipt.obligationId,
+          executionReceiptHash: receipt.receiptHash,
+          executionOutputHash: receipt.outputHash,
+          denominatorHash: receipt.denominatorHash,
+          disposition: receipt.disposition,
+          terminalReceiptId: receipt.terminalReceiptId,
+        })),
+        evidenceEntryIds,
+      })
+  );
 }
 
 export function createInductionReceiptV1(input: {
@@ -1412,7 +1933,17 @@ function validateZeroInductionDisposition(
       zeroReview.reviewKind !== 'zero-hypothesis' ||
       zeroReview.verdict !== 'pass' ||
       zeroReview.currentAnalysisFixpointHash !== input.currentAnalysisFixpointHash ||
-      zeroReview.populationHash !== input.populationHash
+      zeroReview.populationHash !== input.populationHash ||
+      zeroReview.proposedDispositionHash !==
+        hashKnowledgeDispositionProposalV1({
+          reviewKind: 'zero-hypothesis',
+          populationHash: input.populationHash,
+          clusterHash: input.clusterHash,
+          clusterId: input.clusterId,
+          observationIds: input.observationIds,
+          mode: input.mode,
+          zeroHypothesisReason: zeroReason,
+        })
     ) {
       fail('INDUCTION_ZERO_REASON_REQUIRED');
     }
@@ -1438,6 +1969,7 @@ export function createFalsificationReceiptV1(input: {
   const executions = normalizeFalsificationExecutions(input.executions, enrolledCounterqueryIds);
   const applicability = input.counterqueryApplicability;
   validateFalsificationApplicability(applicability);
+  validateFalsificationProposal(input, enrolledCounterqueryIds, executions);
   if (applicability.status === 'not-required') {
     return createNotRequiredFalsificationReceipt(input, enrolledCounterqueryIds, executions);
   }
@@ -1460,6 +1992,36 @@ export function createFalsificationReceiptV1(input: {
     dispositionReviewReceiptId: input.dispositionReview.reviewReceiptId,
   };
   return freezeDeep({ ...semantic, receiptHash: hashCanonicalJson(semantic) });
+}
+
+function validateFalsificationProposal(
+  input: Parameters<typeof createFalsificationReceiptV1>[0],
+  enrolledCounterqueryIds: readonly string[],
+  executions: readonly CounterqueryExecutionV1[]
+): void {
+  if (
+    input.dispositionReview.proposedDispositionHash !==
+    hashKnowledgeDispositionProposalV1({
+      reviewKind: 'falsification',
+      populationHash: input.dispositionReview.populationHash,
+      hypothesisId: input.hypothesisId,
+      enrolledCounterqueryIds,
+      executions: executions.map((execution) => ({
+        counterqueryId: execution.counterqueryId,
+        obligationId: execution.obligationId,
+        executionReceiptHash: execution.executionReceipt.receiptHash,
+        executionOutputHash: execution.executionReceipt.outputHash,
+        denominatorHash: execution.executionReceipt.denominatorHash,
+        counterexampleFactIds: execution.counterexampleFactIds,
+      })),
+      counterqueryApplicability: {
+        status: input.counterqueryApplicability.status,
+        reasonCode: input.counterqueryApplicability.reasonCode,
+      },
+    })
+  ) {
+    fail('FALSIFICATION_REVIEW_DISPOSITION_MISMATCH');
+  }
 }
 
 function validateFalsificationReview(
@@ -1668,6 +2230,7 @@ function normalizeHypothesisExpressions(
   for (const expression of expressions) {
     requireText(expression.authoredFingerprint, 'EXPRESSION_SET_FINGERPRINT_REQUIRED');
     requireText(expression.terminalReceiptId, 'EXPRESSION_SET_TERMINAL_RECEIPT_REQUIRED');
+    requireSha256(expression.terminalReceiptHash, 'EXPRESSION_SET_TERMINAL_RECEIPT_HASH_REQUIRED');
     if (!EXPRESSION_TERMINAL_FATES.has(expression.terminalFate)) {
       fail('EXPRESSION_SET_TERMINAL_FATE_INVALID');
     }
@@ -1683,10 +2246,27 @@ function normalizeHypothesisExpressions(
     if (expression.dispositionReview) {
       assertKnowledgeDispositionReviewIntegrity(expression.dispositionReview);
       if (
+        (expression.terminalFate !== 'reviewed-merge' &&
+          expression.terminalFate !== 'reviewed-duplicate') ||
         expression.dispositionReview.reviewKind !== 'producer-non-draft' ||
         expression.dispositionReview.verdict !== 'pass' ||
         expression.dispositionReview.currentAnalysisFixpointHash !== input.analysisFixpointHash ||
-        expression.terminalReceiptId !== expression.dispositionReview.reviewReceiptId
+        expression.terminalReceiptId !== expression.dispositionReview.reviewReceiptId ||
+        expression.terminalReceiptHash !== expression.dispositionReview.receiptHash ||
+        expression.dispositionReview.proposedDispositionHash !==
+          hashKnowledgeDispositionProposalV1({
+            reviewKind: 'producer-non-draft',
+            populationHash: expression.dispositionReview.populationHash,
+            hypothesisId: input.hypothesisId,
+            expression: {
+              expressionId: expression.expressionId,
+              authoredFingerprint: expression.authoredFingerprint,
+              terminalFate: expression.terminalFate,
+              matchingRepresentativeId: expression.matchingRepresentativeId ?? null,
+              matchingContentReadyRecipeId: expression.matchingContentReadyRecipeId ?? null,
+            },
+            zeroDisposition: null,
+          })
       ) {
         fail('EXPRESSION_SET_DISPOSITION_REVIEW_INVALID');
       }
@@ -1717,7 +2297,18 @@ function validateExpressionSetZeroDisposition(
     zeroDisposition.dispositionReview.reviewKind !== 'producer-non-draft' ||
     zeroDisposition.dispositionReview.verdict !== 'pass' ||
     zeroDisposition.dispositionReview.currentAnalysisFixpointHash !== input.analysisFixpointHash ||
-    zeroDisposition.reviewerReceiptId !== zeroDisposition.dispositionReview.reviewReceiptId
+    zeroDisposition.reviewerReceiptId !== zeroDisposition.dispositionReview.reviewReceiptId ||
+    zeroDisposition.dispositionReview.proposedDispositionHash !==
+      hashKnowledgeDispositionProposalV1({
+        reviewKind: 'producer-non-draft',
+        populationHash: zeroDisposition.dispositionReview.populationHash,
+        hypothesisId: input.hypothesisId,
+        expression: null,
+        zeroDisposition: {
+          reasonCode: zeroDisposition.reasonCode,
+          terminalFate: zeroDisposition.terminalFate,
+        },
+      })
   ) {
     fail('EXPRESSION_SET_ZERO_DISPOSITION_UNREVIEWED');
   }
@@ -1930,7 +2521,7 @@ export function createFinalExpandedMiningScheduleReceiptV1(input: {
       rows: receipt.rows,
       resultingScheduledCount: receipt.resultingScheduledCount,
     };
-    if (receipt.receiptHash !== hashCanonicalJson(receiptSemantic)) {
+    if (receipt.schemaVersion !== 1 || receipt.receiptHash !== hashCanonicalJson(receiptSemantic)) {
       fail('ANALYSIS_EXPANSION_RECEIPT_HASH_MISMATCH');
     }
     if (receipt.previousExpansionHeadHash !== previousHead) {
@@ -1961,6 +2552,28 @@ export function createFinalExpandedMiningScheduleReceiptV1(input: {
     counterexampleObligationCount,
   };
   return freezeDeep({ ...semantic, finalExpandedScheduleHash: hashCanonicalJson(semantic) });
+}
+
+function assertFinalExpandedScheduleReceiptV1(receipt: FinalExpandedMiningScheduleReceiptV1): void {
+  const semantic = {
+    schemaVersion: receipt.schemaVersion,
+    baselineScheduleHash: receipt.baselineScheduleHash,
+    expansionReceiptHashes: receipt.expansionReceiptHashes,
+    obligationIds: receipt.obligationIds,
+    explorationObligationCount: receipt.explorationObligationCount,
+    counterexampleObligationCount: receipt.counterexampleObligationCount,
+  };
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.finalExpandedScheduleHash !== hashCanonicalJson(semantic) ||
+    normalizeStrings(receipt.obligationIds).length !== receipt.obligationIds.length ||
+    JSON.stringify(normalizeStrings(receipt.obligationIds)) !==
+      JSON.stringify(receipt.obligationIds) ||
+    receipt.explorationObligationCount < 0 ||
+    receipt.counterexampleObligationCount < 0
+  ) {
+    fail('FINAL_EXPANDED_SCHEDULE_RECEIPT_INVALID');
+  }
 }
 
 export function createAnalysisFixpointReceiptV1(input: {
@@ -2168,16 +2781,118 @@ function assertKnowledgeDispositionReviewIntegrity(review: KnowledgeDispositionR
   assertProductionActorIdentityV1(review.producer);
   assertProductionActorIdentityV1(review.reviewer);
   const { reviewReceiptId, receiptHash, ...semantic } = review;
+  const executionBindings = [...review.executionBindings].sort(byId('obligationId'));
+  const executionScopeSemantic = {
+    finalExpandedScheduleHash: review.executionScope.finalExpandedScheduleHash,
+    scheduledObligationIds: review.executionScope.scheduledObligationIds,
+    terminalObligations: review.executionScope.terminalObligations,
+  };
+  const scheduledObligationIds = normalizeStrings(review.executionScope.scheduledObligationIds);
+  const terminalObligations = [...review.executionScope.terminalObligations].sort(
+    byId('obligationId')
+  );
   if (
+    knowledgeReviewEnvelopeInvalid(review, semantic, receiptHash, reviewReceiptId) ||
+    knowledgeReviewScopeInvalid(
+      review,
+      executionScopeSemantic,
+      scheduledObligationIds,
+      terminalObligations
+    ) ||
+    knowledgeReviewBindingsInvalid(review, executionBindings, terminalObligations)
+  ) {
+    fail('KNOWLEDGE_DISPOSITION_REVIEW_INVALID');
+  }
+}
+
+function knowledgeReviewEnvelopeInvalid(
+  review: KnowledgeDispositionReviewV1,
+  semantic: Omit<KnowledgeDispositionReviewV1, 'reviewReceiptId' | 'receiptHash'>,
+  receiptHash: string,
+  reviewReceiptId: string
+): boolean {
+  return (
+    review.schemaVersion !== 1 ||
+    !KNOWLEDGE_DISPOSITION_REVIEW_KINDS.has(review.reviewKind) ||
+    !KNOWLEDGE_DISPOSITION_REVIEW_VERDICTS.has(review.verdict) ||
+    !review.reasonCode?.trim() ||
+    !/^sha256:[0-9a-f]{64}$/.test(review.currentAnalysisFixpointHash) ||
+    !/^sha256:[0-9a-f]{64}$/.test(review.populationHash) ||
+    !/^sha256:[0-9a-f]{64}$/.test(review.proposedDispositionHash) ||
+    !/^sha256:[0-9a-f]{64}$/.test(review.sourceRevisionVectorHash) ||
+    !/^sha256:[0-9a-f]{64}$/.test(review.calibrationReceiptHash) ||
     hashCanonicalJson(semantic) !== receiptHash ||
     reviewReceiptId !== `knowledge-review:${receiptHash.slice(7, 31)}` ||
     review.producer.runId !== review.reviewer.runId ||
     review.producer.actorHash === review.reviewer.actorHash ||
     review.producer.invocationId === review.reviewer.invocationId ||
     review.producer.outputHash === review.reviewer.outputHash
-  ) {
-    fail('KNOWLEDGE_DISPOSITION_REVIEW_INVALID');
-  }
+  );
+}
+
+function knowledgeReviewScopeInvalid(
+  review: KnowledgeDispositionReviewV1,
+  executionScopeSemantic: {
+    readonly finalExpandedScheduleHash: string;
+    readonly scheduledObligationIds: readonly string[];
+    readonly terminalObligations: KnowledgeDispositionReviewV1['executionScope']['terminalObligations'];
+  },
+  scheduledObligationIds: readonly string[],
+  terminalObligations: KnowledgeDispositionReviewV1['executionScope']['terminalObligations']
+): boolean {
+  return (
+    review.executionScope.scopeHash !== hashCanonicalJson(executionScopeSemantic) ||
+    !/^sha256:[0-9a-f]{64}$/.test(review.executionScope.finalExpandedScheduleHash) ||
+    !sameOrderedStrings(review.executionScope.scheduledObligationIds, scheduledObligationIds) ||
+    !sameOrderedStrings(
+      terminalObligations.map((obligation) => obligation.obligationId),
+      scheduledObligationIds
+    )
+  );
+}
+
+function knowledgeReviewBindingsInvalid(
+  review: KnowledgeDispositionReviewV1,
+  executionBindings: readonly KnowledgeDispositionExecutionBindingV1[],
+  terminalObligations: KnowledgeDispositionReviewV1['executionScope']['terminalObligations']
+): boolean {
+  return (
+    executionBindings.length === 0 ||
+    JSON.stringify(review.executionBindings) !== JSON.stringify(executionBindings) ||
+    new Set(executionBindings.map((binding) => binding.obligationId)).size !==
+      executionBindings.length ||
+    executionBindings.some(
+      (binding) =>
+        !binding.obligationId.trim() ||
+        !/^sha256:[0-9a-f]{64}$/.test(binding.executionReceiptHash) ||
+        !/^sha256:[0-9a-f]{64}$/.test(binding.executionOutputHash) ||
+        !/^sha256:[0-9a-f]{64}$/.test(binding.denominatorHash) ||
+        !binding.terminalReceiptId.trim() ||
+        !FACT_QUERY_TERMINAL_DISPOSITIONS.has(binding.disposition) ||
+        !terminalObligations.some(
+          (terminal) =>
+            terminal.obligationId === binding.obligationId &&
+            terminal.terminalReceiptId === binding.terminalReceiptId &&
+            terminal.disposition === binding.disposition
+        )
+    ) ||
+    !sameOrderedStrings(
+      review.obligationIds,
+      executionBindings.map((binding) => binding.obligationId)
+    ) ||
+    !sameOrderedStrings(
+      review.executionReceiptHashes,
+      executionBindings.map((binding) => binding.executionReceiptHash)
+    ) ||
+    !sameOrderedStrings(
+      review.executionOutputHashes,
+      executionBindings.map((binding) => binding.executionOutputHash)
+    ) ||
+    !sameOrderedStrings(
+      review.denominatorHashes,
+      executionBindings.map((binding) => binding.denominatorHash)
+    )
+  );
 }
 
 export function assertKnowledgeDispositionReviewV1(review: KnowledgeDispositionReviewV1): void {
@@ -2203,6 +2918,10 @@ function normalizeRelativePath(value: string): string {
 
 function normalizeStrings(values: readonly string[]): string[] {
   return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function sameOrderedStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function normalizeObservationDispositionLineage<

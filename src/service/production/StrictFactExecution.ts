@@ -50,6 +50,7 @@ import {
 
 export {
   assertFactQueryExecutionReceiptV1,
+  assertReviewAuthorizingFactExecutionV1,
   type FactQueryExecutionReceiptV1,
   type StrictFactFileExecutionV1,
 } from './StrictFactExecutionReceipt.js';
@@ -1582,7 +1583,7 @@ function verifyStrictFactExecutionInputs(input: StrictFactScheduleExecutionInput
   assertPlanningFactsAuthority(input.artifact, input.planningFacts);
   assertStrictFrozenArtifact(input.artifact);
   assertStrictFactCatalog(input.catalog);
-  assertStrictFactSchedule(input.schedule);
+  assertMiningWorkScheduleV1(input.schedule);
   assertStrictFactExecutionAuthorities(input);
 }
 
@@ -1609,7 +1610,11 @@ function assertStrictFactCatalog(catalog: FactQueryCatalogSnapshotV1): void {
   }
 }
 
-function assertStrictFactSchedule(schedule: MiningWorkScheduleV1): void {
+/**
+ * 对外暴露 schedule 重放校验，供 unified authority 复核“实际执行的 schedule”而不是信任
+ * manifest / review 中重复出现的 hash 字符串。
+ */
+export function assertMiningWorkScheduleV1(schedule: MiningWorkScheduleV1): void {
   const scheduleDrift = [
     hashCanonicalJson(schedule.factHarvestObligations) !== schedule.factHarvestScheduleHash,
     hashCanonicalJson(schedule.lensBindings) !== schedule.lensBindingsHash,
