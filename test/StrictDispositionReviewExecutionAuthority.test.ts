@@ -2,29 +2,48 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   assertSemanticDispositionReviewExecutionV1,
+  assertSemanticDispositionReviewExecutionV2,
   canonicalizeObservationPopulationV1,
   consumeMainSemanticDispositionReviewExecutionV1,
+  consumeMainSemanticDispositionReviewExecutionV2,
   createAgentSemanticDispositionReviewExecutionV1,
+  createAgentSemanticDispositionReviewHostGatewayV2,
   createAgentSemanticDispositionReviewRequestV1,
+  createAgentSemanticDispositionReviewRequestV2,
   createAnalysisFixpointReceiptV1,
   createFinalExpandedMiningScheduleReceiptV1,
   createInvestigatedEmptyDecisionV1,
+  createProducerZeroDispositionAdmissionAuthorityV1,
   createProductionActorIdentityV1,
+  createSemanticDispositionReviewEvidenceAuthorityV2,
+  createStrictAcceptedCorpusInspectionV1,
+  createStrictAdmissionReceiptV1,
+  createStrictEvidenceLedgerSnapshotV1,
+  createStrictG1ReceiptV1,
   createStrictProductionAuthorityReceiptV1,
   type FactQueryExecutionReceiptV1,
   hashKnowledgeDispositionProposalV1,
   type SemanticDispositionReviewAxisIdV1,
   type SemanticDispositionReviewDecisionV1,
+  type SemanticDispositionReviewDecisionV2,
+  type SemanticDispositionReviewExecutionV2,
   type SemanticDispositionReviewerHostInvocationV1,
   type SemanticDispositionReviewRequestV1,
+  type SemanticDispositionReviewRequestV2,
+  STRICT_G1_HARD_AXES_V1,
   type StrictAdmissionReceiptV1,
+  type StrictG1ReceiptV1,
   validateHypothesisExpressionSetReceiptV1,
 } from '../src/production.js';
+import { createProjectContextFileRef } from '../src/projectContextFoundation.js';
 import { hashCanonicalJson } from '../src/service/project-context/foundation/canonical.js';
 
 const WORKFLOW_RUN = 'strict-workflow:semantic-review';
 const EVALUATOR_RUN = 'agent-host-run:semantic-review:1';
 const SOURCE_REVISION = shaText('source-revision');
+const REVIEW_SOURCE_BLOB = shaText('review-source-blob');
+const REVIEW_EVIDENCE_CONTENT =
+  'Frozen evidence: the complete source subject and its disposition comparison were inspected.';
 
 const PRODUCER_AXES: readonly SemanticDispositionReviewAxisIdV1[] = [
   'admission-comparison-completeness',
@@ -70,7 +89,7 @@ describe('semantic disposition-review execution authority', () => {
         },
       },
     });
-    expect(execution.request.evidence[0]?.content).toContain('duplicate target');
+    expect(execution.request.evidence[0]?.content).toContain('disposition comparison');
     expect(execution.invocation.evaluatorRunId).toBe(EVALUATOR_RUN);
     expect(execution.invocation.evaluatorRunId).not.toBe(request.strictWorkflowRunId);
     expect(review.reviewer.runId).toBe(EVALUATOR_RUN);
@@ -110,32 +129,31 @@ describe('semantic disposition-review execution authority', () => {
     expect(review.reviewer.runId).toBe(EVALUATOR_RUN);
   });
 
-  it('requires exact-one semantic execution in unified authority and rejects resume reuse', () => {
-    const request = investigatedEmptyRequest();
-    const decision = passingDecision(request, INVESTIGATED_EMPTY_AXES);
-    const execution = createAgentSemanticDispositionReviewExecutionV1({
-      request,
-      invocation: invocation(request, decision),
-      decision,
-    });
-    const review = consumeMainSemanticDispositionReviewExecutionV1({
+  it('requires exact-one V2 semantic execution in unified authority and rejects resume reuse', async () => {
+    const semanticRequest = investigatedEmptyRequest();
+    const { request, execution, gateway } = await executeSemanticRequestV2(
+      semanticRequest,
+      INVESTIGATED_EMPTY_AXES
+    );
+    const review = consumeMainSemanticDispositionReviewExecutionV2({
       execution,
       expectedRequest: request,
+      hostAuthority: gateway.authority,
     });
-    const receipt = request.executionReceipts[0]!;
-    const context = request.context;
+    const receipt = semanticRequest.executionReceipts[0]!;
+    const context = semanticRequest.context;
     if (context.reviewKind !== 'investigated-empty') {
       throw new Error('investigated-empty fixture required');
     }
     const scheduleLineage = authorityScheduleLineage([receipt]);
     const investigatedEmptyDecision = createInvestigatedEmptyDecisionV1({
       sourceRevisionVectorHash: SOURCE_REVISION,
-      finalExpandedScheduleHash: request.finalExpandedSchedule.finalExpandedScheduleHash,
+      finalExpandedScheduleHash: semanticRequest.finalExpandedSchedule.finalExpandedScheduleHash,
       currentAnalysisFixpointHash: context.analysisFixpoint.fixpointHash,
       expectedObligationIds: [receipt.obligationId],
       executionReceipts: [receipt],
       dispositionReview: review,
-      evidenceEntryIds: ['E-semantic-review'],
+      evidenceEntryIds: ['E-1'],
     });
     const authorityInput = {
       runId: WORKFLOW_RUN,
@@ -151,6 +169,7 @@ describe('semantic disposition-review execution authority', () => {
       investigatedEmptyDecisions: [investigatedEmptyDecision],
       dispositionReviews: [review],
       semanticDispositionReviewExecutions: [execution],
+      semanticDispositionReviewHostAuthority: gateway.authority,
       expressionSets: [],
       candidateAttemptBatches: [],
       serialAdmissionLedger: null,
@@ -184,6 +203,14 @@ describe('semantic disposition-review execution authority', () => {
         semanticDispositionReviewExecutions: [],
       })
     ).toThrow('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_MISMATCH');
+    const orphanRequest = semanticRequestV2(investigatedEmptyRequest('orphan')).request;
+    const orphanExecution = await gateway.execute(orphanRequest);
+    expect(() =>
+      createStrictProductionAuthorityReceiptV1({
+        ...authorityInput,
+        semanticDispositionReviewExecutions: [execution, orphanExecution],
+      })
+    ).toThrow('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_ORPHANED');
   });
 
   it('rejects hash-only pass, unrelated-call stamping, identity mismatch, and self invocation', () => {
@@ -306,7 +333,10 @@ describe('semantic disposition-review execution authority', () => {
         ...requestInputFrom(request),
         context: {
           ...context,
-          admissionReceipt: admissionFixture(shaText('stale-admission-fixpoint')),
+          admissionReceipt: admissionFixture(
+            shaText('stale-admission-fixpoint'),
+            context.g1Receipt
+          ),
         },
       })
     ).toThrow('SEMANTIC_DISPOSITION_REVIEW_ADMISSION_CONTEXT_MISMATCH');
@@ -439,6 +469,235 @@ describe('semantic disposition-review execution authority', () => {
       })
     ).toThrow('EXPRESSION_SET_DISPOSITION_REVIEW_INVALID');
   });
+
+  it('binds V2 to exact compiled prompt bytes, frozen ledger authority, and a live Agent host capability', async () => {
+    const capture: { callPrompt?: string } = {};
+    const semanticRequest = producerRequest();
+    const { request, execution, gateway } = await executeSemanticRequestV2(
+      semanticRequest,
+      PRODUCER_AXES,
+      capture
+    );
+    const review = consumeMainSemanticDispositionReviewExecutionV2({
+      execution,
+      expectedRequest: request,
+      hostAuthority: gateway.authority,
+    });
+
+    expect(capture.callPrompt).toBe(request.compiledPrompt);
+    expect(execution.hostExecution.compiledPrompt).toBe(request.compiledPrompt);
+    expect(execution.reviewer.promptHash).toBe(request.compiledPromptHash);
+    expect(request.evidenceAuthorities[0]).toMatchObject({
+      executionReceiptHash: semanticRequest.executionReceipts[0]?.receiptHash,
+      canonicalSubjectRef: semanticRequest.executionReceipts[0]?.canonicalSubjectRef,
+      evidenceEntry: { id: 'E-1', sessionId: 'session:semantic-review' },
+      witnessBinding: {
+        sourceRevisionVectorHash: SOURCE_REVISION,
+        relativePath: 'src/review.ts',
+        blobHash: REVIEW_SOURCE_BLOB,
+      },
+      emittedFactIds: [],
+    });
+    expect(review.semanticExecutionResultHash).toBe(execution.executionHash);
+    expect(() =>
+      assertSemanticDispositionReviewExecutionV2({
+        execution,
+        hostAuthority: gateway.authority,
+      })
+    ).not.toThrow();
+    expect(() =>
+      assertSemanticDispositionReviewExecutionV2({
+        execution: {
+          ...execution,
+          hostExecution: {
+            ...execution.hostExecution,
+            compiledPrompt: `${execution.hostExecution.compiledPrompt}\n`,
+          },
+        },
+        hostAuthority: gateway.authority,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EXECUTION_V2_INVALID');
+    expect(() =>
+      assertSemanticDispositionReviewExecutionV2({
+        execution: {
+          ...execution,
+          hostExecution: {
+            ...execution.hostExecution,
+            providerId: 'provider:post-hoc-identity',
+          },
+        },
+        hostAuthority: gateway.authority,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EXECUTION_V2_INVALID');
+    expect(() =>
+      assertSemanticDispositionReviewExecutionV2({
+        execution: {
+          ...execution,
+          decision: { ...execution.decision, reasonCode: 'POST_HOC_DECISION' },
+        },
+        hostAuthority: gateway.authority,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EXECUTION_V2_INVALID');
+  });
+
+  it('rejects generic/unrelated execution post-hoc stamping even when every public hash is recomputed', async () => {
+    const unrelatedSemanticRequest = investigatedEmptyRequest();
+    const unrelated = await executeSemanticRequestV2(
+      unrelatedSemanticRequest,
+      INVESTIGATED_EMPTY_AXES
+    );
+    const target = semanticRequestV2(producerRequest()).request;
+    const stamped = postHocStampedExecution(unrelated.execution, target, PRODUCER_AXES);
+
+    expect(() =>
+      assertSemanticDispositionReviewExecutionV2({
+        execution: stamped,
+        hostAuthority: unrelated.gateway.authority,
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
+  });
+
+  it('rejects summary-only and rebound ledger/session/subject/blob authority', () => {
+    const semanticRequest = producerRequest();
+    const { evidenceAuthority } = semanticRequestV2(semanticRequest);
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV2({
+        semanticRequest,
+        evidenceAuthorities: [],
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_MISMATCH');
+
+    const reboundSummary = createAgentSemanticDispositionReviewRequestV1({
+      ...requestInputFrom(semanticRequest),
+      evidence: semanticRequest.evidence.map((row) => ({
+        ...row,
+        evidenceSessionId: 'session:post-hoc-rebound',
+        canonicalSubjectRef: 'file:repo:src/rebound.ts',
+        relativePath: 'src/rebound.ts',
+        blobHash: shaText('rebound-blob'),
+      })),
+    });
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV2({
+        semanticRequest: reboundSummary,
+        evidenceAuthorities: [evidenceAuthority],
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_MISMATCH');
+
+    const { authorityHash: _authorityHash, ...authoritySemantic } = evidenceAuthority;
+    const factReboundSemantic = {
+      ...authoritySemantic,
+      emittedFactIds: ['fact:post-hoc-rebound'],
+    };
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV2({
+        semanticRequest,
+        evidenceAuthorities: [
+          {
+            ...factReboundSemantic,
+            authorityHash: hashCanonicalJson(factReboundSemantic),
+          },
+        ],
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_INVALID');
+  });
+
+  it('requires and conserves mandatory zero/non-draft G1, Admission, and corpus inspection', async () => {
+    const request = producerZeroRequest();
+    const context = request.context;
+    if (context.reviewKind !== 'producer-non-draft') {
+      throw new Error('producer zero fixture required');
+    }
+    const zeroDisposition = context.proposal.zeroDisposition;
+    if (!zeroDisposition) {
+      throw new Error('producer zero disposition required');
+    }
+    expect(context).toMatchObject({
+      proposal: {
+        expression: null,
+        zeroDisposition: { terminalFate: 'reviewed-non-draft' },
+      },
+      g1Receipt: { verdict: 'pass', candidateFingerprint: 'fingerprint:zero-disposition' },
+      admissionReceipt: {
+        disposition: 'admit',
+        inputFingerprint: 'fingerprint:zero-disposition',
+        finalAdmittedFingerprint: 'fingerprint:zero-disposition',
+        consolidation: { action: 'create', targetRecipeId: null },
+      },
+      target: {
+        expressionId: null,
+        authoredFingerprint: 'fingerprint:zero-disposition',
+        terminalFate: 'reviewed-non-draft',
+      },
+    });
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV1({
+        ...requestInputFrom(request),
+        context: { ...context, admissionReceipt: null as never },
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_ADMISSION_REQUIRED');
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV1({
+        ...requestInputFrom(request),
+        context: {
+          ...context,
+          g1Receipt: g1Fixture('fingerprint:post-hoc-rebound'),
+        },
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_ADMISSION_CONTEXT_MISMATCH');
+
+    const v2 = await executeSemanticRequestV2(request, PRODUCER_AXES);
+    const review = consumeMainSemanticDispositionReviewExecutionV2({
+      execution: v2.execution,
+      expectedRequest: v2.request,
+      hostAuthority: v2.gateway.authority,
+    });
+    const expressionSet = validateHypothesisExpressionSetReceiptV1({
+      schemaVersion: 1,
+      receiptId: context.expressionSetReceiptId,
+      hypothesisId: context.proposal.hypothesisId,
+      analysisFixpointHash: context.analysisFixpoint.fixpointHash,
+      privateCorpusRevision: context.privateCorpusRevision,
+      version: 1,
+      parentReceiptId: null,
+      terminalHead: true,
+      expressions: [],
+      zeroDisposition: {
+        reasonCode: zeroDisposition.reasonCode,
+        reviewerReceiptId: review.reviewReceiptId,
+        dispositionReview: review,
+        terminalFate: 'reviewed-non-draft',
+      },
+    });
+    const corpusInspection = zeroCorpusInspection(context.analysisFixpoint.fixpointHash);
+    expect(
+      createProducerZeroDispositionAdmissionAuthorityV1({
+        execution: v2.execution,
+        hostAuthority: v2.gateway.authority,
+        expressionSet,
+        corpusInspection,
+      })
+    ).toMatchObject({
+      authoredFingerprint: 'fingerprint:zero-disposition',
+      g1ReceiptHash: context.g1Receipt.receiptHash,
+      admissionReceiptHash: context.admissionReceipt.receiptHash,
+      acceptedCorpusInspectionHash: corpusInspection.inspectionHash,
+    });
+    expect(() =>
+      createProducerZeroDispositionAdmissionAuthorityV1({
+        execution: v2.execution,
+        hostAuthority: v2.gateway.authority,
+        expressionSet,
+        corpusInspection: createStrictAcceptedCorpusInspectionV1({
+          runId: WORKFLOW_RUN,
+          analysisFixpointHash: context.analysisFixpoint.fixpointHash,
+          privateCorpusRevision: 'private-corpus:rebound',
+          revisionRootManifestHash: shaText('zero-revision-root'),
+          entries: [],
+        }),
+      })
+    ).toThrow();
+  });
 });
 
 function producerRequest() {
@@ -474,9 +733,9 @@ function producerRequest() {
     loadReceiptHash: shaText('producer-load'),
     outputHash: proposedDispositionHash,
   });
-  const evidenceContent =
-    'Frozen evidence: the authored candidate and accepted duplicate target have identical semantics.';
+  const evidenceContent = REVIEW_EVIDENCE_CONTENT;
   const calibration = calibrationFixture(PRODUCER_AXES);
+  const g1Receipt = g1Fixture('fingerprint:candidate');
   return createAgentSemanticDispositionReviewRequestV1({
     strictWorkflowRunId: WORKFLOW_RUN,
     sourceRevisionVectorHash: SOURCE_REVISION,
@@ -487,12 +746,12 @@ function producerRequest() {
     executionReceipts: [receipt],
     evidence: [
       {
-        evidenceEntryId: 'E-semantic-review',
+        evidenceEntryId: 'E-1',
         evidenceSessionId: 'session:semantic-review',
         sourceRevisionVectorHash: SOURCE_REVISION,
         canonicalSubjectRef: 'file:repo:src/review.ts',
         relativePath: 'src/review.ts',
-        blobHash: shaText('review-source-blob'),
+        blobHash: REVIEW_SOURCE_BLOB,
         content: evidenceContent,
         contentHash: shaText(evidenceContent),
         semanticRole: 'candidate-admission-target-comparison',
@@ -509,7 +768,8 @@ function producerRequest() {
       falsification,
       proposal,
       expressionSetReceiptId: 'expression-set:semantic-review',
-      admissionReceipt: admissionFixture(fixpoint.fixpointHash),
+      g1Receipt,
+      admissionReceipt: admissionFixture(fixpoint.fixpointHash, g1Receipt),
       target: {
         expressionId: proposal.expression.expressionId,
         authoredFingerprint: proposal.expression.authoredFingerprint,
@@ -519,6 +779,81 @@ function producerRequest() {
         targetReadyProofHash: shaText('target-ready-proof'),
       },
     },
+  });
+}
+
+function producerZeroRequest() {
+  const base = producerRequest();
+  const context = base.context;
+  if (context.reviewKind !== 'producer-non-draft') {
+    throw new Error('producer fixture required');
+  }
+  const authoredFingerprint = 'fingerprint:zero-disposition';
+  const proposal = {
+    reviewKind: 'producer-non-draft' as const,
+    populationHash: base.populationHash,
+    hypothesisId: context.proposal.hypothesisId,
+    expression: null,
+    zeroDisposition: {
+      reasonCode: 'NO_ELIGIBLE_EXPRESSION_AFTER_PRODUCER',
+      terminalFate: 'reviewed-non-draft' as const,
+    },
+  };
+  const proposedDispositionHash = hashKnowledgeDispositionProposalV1(proposal);
+  const g1Receipt = g1Fixture(authoredFingerprint);
+  const corpusInspection = zeroCorpusInspection(base.currentAnalysisFixpointHash);
+  const admissionReceipt = createStrictAdmissionReceiptV1({
+    g1Receipt,
+    corpusInspection,
+    inputFingerprint: authoredFingerprint,
+    finalAdmittedFingerprint: authoredFingerprint,
+    exactMatches: [],
+    semanticMatches: [],
+    consolidation: {
+      action: 'create',
+      reasonCode: 'NO_ACCEPTED_CORPUS_MATCH',
+      targetRecipeId: null,
+      targetFingerprint: null,
+    },
+    algorithmVersion: 'strict-admission-v1',
+  });
+  return createAgentSemanticDispositionReviewRequestV1({
+    ...requestInputFrom(base),
+    proposedDispositionHash,
+    producer: createProductionActorIdentityV1({
+      providerId: 'alembic-agent',
+      modelId: 'producer:model',
+      modelVersion: 'strict-producer-v1',
+      promptHash: shaText('producer-zero-prompt'),
+      runId: WORKFLOW_RUN,
+      invocationId: 'producer-invocation:semantic-review:zero',
+      loadReceiptHash: shaText('producer-load'),
+      outputHash: proposedDispositionHash,
+    }),
+    context: {
+      ...context,
+      proposal,
+      g1Receipt,
+      admissionReceipt,
+      target: {
+        expressionId: null,
+        authoredFingerprint,
+        terminalFate: 'reviewed-non-draft',
+        targetRecipeId: null,
+        targetFingerprint: null,
+        targetReadyProofHash: null,
+      },
+    },
+  });
+}
+
+function zeroCorpusInspection(analysisFixpointHash: string) {
+  return createStrictAcceptedCorpusInspectionV1({
+    runId: WORKFLOW_RUN,
+    analysisFixpointHash,
+    privateCorpusRevision: 'private-corpus:semantic-review',
+    revisionRootManifestHash: shaText('zero-revision-root'),
+    entries: [],
   });
 }
 
@@ -636,7 +971,7 @@ function producerAnalysisFixture(
   };
 }
 
-function investigatedEmptyRequest() {
+function investigatedEmptyRequest(suffix = '') {
   const receipt = executionReceipt();
   const { finalExpandedSchedule } = authorityScheduleLineage([receipt]);
   const population = canonicalizeObservationPopulationV1({
@@ -704,11 +1039,10 @@ function investigatedEmptyRequest() {
     currentAnalysisFixpointHash: fixpoint.fixpointHash,
     expectedObligationIds: [receipt.obligationId],
     executionBindings: [executionBinding],
-    evidenceEntryIds: ['E-semantic-review'],
+    evidenceEntryIds: ['E-1'],
   };
   const proposedDispositionHash = hashKnowledgeDispositionProposalV1(proposal);
-  const evidenceContent =
-    'Frozen evidence: the complete scheduled subject was inspected and no project-specific recurring mechanism was found.';
+  const evidenceContent = REVIEW_EVIDENCE_CONTENT;
   return createAgentSemanticDispositionReviewRequestV1({
     strictWorkflowRunId: WORKFLOW_RUN,
     sourceRevisionVectorHash: SOURCE_REVISION,
@@ -719,12 +1053,12 @@ function investigatedEmptyRequest() {
     executionReceipts: [receipt],
     evidence: [
       {
-        evidenceEntryId: 'E-semantic-review',
-        evidenceSessionId: 'session:investigated-empty',
+        evidenceEntryId: 'E-1',
+        evidenceSessionId: 'session:semantic-review',
         sourceRevisionVectorHash: SOURCE_REVISION,
         canonicalSubjectRef: receipt.canonicalSubjectRef,
         relativePath: 'src/review.ts',
-        blobHash: shaText('review-source-blob'),
+        blobHash: REVIEW_SOURCE_BLOB,
         content: evidenceContent,
         contentHash: shaText(evidenceContent),
         semanticRole: 'negative-evidence-complete-denominator',
@@ -735,9 +1069,9 @@ function investigatedEmptyRequest() {
       providerId: 'alembic-agent',
       modelId: 'producer:model',
       modelVersion: 'strict-producer-v1',
-      promptHash: shaText('investigated-empty-producer-prompt'),
+      promptHash: shaText(`investigated-empty-producer-prompt:${suffix}`),
       runId: WORKFLOW_RUN,
-      invocationId: 'producer-invocation:investigated-empty',
+      invocationId: `producer-invocation:investigated-empty:${suffix}`,
       loadReceiptHash: shaText('producer-load'),
       outputHash: proposedDispositionHash,
     }),
@@ -749,7 +1083,7 @@ function investigatedEmptyRequest() {
       negativeEvidenceSufficiency: {
         claim: 'The sealed denominator was fully inspected without an eligible mechanism.',
         requiredAbsencePredicates: ['no-project-specific-recurring-mechanism'],
-        inspectedEvidenceEntryIds: ['E-semantic-review'],
+        inspectedEvidenceEntryIds: ['E-1'],
         reasonCode: 'COMPLETE_NEGATIVE_EVIDENCE',
       },
     },
@@ -805,16 +1139,152 @@ function passingDecision(
       verdict: 'pass',
       score: 0.95,
       reasonCode: `PASS:${axisId}`,
-      evidenceEntryIds: ['E-semantic-review'],
+      evidenceEntryIds: ['E-1'],
     })),
     evidenceFindings: [
       {
-        evidenceEntryId: 'E-semantic-review',
+        evidenceEntryId: 'E-1',
         axisIds,
         finding: 'The frozen semantic payload supports every calibrated disposition axis.',
         supportsVerdict: true,
       },
     ],
+  };
+}
+
+function passingDecisionV2(
+  request: SemanticDispositionReviewRequestV2,
+  axisIds: readonly SemanticDispositionReviewAxisIdV1[]
+): SemanticDispositionReviewDecisionV2 {
+  const semantic = request.semanticRequest;
+  return {
+    schemaVersion: 2,
+    requestHash: request.requestHash,
+    compiledPromptHash: request.compiledPromptHash,
+    semanticRequestHash: semantic.requestHash,
+    contextHash: semantic.contextHash,
+    reviewKind: semantic.reviewKind,
+    proposedDispositionHash: semantic.proposedDispositionHash,
+    verdict: 'pass',
+    reasonCode: 'SEMANTIC_DISPOSITION_CONFIRMED',
+    axisDecisions: axisIds.map((axisId) => ({
+      axisId,
+      verdict: 'pass',
+      score: 0.95,
+      reasonCode: `PASS:${axisId}`,
+      evidenceEntryIds: ['E-1'],
+    })),
+    evidenceFindings: [
+      {
+        evidenceEntryId: 'E-1',
+        axisIds,
+        finding: 'The frozen semantic payload supports every calibrated disposition axis.',
+        supportsVerdict: true,
+      },
+    ],
+  };
+}
+
+function semanticRequestV2(semanticRequest: SemanticDispositionReviewRequestV1) {
+  const evidence = strictEvidenceFixture();
+  const executionReceipt = semanticRequest.executionReceipts[0];
+  const semanticEvidence = semanticRequest.evidence[0];
+  const fileExecution = executionReceipt?.fileExecutions[0];
+  if (!executionReceipt || !semanticEvidence || !fileExecution) {
+    throw new Error('semantic V2 fixture requires one evidence-bearing execution');
+  }
+  const authority = createSemanticDispositionReviewEvidenceAuthorityV2({
+    evidenceEntry: evidence.evidenceEntry,
+    evidenceLedgerSnapshot: evidence.evidenceLedgerSnapshot,
+    witnessBinding: evidence.witnessBinding,
+    executionReceipt,
+    fileExecutionHash: fileExecution.executionHash,
+    semanticRole: semanticEvidence.semanticRole,
+  });
+  return {
+    request: createAgentSemanticDispositionReviewRequestV2({
+      semanticRequest,
+      evidenceAuthorities: [authority],
+    }),
+    evidenceAuthority: authority,
+  };
+}
+
+async function executeSemanticRequestV2(
+  semanticRequest: SemanticDispositionReviewRequestV1,
+  axisIds: readonly SemanticDispositionReviewAxisIdV1[],
+  capture?: { callPrompt?: string }
+) {
+  const { request, evidenceAuthority } = semanticRequestV2(semanticRequest);
+  let invocationOrdinal = 0;
+  const gateway = createAgentSemanticDispositionReviewHostGatewayV2({
+    reviewerModelLoadReceipt: semanticRequest.calibration.reviewerModelLoadReceipt,
+    invoke: async (call) => {
+      invocationOrdinal += 1;
+      if (capture) {
+        capture.callPrompt = call.compiledPrompt;
+      }
+      const decision = passingDecisionV2(call.request, axisIds);
+      return {
+        evaluatorRunId: EVALUATOR_RUN,
+        invocationId: `agent-host-invocation:semantic-review:v2:${invocationOrdinal}`,
+        responseOutput: JSON.stringify(decision),
+        status: 'success',
+        toolCallCount: 0,
+      };
+    },
+  });
+  const execution = await gateway.execute(request);
+  return { request, evidenceAuthority, gateway, execution };
+}
+
+function postHocStampedExecution(
+  unrelatedExecution: SemanticDispositionReviewExecutionV2,
+  targetRequest: SemanticDispositionReviewRequestV2,
+  axisIds: readonly SemanticDispositionReviewAxisIdV1[]
+): SemanticDispositionReviewExecutionV2 {
+  const decision = passingDecisionV2(targetRequest, axisIds);
+  const responseOutput = JSON.stringify(decision);
+  const hostSemantic = {
+    ...unrelatedExecution.hostExecution,
+    requestId: targetRequest.requestId,
+    requestHash: targetRequest.requestHash,
+    compiledPrompt: targetRequest.compiledPrompt,
+    compiledPromptHash: targetRequest.compiledPromptHash,
+    responseOutput,
+    responseOutputHash: shaText(responseOutput),
+  };
+  const { recordHash: _oldRecordHash, ...hostWithoutHash } = hostSemantic;
+  const hostExecution = {
+    ...hostWithoutHash,
+    recordHash: hashCanonicalJson(hostWithoutHash),
+  };
+  const reviewer = createProductionActorIdentityV1({
+    providerId: hostExecution.providerId,
+    modelId: hostExecution.modelId,
+    modelVersion: `${hostExecution.modelVersion}/${hostExecution.methodId}/${hostExecution.methodVersion}`,
+    promptHash: hostExecution.compiledPromptHash,
+    runId: hostExecution.evaluatorRunId,
+    invocationId: hostExecution.invocationId,
+    loadReceiptHash: hostExecution.reviewerModelLoadReceipt.loadReceiptHash,
+    outputHash: hostExecution.responseOutputHash,
+  });
+  const semantic = {
+    schemaVersion: 2 as const,
+    producerRoute: unrelatedExecution.producerRoute,
+    consumerRoute: unrelatedExecution.consumerRoute,
+    request: targetRequest,
+    hostExecution,
+    decision,
+    decisionHash: hashCanonicalJson(decision),
+    reviewer,
+    hostAuthorityHash: unrelatedExecution.hostAuthorityHash,
+  };
+  const executionHash = hashCanonicalJson(semantic);
+  return {
+    ...semantic,
+    executionId: `semantic-review-execution-v2:${executionHash.slice(7, 31)}`,
+    executionHash,
   };
 }
 
@@ -857,14 +1327,30 @@ function requestInputFrom(request: ReturnType<typeof producerRequest>) {
   };
 }
 
-function admissionFixture(analysisFixpointHash: string): StrictAdmissionReceiptV1 {
+function g1Fixture(candidateFingerprint: string): StrictG1ReceiptV1 {
+  return createStrictG1ReceiptV1({
+    candidateFingerprint,
+    retrievalReadinessHash: shaText(`retrieval:${candidateFingerprint}`),
+    rows: STRICT_G1_HARD_AXES_V1.map((axis) => ({
+      axis,
+      verdict: 'pass',
+      reasonCode: `PASS:${axis}`,
+      evidenceRefs: ['E-1'],
+    })),
+  });
+}
+
+function admissionFixture(
+  analysisFixpointHash: string,
+  g1Receipt: StrictG1ReceiptV1
+): StrictAdmissionReceiptV1 {
   const semantic = {
     schemaVersion: 1 as const,
     runId: WORKFLOW_RUN,
     analysisFixpointHash,
     privateCorpusRevision: 'private-corpus:semantic-review',
     revisionRootManifestHash: shaText('revision-root'),
-    g1ReceiptHash: shaText('g1-receipt'),
+    g1ReceiptHash: g1Receipt.receiptHash,
     inputFingerprint: 'fingerprint:candidate',
     finalAdmittedFingerprint: 'fingerprint:candidate',
     acceptedCorpusInspectionHash: shaText('accepted-corpus-inspection'),
@@ -894,7 +1380,54 @@ function admissionFixture(analysisFixpointHash: string): StrictAdmissionReceiptV
   return { ...withId, receiptHash: hashCanonicalJson(withId) };
 }
 
+function strictEvidenceFixture() {
+  const evidenceEntry = {
+    id: 'E-1',
+    sessionId: 'session:semantic-review',
+    dimensionId: 'dimension:semantic-review',
+    tool: 'code.read' as const,
+    callId: 'call:semantic-review-source',
+    file: 'src/review.ts',
+    content: REVIEW_EVIDENCE_CONTENT,
+    contentHash: shaText(REVIEW_EVIDENCE_CONTENT),
+    capturedAt: 1,
+  };
+  const evidenceLedgerSnapshot = createStrictEvidenceLedgerSnapshotV1([evidenceEntry]);
+  const projectContextRef = createProjectContextFileRef({
+    projectRoot: '/frozen/project',
+    repoId: 'repo',
+    filePath: 'src/review.ts',
+    hash: REVIEW_SOURCE_BLOB,
+  });
+  const bindingSemantic = {
+    schemaVersion: 1 as const,
+    sourceArtifactId: 'artifact:semantic-disposition-review',
+    sourceRevisionVectorHash: SOURCE_REVISION,
+    repoId: 'repo',
+    relativePath: 'src/review.ts',
+    blobHash: REVIEW_SOURCE_BLOB,
+    evidenceEntryId: evidenceEntry.id,
+    evidenceSessionId: evidenceEntry.sessionId,
+    evidenceContentHash: evidenceEntry.contentHash,
+    evidenceEntryHash: hashCanonicalJson(evidenceEntry),
+    evidenceEntry,
+    evidenceLedgerSnapshotHash: evidenceLedgerSnapshot.snapshotHash,
+    projectContextRefId: projectContextRef.id,
+    projectContextRefHash: hashCanonicalJson(projectContextRef),
+    projectContextRef,
+  };
+  return {
+    evidenceEntry,
+    evidenceLedgerSnapshot,
+    witnessBinding: {
+      ...bindingSemantic,
+      bindingHash: hashCanonicalJson(bindingSemantic),
+    },
+  };
+}
+
 function executionReceipt(): FactQueryExecutionReceiptV1 {
+  const evidence = strictEvidenceFixture();
   const obligationSemantic = {
     factFamilyId: 'syntax-idiom',
     capabilityId: 'tree-sitter-query',
@@ -903,18 +1436,18 @@ function executionReceipt(): FactQueryExecutionReceiptV1 {
     denominator: 'complete-frozen-subject' as const,
   };
   const obligationId = `fact:${hashCanonicalJson(obligationSemantic).slice(7, 31)}`;
-  const denominatorFileIds = [`repo:src/review.ts@${shaText('review-source-blob')}`];
+  const denominatorFileIds = [`repo:src/review.ts@${REVIEW_SOURCE_BLOB}`];
   const fileExecutionSemantic = {
     repoId: 'repo',
     relativePath: 'src/review.ts',
-    blobHash: shaText('review-source-blob'),
+    blobHash: REVIEW_SOURCE_BLOB,
     status: 'complete' as const,
     reasonCode: 'COMPLETE',
     truncated: false,
     continuation: null,
-    witnessBindingHash: shaText('witness-binding'),
-    evidenceEntryId: 'E-semantic-review',
-    projectContextRefId: 'file:repo:src/review.ts',
+    witnessBindingHash: evidence.witnessBinding.bindingHash,
+    evidenceEntryId: 'E-1',
+    projectContextRefId: evidence.witnessBinding.projectContextRefId,
     stagedFactIds: [],
     discardedFactIds: [],
     emittedFactIds: [],
@@ -950,7 +1483,7 @@ function executionReceipt(): FactQueryExecutionReceiptV1 {
     inspectedFileCount: 1,
     denominatorFileIds,
     denominatorHash,
-    witnessBindingHash: shaText('witness-binding'),
+    witnessBindingHash: hashCanonicalJson([evidence.witnessBinding.bindingHash]),
     fileExecutions: [fileExecution],
     derivedFactIds: [],
     emittedFactIds: [],

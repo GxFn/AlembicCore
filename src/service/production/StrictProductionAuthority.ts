@@ -15,8 +15,10 @@ import {
   validateSerialAdmissionLedgerV1,
 } from './ProductionPersistenceContracts.js';
 import {
-  assertSemanticDispositionReviewExecutionV1,
-  type SemanticDispositionReviewExecutionV1,
+  assertSemanticDispositionReviewExecutionV2,
+  createProducerZeroDispositionAdmissionAuthorityV1,
+  type SemanticDispositionReviewAgentHostExecutionAuthorityV2,
+  type SemanticDispositionReviewExecutionV2,
 } from './SemanticDispositionReviewExecution.js';
 import {
   type AnalysisFixpointReceiptV1,
@@ -250,7 +252,9 @@ export interface StrictProductionAuthorityInputV1 {
    * Agent 产生、Main 只读消费的 evaluator execution registry。普通 analyst review 保持 V1
    * 兼容；producer-non-draft / investigated-empty 必须在这里 exact-one 连接。
    */
-  readonly semanticDispositionReviewExecutions?: readonly SemanticDispositionReviewExecutionV1[];
+  readonly semanticDispositionReviewExecutions?: readonly SemanticDispositionReviewExecutionV2[];
+  /** Agent live capability；普通 JSON execution 即使重算全部 hash，也不能由 Main 自行盖章。 */
+  readonly semanticDispositionReviewHostAuthority?: SemanticDispositionReviewAgentHostExecutionAuthorityV2;
   /** 恢复时由宿主传入上一 checkpoint 已消费集合，防止 execution 跨 resume 重放。 */
   readonly priorSemanticDispositionReviewExecutionHashes?: readonly string[];
   readonly expressionSets: readonly HypothesisExpressionSetReceiptV1[];
@@ -780,20 +784,26 @@ function validateSemanticDispositionReviewExecutions(
 ): readonly string[] {
   const executions = [...(input.semanticDispositionReviewExecutions ?? [])];
   const priorHashes = new Set(input.priorSemanticDispositionReviewExecutionHashes ?? []);
-  const byHash = new Map<string, SemanticDispositionReviewExecutionV1>();
+  const byHash = new Map<string, SemanticDispositionReviewExecutionV2>();
   const executionIds = new Set<string>();
   const invocationCoordinates = new Set<string>();
   const outputHashes = new Set<string>();
   const decisionHashes = new Set<string>();
   for (const execution of executions) {
-    assertSemanticDispositionReviewExecutionV1(execution);
-    const invocationCoordinate = `${execution.invocation.evaluatorRunId}\u0000${execution.invocation.invocationId}`;
+    if (!input.semanticDispositionReviewHostAuthority) {
+      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
+    }
+    assertSemanticDispositionReviewExecutionV2({
+      execution,
+      hostAuthority: input.semanticDispositionReviewHostAuthority,
+    });
+    const invocationCoordinate = `${execution.hostExecution.evaluatorRunId}\u0000${execution.hostExecution.invocationId}`;
     if (
       priorHashes.has(execution.executionHash) ||
       byHash.has(execution.executionHash) ||
       executionIds.has(execution.executionId) ||
       invocationCoordinates.has(invocationCoordinate) ||
-      outputHashes.has(execution.invocation.responseOutputHash) ||
+      outputHashes.has(execution.hostExecution.responseOutputHash) ||
       decisionHashes.has(execution.decisionHash)
     ) {
       fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_EXECUTION_REUSED');
@@ -801,7 +811,7 @@ function validateSemanticDispositionReviewExecutions(
     byHash.set(execution.executionHash, execution);
     executionIds.add(execution.executionId);
     invocationCoordinates.add(invocationCoordinate);
-    outputHashes.add(execution.invocation.responseOutputHash);
+    outputHashes.add(execution.hostExecution.responseOutputHash);
     decisionHashes.add(execution.decisionHash);
   }
 
@@ -839,10 +849,10 @@ function validateSemanticDispositionReviewExecutions(
 function semanticDispositionReviewExecutionMismatch(
   input: StrictProductionAuthorityInputV1,
   review: KnowledgeDispositionReviewV1,
-  execution: SemanticDispositionReviewExecutionV1,
+  execution: SemanticDispositionReviewExecutionV2,
   receiptsByHash: ReturnType<typeof validateFactExecution>['receiptsByHash']
 ): boolean {
-  const request = execution.request;
+  const request = execution.request.semanticRequest;
   const actualPopulation = input.populations.find(
     (population) => population.populationHash === request.populationHash
   );
@@ -881,7 +891,7 @@ function semanticDispositionReviewExecutionMismatch(
 
 function semanticDispositionReviewScheduleMismatch(
   input: StrictProductionAuthorityInputV1,
-  request: SemanticDispositionReviewExecutionV1['request']
+  request: SemanticDispositionReviewExecutionV2['request']['semanticRequest']
 ): boolean {
   return (
     request.finalExpandedSchedule.finalExpandedScheduleHash !==
@@ -893,9 +903,9 @@ function semanticDispositionReviewScheduleMismatch(
 
 function semanticDispositionReviewContextMissing(
   input: StrictProductionAuthorityInputV1,
-  execution: SemanticDispositionReviewExecutionV1
+  execution: SemanticDispositionReviewExecutionV2
 ): boolean {
-  const context = execution.request.context;
+  const context = execution.request.semanticRequest.context;
   if (context.reviewKind === 'investigated-empty') {
     return false;
   }
@@ -913,6 +923,9 @@ function semanticDispositionReviewContextMissing(
         (candidate) => candidate.receiptHash === context.admissionReceipt?.receiptHash
       )
     : null;
+  const g1 = input.terminalEvidence.g1Receipts.find(
+    (candidate) => candidate.receiptHash === context.g1Receipt.receiptHash
+  );
   return (
     context.privateCorpusRevision !== input.privateCorpusRevision ||
     semanticDispositionExpressionSetMissing(input, execution) ||
@@ -920,16 +933,18 @@ function semanticDispositionReviewContextMissing(
     hashCanonicalJson(induction) !== hashCanonicalJson(context.induction) ||
     !falsification ||
     hashCanonicalJson(falsification) !== hashCanonicalJson(context.falsification) ||
-    (context.admissionReceipt !== null &&
-      (!admission || hashCanonicalJson(admission) !== hashCanonicalJson(context.admissionReceipt)))
+    !g1 ||
+    hashCanonicalJson(g1) !== hashCanonicalJson(context.g1Receipt) ||
+    !admission ||
+    hashCanonicalJson(admission) !== hashCanonicalJson(context.admissionReceipt)
   );
 }
 
 function semanticDispositionExpressionSetMissing(
   input: StrictProductionAuthorityInputV1,
-  execution: SemanticDispositionReviewExecutionV1
+  execution: SemanticDispositionReviewExecutionV2
 ): boolean {
-  const context = execution.request.context;
+  const context = execution.request.semanticRequest.context;
   if (context.reviewKind !== 'producer-non-draft') {
     return false;
   }
@@ -2033,11 +2048,67 @@ function validateTerminalEvidence(
   for (const expressionRef of expressions) {
     consumeExpressionTerminalEvidence(input, registry, consumption, expressionRef);
   }
+  consumeZeroDispositionTerminalEvidence(input, registry, consumption);
   validateTerminalEvidenceConservation(registry, consumption);
   return {
     receiptHashes: collectTerminalEvidenceReceiptHashes(input),
     acceptedCorpusHashByTerminalId: consumption.acceptedCorpusHashByTerminalId,
   };
+}
+
+/**
+ * 零输出不是 terminal-evidence 的空集：reviewed-non-draft row 必须消费与普通 candidate
+ * 相同的 G1→非持久化 Admission→完整 accepted-corpus inspection 链。
+ */
+function consumeZeroDispositionTerminalEvidence(
+  input: StrictProductionAuthorityInputV1,
+  registry: TerminalEvidenceRegistry,
+  consumption: TerminalEvidenceConsumption
+): void {
+  for (const execution of input.semanticDispositionReviewExecutions ?? []) {
+    const request = execution.request.semanticRequest;
+    const context = request.context;
+    if (context.reviewKind !== 'producer-non-draft' || context.proposal.expression !== null) {
+      continue;
+    }
+    const expressionSet = input.expressionSets.find(
+      (candidate) => candidate.receiptId === context.expressionSetReceiptId
+    );
+    const admission = registry.admissionByHash.get(context.admissionReceipt.receiptHash);
+    const g1 = registry.g1ByHash.get(context.g1Receipt.receiptHash);
+    const corpusInspection = registry.corpusInspectionByHash.get(
+      context.admissionReceipt.acceptedCorpusInspectionHash
+    );
+    if (
+      !context.proposal.zeroDisposition ||
+      context.proposal.zeroDisposition.terminalFate !== 'reviewed-non-draft' ||
+      expressionSet?.zeroDisposition?.terminalFate !== 'reviewed-non-draft' ||
+      expressionSet.zeroDisposition.dispositionReview.semanticExecutionResultHash !==
+        execution.executionHash ||
+      !context.target.authoredFingerprint ||
+      !admission ||
+      !g1 ||
+      !corpusInspection ||
+      admission.disposition !== 'admit' ||
+      admission.inputFingerprint !== context.target.authoredFingerprint ||
+      admission.finalAdmittedFingerprint !== context.target.authoredFingerprint ||
+      admission.g1ReceiptHash !== g1.receiptHash ||
+      hashCanonicalJson(admission) !== hashCanonicalJson(context.admissionReceipt) ||
+      hashCanonicalJson(g1) !== hashCanonicalJson(context.g1Receipt)
+    ) {
+      fail('STRICT_PRODUCTION_ZERO_DISPOSITION_ADMISSION_CHAIN_INVALID');
+    }
+    if (!input.semanticDispositionReviewHostAuthority) {
+      fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
+    }
+    createProducerZeroDispositionAdmissionAuthorityV1({
+      execution,
+      hostAuthority: input.semanticDispositionReviewHostAuthority,
+      expressionSet,
+      corpusInspection,
+    });
+    consumeAdmissionEvidence(registry, consumption, admission);
+  }
 }
 
 interface TerminalEvidenceRegistry {
@@ -2318,8 +2389,8 @@ function consumeExpressionTerminalEvidence(
       (candidate) => candidate.executionHash === review?.semanticExecutionResultHash
     );
     const admission =
-      execution?.request.context.reviewKind === 'producer-non-draft'
-        ? execution.request.context.admissionReceipt
+      execution?.request.semanticRequest.context.reviewKind === 'producer-non-draft'
+        ? execution.request.semanticRequest.context.admissionReceipt
         : null;
     const registeredAdmission = admission
       ? registry.admissionByHash.get(admission.receiptHash)
