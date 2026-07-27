@@ -5,7 +5,6 @@ import {
   canonicalizeObservationPopulationV1,
   createAnalysisFixpointReceiptV1,
   createFactRecordV1,
-  createFalsificationReceiptV1,
   createFinalExpandedMiningScheduleReceiptV1,
   createInductionReceiptV1,
   createTypedGateReturnV1,
@@ -23,7 +22,8 @@ const DIRECT_WITNESS: DirectFactWitnessInputV1 = {
   evidenceSessionId: 'session-1',
   evidenceContentHash: 'sha256:evidence',
   sourceRevisionVectorHash: 'sha256:revision',
-  projectContextRefId: 'ref:symbol:a',
+  projectContextRefId: 'symbol:a',
+  projectContextRefHash: `sha256:${'a'.repeat(64)}`,
   canonicalSubjectRef: 'symbol:a',
   anchor: {
     relativePath: 'src/a.ts',
@@ -33,7 +33,7 @@ const DIRECT_WITNESS: DirectFactWitnessInputV1 = {
 };
 
 describe('strict analysis production contracts', () => {
-  it('creates dimension-free direct Fact IDs independent from view, scale, lens, and input order', () => {
+  it('creates dimension-free direct Fact IDs while preserving scale and accepted witness identity', () => {
     const left = createFactRecordV1({
       factFamilyId: 'syntax-idiom',
       canonicalSubjectRef: 'symbol:a',
@@ -49,17 +49,10 @@ describe('strict analysis production contracts', () => {
     const right = createFactRecordV1({
       factFamilyId: 'syntax-idiom',
       canonicalSubjectRef: 'symbol:a',
-      primaryScale: 'repository',
+      primaryScale: 'symbol',
       sourceRevisionVectorHash: 'sha256:revision',
       value: { order: ['validate', 'persist'], behavior: 'returns typed failure' },
-      witnesses: [
-        {
-          ...DIRECT_WITNESS,
-          evidenceEntryId: 'E-18',
-          evidenceSessionId: 'session-2',
-          projectContextRefId: 'ref:query-specific:a',
-        },
-      ],
+      witnesses: [DIRECT_WITNESS],
       dimensionId: 'testing-quality',
       cellId: 'core::testing-quality',
       viewId: 'view-b',
@@ -68,7 +61,14 @@ describe('strict analysis production contracts', () => {
 
     expect(right.factId).toBe(left.factId);
     expect(right).toEqual(left);
-    expect(left).not.toHaveProperty('primaryScale');
+    expect(left.primaryScale).toBe('symbol');
+    expect(left.valueHash).toMatch(/^sha256:[0-9a-f]{64}$/);
+    expect(left.witnesses[0]).toMatchObject({
+      evidenceEntryId: 'E-17',
+      evidenceSessionId: 'session-1',
+      projectContextRefId: 'symbol:a',
+      projectContextRefHash: `sha256:${'a'.repeat(64)}`,
+    });
     expect(left).not.toHaveProperty('dimensionId');
     expect(left).not.toHaveProperty('cellId');
     expect(left).not.toHaveProperty('viewId');
@@ -182,6 +182,7 @@ describe('strict analysis production contracts', () => {
     const observations = Array.from({ length: 73 }, (_, index) => ({
       observationId: `obs-${index}`,
       factIds: [`fact-${index}`],
+      obligationIds: ['obligation:fixture'],
       mechanismKey: index % 2 === 0 ? 'safe-write' : 'typed-return',
       canonicalSubjectRefs: [`symbol:${index}`],
     }));
@@ -193,11 +194,19 @@ describe('strict analysis production contracts', () => {
       denominator: {
         kind: 'frozen-complete-subjects',
         expectedObservationIds: observations.map((row) => row.observationId),
+        ...completeExecutionDenominator(),
       },
-      observations,
+      observations: observations.map((observation) => ({
+        ...observation,
+        parentSubjectRefs: [],
+        variantKeys: [],
+        outlierReasonCodes: [],
+        negativeControl: false,
+      })),
       duplicateObservations: [],
       excludedObservations: [],
       errorObservations: [],
+      inspectedNoPatternObservations: [],
     });
 
     expect(population.observations).toHaveLength(73);
@@ -207,6 +216,8 @@ describe('strict analysis production contracts', () => {
       duplicate: 0,
       excluded: 0,
       error: 0,
+      inspectedNoPattern: 0,
+      omitted: 0,
     });
   });
 
@@ -216,52 +227,76 @@ describe('strict analysis production contracts', () => {
       revision: 1,
       parentPopulationHash: null,
       sourceRevisionVectorHash: 'sha256:revision',
-      denominator: { kind: 'frozen-complete-subjects', expectedObservationIds: ['o1', 'o2', 'o3'] },
+      denominator: {
+        kind: 'frozen-complete-subjects',
+        expectedObservationIds: ['o1', 'o2', 'o3'],
+        ...completeExecutionDenominator(),
+      },
       observations: [
         {
           observationId: 'o1',
           factIds: ['f1'],
+          obligationIds: ['obligation:fixture'],
           mechanismKey: 'safe-write',
           canonicalSubjectRefs: ['s1'],
+          parentSubjectRefs: [],
+          variantKeys: [],
+          outlierReasonCodes: [],
+          negativeControl: false,
         },
         {
           observationId: 'o2',
           factIds: ['f2'],
+          obligationIds: ['obligation:fixture'],
           mechanismKey: 'safe-write',
           canonicalSubjectRefs: ['s2'],
+          parentSubjectRefs: [],
+          variantKeys: [],
+          outlierReasonCodes: [],
+          negativeControl: false,
         },
         {
           observationId: 'o3',
           factIds: ['f3'],
+          obligationIds: ['obligation:fixture'],
           mechanismKey: 'other',
           canonicalSubjectRefs: ['s3'],
+          parentSubjectRefs: [],
+          variantKeys: [],
+          outlierReasonCodes: [],
+          negativeControl: false,
         },
       ],
       duplicateObservations: [],
       excludedObservations: [],
       errorObservations: [],
+      inspectedNoPatternObservations: [],
     });
     const clusters = canonicalizeKnowledgeClustersV1(population, {
       clusters: [
         {
           mechanismKey: 'safe-write',
+          mechanism: { invariant: 'safe write' },
           observationIds: ['o1', 'o2'],
+          mechanismEvidenceFactIds: ['f1', 'f2'],
           anatomyLensIds: ['state-lifecycle-persistence'],
         },
         {
           mechanismKey: 'safe-write',
+          mechanism: { invariant: 'safe write with error recovery' },
           observationIds: ['o1'],
+          mechanismEvidenceFactIds: ['f1'],
           anatomyLensIds: ['error-recovery-concurrency'],
         },
-      ],
-      nonClusteredDispositions: [
         {
-          observationId: 'o3',
-          status: 'discarded',
-          reasonCode: 'independently-reviewed-nonmechanism',
-          reviewerReceiptId: 'review:o3',
+          mechanismKey: 'other',
+          mechanism: { invariant: 'other' },
+          observationIds: ['o3'],
+          mechanismEvidenceFactIds: ['f3'],
+          anatomyLensIds: [],
         },
       ],
+      nonClusteredDispositions: [],
     });
 
     expect(clusters.dispositions).toEqual([
@@ -271,32 +306,40 @@ describe('strict analysis production contracts', () => {
         clusterIds: expect.any(Array),
       }),
       expect.objectContaining({ observationId: 'o2', status: 'clustered' }),
-      expect.objectContaining({ observationId: 'o3', status: 'discarded' }),
+      expect.objectContaining({ observationId: 'o3', status: 'clustered' }),
     ]);
     expect(() =>
       canonicalizeKnowledgeClustersV1(population, {
         clusters: [
-          { mechanismKey: 'safe-write', observationIds: ['o1', 'o3'], anatomyLensIds: [] },
+          {
+            mechanismKey: 'safe-write',
+            mechanism: { invariant: 'safe write' },
+            observationIds: ['o1', 'o3'],
+            mechanismEvidenceFactIds: ['f1'],
+            anatomyLensIds: [],
+          },
         ],
         nonClusteredDispositions: [
           {
             observationId: 'o2',
-            status: 'discarded',
-            reasonCode: 'reviewed-nonmechanism',
-            reviewerReceiptId: 'review:o2',
+            status: 'unresolved',
+            reasonCode: 'review-pending',
+            owner: 'HostAgent',
+            resumePoint: 'cluster-review',
           },
         ],
       })
-    ).toThrow('CLUSTER_MECHANISM_MISMATCH');
+    ).toThrow('CLUSTER_MEMBER_EVIDENCE_INCOMPLETE');
   });
 
-  it('supports zero, singleton, and recurring induction without inventing a minimum', () => {
+  it('supports singleton and recurring induction while rejecting string-certified zero', () => {
     const singleton = createInductionReceiptV1({
       populationHash: 'sha256:population',
       clusterHash: 'sha256:cluster-one',
       clusterId: 'cluster-one',
       observationIds: ['o1'],
       mode: 'bounded-singleton',
+      currentAnalysisFixpointHash: `sha256:${'b'.repeat(64)}`,
       hypotheses: [
         { hypothesisId: 'h1', statement: 'bounded local invariant', premiseFactIds: ['f1'] },
       ],
@@ -310,90 +353,27 @@ describe('strict analysis production contracts', () => {
         clusterId: 'cluster-one',
         observationIds: ['o1'],
         mode: 'recurring',
+        currentAnalysisFixpointHash: `sha256:${'b'.repeat(64)}`,
         hypotheses: [{ hypothesisId: 'h1', statement: 'not recurring', premiseFactIds: ['f1'] }],
       })
     ).toThrow('INDUCTION_RECURRING_DENOMINATOR_INSUFFICIENT');
 
-    const zero = createInductionReceiptV1({
-      populationHash: 'sha256:population',
-      clusterHash: 'sha256:cluster-zero',
-      clusterId: 'cluster-zero',
-      observationIds: ['o2', 'o3'],
-      mode: 'recurring',
-      hypotheses: [],
-      zeroHypothesisReason: 'refuted',
-      zeroHypothesisReviewReceiptId: 'review:zero',
-    });
-    expect(zero.zeroHypothesisReason).toBeTruthy();
+    expect(() =>
+      createInductionReceiptV1({
+        populationHash: 'sha256:population',
+        clusterHash: 'sha256:cluster-zero',
+        clusterId: 'cluster-zero',
+        observationIds: ['o2', 'o3'],
+        mode: 'recurring',
+        currentAnalysisFixpointHash: `sha256:${'b'.repeat(64)}`,
+        hypotheses: [],
+        zeroHypothesisReason: 'refuted',
+        zeroHypothesisReviewReceiptId: 'review:zero',
+      })
+    ).toThrow('INDUCTION_ZERO_REASON_REQUIRED');
   });
 
-  it('fails counterqueries closed and requires owner/resume for every non-pass gate', () => {
-    const unknown = createFalsificationReceiptV1({
-      hypothesisId: 'h1',
-      enrolledCounterqueryIds: ['counter:q1'],
-      counterqueryApplicability: {
-        status: 'required',
-        reasonCode: 'claim-requires-negative-search',
-        reviewerReceiptId: null,
-      },
-      executions: [
-        {
-          counterqueryId: 'counter:q1',
-          backendStatus: 'complete',
-          denominatorComplete: true,
-          truncated: true,
-          counterexampleFactIds: [],
-        },
-      ],
-    });
-    expect(unknown.verdict).toBe('unknown');
-
-    expect(() =>
-      createFalsificationReceiptV1({
-        hypothesisId: 'h1',
-        enrolledCounterqueryIds: ['counter:q1'],
-        counterqueryApplicability: {
-          status: 'required',
-          reasonCode: 'claim-requires-negative-search',
-          reviewerReceiptId: null,
-        },
-        executions: [
-          {
-            counterqueryId: 'counter:unenrolled',
-            backendStatus: 'complete',
-            denominatorComplete: true,
-            truncated: false,
-            counterexampleFactIds: [],
-          },
-        ],
-      })
-    ).toThrow('FALSIFICATION_COUNTERQUERY_UNENROLLED');
-
-    expect(() =>
-      createFalsificationReceiptV1({
-        hypothesisId: 'h1',
-        enrolledCounterqueryIds: [],
-        counterqueryApplicability: {
-          status: 'required',
-          reasonCode: 'claim-requires-negative-search',
-          reviewerReceiptId: null,
-        },
-        executions: [],
-      })
-    ).toThrow('FALSIFICATION_COUNTERQUERY_REQUIRED');
-    expect(
-      createFalsificationReceiptV1({
-        hypothesisId: 'h1',
-        enrolledCounterqueryIds: [],
-        counterqueryApplicability: {
-          status: 'not-required',
-          reasonCode: 'structurally-nonfalsifiable-at-this-stage',
-          reviewerReceiptId: 'review:not-required',
-        },
-        executions: [],
-      }).verdict
-    ).toBe('not-required');
-
+  it('requires owner/resume for every non-pass gate', () => {
     expect(() =>
       createTypedGateReturnV1({ gate: 'G1', verdict: 'revise', reasonCode: 'bad' })
     ).toThrow('GATE_RETURN_OWNER_RESUME_REQUIRED');
@@ -534,18 +514,28 @@ describe('strict analysis production contracts', () => {
       revision: 1,
       parentPopulationHash: null,
       sourceRevisionVectorHash: 'sha256:revision',
-      denominator: { kind: 'frozen-complete-subjects', expectedObservationIds: ['o1'] },
+      denominator: {
+        kind: 'frozen-complete-subjects',
+        expectedObservationIds: ['o1'],
+        ...completeExecutionDenominator(),
+      },
       observations: [
         {
           observationId: 'o1',
           factIds: ['f1'],
+          obligationIds: ['obligation:fixture'],
           mechanismKey: 'pending-review',
           canonicalSubjectRefs: ['symbol:a'],
+          parentSubjectRefs: [],
+          variantKeys: [],
+          outlierReasonCodes: [],
+          negativeControl: false,
         },
       ],
       duplicateObservations: [],
       excludedObservations: [],
       errorObservations: [],
+      inspectedNoPatternObservations: [],
     });
     const unresolvedClusters = canonicalizeKnowledgeClustersV1(unresolvedPopulation, {
       clusters: [],
@@ -584,3 +574,16 @@ describe('strict analysis production contracts', () => {
     ).toThrow('ANALYSIS_FIXPOINT_NONTERMINAL');
   });
 });
+
+function completeExecutionDenominator() {
+  return {
+    expectedObligationIds: ['obligation:fixture'],
+    executionReceiptHashes: [`sha256:${'c'.repeat(64)}`],
+    outputHashes: [`sha256:${'d'.repeat(64)}`],
+    denominatorHashes: [`sha256:${'e'.repeat(64)}`],
+    complete: true,
+    truncated: false,
+    continuation: null,
+    omittedObservationIds: [],
+  } as const;
+}

@@ -38,16 +38,19 @@ import { hashCanonicalJson } from '../src/service/project-context/foundation/can
 import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 import {
   assertPrivateCorpusRevisionHandleV1,
+  createPrivateCorpusRevisionCheckpointV1,
   initializePrivateCorpusRevisionV1,
   PrivateCorpusRevisionHandleV1,
   type PrivateCorpusRevisionInitReceiptV1,
   rehydratePrivateCorpusRevisionV1,
+  validatePrivateCorpusRevisionCheckpointV1,
   WorkspaceResolver,
 } from '../src/workspace.js';
 
 const roots: string[] = [];
 const acceptedMigrationBundleSemanticHash = hashCanonicalJson(readAlembicMigrationBundleManifest());
 const configReceiptHash = `sha256:${'c'.repeat(64)}`;
+const runtimeReceiptHash = `sha256:${'d'.repeat(64)}`;
 
 afterEach(() => {
   for (const root of roots.splice(0)) {
@@ -65,6 +68,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -84,7 +88,11 @@ describe('production persistence contracts', () => {
     ) as typeof initialized.handle.initReceipt;
     initialized.runtime.close();
 
-    const rehydrated = await rehydratePrivateCorpusRevisionV1(base, sealedReceipt);
+    const rehydrated = await rehydratePrivateCorpusRevisionV1(
+      base,
+      sealedReceipt,
+      expectedRevisionContext(sealedReceipt)
+    );
     expect(rehydrated.handle.resolver.dataRoot).toBe(expectedDataRoot);
     expect(rehydrated.handle.initReceipt).toEqual(sealedReceipt);
     const reopenedRepositories = createAlembicRepositories(rehydrated.runtime.connection);
@@ -100,6 +108,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-2',
       analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -116,6 +125,57 @@ describe('production persistence contracts', () => {
     next.runtime.close();
   });
 
+  it('rejects an old revision receipt and checkpoint under a new current context', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
+    roots.push(root);
+    const base = privateScopeResolver(root);
+    const initialized = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-current-context',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      runtimeReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const sealedReceipt = cloneReceipt(initialized.handle.initReceipt);
+    const current = expectedRevisionContext(sealedReceipt);
+    const checkpoint = createPrivateCorpusRevisionCheckpointV1(
+      initialized.handle,
+      initialized.runtime,
+      current
+    );
+    expect(validatePrivateCorpusRevisionCheckpointV1(checkpoint, sealedReceipt, current)).toEqual(
+      checkpoint
+    );
+    const other = await initializePrivateCorpusRevisionV1(base, {
+      runId: 'run-current-context',
+      revisionId: 'revision-2',
+      analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
+      configReceiptHash,
+      runtimeReceiptHash,
+      credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
+      acceptedMigrationBundleSemanticHash,
+    });
+    expect(() =>
+      createPrivateCorpusRevisionCheckpointV1(initialized.handle, other.runtime, current)
+    ).toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');
+    other.runtime.close();
+    initialized.runtime.close();
+
+    const replacementContext = {
+      ...current,
+      revisionId: 'revision-2',
+      analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
+    };
+    await expect(
+      rehydratePrivateCorpusRevisionV1(base, sealedReceipt, replacementContext)
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_CURRENT_CONTEXT_MISMATCH');
+    expect(() =>
+      validatePrivateCorpusRevisionCheckpointV1(checkpoint, sealedReceipt, replacementContext)
+    ).toThrow('PRIVATE_CORPUS_REVISION_CURRENT_CONTEXT_MISMATCH');
+  });
+
   it('fails closed on tampered init receipts and mismatched project scope', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
     roots.push(root);
@@ -125,29 +185,42 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
     const sealedReceipt = cloneReceipt(initialized.handle.initReceipt);
     initialized.runtime.close();
 
-    await expect(rehydratePrivateCorpusRevisionV1(base, undefined as never)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_INVALID'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(
+        base,
+        undefined as never,
+        expectedRevisionContext(sealedReceipt)
+      )
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_INVALID');
 
     const tamperedConfig = cloneReceipt(sealedReceipt) as unknown as {
       configReceiptHash: string;
     };
     tamperedConfig.configReceiptHash = `sha256:${'d'.repeat(64)}`;
-    await expect(rehydratePrivateCorpusRevisionV1(base, tamperedConfig as never)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(
+        base,
+        tamperedConfig as never,
+        expectedRevisionContext(sealedReceipt)
+      )
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH');
 
     const tamperedScope = cloneReceipt(sealedReceipt) as unknown as { projectScopeId: string };
     tamperedScope.projectScopeId = 'scope-tampered';
-    await expect(rehydratePrivateCorpusRevisionV1(base, tamperedScope as never)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(
+        base,
+        tamperedScope as never,
+        expectedRevisionContext(sealedReceipt)
+      )
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH');
 
     const tamperedMigration = cloneReceipt(sealedReceipt) as unknown as {
       migrationArtifacts: Array<{ migrationArtifactSha256: string }>;
@@ -158,16 +231,24 @@ describe('production persistence contracts', () => {
     }
     firstArtifact.migrationArtifactSha256 = `sha256:${'e'.repeat(64)}`;
     await expect(
-      rehydratePrivateCorpusRevisionV1(base, tamperedMigration as never)
+      rehydratePrivateCorpusRevisionV1(
+        base,
+        tamperedMigration as never,
+        expectedRevisionContext(sealedReceipt)
+      )
     ).rejects.toThrow('PRIVATE_CORPUS_REVISION_INIT_RECEIPT_HASH_MISMATCH');
 
     const wrongScopeBase = privateScopeResolver(root, {
       projectId: 'project-private-corpus-other',
       projectScopeId: 'scope-private-corpus-other',
     });
-    await expect(rehydratePrivateCorpusRevisionV1(wrongScopeBase, sealedReceipt)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_PROJECT_SCOPE_MISMATCH'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(
+        wrongScopeBase,
+        sealedReceipt,
+        expectedRevisionContext(sealedReceipt)
+      )
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_PROJECT_SCOPE_MISMATCH');
   });
 
   it('fails closed when an initialized revision is missing or symlinked', async () => {
@@ -182,6 +263,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -189,9 +271,13 @@ describe('production persistence contracts', () => {
     const missingLeaf = missing.handle.resolver.dataRoot;
     missing.runtime.close();
     fs.rmSync(missingLeaf, { recursive: true });
-    await expect(rehydratePrivateCorpusRevisionV1(missingBase, missingReceipt)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_LEAF_MISSING'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(
+        missingBase,
+        missingReceipt,
+        expectedRevisionContext(missingReceipt)
+      )
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_LEAF_MISSING');
     expect(fs.existsSync(missingLeaf)).toBe(false);
 
     const symlinkBase = privateScopeResolver(symlinkRoot);
@@ -200,6 +286,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -209,9 +296,13 @@ describe('production persistence contracts', () => {
     symlinked.runtime.close();
     fs.renameSync(symlinkLeaf, movedLeaf);
     fs.symlinkSync(movedLeaf, symlinkLeaf, 'dir');
-    await expect(rehydratePrivateCorpusRevisionV1(symlinkBase, symlinkReceipt)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_CONFINEMENT_FAILED'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(
+        symlinkBase,
+        symlinkReceipt,
+        expectedRevisionContext(symlinkReceipt)
+      )
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_CONFINEMENT_FAILED');
   });
 
   it('fails closed when the existing database migration ledger drifts', async () => {
@@ -223,6 +314,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -232,9 +324,9 @@ describe('production persistence contracts', () => {
       .run('017_recipe_retrieval_profile');
     initialized.runtime.close();
 
-    await expect(rehydratePrivateCorpusRevisionV1(base, sealedReceipt)).rejects.toThrow(
-      'PRIVATE_CORPUS_REVISION_MIGRATION_SET_MISMATCH'
-    );
+    await expect(
+      rehydratePrivateCorpusRevisionV1(base, sealedReceipt, expectedRevisionContext(sealedReceipt))
+    ).rejects.toThrow('PRIVATE_CORPUS_REVISION_MIGRATION_SET_MISMATCH');
   });
 
   it('allocates each private revision under a fixed absent-before-create namespace and revokes the old handle', async () => {
@@ -246,6 +338,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -275,6 +368,7 @@ describe('production persistence contracts', () => {
         revisionId: 'revision-1',
         analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
         configReceiptHash,
+        runtimeReceiptHash,
         credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
         acceptedMigrationBundleSemanticHash,
       })
@@ -285,6 +379,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-2',
       analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -304,7 +399,11 @@ describe('production persistence contracts', () => {
       )
     ).rejects.toThrow('ALEMBIC_DATABASE_ROOT_REVOKED');
     await expect(
-      rehydratePrivateCorpusRevisionV1(base, cloneReceipt(first.handle.initReceipt))
+      rehydratePrivateCorpusRevisionV1(
+        base,
+        cloneReceipt(first.handle.initReceipt),
+        expectedRevisionContext(first.handle.initReceipt)
+      )
     ).rejects.toThrow('ALEMBIC_DATABASE_ROOT_REVOKED');
     expect(first.handle.sealedRootManifestHash).toBe(sealedRootManifestHash);
     expect(() => second.handle.assertResolver(first.handle.resolver)).toThrow(
@@ -322,6 +421,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -344,6 +444,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-2',
       analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -376,6 +477,7 @@ describe('production persistence contracts', () => {
       revisionId: 'revision-1',
       analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
       configReceiptHash,
+      runtimeReceiptHash,
       credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
       acceptedMigrationBundleSemanticHash,
     });
@@ -398,6 +500,7 @@ describe('production persistence contracts', () => {
         revisionId: 'revision-2',
         analysisFixpointHash: `sha256:${'2'.repeat(64)}`,
         configReceiptHash,
+        runtimeReceiptHash,
         credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
         acceptedMigrationBundleSemanticHash,
       });
@@ -452,6 +555,7 @@ describe('production persistence contracts', () => {
         revisionId: 'revision-1',
         analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
         configReceiptHash,
+        runtimeReceiptHash,
         credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
         acceptedMigrationBundleSemanticHash,
       })
@@ -470,6 +574,7 @@ describe('production persistence contracts', () => {
         revisionId: 'revision-1',
         analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
         configReceiptHash,
+        runtimeReceiptHash,
         credentialLocationSymbol: 'env:DEEPSEEK_API_KEY',
         acceptedMigrationBundleSemanticHash,
       })
@@ -1229,6 +1334,16 @@ function cloneReceipt(
   receipt: PrivateCorpusRevisionInitReceiptV1
 ): PrivateCorpusRevisionInitReceiptV1 {
   return JSON.parse(JSON.stringify(receipt)) as PrivateCorpusRevisionInitReceiptV1;
+}
+
+function expectedRevisionContext(receipt: PrivateCorpusRevisionInitReceiptV1) {
+  return {
+    runId: receipt.runId,
+    revisionId: receipt.revisionId,
+    analysisFixpointHash: receipt.analysisFixpointHash,
+    configReceiptHash: receipt.configReceiptHash,
+    runtimeReceiptHash: receipt.runtimeReceiptHash,
+  };
 }
 
 function privateScopeResolver(

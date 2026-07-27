@@ -82,6 +82,10 @@
       "types": "./dist/host-agent-workflows.d.ts",
       "import": "./dist/host-agent-workflows.js"
     },
+    "./production": {
+      "types": "./dist/production.d.ts",
+      "import": "./dist/production.js"
+    },
     "./database": {
       "types": "./dist/database.d.ts",
       "import": "./dist/database.js"
@@ -297,6 +301,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke:public-api": "node scripts/smoke-public-api.mjs",
+    "probe:strict-production": "npm run build && node scripts/strict-production-authority-probe.mjs",
     "check:output-budgets": "node scripts/check-output-budgets.mjs",
     "check:space-edges": "node scripts/check-space-edges.mjs",
     "lint:doctrine": "node scripts/lint-doctrine.mjs",

@@ -141,9 +141,28 @@ describe('strict frozen-fact execution', () => {
         inspectedFileCount: 2,
         continuation: null,
         truncated: false,
+        outputHash: expect.stringMatching(/^sha256:[0-9a-f]{64}$/),
       }),
     ]);
     expect(result.facts).toHaveLength(2);
+    const acceptedProjectContextRefIds = witnessBindings(artifact)
+      .map((binding) => binding.projectContextRef.id)
+      .sort();
+    expect(result.facts.map((fact) => fact.canonicalSubjectRef).sort()).toEqual(
+      acceptedProjectContextRefIds
+    );
+    expect(result.facts.every((fact) => fact.primaryScale === 'file')).toBe(true);
+    expect(
+      result.facts.every(
+        (fact) =>
+          fact.witnesses[0]?.kind === 'direct' &&
+          fact.witnesses[0].projectContextRefId === fact.canonicalSubjectRef &&
+          fact.witnesses[0].projectContextRefHash ===
+            witnessBindings(artifact).find(
+              (binding) => binding.projectContextRef.id === fact.canonicalSubjectRef
+            )?.projectContextRefHash
+      )
+    ).toBe(true);
     expect(
       result.facts
         .map((fact) => ({

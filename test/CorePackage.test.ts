@@ -73,6 +73,8 @@ describe('Core package baseline', () => {
   it('exports strict fact execution, admission authority, and snapshot identity from stable facades', async () => {
     const hostAgentWorkflows = await import('../src/host-agent-workflows.js');
     const knowledge = await import('../src/knowledge.js');
+    const production = await import('../src/production.js');
+    const workspace = await import('../src/workspace.js');
 
     expect(hostAgentWorkflows.executeStrictFactScheduleV1).toBeInstanceOf(Function);
     expect(hostAgentWorkflows.createAstFactQueryBackendV1).toBeInstanceOf(Function);
@@ -85,5 +87,10 @@ describe('Core package baseline', () => {
     expect(knowledge.createStrictG2ReceiptV1).toBeInstanceOf(Function);
     expect(knowledge.createStrictRecipePersistedPayloadV1).toBeInstanceOf(Function);
     expect(knowledge.parseStrictPublicationSnapshotIdV1).toBeInstanceOf(Function);
+    expect(production.createStrictProductionAuthorityReceiptV1).toBeInstanceOf(Function);
+    expect(production.createKnowledgeDispositionReviewV1).toBeInstanceOf(Function);
+    expect(production.createInvestigatedEmptyDecisionV1).toBeInstanceOf(Function);
+    expect(workspace.validatePrivateCorpusRevisionInitReceiptV1).toBeInstanceOf(Function);
+    expect(workspace.validatePrivateCorpusRevisionCheckpointV1).toBeInstanceOf(Function);
   });
 });

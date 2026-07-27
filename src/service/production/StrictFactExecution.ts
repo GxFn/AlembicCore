@@ -42,6 +42,17 @@ import {
   type FactRecordV1,
   validateFactRecordGraphV1,
 } from './StrictAnalysisContracts.js';
+import {
+  assertFactQueryExecutionReceiptV1,
+  type FactQueryExecutionReceiptV1,
+  type StrictFactFileExecutionV1,
+} from './StrictFactExecutionReceipt.js';
+
+export {
+  assertFactQueryExecutionReceiptV1,
+  type FactQueryExecutionReceiptV1,
+  type StrictFactFileExecutionV1,
+} from './StrictFactExecutionReceipt.js';
 
 export type StrictFactSubjectSelectorV1 =
   | {
@@ -168,54 +179,6 @@ export interface StrictFactBackendRegistryV1 {
   readonly schemaVersion: 1;
   readonly backends: readonly StrictFactQueryBackendV1[];
   readonly registryHash: string;
-}
-
-export interface StrictFactFileExecutionV1 {
-  readonly repoId: string;
-  readonly relativePath: string;
-  readonly blobHash: string;
-  readonly status: StrictFactBackendFileResultV1['status'];
-  readonly reasonCode: string;
-  readonly truncated: boolean;
-  readonly continuation: string | null;
-  readonly witnessBindingHash: string | null;
-  readonly evidenceEntryId: string | null;
-  readonly projectContextRefId: string | null;
-  readonly stagedFactIds: readonly string[];
-  readonly discardedFactIds: readonly string[];
-  readonly emittedFactIds: readonly string[];
-  readonly executionHash: string;
-}
-
-export interface FactQueryExecutionReceiptV1 {
-  readonly schemaVersion: 1;
-  readonly terminalReceiptId: string;
-  readonly obligationId: string;
-  readonly factFamilyId: string;
-  readonly capabilityId: string;
-  readonly canonicalSubjectRef: string;
-  readonly analysisScale: FactHarvestObligationV1['analysisScale'];
-  readonly denominator: 'complete-frozen-subject';
-  readonly sourceRevisionVectorHash: string;
-  readonly backendProducer: string;
-  readonly backendManifestHash: string;
-  readonly backendLoadReceiptHash: string;
-  readonly queryPackHash: string;
-  readonly harvestKey: string;
-  readonly harvestReceiptHash: string;
-  readonly expectedFileCount: number;
-  readonly inspectedFileCount: number;
-  readonly denominatorFileIds: readonly string[];
-  readonly denominatorHash: string;
-  readonly witnessBindingHash: string;
-  readonly fileExecutions: readonly StrictFactFileExecutionV1[];
-  readonly derivedFactIds: readonly string[];
-  readonly emittedFactIds: readonly string[];
-  readonly disposition: 'matched' | 'inspected-no-pattern' | 'failed' | 'unknown';
-  readonly reasonCode: string;
-  readonly truncated: boolean;
-  readonly continuation: string | null;
-  readonly receiptHash: string;
 }
 
 export interface CodeFactGenerationManifestV1 {
@@ -1176,7 +1139,9 @@ function createStrictDirectFacts(
   candidates: readonly StrictFactBackendCandidateV1[],
   contentText: string
 ): FactRecordV1[] {
-  const canonicalFileSubjectRef = `file:${file.repoId}:${file.relativePath}`;
+  // 已验收的 ProjectContextRef.id 是本 revision 的 canonical subject；不得在 Main/Core
+  // 交界重新拼接一个缺 blob identity 的近似字符串。
+  const canonicalFileSubjectRef = binding.projectContextRefId;
   const facts = candidates.map((candidate) => {
     assertCandidateRange(candidate, contentText);
     return createFactRecordV1({
@@ -1193,6 +1158,7 @@ function createStrictDirectFacts(
           evidenceContentHash: binding.evidenceContentHash,
           sourceRevisionVectorHash: input.artifact.sourceVectorHash,
           projectContextRefId: binding.projectContextRefId,
+          projectContextRefHash: binding.projectContextRefHash,
           canonicalSubjectRef: canonicalFileSubjectRef,
           anchor: {
             relativePath: file.relativePath,
@@ -1299,23 +1265,9 @@ export function assertCodeFactGenerationManifestV1(
 
 function assertFactExecutionReceipts(receipts: readonly FactQueryExecutionReceiptV1[]): void {
   for (const receipt of receipts) {
-    for (const execution of receipt.fileExecutions) {
-      const { executionHash, ...executionSemantic } = execution;
-      if (
-        hashCanonicalJson(executionSemantic) !== executionHash ||
-        !sameStrings(
-          execution.stagedFactIds,
-          [...execution.emittedFactIds, ...execution.discardedFactIds].sort()
-        )
-      ) {
-        throw new Error('STRICT_FACT_GENERATION_MANIFEST_INVALID');
-      }
-    }
-    const { terminalReceiptId, receiptHash, ...receiptSemantic } = receipt;
-    if (
-      hashCanonicalJson(receiptSemantic) !== receiptHash ||
-      terminalReceiptId !== `fact-execution:${receiptHash.slice(7, 31)}`
-    ) {
+    try {
+      assertFactQueryExecutionReceiptV1(receipt);
+    } catch {
       throw new Error('STRICT_FACT_GENERATION_MANIFEST_INVALID');
     }
   }
@@ -1892,9 +1844,20 @@ function createExecutionReceipt(input: {
     truncated: input.fileExecutions.some((execution) => execution.truncated),
     continuation: continuations.length > 0 ? JSON.stringify(continuations) : null,
   };
-  const receiptHash = hashCanonicalJson(semantic);
+  const outputHash = hashCanonicalJson({
+    obligationId: semantic.obligationId,
+    denominatorHash: semantic.denominatorHash,
+    fileExecutionHashes: semantic.fileExecutions.map((execution) => execution.executionHash),
+    derivedFactIds: semantic.derivedFactIds,
+    emittedFactIds: semantic.emittedFactIds,
+    disposition: semantic.disposition,
+    truncated: semantic.truncated,
+    continuation: semantic.continuation,
+  });
+  const receiptHash = hashCanonicalJson({ ...semantic, outputHash });
   return freezeDeep({
     ...semantic,
+    outputHash,
     terminalReceiptId: `fact-execution:${receiptHash.slice(7, 31)}`,
     receiptHash,
   });

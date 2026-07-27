@@ -1,13 +1,19 @@
 export {
+  assertPrivateCorpusRevisionExpectedContextV1,
   assertPrivateCorpusRevisionHandleV1,
+  createPrivateCorpusRevisionCheckpointV1,
   type InitializedPrivateCorpusRevisionV1,
   type InitializePrivateCorpusRevisionInputV1,
   initializePrivateCorpusRevisionV1,
   openPrivateCorpusRevisionDatabaseV1,
+  type PrivateCorpusRevisionCheckpointReceiptV1,
+  type PrivateCorpusRevisionExpectedContextV1,
   PrivateCorpusRevisionHandleV1,
   type PrivateCorpusRevisionInitReceiptV1,
   type RehydratedPrivateCorpusRevisionV1,
   rehydratePrivateCorpusRevisionV1,
+  validatePrivateCorpusRevisionCheckpointV1,
+  validatePrivateCorpusRevisionInitReceiptV1,
 } from './service/production/ProductionPersistenceContracts.js';
 export {
   type AlembicFolderNames,
