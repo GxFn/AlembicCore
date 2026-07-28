@@ -3,9 +3,11 @@ import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 import {
   assertSemanticDispositionReviewDurableAttestationV3,
   assertSemanticDispositionReviewDurableAttestationV4,
+  assertSemanticDispositionReviewDurableAttestationV5,
   createProducerZeroDispositionAdmissionAuthorityV1,
   type SemanticDispositionReviewDurableAttestationV3,
   type SemanticDispositionReviewDurableAttestationV4,
+  type SemanticDispositionReviewDurableAttestationV5,
   type SemanticDispositionReviewTrustPolicyV3,
 } from './DurableSemanticDispositionReviewAuthority.js';
 import {
@@ -25,6 +27,7 @@ import {
 import type {
   SemanticDispositionReviewExecutionV2,
   SemanticDispositionReviewExecutionV3,
+  SemanticDispositionReviewExecutionV4,
 } from './SemanticDispositionReviewExecution.js';
 import {
   type AnalysisFixpointReceiptV1,
@@ -66,11 +69,13 @@ import {
 
 type SemanticDispositionReviewDurableAttestation =
   | SemanticDispositionReviewDurableAttestationV3
-  | SemanticDispositionReviewDurableAttestationV4;
+  | SemanticDispositionReviewDurableAttestationV4
+  | SemanticDispositionReviewDurableAttestationV5;
 
 type VerifiedSemanticDispositionReviewExecution =
   | SemanticDispositionReviewExecutionV2
-  | SemanticDispositionReviewExecutionV3;
+  | SemanticDispositionReviewExecutionV3
+  | SemanticDispositionReviewExecutionV4;
 
 export interface StrictProductionResourceConservationV1 {
   readonly candidateAttemptCap: number;
@@ -892,11 +897,18 @@ function requireDurableSemanticDispositionReviewExecution(
       attestation,
       expectedTrustPolicy: trustPolicy,
     });
-  } else {
+  } else if (attestation.schemaVersion === 4) {
     assertSemanticDispositionReviewDurableAttestationV4({
       attestation,
       expectedTrustPolicy: trustPolicy,
     });
+  } else if (attestation.schemaVersion === 5) {
+    assertSemanticDispositionReviewDurableAttestationV5({
+      attestation,
+      expectedTrustPolicy: trustPolicy,
+    });
+  } else {
+    fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_ATTESTATION_VERSION_INVALID');
   }
   return attestation.execution;
 }

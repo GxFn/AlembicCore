@@ -23,11 +23,14 @@ import {
 import { resetDiscovererRegistry } from './core/discovery/index.js';
 import {
   consumeMainSemanticDispositionReviewDurableAttestationV4,
+  consumeMainSemanticDispositionReviewDurableAttestationV5,
   type SemanticDispositionReviewDurableAttestationV4,
+  type SemanticDispositionReviewDurableAttestationV5,
   type SemanticDispositionReviewTrustPolicyV3,
 } from './service/production/DurableSemanticDispositionReviewAuthority.js';
 import type {
   SemanticDispositionReviewEvidenceAuthorityV3,
+  SemanticDispositionReviewEvidenceAuthorityV4,
   SemanticDispositionReviewRequestV1,
 } from './service/production/SemanticDispositionReviewExecution.js';
 import type { KnowledgeDispositionReviewV1 } from './service/production/StrictAnalysisContracts.js';
@@ -206,4 +209,70 @@ export function consumeTwoScaleSharedHarvestSemanticReviewFixtureV1(
     throw new Error('SHARED_HARVEST_FIXTURE_CONTRACT_MISMATCH');
   }
   return Object.freeze({ authority, review });
+}
+
+/**
+ * Agent/Main 集成可复用的跨 harvest public consumer。它只消费 production V5 verifier，
+ * 不自行 mint/group receipt；fixture 必须携带一个真实物理 evidence root 的完整 schedule。
+ */
+export interface CrossHarvestSemanticReviewFixtureV1 {
+  readonly semanticRequest: SemanticDispositionReviewRequestV1;
+  readonly attestation: SemanticDispositionReviewDurableAttestationV5;
+  readonly trustPolicy: SemanticDispositionReviewTrustPolicyV3;
+}
+
+export interface CrossHarvestSemanticReviewFixtureResultV1 {
+  readonly authority: SemanticDispositionReviewEvidenceAuthorityV4;
+  readonly review: KnowledgeDispositionReviewV1;
+  readonly evidenceRootCount: 1;
+  readonly harvestGroupCount: number;
+  readonly executionReceiptCount: number;
+}
+
+export function consumeCrossHarvestSemanticReviewFixtureV1(
+  fixture: CrossHarvestSemanticReviewFixtureV1
+): CrossHarvestSemanticReviewFixtureResultV1 {
+  const review = consumeMainSemanticDispositionReviewDurableAttestationV5({
+    attestation: fixture.attestation,
+    expectedSemanticRequest: fixture.semanticRequest,
+    expectedTrustPolicy: fixture.trustPolicy,
+  });
+  const authorities = fixture.attestation.execution.request.evidenceAuthorities;
+  const authority = authorities[0];
+  if (!authority || authorities.length !== 1) {
+    throw new Error('CROSS_HARVEST_FIXTURE_EXACT_ONE_EVIDENCE_ROOT_REQUIRED');
+  }
+  const groups = authority.harvestGroups;
+  const bindings = groups.flatMap((group) => group.executionReceiptBindings);
+  const expectedReceiptHashes = fixture.semanticRequest.executionReceipts
+    .map((receipt) => receipt.receiptHash)
+    .sort();
+  const actualReceiptHashes = bindings.map((binding) => binding.executionReceiptHash).sort();
+  if (
+    groups.length < 2 ||
+    new Set(groups.map((group) => group.harvestKey)).size !== groups.length ||
+    new Set(groups.map((group) => group.harvestReceiptHash)).size !== groups.length ||
+    !groups.some(
+      (group) =>
+        new Set(group.executionReceiptBindings.map((binding) => binding.analysisScale)).size >= 2
+    ) ||
+    bindings.length !== fixture.semanticRequest.executionReceipts.length ||
+    new Set(bindings.map((binding) => binding.obligationId)).size !== bindings.length ||
+    new Set(bindings.map((binding) => binding.executionReceiptHash)).size !== bindings.length ||
+    JSON.stringify(actualReceiptHashes) !== JSON.stringify(expectedReceiptHashes) ||
+    fixture.attestation.evidenceLoadReceipts.length !== 1 ||
+    fixture.attestation.evidenceLoadReceipts[0]?.evidenceAuthorityHash !==
+      authority.authorityHash ||
+    fixture.attestation.evidenceLoadReceipts[0]?.witnessBindingHash !==
+      authority.witnessBinding.bindingHash
+  ) {
+    throw new Error('CROSS_HARVEST_FIXTURE_CONTRACT_MISMATCH');
+  }
+  return Object.freeze({
+    authority,
+    review,
+    evidenceRootCount: 1 as const,
+    harvestGroupCount: groups.length,
+    executionReceiptCount: bindings.length,
+  });
 }

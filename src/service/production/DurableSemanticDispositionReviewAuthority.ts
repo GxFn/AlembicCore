@@ -9,25 +9,34 @@ import type { StrictAcceptedCorpusInspectionV1 } from './ProductionPersistenceCo
 import {
   assertSemanticDispositionReviewExecutionStructureV2ForDurableTrust,
   assertSemanticDispositionReviewExecutionStructureV3ForDurableTrust,
+  assertSemanticDispositionReviewExecutionStructureV4ForDurableTrust,
   assertSemanticDispositionReviewRequestV1,
   createAgentSemanticDispositionReviewHostGatewayV2,
   createAgentSemanticDispositionReviewHostGatewayV3,
+  createAgentSemanticDispositionReviewHostGatewayV4,
   createAgentSemanticDispositionReviewRequestV2,
   createAgentSemanticDispositionReviewRequestV3,
+  createAgentSemanticDispositionReviewRequestV4,
   createProducerZeroDispositionAdmissionAuthorityFromVerifiedExecutionV1,
   createSemanticDispositionReviewEvidenceAuthorityV2,
   createSemanticDispositionReviewEvidenceAuthorityV3,
+  createSemanticDispositionReviewEvidenceAuthorityV4,
   createSemanticDispositionReviewExpectedExecutionReceiptBindingsV3,
+  createSemanticDispositionReviewExpectedHarvestGroupsV4,
   type ProducerZeroDispositionAdmissionAuthorityV1,
   type SemanticDispositionReviewEvidenceAuthorityV2,
   type SemanticDispositionReviewEvidenceAuthorityV3,
+  type SemanticDispositionReviewEvidenceAuthorityV4,
   type SemanticDispositionReviewEvidenceV1,
   type SemanticDispositionReviewExecutionReceiptBindingV3,
   type SemanticDispositionReviewExecutionV2,
   type SemanticDispositionReviewExecutionV3,
+  type SemanticDispositionReviewExecutionV4,
   type SemanticDispositionReviewerModelLoadReceiptV1,
+  type SemanticDispositionReviewHarvestGroupV4,
   type SemanticDispositionReviewHostCallV2,
   type SemanticDispositionReviewHostCallV3,
+  type SemanticDispositionReviewHostCallV4,
   type SemanticDispositionReviewHostResultV2,
   type SemanticDispositionReviewRequestV1,
 } from './SemanticDispositionReviewExecution.js';
@@ -118,6 +127,37 @@ export interface SemanticDispositionReviewDurableAttestationV4 {
   readonly attestationHash: string;
 }
 
+export interface SemanticDispositionReviewEvidenceStoreLoadReceiptV5 {
+  readonly schemaVersion: 5;
+  readonly trustRootId: string;
+  readonly evidenceStoreId: string;
+  readonly evidenceStoreConfigHash: string;
+  readonly loadOperationId: string;
+  readonly evidenceEntryId: string;
+  readonly evidenceSessionId: string;
+  readonly evidenceEntryHash: string;
+  readonly evidenceLedgerSnapshotHash: string;
+  readonly witnessBindingHash: string;
+  readonly projectContextRefId: string;
+  readonly projectContextRefHash: string;
+  readonly relativePath: string;
+  readonly blobHash: string;
+  readonly harvestGroups: readonly SemanticDispositionReviewHarvestGroupV4[];
+  readonly evidenceAuthorityHash: string;
+  readonly loadReceiptHash: string;
+}
+
+export interface SemanticDispositionReviewDurableAttestationV5 {
+  readonly schemaVersion: 5;
+  readonly trustPolicyHash: string;
+  readonly execution: SemanticDispositionReviewExecutionV4;
+  readonly evidenceLoadReceipts: readonly SemanticDispositionReviewEvidenceStoreLoadReceiptV5[];
+  readonly attestedPayloadHash: string;
+  readonly signatureAlgorithm: typeof SEMANTIC_DISPOSITION_REVIEW_DURABLE_ATTESTATION_ALGORITHM_V3;
+  readonly signatureBase64: string;
+  readonly attestationHash: string;
+}
+
 export interface SemanticDispositionReviewEvidenceStoreLoadCallV3 {
   readonly semanticRequest: SemanticDispositionReviewRequestV1;
   readonly evidence: SemanticDispositionReviewEvidenceV1;
@@ -163,6 +203,28 @@ export interface SemanticDispositionReviewEvidenceStoreAdapterV4 {
   ): Promise<SemanticDispositionReviewEvidenceStoreLoadResultV4>;
 }
 
+export interface SemanticDispositionReviewEvidenceStoreLoadCallV5 {
+  readonly semanticRequest: SemanticDispositionReviewRequestV1;
+  readonly evidence: SemanticDispositionReviewEvidenceV1;
+  readonly expectedHarvestGroups: readonly SemanticDispositionReviewHarvestGroupV4[];
+}
+
+export interface SemanticDispositionReviewEvidenceStoreLoadResultV5 {
+  readonly loadOperationId: string;
+  readonly evidenceEntry: SemanticDispositionReviewEvidenceAuthorityV4['evidenceEntry'];
+  readonly evidenceLedgerSnapshot: SemanticDispositionReviewEvidenceAuthorityV4['evidenceLedgerSnapshot'];
+  readonly witnessBinding: SemanticDispositionReviewEvidenceAuthorityV4['witnessBinding'];
+  readonly semanticRole: string;
+}
+
+export interface SemanticDispositionReviewEvidenceStoreAdapterV5 {
+  readonly evidenceStoreId: string;
+  readonly evidenceStoreConfigHash: string;
+  load(
+    call: SemanticDispositionReviewEvidenceStoreLoadCallV5
+  ): Promise<SemanticDispositionReviewEvidenceStoreLoadResultV5>;
+}
+
 export interface SemanticDispositionReviewAgentReviewerHostAdapterV3 {
   readonly reviewerModelLoadReceipt: SemanticDispositionReviewerModelLoadReceiptV1;
   invoke(call: SemanticDispositionReviewHostCallV2): Promise<SemanticDispositionReviewHostResultV2>;
@@ -171,6 +233,11 @@ export interface SemanticDispositionReviewAgentReviewerHostAdapterV3 {
 export interface SemanticDispositionReviewAgentReviewerHostAdapterV4 {
   readonly reviewerModelLoadReceipt: SemanticDispositionReviewerModelLoadReceiptV1;
   invoke(call: SemanticDispositionReviewHostCallV3): Promise<SemanticDispositionReviewHostResultV2>;
+}
+
+export interface SemanticDispositionReviewAgentReviewerHostAdapterV5 {
+  readonly reviewerModelLoadReceipt: SemanticDispositionReviewerModelLoadReceiptV1;
+  invoke(call: SemanticDispositionReviewHostCallV4): Promise<SemanticDispositionReviewHostResultV2>;
 }
 
 export interface SemanticDispositionReviewDurableGatewayV3 {
@@ -185,6 +252,13 @@ export interface SemanticDispositionReviewDurableGatewayV4 {
   execute(
     semanticRequest: SemanticDispositionReviewRequestV1
   ): Promise<SemanticDispositionReviewDurableAttestationV4>;
+}
+
+export interface SemanticDispositionReviewDurableGatewayV5 {
+  readonly trustPolicy: SemanticDispositionReviewTrustPolicyV3;
+  execute(
+    semanticRequest: SemanticDispositionReviewRequestV1
+  ): Promise<SemanticDispositionReviewDurableAttestationV5>;
 }
 
 /**
@@ -363,6 +437,109 @@ export function createAgentSemanticDispositionReviewDurableGatewayV4(input: {
       });
       const execution = await hostGateway.execute(request);
       return createDurableAttestationV4(
+        input.privateKey,
+        trustPolicy,
+        execution,
+        evidenceLoadReceipts
+      );
+    },
+  });
+}
+
+/**
+ * V5 将完整 receipt universe 按 Core-authored canonical harvest groups 绑定到一次物理
+ * Ledger load。Agent/store 只能认证该 root，不能重新选择、拆分或合并 groups。
+ */
+export function createAgentSemanticDispositionReviewDurableGatewayV5(input: {
+  readonly trustRootId: string;
+  readonly keyId: string;
+  readonly privateKey: KeyObject;
+  readonly reviewerHost: SemanticDispositionReviewAgentReviewerHostAdapterV5;
+  readonly evidenceStore: SemanticDispositionReviewEvidenceStoreAdapterV5;
+}): SemanticDispositionReviewDurableGatewayV5 {
+  requireText(input.trustRootId, 'SEMANTIC_DISPOSITION_REVIEW_TRUST_ROOT_ID_REQUIRED');
+  requireText(input.keyId, 'SEMANTIC_DISPOSITION_REVIEW_TRUST_KEY_ID_REQUIRED');
+  requireText(
+    input.evidenceStore.evidenceStoreId,
+    'SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_STORE_ID_REQUIRED'
+  );
+  requireSha256(
+    input.evidenceStore.evidenceStoreConfigHash,
+    'SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_STORE_CONFIG_INVALID'
+  );
+  if (input.privateKey.type !== 'private' || input.privateKey.asymmetricKeyType !== 'ed25519') {
+    fail('SEMANTIC_DISPOSITION_REVIEW_PRIVATE_KEY_INVALID');
+  }
+  if (typeof input.evidenceStore.load !== 'function') {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_STORE_ADAPTER_INVALID');
+  }
+  const trustPolicy = createTrustPolicyV3(input);
+  const hostGateway = createAgentSemanticDispositionReviewHostGatewayV4(input.reviewerHost);
+  return freezeDeep({
+    trustPolicy,
+    execute: async (semanticRequest: SemanticDispositionReviewRequestV1) => {
+      assertSemanticDispositionReviewRequestV1(semanticRequest);
+      const receiptsByHash = new Map(
+        semanticRequest.executionReceipts.map((receipt) => [receipt.receiptHash, receipt] as const)
+      );
+      const evidenceAuthorities: SemanticDispositionReviewEvidenceAuthorityV4[] = [];
+      const evidenceLoadReceipts: SemanticDispositionReviewEvidenceStoreLoadReceiptV5[] = [];
+      const loadOperationIds = new Set<string>();
+      for (const evidence of semanticRequest.evidence) {
+        const expectedHarvestGroups = createSemanticDispositionReviewExpectedHarvestGroupsV4({
+          semanticRequest,
+          evidence,
+        });
+        const loaded = await input.evidenceStore.load(
+          freezeDeep({ semanticRequest, evidence, expectedHarvestGroups })
+        );
+        requireText(
+          loaded.loadOperationId,
+          'SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_ID_REQUIRED'
+        );
+        if (loadOperationIds.has(loaded.loadOperationId)) {
+          fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_REUSED');
+        }
+        loadOperationIds.add(loaded.loadOperationId);
+        if (
+          loaded.evidenceEntry.id !== evidence.evidenceEntryId ||
+          loaded.evidenceEntry.sessionId !== evidence.evidenceSessionId ||
+          loaded.semanticRole !== evidence.semanticRole
+        ) {
+          fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_MISMATCH');
+        }
+        const executionReceipts = expectedHarvestGroups.flatMap((group) =>
+          group.executionReceiptBindings.map((binding) => {
+            const receipt = receiptsByHash.get(binding.executionReceiptHash);
+            if (!receipt) {
+              fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_EXECUTION_SET_INVALID');
+            }
+            return receipt;
+          })
+        );
+        const authority = createSemanticDispositionReviewEvidenceAuthorityV4({
+          evidenceEntry: loaded.evidenceEntry,
+          evidenceLedgerSnapshot: loaded.evidenceLedgerSnapshot,
+          witnessBinding: loaded.witnessBinding,
+          executionReceipts,
+          semanticRole: loaded.semanticRole,
+        });
+        if (
+          hashCanonicalJson(authority.harvestGroups) !== hashCanonicalJson(expectedHarvestGroups)
+        ) {
+          fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_EXECUTION_SET_INVALID');
+        }
+        evidenceAuthorities.push(authority);
+        evidenceLoadReceipts.push(
+          createEvidenceStoreLoadReceiptV5(trustPolicy, loaded.loadOperationId, authority)
+        );
+      }
+      const request = createAgentSemanticDispositionReviewRequestV4({
+        semanticRequest,
+        evidenceAuthorities,
+      });
+      const execution = await hostGateway.execute(request);
+      return createDurableAttestationV5(
         input.privateKey,
         trustPolicy,
         execution,
@@ -585,10 +762,95 @@ export function consumeMainSemanticDispositionReviewDurableAttestationV4(input: 
   });
 }
 
+export function assertSemanticDispositionReviewDurableAttestationV5(input: {
+  readonly attestation: SemanticDispositionReviewDurableAttestationV5;
+  readonly expectedTrustPolicy: SemanticDispositionReviewTrustPolicyV3;
+}): void {
+  assertSemanticDispositionReviewTrustPolicyV3(input.expectedTrustPolicy);
+  const attestation = input.attestation;
+  if (
+    attestation?.schemaVersion !== 5 ||
+    attestation.trustPolicyHash !== input.expectedTrustPolicy.policyHash
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_TRUST_POLICY_MISMATCH');
+  }
+  assertSemanticDispositionReviewExecutionStructureV4ForDurableTrust(attestation.execution);
+  if (
+    attestation.execution.request.semanticRequest.calibration.reviewerModelLoadReceipt
+      .loadReceiptHash !== input.expectedTrustPolicy.reviewerModelLoadReceiptHash
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_TRUST_POLICY_MISMATCH');
+  }
+  assertEvidenceStoreLoadReceiptsV5(
+    attestation.evidenceLoadReceipts,
+    attestation.execution.request.evidenceAuthorities,
+    attestation.execution.request.semanticRequest,
+    input.expectedTrustPolicy
+  );
+  const signedSemantic = durableAttestationSignedSemanticV5(
+    attestation.trustPolicyHash,
+    attestation.execution,
+    attestation.evidenceLoadReceipts
+  );
+  const attestedPayloadHash = hashCanonicalJson(signedSemantic);
+  const attestationWithoutHash = {
+    ...signedSemantic,
+    attestedPayloadHash,
+    signatureAlgorithm: 'Ed25519' as const,
+    signatureBase64: attestation.signatureBase64,
+  };
+  if (
+    attestation.signatureAlgorithm !==
+      SEMANTIC_DISPOSITION_REVIEW_DURABLE_ATTESTATION_ALGORITHM_V3 ||
+    attestation.attestedPayloadHash !== attestedPayloadHash ||
+    attestation.attestationHash !== hashCanonicalJson(attestationWithoutHash) ||
+    !verifyAttestationSignatureV3(
+      input.expectedTrustPolicy,
+      attestedPayloadHash,
+      attestation.signatureBase64
+    )
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_DURABLE_ATTESTATION_V5_INVALID');
+  }
+}
+
+export function consumeMainSemanticDispositionReviewDurableAttestationV5(input: {
+  readonly attestation: SemanticDispositionReviewDurableAttestationV5;
+  readonly expectedSemanticRequest: SemanticDispositionReviewRequestV1;
+  readonly expectedTrustPolicy: SemanticDispositionReviewTrustPolicyV3;
+}) {
+  assertSemanticDispositionReviewDurableAttestationV5(input);
+  assertSemanticDispositionReviewRequestV1(input.expectedSemanticRequest);
+  const execution = input.attestation.execution;
+  const request = execution.request.semanticRequest;
+  if (
+    request.requestHash !== input.expectedSemanticRequest.requestHash ||
+    hashCanonicalJson(request) !== hashCanonicalJson(input.expectedSemanticRequest)
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_MISMATCH');
+  }
+  return createKnowledgeDispositionReviewV1({
+    reviewKind: request.reviewKind,
+    currentAnalysisFixpointHash: request.currentAnalysisFixpointHash,
+    populationHash: request.populationHash,
+    proposedDispositionHash: request.proposedDispositionHash,
+    executionReceipts: request.executionReceipts,
+    finalExpandedSchedule: request.finalExpandedSchedule,
+    terminalObligations: request.context.analysisFixpoint.terminalObligations,
+    producer: request.producer,
+    reviewer: execution.reviewer,
+    calibrationReceiptHash: request.calibration.calibrationReceiptHash,
+    verdict: execution.decision.verdict,
+    reasonCode: execution.decision.reasonCode,
+    semanticExecutionResultHash: execution.executionHash,
+  });
+}
+
 export function createProducerZeroDispositionAdmissionAuthorityV1(input: {
   readonly attestation:
     | SemanticDispositionReviewDurableAttestationV3
-    | SemanticDispositionReviewDurableAttestationV4;
+    | SemanticDispositionReviewDurableAttestationV4
+    | SemanticDispositionReviewDurableAttestationV5;
   readonly expectedTrustPolicy: SemanticDispositionReviewTrustPolicyV3;
   readonly expressionSet: HypothesisExpressionSetReceiptV1;
   readonly corpusInspection: StrictAcceptedCorpusInspectionV1;
@@ -598,11 +860,18 @@ export function createProducerZeroDispositionAdmissionAuthorityV1(input: {
       attestation: input.attestation,
       expectedTrustPolicy: input.expectedTrustPolicy,
     });
-  } else {
+  } else if (input.attestation.schemaVersion === 4) {
     assertSemanticDispositionReviewDurableAttestationV4({
       attestation: input.attestation,
       expectedTrustPolicy: input.expectedTrustPolicy,
     });
+  } else if (input.attestation.schemaVersion === 5) {
+    assertSemanticDispositionReviewDurableAttestationV5({
+      attestation: input.attestation,
+      expectedTrustPolicy: input.expectedTrustPolicy,
+    });
+  } else {
+    fail('SEMANTIC_DISPOSITION_REVIEW_DURABLE_ATTESTATION_VERSION_INVALID');
   }
   return createProducerZeroDispositionAdmissionAuthorityFromVerifiedExecutionV1({
     execution: input.attestation.execution,
@@ -706,6 +975,32 @@ function createEvidenceStoreLoadReceiptV4(
   return freezeDeep({ ...semantic, loadReceiptHash: hashCanonicalJson(semantic) });
 }
 
+function createEvidenceStoreLoadReceiptV5(
+  policy: SemanticDispositionReviewTrustPolicyV3,
+  loadOperationId: string,
+  authority: SemanticDispositionReviewEvidenceAuthorityV4
+): SemanticDispositionReviewEvidenceStoreLoadReceiptV5 {
+  const semantic = {
+    schemaVersion: 5 as const,
+    trustRootId: policy.trustRootId,
+    evidenceStoreId: policy.evidenceStoreId,
+    evidenceStoreConfigHash: policy.evidenceStoreConfigHash,
+    loadOperationId: loadOperationId.trim(),
+    evidenceEntryId: authority.evidenceEntry.id,
+    evidenceSessionId: authority.evidenceEntry.sessionId,
+    evidenceEntryHash: hashCanonicalJson(authority.evidenceEntry),
+    evidenceLedgerSnapshotHash: authority.evidenceLedgerSnapshot.snapshotHash,
+    witnessBindingHash: authority.witnessBinding.bindingHash,
+    projectContextRefId: authority.witnessBinding.projectContextRefId,
+    projectContextRefHash: authority.witnessBinding.projectContextRefHash,
+    relativePath: authority.witnessBinding.relativePath,
+    blobHash: authority.witnessBinding.blobHash,
+    harvestGroups: authority.harvestGroups,
+    evidenceAuthorityHash: authority.authorityHash,
+  };
+  return freezeDeep({ ...semantic, loadReceiptHash: hashCanonicalJson(semantic) });
+}
+
 function createDurableAttestationV3(
   privateKey: KeyObject,
   trustPolicy: SemanticDispositionReviewTrustPolicyV3,
@@ -774,6 +1069,40 @@ function createDurableAttestationV4(
   return attestation;
 }
 
+function createDurableAttestationV5(
+  privateKey: KeyObject,
+  trustPolicy: SemanticDispositionReviewTrustPolicyV3,
+  execution: SemanticDispositionReviewExecutionV4,
+  evidenceLoadReceipts: readonly SemanticDispositionReviewEvidenceStoreLoadReceiptV5[]
+): SemanticDispositionReviewDurableAttestationV5 {
+  const signedSemantic = durableAttestationSignedSemanticV5(
+    trustPolicy.policyHash,
+    execution,
+    evidenceLoadReceipts
+  );
+  const attestedPayloadHash = hashCanonicalJson(signedSemantic);
+  const signatureBase64 = signDetached(
+    null,
+    Buffer.from(attestedPayloadHash, 'utf8'),
+    privateKey
+  ).toString('base64');
+  const semantic = {
+    ...signedSemantic,
+    attestedPayloadHash,
+    signatureAlgorithm: 'Ed25519' as const,
+    signatureBase64,
+  };
+  const attestation = freezeDeep({
+    ...semantic,
+    attestationHash: hashCanonicalJson(semantic),
+  });
+  assertSemanticDispositionReviewDurableAttestationV5({
+    attestation,
+    expectedTrustPolicy: trustPolicy,
+  });
+  return attestation;
+}
+
 function durableAttestationSignedSemantic(
   trustPolicyHash: string,
   execution: SemanticDispositionReviewExecutionV2,
@@ -794,6 +1123,19 @@ function durableAttestationSignedSemanticV4(
 ) {
   return {
     schemaVersion: 4 as const,
+    trustPolicyHash,
+    execution,
+    evidenceLoadReceipts: [...evidenceLoadReceipts],
+  };
+}
+
+function durableAttestationSignedSemanticV5(
+  trustPolicyHash: string,
+  execution: SemanticDispositionReviewExecutionV4,
+  evidenceLoadReceipts: readonly SemanticDispositionReviewEvidenceStoreLoadReceiptV5[]
+) {
+  return {
+    schemaVersion: 5 as const,
     trustPolicyHash,
     execution,
     evidenceLoadReceipts: [...evidenceLoadReceipts],
@@ -885,6 +1227,60 @@ function assertEvidenceStoreLoadReceiptsV4(
       JSON.stringify(semanticRequest.executionReceipts.map((row) => row.receiptHash).sort())
   ) {
     fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_V4_INVALID');
+  }
+}
+
+function assertEvidenceStoreLoadReceiptsV5(
+  receipts: readonly SemanticDispositionReviewEvidenceStoreLoadReceiptV5[],
+  authorities: readonly SemanticDispositionReviewEvidenceAuthorityV4[],
+  semanticRequest: SemanticDispositionReviewRequestV1,
+  policy: SemanticDispositionReviewTrustPolicyV3
+): void {
+  if (
+    receipts.length === 0 ||
+    receipts.length !== authorities.length ||
+    new Set(receipts.map((receipt) => receipt.loadOperationId)).size !== receipts.length
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_V5_INVALID');
+  }
+  const byAuthorityHash = new Map(
+    authorities.map((authority) => [authority.authorityHash, authority] as const)
+  );
+  const atomKeys = new Set<string>();
+  const coveredReceiptHashes = new Set<string>();
+  for (const receipt of receipts) {
+    const authority = byAuthorityHash.get(receipt.evidenceAuthorityHash);
+    if (
+      !authority ||
+      receipt.schemaVersion !== 5 ||
+      receipt.trustRootId !== policy.trustRootId ||
+      receipt.evidenceStoreId !== policy.evidenceStoreId ||
+      receipt.evidenceStoreConfigHash !== policy.evidenceStoreConfigHash
+    ) {
+      fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_V5_INVALID');
+    }
+    const rebuilt = createEvidenceStoreLoadReceiptV5(policy, receipt.loadOperationId, authority);
+    if (hashCanonicalJson(rebuilt) !== hashCanonicalJson(receipt)) {
+      fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_V5_INVALID');
+    }
+    for (const group of receipt.harvestGroups) {
+      for (const binding of group.executionReceiptBindings) {
+        const atomKey = `${receipt.evidenceSessionId}\u0000${receipt.evidenceEntryId}\u0000${binding.executionReceiptHash}`;
+        if (atomKeys.has(atomKey)) {
+          fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_V5_INVALID');
+        }
+        atomKeys.add(atomKey);
+        coveredReceiptHashes.add(binding.executionReceiptHash);
+      }
+    }
+    byAuthorityHash.delete(receipt.evidenceAuthorityHash);
+  }
+  if (
+    byAuthorityHash.size !== 0 ||
+    JSON.stringify([...coveredReceiptHashes].sort()) !==
+      JSON.stringify(semanticRequest.executionReceipts.map((row) => row.receiptHash).sort())
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_LOAD_RECEIPT_V5_INVALID');
   }
 }
 

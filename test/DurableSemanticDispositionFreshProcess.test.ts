@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import {
   assertSemanticDispositionReviewDurableAttestationV3,
   assertSemanticDispositionReviewDurableAttestationV4,
+  assertSemanticDispositionReviewDurableAttestationV5,
   consumeMainSemanticDispositionReviewDurableAttestationV4,
+  consumeMainSemanticDispositionReviewDurableAttestationV5,
   type SemanticDispositionReviewDurableAttestationV3,
   type SemanticDispositionReviewDurableAttestationV4,
+  type SemanticDispositionReviewDurableAttestationV5,
   type SemanticDispositionReviewRequestV1,
   type SemanticDispositionReviewTrustPolicyV3,
 } from '../src/production.js';
@@ -17,7 +20,8 @@ describe.skipIf(!fixturePath)('durable semantic disposition-review fresh-process
     const fixture = JSON.parse(readFileSync(fixturePath!, 'utf8')) as {
       readonly attestation:
         | SemanticDispositionReviewDurableAttestationV3
-        | SemanticDispositionReviewDurableAttestationV4;
+        | SemanticDispositionReviewDurableAttestationV4
+        | SemanticDispositionReviewDurableAttestationV5;
       readonly expectedSemanticRequest?: SemanticDispositionReviewRequestV1;
       readonly expectedTrustPolicy: SemanticDispositionReviewTrustPolicyV3;
     };
@@ -32,7 +36,24 @@ describe.skipIf(!fixturePath)('durable semantic disposition-review fresh-process
       return;
     }
     if (!fixture.expectedSemanticRequest) {
-      throw new Error('V4 fixture requires expectedSemanticRequest');
+      throw new Error('V4/V5 fixture requires expectedSemanticRequest');
+    }
+    if (fixture.attestation.schemaVersion === 5) {
+      expect(() =>
+        assertSemanticDispositionReviewDurableAttestationV5({
+          attestation: fixture.attestation,
+          expectedTrustPolicy: fixture.expectedTrustPolicy,
+        })
+      ).not.toThrow();
+      const review = consumeMainSemanticDispositionReviewDurableAttestationV5({
+        attestation: fixture.attestation,
+        expectedSemanticRequest: fixture.expectedSemanticRequest,
+        expectedTrustPolicy: fixture.expectedTrustPolicy,
+      });
+      expect(review.executionReceiptHashes).toEqual(
+        fixture.expectedSemanticRequest.executionReceipts.map((receipt) => receipt.receiptHash)
+      );
+      return;
     }
     expect(() =>
       assertSemanticDispositionReviewDurableAttestationV4({

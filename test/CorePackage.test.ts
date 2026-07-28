@@ -118,14 +118,22 @@ describe('Core package baseline', () => {
     expect(hostAgentWorkflows.createAgentSemanticDispositionReviewDurableGatewayV4).toBeInstanceOf(
       Function
     );
+    expect(hostAgentWorkflows.createAgentSemanticDispositionReviewDurableGatewayV5).toBeInstanceOf(
+      Function
+    );
     expect(production.assertSemanticDispositionReviewDurableAttestationV3).toBeInstanceOf(Function);
     expect(production.assertSemanticDispositionReviewDurableAttestationV4).toBeInstanceOf(Function);
+    expect(production.assertSemanticDispositionReviewDurableAttestationV5).toBeInstanceOf(Function);
     expect(production.consumeMainSemanticDispositionReviewDurableAttestationV4).toBeInstanceOf(
+      Function
+    );
+    expect(production.consumeMainSemanticDispositionReviewDurableAttestationV5).toBeInstanceOf(
       Function
     );
     expect(testFixtures.consumeTwoScaleSharedHarvestSemanticReviewFixtureV1).toBeInstanceOf(
       Function
     );
+    expect(testFixtures.consumeCrossHarvestSemanticReviewFixtureV1).toBeInstanceOf(Function);
     expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewHostGatewayV2')).toBe(
       false
     );
@@ -139,7 +147,13 @@ describe('Core package baseline', () => {
     expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewDurableGatewayV4')).toBe(
       false
     );
+    expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewDurableGatewayV5')).toBe(
+      false
+    );
     expect(Object.hasOwn(production, 'createSemanticDispositionReviewEvidenceAuthorityV3')).toBe(
+      false
+    );
+    expect(Object.hasOwn(production, 'createSemanticDispositionReviewEvidenceAuthorityV4')).toBe(
       false
     );
     expect(Object.hasOwn(production, 'assertSemanticDispositionReviewExecutionV2')).toBe(false);

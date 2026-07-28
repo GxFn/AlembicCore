@@ -8,8 +8,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   createAgentSemanticDispositionReviewDurableGatewayV4,
+  createAgentSemanticDispositionReviewDurableGatewayV5,
   createAstFactQueryBackendV1,
   createAstFactQueryFamilyV1,
+  createConfigFactQueryBackendV1,
+  createConfigFactQueryFamilyV1,
   createStrictAstFactQueryPackV1,
   createStrictEvidenceLedgerSnapshotV1,
   createStrictFactBackendRegistryV1,
@@ -26,6 +29,7 @@ import {
 } from '../src/plans.js';
 import {
   assertSemanticDispositionReviewDurableAttestationV4,
+  assertSemanticDispositionReviewDurableAttestationV5,
   canonicalizeObservationPopulationV1,
   createAgentSemanticDispositionReviewRequestV1,
   createAnalysisFixpointReceiptV1,
@@ -36,6 +40,7 @@ import {
   hashKnowledgeDispositionProposalV1,
   type SemanticDispositionReviewAxisIdV1,
   type SemanticDispositionReviewDecisionV3,
+  type SemanticDispositionReviewDecisionV4,
 } from '../src/production.js';
 import {
   buildProjectContextRequestMatrixV2,
@@ -52,10 +57,15 @@ import {
 } from '../src/projectContextFoundation.js';
 import {
   createAgentSemanticDispositionReviewRequestV3,
+  createAgentSemanticDispositionReviewRequestV4,
   createSemanticDispositionReviewEvidenceAuthorityV3,
+  createSemanticDispositionReviewEvidenceAuthorityV4,
 } from '../src/service/production/SemanticDispositionReviewExecution.js';
 import { readCertifiedProjectFactsFrozenFile } from '../src/service/project-context/foundation/frozen.js';
-import { consumeTwoScaleSharedHarvestSemanticReviewFixtureV1 } from '../src/test-fixtures.js';
+import {
+  consumeCrossHarvestSemanticReviewFixtureV1,
+  consumeTwoScaleSharedHarvestSemanticReviewFixtureV1,
+} from '../src/test-fixtures.js';
 
 const roots: string[] = [];
 const REVIEW_AXES = [
@@ -81,6 +91,135 @@ afterEach(() => {
 });
 
 describe('shared-harvest semantic evidence authority', () => {
+  it('binds one physical evidence root across the complete canonical harvest-group set', async () => {
+    const fixture = await createCrossHarvestFixture();
+    const semanticRequest = createSharedHarvestSemanticRequest(fixture);
+    const gateway = createCrossHarvestGateway(semanticRequest, fixture, 'cross-harvest');
+
+    const attestation = await gateway.execute(semanticRequest);
+    const authority = attestation.execution.request.evidenceAuthorities[0]!;
+
+    expect(new Set(fixture.receipts.map((receipt) => receipt.harvestKey)).size).toBe(2);
+    expect(new Set(fixture.receipts.map((receipt) => receipt.harvestReceiptHash)).size).toBe(2);
+    expect(
+      new Set(fixture.receipts.map((receipt) => receipt.fileExecutions[0]!.executionHash)).size
+    ).toBe(2);
+    expect(attestation.execution.request.evidenceAuthorities).toHaveLength(1);
+    expect(attestation.evidenceLoadReceipts).toHaveLength(1);
+    expect(gateway.evidenceLoadCount).toBe(1);
+    expect(authority.harvestGroups).toHaveLength(2);
+    expect(
+      authority.harvestGroups.map((group) => group.executionReceiptBindings.length).sort()
+    ).toEqual([1, 2]);
+    expect(
+      authority.harvestGroups.flatMap((group) =>
+        group.executionReceiptBindings.map((binding) => binding.executionReceiptHash)
+      )
+    ).toEqual(
+      expect.arrayContaining(semanticRequest.executionReceipts.map((row) => row.receiptHash))
+    );
+    expect(() =>
+      assertSemanticDispositionReviewDurableAttestationV5({
+        attestation: JSON.parse(JSON.stringify(attestation)),
+        expectedTrustPolicy: gateway.trustPolicy,
+      })
+    ).not.toThrow();
+    const publicFixtureResult = consumeCrossHarvestSemanticReviewFixtureV1({
+      semanticRequest,
+      attestation: JSON.parse(JSON.stringify(attestation)),
+      trustPolicy: gateway.trustPolicy,
+    });
+    expect(publicFixtureResult).toMatchObject({
+      evidenceRootCount: 1,
+      harvestGroupCount: 2,
+      executionReceiptCount: 3,
+    });
+    const context = semanticRequest.context;
+    if (context.reviewKind !== 'investigated-empty') {
+      throw new Error('cross-harvest investigated-empty fixture required');
+    }
+    const investigatedEmptyDecision = createInvestigatedEmptyDecisionV1({
+      sourceRevisionVectorHash: semanticRequest.sourceRevisionVectorHash,
+      finalExpandedScheduleHash: semanticRequest.finalExpandedSchedule.finalExpandedScheduleHash,
+      currentAnalysisFixpointHash: context.analysisFixpoint.fixpointHash,
+      expectedObligationIds: semanticRequest.executionReceipts.map(
+        (receipt) => receipt.obligationId
+      ),
+      executionReceipts: semanticRequest.executionReceipts,
+      dispositionReview: publicFixtureResult.review,
+      evidenceEntryIds: [fixture.evidenceEntry.id],
+    });
+    expect(
+      createStrictProductionAuthorityReceiptV1({
+        runId: semanticRequest.strictWorkflowRunId,
+        sourceRevisionVectorHash: semanticRequest.sourceRevisionVectorHash,
+        analysisFixpoint: context.analysisFixpoint,
+        privateCorpusRevision: 'private-corpus:cross-harvest',
+        factExecution: fixture.executionResult,
+        baselineSchedule: fixture.schedule,
+        scheduleExpansionReceipts: [],
+        finalExpandedSchedule: semanticRequest.finalExpandedSchedule,
+        finalFactSchedule: fixture.schedule,
+        populations: [context.population],
+        clusterSets: [],
+        inductions: [],
+        falsifications: [],
+        investigatedEmptyDecisions: [investigatedEmptyDecision],
+        dispositionReviews: [publicFixtureResult.review],
+        semanticDispositionReviewAttestations: [attestation],
+        semanticDispositionReviewTrustPolicy: gateway.trustPolicy,
+        expressionSets: [],
+        candidateAttemptBatches: [],
+        serialAdmissionLedger: null,
+        terminalEvidence: {
+          g1Receipts: [],
+          g1TerminalBindings: [],
+          corpusInspections: [],
+          admissionReceipts: [],
+          g2Receipts: [],
+          gateReturns: [],
+        },
+        resourceCaps: {
+          candidateAttemptCap: 1,
+          maxAuthoredCandidatesPerCellPass: 1,
+        },
+      })
+    ).toMatchObject({
+      semanticDispositionReviewExecutionHashes: [attestation.execution.executionHash],
+      semanticDispositionReviewAttestationHashes: [attestation.attestationHash],
+    });
+
+    const freshProcessRoot = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'alembic-cross-harvest-attestation-')
+    );
+    roots.push(freshProcessRoot);
+    const fixturePath = path.join(freshProcessRoot, 'attestation.json');
+    fs.writeFileSync(
+      fixturePath,
+      JSON.stringify({
+        attestation,
+        expectedSemanticRequest: semanticRequest,
+        expectedTrustPolicy: gateway.trustPolicy,
+      }),
+      'utf8'
+    );
+    const freshProcessOutput = execFileSync(
+      process.execPath,
+      [
+        path.join(process.cwd(), 'node_modules/vitest/vitest.mjs'),
+        'run',
+        'test/DurableSemanticDispositionFreshProcess.test.ts',
+        '--reporter=dot',
+      ],
+      {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: { ...process.env, ALEMBIC_DURABLE_ATTESTATION_FIXTURE: fixturePath },
+      }
+    );
+    expect(freshProcessOutput).toContain('1 passed');
+  });
+
   it('binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart', async () => {
     const fixture = await createSharedHarvestFixture();
     const semanticRequest = createSharedHarvestSemanticRequest(fixture);
@@ -391,6 +530,130 @@ describe('shared-harvest semantic evidence authority', () => {
       ).toThrow();
     }
   });
+
+  it('fails closed on cross-harvest group, root, request, load, and attestation tampering', async () => {
+    const fixture = await createCrossHarvestFixture();
+    const semanticRequest = createSharedHarvestSemanticRequest(fixture);
+    const gateway = createCrossHarvestGateway(semanticRequest, fixture, 'negative');
+    const attestation = await gateway.execute(semanticRequest);
+    const authority = attestation.execution.request.evidenceAuthorities[0]!;
+
+    const partialAuthority = createSemanticDispositionReviewEvidenceAuthorityV4({
+      evidenceEntry: fixture.evidenceEntry,
+      evidenceLedgerSnapshot: fixture.evidenceLedgerSnapshot,
+      witnessBinding: fixture.witnessBinding,
+      executionReceipts: [fixture.receipts[0]!],
+      semanticRole: semanticRequest.evidence[0]!.semanticRole,
+    });
+    expect(partialAuthority.harvestGroups).toHaveLength(1);
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV4({
+        semanticRequest,
+        evidenceAuthorities: [partialAuthority],
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V4_MISMATCH');
+
+    const reversedSemantic = {
+      ...authority,
+      harvestGroups: [...authority.harvestGroups].reverse(),
+    };
+    const reversedAuthority = {
+      ...reversedSemantic,
+      authorityHash: hashCanonicalJson(
+        Object.fromEntries(
+          Object.entries(reversedSemantic).filter(([key]) => key !== 'authorityHash')
+        )
+      ),
+    } as typeof authority;
+    expect(() =>
+      createAgentSemanticDispositionReviewRequestV4({
+        semanticRequest,
+        evidenceAuthorities: [reversedAuthority],
+      })
+    ).toThrow('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V4_INVALID');
+
+    expect(() =>
+      createSemanticDispositionReviewEvidenceAuthorityV4({
+        evidenceEntry: fixture.evidenceEntry,
+        evidenceLedgerSnapshot: fixture.evidenceLedgerSnapshot,
+        witnessBinding: {
+          ...fixture.witnessBinding,
+          blobHash: hashCanonicalJson('rebound-cross-harvest-blob'),
+        },
+        executionReceipts: fixture.receipts,
+        semanticRole: semanticRequest.evidence[0]!.semanticRole,
+      })
+    ).toThrow();
+
+    type MutableV5Attestation = Mutable<typeof attestation>;
+    const tamperProbes: readonly ((candidate: MutableV5Attestation) => void)[] = [
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].harvestGroups.pop();
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].harvestGroups.reverse();
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].harvestGroups[0].executionReceiptBindings.pop();
+      },
+      (candidate) => {
+        const group = candidate.execution.request.evidenceAuthorities[0].harvestGroups[0];
+        group.executionReceiptBindings.push({ ...group.executionReceiptBindings[0]! });
+      },
+      (candidate) => {
+        const groups = candidate.execution.request.evidenceAuthorities[0].harvestGroups;
+        groups[0]!.executionReceiptBindings.push({
+          ...groups[1]!.executionReceiptBindings[0]!,
+        });
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].harvestGroups[0].harvestKey =
+          hashCanonicalJson('rebound-harvest-key');
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].harvestGroups[0].fileExecutionHash =
+          hashCanonicalJson('rebound-file-execution');
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].harvestGroups[0].executionReceiptBindings[0].harvestReceiptHash =
+          hashCanonicalJson('rebound-harvest-receipt');
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].evidenceEntry.content +=
+          '// rebound root\n';
+      },
+      (candidate) => {
+        candidate.execution.request.evidenceAuthorities[0].witnessBinding.bindingHash =
+          hashCanonicalJson('rebound-witness');
+      },
+      (candidate) => {
+        candidate.execution.request.semanticRequest.executionReceipts.pop();
+      },
+      (candidate) => {
+        candidate.evidenceLoadReceipts[0].harvestGroups.pop();
+      },
+      (candidate) => {
+        candidate.evidenceLoadReceipts[0].relativePath = 'src/rebound.ts';
+      },
+      (candidate) => {
+        candidate.evidenceLoadReceipts[0].witnessBindingHash =
+          hashCanonicalJson('rebound-load-witness');
+      },
+      (candidate) => {
+        candidate.signatureBase64 = Buffer.alloc(64).toString('base64');
+      },
+    ];
+    for (const tamper of tamperProbes) {
+      const candidate = JSON.parse(JSON.stringify(attestation)) as MutableV5Attestation;
+      tamper(candidate);
+      expect(() =>
+        assertSemanticDispositionReviewDurableAttestationV5({
+          attestation: candidate as unknown as typeof attestation,
+          expectedTrustPolicy: gateway.trustPolicy,
+        })
+      ).toThrow();
+    }
+  });
 });
 
 async function createSharedHarvestFixture(queryId = 'typescript-declarations') {
@@ -462,6 +725,95 @@ async function createSharedHarvestFixture(queryId = 'typescript-declarations') {
           queryVersion: '1',
           extractorId: 'declarations-v1',
         }),
+      }),
+    ]),
+  });
+  return {
+    artifact,
+    evidenceEntry,
+    evidenceLedgerSnapshot,
+    witnessBinding,
+    schedule,
+    executionResult: result,
+    receipts: result.receipts,
+  };
+}
+
+async function createCrossHarvestFixture() {
+  const artifact = await createStrictArtifact();
+  const evidenceEntry = {
+    id: 'E-1',
+    sessionId: 'session:shared-harvest',
+    dimensionId: 'strict-fact-execution',
+    tool: 'code.read' as const,
+    callId: 'call:shared-harvest',
+    file: 'src/review.ts',
+    content: '// complete frozen subject with no matching declaration\n',
+    contentHash: hashBytes(
+      Buffer.from('// complete frozen subject with no matching declaration\n')
+    ),
+    capturedAt: 1,
+  };
+  const evidenceLedgerSnapshot = createStrictEvidenceLedgerSnapshotV1([evidenceEntry]);
+  const projectContextRef = createProjectContextFileRef({
+    projectRoot: '/certified/shared-harvest-test',
+    repoId: 'core',
+    filePath: evidenceEntry.file,
+    hash: artifact.facts.inventory.files[0]!.blobSha256,
+  });
+  const witnessBinding = createStrictFactDirectWitnessBindingV1({
+    artifact,
+    repoId: 'core',
+    relativePath: evidenceEntry.file,
+    evidenceEntry,
+    evidenceLedgerSnapshot,
+    projectContextRef,
+  });
+  const primaryPack = createStrictAstFactQueryPackV1({
+    familyId: 'syntax-idiom',
+    queryId: 'typescript-declarations',
+    queryVersion: '1',
+    extractorId: 'declarations-v1',
+  });
+  const primaryFamily = createAstFactQueryFamilyV1({
+    queryPack: primaryPack,
+    supportedScales: ['file', 'repository'],
+  });
+  const alternateFamily = createConfigFactQueryFamilyV1({
+    familyId: 'workspace-config',
+    supportedScales: ['file'],
+    parser: 'nx-project-json',
+  });
+  const schedule = scheduleForFamilyScales([
+    { family: primaryFamily, analysisScales: ['file', 'repository'] },
+    { family: alternateFamily, analysisScales: ['file'] },
+  ]);
+  const result = await executeStrictFactScheduleV1({
+    artifact,
+    planningFacts: planningFacts(artifact),
+    catalog: buildFactQueryCatalogSnapshot([primaryFamily, alternateFamily]),
+    schedule,
+    subjectBindings: [
+      createStrictFactSubjectBindingV1({
+        artifact,
+        planningFacts: planningFacts(artifact),
+        selector: { kind: 'repository', repoId: 'core' },
+      }),
+    ],
+    witnessBindings: [witnessBinding],
+    witnessAuthority: createStrictFactWitnessAuthorityV1({
+      artifact,
+      evidenceLedgerSnapshot,
+      projectContextRefs: [projectContextRef],
+    }),
+    registry: createStrictFactBackendRegistryV1([
+      createAstFactQueryBackendV1({
+        family: primaryFamily,
+        queryPack: primaryPack,
+      }),
+      createConfigFactQueryBackendV1({
+        family: alternateFamily,
+        parser: 'nx-project-json',
       }),
     ]),
   });
@@ -641,6 +993,50 @@ function createSharedHarvestGateway(
   });
 }
 
+function createCrossHarvestGateway(
+  semanticRequest: ReturnType<typeof createSharedHarvestSemanticRequest>,
+  fixture: Awaited<ReturnType<typeof createCrossHarvestFixture>>,
+  suffix: string
+) {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  let evidenceLoadCount = 0;
+  const gateway = createAgentSemanticDispositionReviewDurableGatewayV5({
+    trustRootId: `semantic-review-trust:cross-harvest:${suffix}`,
+    keyId: `semantic-review-key:cross-harvest:${suffix}`,
+    privateKey,
+    reviewerHost: {
+      reviewerModelLoadReceipt: semanticRequest.calibration.reviewerModelLoadReceipt,
+      invoke: async (call) => ({
+        evaluatorRunId: `agent-host-run:cross-harvest-review:${suffix}`,
+        invocationId: `agent-host-invocation:cross-harvest-review:${suffix}`,
+        responseOutput: JSON.stringify(passingDecisionV4(call.request)),
+        status: 'success',
+        toolCallCount: 0,
+      }),
+    },
+    evidenceStore: {
+      evidenceStoreId: `evidence-store:cross-harvest:${suffix}`,
+      evidenceStoreConfigHash: hashCanonicalJson(`cross-harvest-store-config:${suffix}`),
+      load: async (call) => {
+        evidenceLoadCount += 1;
+        return {
+          loadOperationId: `evidence-load:cross-harvest:${suffix}:1`,
+          evidenceEntry: fixture.evidenceEntry,
+          evidenceLedgerSnapshot: fixture.evidenceLedgerSnapshot,
+          witnessBinding: fixture.witnessBinding,
+          semanticRole: call.evidence.semanticRole,
+        };
+      },
+    },
+  });
+  return {
+    ...gateway,
+    get evidenceLoadCount() {
+      return evidenceLoadCount;
+    },
+  };
+}
+
 function passingDecision(
   request: Parameters<
     Parameters<
@@ -671,6 +1067,42 @@ function passingDecision(
         evidenceEntryId: 'E-1',
         axisIds: REVIEW_AXES,
         finding: 'The authenticated shared harvest covers both exact scale receipts.',
+        supportsVerdict: true,
+      },
+    ],
+  };
+}
+
+function passingDecisionV4(
+  request: Parameters<
+    Parameters<
+      typeof createAgentSemanticDispositionReviewDurableGatewayV5
+    >[0]['reviewerHost']['invoke']
+  >[0]['request']
+): SemanticDispositionReviewDecisionV4 {
+  const semantic = request.semanticRequest;
+  return {
+    schemaVersion: 4,
+    requestHash: request.requestHash,
+    compiledPromptHash: request.compiledPromptHash,
+    semanticRequestHash: semantic.requestHash,
+    contextHash: semantic.contextHash,
+    reviewKind: semantic.reviewKind,
+    proposedDispositionHash: semantic.proposedDispositionHash,
+    verdict: 'pass',
+    reasonCode: 'SEMANTIC_DISPOSITION_CONFIRMED',
+    axisDecisions: REVIEW_AXES.map((axisId) => ({
+      axisId,
+      verdict: 'pass',
+      score: 0.95,
+      reasonCode: `PASS:${axisId}`,
+      evidenceEntryIds: ['E-1'],
+    })),
+    evidenceFindings: [
+      {
+        evidenceEntryId: 'E-1',
+        axisIds: REVIEW_AXES,
+        finding: 'The authenticated evidence root covers the exact canonical harvest groups.',
         supportsVerdict: true,
       },
     ],
@@ -744,20 +1176,31 @@ function scheduleForScales(
   family: ReturnType<typeof createAstFactQueryFamilyV1>,
   analysisScales: readonly FactHarvestObligationV1['analysisScale'][]
 ): MiningWorkScheduleV1 {
-  const obligations = analysisScales.map((analysisScale) => {
-    const semantic = {
-      factFamilyId: family.id,
-      capabilityId: family.capabilityId,
-      canonicalSubjectRef: 'repo:core',
-      analysisScale,
-      denominator: 'complete-frozen-subject' as const,
-    };
-    return {
-      obligationId: `fact:${hashCanonicalJson(semantic).slice(7, 31)}`,
-      ...semantic,
-      source: 'required-universe' as const,
-    };
-  });
+  return scheduleForFamilyScales([{ family, analysisScales }]);
+}
+
+function scheduleForFamilyScales(
+  groups: readonly {
+    readonly family: ReturnType<typeof createAstFactQueryFamilyV1>;
+    readonly analysisScales: readonly FactHarvestObligationV1['analysisScale'][];
+  }[]
+): MiningWorkScheduleV1 {
+  const obligations = groups.flatMap(({ family, analysisScales }) =>
+    analysisScales.map((analysisScale) => {
+      const semantic = {
+        factFamilyId: family.id,
+        capabilityId: family.capabilityId,
+        canonicalSubjectRef: 'repo:core',
+        analysisScale,
+        denominator: 'complete-frozen-subject' as const,
+      };
+      return {
+        obligationId: `fact:${hashCanonicalJson(semantic).slice(7, 31)}`,
+        ...semantic,
+        source: 'required-universe' as const,
+      };
+    })
+  );
   const factHarvestScheduleHash = hashCanonicalJson(obligations);
   const lensBindings: MiningWorkScheduleV1['lensBindings'] = [];
   const lensBindingsHash = hashCanonicalJson(lensBindings);

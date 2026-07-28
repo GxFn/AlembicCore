@@ -9,16 +9,22 @@
 export {
   createAgentSemanticDispositionReviewDurableGatewayV3,
   createAgentSemanticDispositionReviewDurableGatewayV4,
+  createAgentSemanticDispositionReviewDurableGatewayV5,
   type SemanticDispositionReviewAgentReviewerHostAdapterV3,
   type SemanticDispositionReviewAgentReviewerHostAdapterV4,
+  type SemanticDispositionReviewAgentReviewerHostAdapterV5,
   type SemanticDispositionReviewDurableGatewayV3,
   type SemanticDispositionReviewDurableGatewayV4,
+  type SemanticDispositionReviewDurableGatewayV5,
   type SemanticDispositionReviewEvidenceStoreAdapterV3,
   type SemanticDispositionReviewEvidenceStoreAdapterV4,
+  type SemanticDispositionReviewEvidenceStoreAdapterV5,
   type SemanticDispositionReviewEvidenceStoreLoadCallV3,
   type SemanticDispositionReviewEvidenceStoreLoadCallV4,
+  type SemanticDispositionReviewEvidenceStoreLoadCallV5,
   type SemanticDispositionReviewEvidenceStoreLoadResultV3,
   type SemanticDispositionReviewEvidenceStoreLoadResultV4,
+  type SemanticDispositionReviewEvidenceStoreLoadResultV5,
 } from './service/production/DurableSemanticDispositionReviewAuthority.js';
 export type {
   AnalysisArtifactProjectionV1,
