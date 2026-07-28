@@ -2,8 +2,10 @@ import type { MiningWorkScheduleV1 } from '../plan/intent/coldStartProductionPla
 import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 import {
   assertSemanticDispositionReviewDurableAttestationV3,
+  assertSemanticDispositionReviewDurableAttestationV4,
   createProducerZeroDispositionAdmissionAuthorityV1,
   type SemanticDispositionReviewDurableAttestationV3,
+  type SemanticDispositionReviewDurableAttestationV4,
   type SemanticDispositionReviewTrustPolicyV3,
 } from './DurableSemanticDispositionReviewAuthority.js';
 import {
@@ -20,7 +22,10 @@ import {
   type StrictG2ReceiptV1,
   validateSerialAdmissionLedgerV1,
 } from './ProductionPersistenceContracts.js';
-import type { SemanticDispositionReviewExecutionV2 } from './SemanticDispositionReviewExecution.js';
+import type {
+  SemanticDispositionReviewExecutionV2,
+  SemanticDispositionReviewExecutionV3,
+} from './SemanticDispositionReviewExecution.js';
 import {
   type AnalysisFixpointReceiptV1,
   type AnalysisScheduleExpansionReceiptV1,
@@ -58,6 +63,14 @@ import {
   assertReviewAuthorizingFactExecutionV1,
   type StrictFactScheduleExecutionResultV1,
 } from './StrictFactExecution.js';
+
+type SemanticDispositionReviewDurableAttestation =
+  | SemanticDispositionReviewDurableAttestationV3
+  | SemanticDispositionReviewDurableAttestationV4;
+
+type VerifiedSemanticDispositionReviewExecution =
+  | SemanticDispositionReviewExecutionV2
+  | SemanticDispositionReviewExecutionV3;
 
 export interface StrictProductionResourceConservationV1 {
   readonly candidateAttemptCap: number;
@@ -255,7 +268,7 @@ export interface StrictProductionAuthorityInputV1 {
    * Agent 产生、Main 只读消费的 durable evaluator attestation registry。普通 analyst review
    * 保持 V1 兼容；producer-non-draft / investigated-empty 必须在这里 exact-one 连接。
    */
-  readonly semanticDispositionReviewAttestations?: readonly SemanticDispositionReviewDurableAttestationV3[];
+  readonly semanticDispositionReviewAttestations?: readonly SemanticDispositionReviewDurableAttestation[];
   /**
    * Main 从 durable configuration / trust store 取得的预批准 public policy。禁止从 task payload
    * 或 attestation 自身回填，否则任意调用方仍可自建 key root。
@@ -798,7 +811,7 @@ function validateSemanticDispositionReviewExecutions(
 } {
   const attestations = [...(input.semanticDispositionReviewAttestations ?? [])];
   const priorHashes = new Set(input.priorSemanticDispositionReviewExecutionHashes ?? []);
-  const byHash = new Map<string, SemanticDispositionReviewExecutionV2>();
+  const byHash = new Map<string, VerifiedSemanticDispositionReviewExecution>();
   const attestationHashes = new Set<string>();
   const executionIds = new Set<string>();
   const invocationCoordinates = new Set<string>();
@@ -868,23 +881,30 @@ function validateSemanticDispositionReviewExecutions(
 }
 
 function requireDurableSemanticDispositionReviewExecution(
-  attestation: SemanticDispositionReviewDurableAttestationV3,
+  attestation: SemanticDispositionReviewDurableAttestation,
   trustPolicy: SemanticDispositionReviewTrustPolicyV3 | undefined
-): SemanticDispositionReviewExecutionV2 {
+): VerifiedSemanticDispositionReviewExecution {
   if (!trustPolicy) {
     fail('STRICT_PRODUCTION_DISPOSITION_REVIEW_TRUST_POLICY_REQUIRED');
   }
-  assertSemanticDispositionReviewDurableAttestationV3({
-    attestation,
-    expectedTrustPolicy: trustPolicy,
-  });
+  if (attestation.schemaVersion === 3) {
+    assertSemanticDispositionReviewDurableAttestationV3({
+      attestation,
+      expectedTrustPolicy: trustPolicy,
+    });
+  } else {
+    assertSemanticDispositionReviewDurableAttestationV4({
+      attestation,
+      expectedTrustPolicy: trustPolicy,
+    });
+  }
   return attestation.execution;
 }
 
 function semanticDispositionReviewExecutionMismatch(
   input: StrictProductionAuthorityInputV1,
   review: KnowledgeDispositionReviewV1,
-  execution: SemanticDispositionReviewExecutionV2,
+  execution: VerifiedSemanticDispositionReviewExecution,
   receiptsByHash: ReturnType<typeof validateFactExecution>['receiptsByHash']
 ): boolean {
   const request = execution.request.semanticRequest;
@@ -926,7 +946,7 @@ function semanticDispositionReviewExecutionMismatch(
 
 function semanticDispositionReviewScheduleMismatch(
   input: StrictProductionAuthorityInputV1,
-  request: SemanticDispositionReviewExecutionV2['request']['semanticRequest']
+  request: VerifiedSemanticDispositionReviewExecution['request']['semanticRequest']
 ): boolean {
   return (
     request.finalExpandedSchedule.finalExpandedScheduleHash !==
@@ -938,7 +958,7 @@ function semanticDispositionReviewScheduleMismatch(
 
 function semanticDispositionReviewContextMissing(
   input: StrictProductionAuthorityInputV1,
-  execution: SemanticDispositionReviewExecutionV2
+  execution: VerifiedSemanticDispositionReviewExecution
 ): boolean {
   const context = execution.request.semanticRequest.context;
   if (context.reviewKind === 'investigated-empty') {
@@ -977,7 +997,7 @@ function semanticDispositionReviewContextMissing(
 
 function semanticDispositionExpressionSetMissing(
   input: StrictProductionAuthorityInputV1,
-  execution: SemanticDispositionReviewExecutionV2
+  execution: VerifiedSemanticDispositionReviewExecution
 ): boolean {
   const context = execution.request.semanticRequest.context;
   if (context.reviewKind !== 'producer-non-draft') {

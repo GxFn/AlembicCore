@@ -8,12 +8,16 @@
 export { buildFactQueryCatalogSnapshot } from './service/plan/intent/coldStartProductionPlan.js';
 export {
   assertSemanticDispositionReviewDurableAttestationV3,
+  assertSemanticDispositionReviewDurableAttestationV4,
   assertSemanticDispositionReviewTrustPolicyV3,
   consumeMainSemanticDispositionReviewDurableAttestationV3,
+  consumeMainSemanticDispositionReviewDurableAttestationV4,
   createProducerZeroDispositionAdmissionAuthorityV1,
   SEMANTIC_DISPOSITION_REVIEW_DURABLE_ATTESTATION_ALGORITHM_V3,
   type SemanticDispositionReviewDurableAttestationV3,
+  type SemanticDispositionReviewDurableAttestationV4,
   type SemanticDispositionReviewEvidenceStoreLoadReceiptV3,
+  type SemanticDispositionReviewEvidenceStoreLoadReceiptV4,
   type SemanticDispositionReviewTrustPolicyV3,
 } from './service/production/DurableSemanticDispositionReviewAuthority.js';
 export * from './service/production/ProductionActorIdentity.js';
@@ -29,8 +33,10 @@ export {
   type ProducerZeroDispositionAdmissionAuthorityV1,
   SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V1,
   SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V2,
+  SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3,
   SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V1,
   SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V2,
+  SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3,
   type SemanticDispositionReviewAxisDecisionV1,
   type SemanticDispositionReviewAxisIdV1,
   type SemanticDispositionReviewCalibrationAxisV1,
@@ -38,11 +44,15 @@ export {
   type SemanticDispositionReviewContextV1,
   type SemanticDispositionReviewDecisionV1,
   type SemanticDispositionReviewDecisionV2,
+  type SemanticDispositionReviewDecisionV3,
   type SemanticDispositionReviewEvidenceAuthorityV2,
+  type SemanticDispositionReviewEvidenceAuthorityV3,
   type SemanticDispositionReviewEvidenceFindingV1,
   type SemanticDispositionReviewEvidenceV1,
+  type SemanticDispositionReviewExecutionReceiptBindingV3,
   type SemanticDispositionReviewExecutionV1,
   type SemanticDispositionReviewExecutionV2,
+  type SemanticDispositionReviewExecutionV3,
   type SemanticDispositionReviewerHostExecutionRecordV2,
   type SemanticDispositionReviewerHostInvocationV1,
   type SemanticDispositionReviewerModelLoadReceiptV1,
@@ -51,6 +61,7 @@ export {
   type SemanticDispositionReviewKindV1,
   type SemanticDispositionReviewRequestV1,
   type SemanticDispositionReviewRequestV2,
+  type SemanticDispositionReviewRequestV3,
 } from './service/production/SemanticDispositionReviewExecution.js';
 export * from './service/production/StrictAnalysisContracts.js';
 export * from './service/production/StrictFactExecution.js';

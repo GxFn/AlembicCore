@@ -463,6 +463,10 @@ export const SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V2 =
   'alembic-agent.semantic-disposition-review-execution-v2';
 export const SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V2 =
   'alembic-main.strict-production-disposition-review-consumer-v2';
+export const SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3 =
+  'alembic-agent.semantic-disposition-review-execution-v3';
+export const SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3 =
+  'alembic-main.strict-production-disposition-review-consumer-v3';
 
 /**
  * V2 不再接受调用方手写 evidence summary。每一行都必须同时携带冻结 Ledger snapshot、
@@ -535,8 +539,169 @@ export function createSemanticDispositionReviewEvidenceAuthorityV2(
   });
 }
 
+/**
+ * V3 binding 保留每个 obligation/scale receipt 的独立身份，同时显式证明它们来自同一
+ * dimension-free harvest 与同一 file execution。authority 不复制 Evidence Ledger 条目。
+ */
+export interface SemanticDispositionReviewExecutionReceiptBindingV3 {
+  readonly schemaVersion: 3;
+  readonly obligationId: string;
+  readonly analysisScale: FactQueryExecutionReceiptV1['analysisScale'];
+  readonly executionReceiptHash: string;
+  readonly harvestKey: string;
+  readonly harvestReceiptHash: string;
+  readonly sourceRevisionVectorHash: string;
+  readonly canonicalSubjectRef: string;
+  readonly fileExecutionHash: string;
+  readonly bindingHash: string;
+}
+
+export interface SemanticDispositionReviewEvidenceAuthorityV3 {
+  readonly schemaVersion: 3;
+  readonly evidenceEntry: EvidenceEntry;
+  readonly evidenceLedgerSnapshot: StrictEvidenceLedgerSnapshotV1;
+  readonly witnessBinding: StrictFactDirectWitnessBindingV1;
+  readonly executionReceiptBindings: readonly SemanticDispositionReviewExecutionReceiptBindingV3[];
+  readonly harvestKey: string;
+  readonly harvestReceiptHash: string;
+  readonly canonicalSubjectRef: string;
+  readonly emittedFactIds: readonly string[];
+  readonly semanticRole: string;
+  readonly authorityHash: string;
+}
+
+type CreateSemanticDispositionReviewEvidenceAuthorityInputV3 = {
+  readonly evidenceEntry: EvidenceEntry;
+  readonly evidenceLedgerSnapshot: StrictEvidenceLedgerSnapshotV1;
+  readonly witnessBinding: StrictFactDirectWitnessBindingV1;
+  readonly executionReceipts: readonly FactQueryExecutionReceiptV1[];
+  readonly semanticRole: string;
+};
+
+/**
+ * 该 producer canonicalizer 仅由 Agent durable gateway 调用。Main facade 只导出 V4
+ * verifier/consumer，不导出 authority mint。
+ */
+export function createSemanticDispositionReviewEvidenceAuthorityV3(
+  input: CreateSemanticDispositionReviewEvidenceAuthorityInputV3
+): SemanticDispositionReviewEvidenceAuthorityV3 {
+  requireText(input.semanticRole, 'SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+  const executionReceipts = [...input.executionReceipts].sort(
+    (left, right) =>
+      left.obligationId.localeCompare(right.obligationId) ||
+      left.receiptHash.localeCompare(right.receiptHash)
+  );
+  if (
+    executionReceipts.length === 0 ||
+    new Set(executionReceipts.map((receipt) => receipt.obligationId)).size !==
+      executionReceipts.length ||
+    new Set(executionReceipts.map((receipt) => receipt.receiptHash)).size !==
+      executionReceipts.length
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+  }
+  for (const receipt of executionReceipts) {
+    assertReviewAuthorizingFactExecutionV1(receipt);
+  }
+  const rebuiltSnapshot = createStrictEvidenceLedgerSnapshotV1(
+    input.evidenceLedgerSnapshot.entries
+  );
+  const snapshotEntry = rebuiltSnapshot.entries.find(
+    (entry) =>
+      entry.sessionId === input.evidenceEntry.sessionId && entry.id === input.evidenceEntry.id
+  );
+  const commonInput = {
+    evidenceEntry: input.evidenceEntry,
+    evidenceLedgerSnapshot: input.evidenceLedgerSnapshot,
+    witnessBinding: input.witnessBinding,
+  };
+  const { bindingHash: _bindingHash, ...bindingSemantic } = input.witnessBinding;
+  if (
+    evidenceSnapshotInvalid(commonInput, rebuiltSnapshot, snapshotEntry) ||
+    evidenceWitnessBindingInvalid(
+      { ...commonInput, executionReceipt: executionReceipts[0]! },
+      rebuiltSnapshot,
+      bindingSemantic
+    )
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+  }
+  const referenceReceipt = executionReceipts[0]!;
+  const executionReceiptBindings = executionReceipts.map((receipt) => {
+    if (
+      receipt.harvestKey !== referenceReceipt.harvestKey ||
+      receipt.harvestReceiptHash !== referenceReceipt.harvestReceiptHash ||
+      receipt.sourceRevisionVectorHash !== referenceReceipt.sourceRevisionVectorHash ||
+      receipt.canonicalSubjectRef !== referenceReceipt.canonicalSubjectRef
+    ) {
+      fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_HARVEST_MISMATCH');
+    }
+    const matchingFileExecutions = receipt.fileExecutions.filter(
+      (fileExecution) =>
+        fileExecution.evidenceEntryId === input.evidenceEntry.id &&
+        fileExecution.witnessBindingHash === input.witnessBinding.bindingHash &&
+        fileExecution.projectContextRefId === input.witnessBinding.projectContextRefId &&
+        fileExecution.relativePath === input.witnessBinding.relativePath &&
+        fileExecution.blobHash === input.witnessBinding.blobHash
+    );
+    if (
+      matchingFileExecutions.length !== 1 ||
+      evidenceFileExecutionInvalid(
+        {
+          ...commonInput,
+          executionReceipt: receipt,
+          fileExecutionHash: matchingFileExecutions[0]!.executionHash,
+        },
+        matchingFileExecutions[0]!
+      )
+    ) {
+      fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_FILE_EXECUTION_MISMATCH');
+    }
+    const bindingSemanticV3 = {
+      schemaVersion: 3 as const,
+      obligationId: receipt.obligationId,
+      analysisScale: receipt.analysisScale,
+      executionReceiptHash: receipt.receiptHash,
+      harvestKey: receipt.harvestKey,
+      harvestReceiptHash: receipt.harvestReceiptHash,
+      sourceRevisionVectorHash: receipt.sourceRevisionVectorHash,
+      canonicalSubjectRef: receipt.canonicalSubjectRef,
+      fileExecutionHash: matchingFileExecutions[0]!.executionHash,
+    };
+    return freezeDeep({
+      ...bindingSemanticV3,
+      bindingHash: hashCanonicalJson(bindingSemanticV3),
+    });
+  });
+  const fileExecutionHashes = new Set(
+    executionReceiptBindings.map((binding) => binding.fileExecutionHash)
+  );
+  if (fileExecutionHashes.size !== 1) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_FILE_EXECUTION_MISMATCH');
+  }
+  const fileExecution = referenceReceipt.fileExecutions.find(
+    (candidate) => candidate.executionHash === executionReceiptBindings[0]!.fileExecutionHash
+  )!;
+  const semantic = {
+    schemaVersion: 3 as const,
+    evidenceEntry: input.evidenceEntry,
+    evidenceLedgerSnapshot: rebuiltSnapshot,
+    witnessBinding: input.witnessBinding,
+    executionReceiptBindings,
+    harvestKey: referenceReceipt.harvestKey,
+    harvestReceiptHash: referenceReceipt.harvestReceiptHash,
+    canonicalSubjectRef: referenceReceipt.canonicalSubjectRef,
+    emittedFactIds: [...fileExecution.emittedFactIds].sort(),
+    semanticRole: input.semanticRole.trim(),
+  };
+  return freezeDeep({ ...semantic, authorityHash: hashCanonicalJson(semantic) });
+}
+
 function evidenceSnapshotInvalid(
-  input: CreateSemanticDispositionReviewEvidenceAuthorityInputV2,
+  input: Pick<
+    CreateSemanticDispositionReviewEvidenceAuthorityInputV2,
+    'evidenceEntry' | 'evidenceLedgerSnapshot'
+  >,
   rebuiltSnapshot: StrictEvidenceLedgerSnapshotV1,
   snapshotEntry: EvidenceEntry | undefined
 ): boolean {
@@ -551,7 +716,10 @@ function evidenceSnapshotInvalid(
 }
 
 function evidenceWitnessBindingInvalid(
-  input: CreateSemanticDispositionReviewEvidenceAuthorityInputV2,
+  input: Pick<
+    CreateSemanticDispositionReviewEvidenceAuthorityInputV2,
+    'evidenceEntry' | 'evidenceLedgerSnapshot' | 'witnessBinding' | 'executionReceipt'
+  >,
   rebuiltSnapshot: StrictEvidenceLedgerSnapshotV1,
   bindingSemantic: Omit<StrictFactDirectWitnessBindingV1, 'bindingHash'>
 ): boolean {
@@ -575,7 +743,10 @@ function evidenceWitnessBindingInvalid(
 }
 
 function evidenceFileExecutionInvalid(
-  input: CreateSemanticDispositionReviewEvidenceAuthorityInputV2,
+  input: Pick<
+    CreateSemanticDispositionReviewEvidenceAuthorityInputV2,
+    'evidenceEntry' | 'witnessBinding' | 'executionReceipt' | 'fileExecutionHash'
+  >,
   fileExecution: FactQueryExecutionReceiptV1['fileExecutions'][number]
 ): boolean {
   return (
@@ -673,8 +844,111 @@ export function createAgentSemanticDispositionReviewRequestV2(input: {
   });
 }
 
+export interface SemanticDispositionReviewRequestV3 {
+  readonly schemaVersion: 3;
+  readonly producerRoute: typeof SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3;
+  readonly consumerRoute: typeof SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3;
+  readonly semanticRequest: SemanticDispositionReviewRequestV1;
+  readonly evidenceAuthorities: readonly SemanticDispositionReviewEvidenceAuthorityV3[];
+  /** UTF-8 exact string passed to Agent host adapter; hash is byte hash, not semantic-object hash. */
+  readonly compiledPrompt: string;
+  readonly compiledPromptHash: string;
+  readonly requestId: string;
+  readonly requestHash: string;
+}
+
+export function createAgentSemanticDispositionReviewRequestV3(input: {
+  readonly semanticRequest: SemanticDispositionReviewRequestV1;
+  readonly evidenceAuthorities: readonly SemanticDispositionReviewEvidenceAuthorityV3[];
+}): SemanticDispositionReviewRequestV3 {
+  assertSemanticDispositionReviewRequestV1(input.semanticRequest);
+  const evidenceAuthorities = input.evidenceAuthorities
+    .map((authority) => assertAndFreezeEvidenceAuthorityV3(authority, input.semanticRequest))
+    .sort(
+      (left, right) =>
+        left.evidenceEntry.sessionId.localeCompare(right.evidenceEntry.sessionId) ||
+        left.evidenceEntry.id.localeCompare(right.evidenceEntry.id)
+    );
+  const authorityEvidenceIds = evidenceAuthorities.map((row) => row.evidenceEntry.id);
+  const requestReceiptHashes = input.semanticRequest.executionReceipts.map(
+    (receipt) => receipt.receiptHash
+  );
+  const authorityReceiptHashes = evidenceAuthorities.flatMap((authority) =>
+    authority.executionReceiptBindings.map((binding) => binding.executionReceiptHash)
+  );
+  const authorityAtoms = evidenceAuthorities.flatMap((authority) =>
+    authority.executionReceiptBindings.map(
+      (binding) =>
+        `${authority.evidenceEntry.sessionId}\u0000${authority.evidenceEntry.id}\u0000${binding.executionReceiptHash}`
+    )
+  );
+  if (
+    evidenceAuthorities.length === 0 ||
+    new Set(evidenceAuthorities.map((row) => row.authorityHash)).size !==
+      evidenceAuthorities.length ||
+    new Set(
+      evidenceAuthorities.map(
+        (row) => `${row.evidenceEntry.sessionId}\u0000${row.evidenceEntry.id}`
+      )
+    ).size !== evidenceAuthorities.length ||
+    new Set(authorityAtoms).size !== authorityAtoms.length ||
+    !sameStrings(
+      authorityEvidenceIds,
+      input.semanticRequest.evidence.map((row) => row.evidenceEntryId)
+    ) ||
+    !sameStrings([...new Set(authorityReceiptHashes)], requestReceiptHashes) ||
+    evidenceAuthorities.some(
+      (authority) =>
+        hashCanonicalJson(evidenceSummaryFromAuthorityV3(authority, input.semanticRequest)) !==
+        hashCanonicalJson(
+          input.semanticRequest.evidence.find(
+            (evidence) => evidence.evidenceEntryId === authority.evidenceEntry.id
+          )
+        )
+    )
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_MISMATCH');
+  }
+  const semanticWithoutPrompt = {
+    schemaVersion: 3 as const,
+    producerRoute: SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3,
+    consumerRoute: SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3,
+    semanticRequest: input.semanticRequest,
+    evidenceAuthorities,
+  } as const;
+  const compiledPrompt = JSON.stringify({
+    schemaVersion: 3,
+    instructionVersion: 'semantic-disposition-independent-review-v3',
+    instruction:
+      'Independently review the bound disposition and exact shared-harvest receipt sets. Return only a SemanticDispositionReviewDecisionV3 JSON object.',
+    payload: semanticWithoutPrompt,
+  });
+  const compiledPromptHash = hashBytes(Buffer.from(compiledPrompt, 'utf8'));
+  const semantic = { ...semanticWithoutPrompt, compiledPrompt, compiledPromptHash };
+  const requestHash = hashCanonicalJson(semantic);
+  return freezeDeep({
+    ...semantic,
+    requestId: `semantic-review-request-v3:${requestHash.slice(7, 31)}`,
+    requestHash,
+  });
+}
+
 export interface SemanticDispositionReviewDecisionV2 {
   readonly schemaVersion: 2;
+  readonly requestHash: string;
+  readonly compiledPromptHash: string;
+  readonly semanticRequestHash: string;
+  readonly contextHash: string;
+  readonly reviewKind: SemanticDispositionReviewKindV1;
+  readonly proposedDispositionHash: string;
+  readonly verdict: KnowledgeDispositionReviewV1['verdict'];
+  readonly reasonCode: string;
+  readonly axisDecisions: readonly SemanticDispositionReviewAxisDecisionV1[];
+  readonly evidenceFindings: readonly SemanticDispositionReviewEvidenceFindingV1[];
+}
+
+export interface SemanticDispositionReviewDecisionV3 {
+  readonly schemaVersion: 3;
   readonly requestHash: string;
   readonly compiledPromptHash: string;
   readonly semanticRequestHash: string;
@@ -761,6 +1035,72 @@ export interface SemanticDispositionReviewAgentHostGatewayV2 {
   ): Promise<SemanticDispositionReviewExecutionV2>;
 }
 
+export interface SemanticDispositionReviewHostCallV3 {
+  readonly schemaVersion: 3;
+  readonly producerRoute: typeof SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3;
+  readonly request: SemanticDispositionReviewRequestV3;
+  readonly requestHash: string;
+  readonly compiledPrompt: string;
+  readonly compiledPromptHash: string;
+}
+
+export interface SemanticDispositionReviewAgentHostAdapterV3 {
+  readonly reviewerModelLoadReceipt: SemanticDispositionReviewerModelLoadReceiptV1;
+  invoke(call: SemanticDispositionReviewHostCallV3): Promise<SemanticDispositionReviewHostResultV2>;
+}
+
+export interface SemanticDispositionReviewAgentHostExecutionAuthorityV3 {
+  readonly schemaVersion: 3;
+  readonly authorityId: string;
+  readonly reviewerModelLoadReceiptHash: string;
+  readonly authorityHash: string;
+}
+
+export interface SemanticDispositionReviewerHostExecutionRecordV3 {
+  readonly schemaVersion: 3;
+  readonly producerRoute: typeof SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3;
+  readonly authorityHash: string;
+  readonly requestId: string;
+  readonly requestHash: string;
+  readonly compiledPrompt: string;
+  readonly compiledPromptHash: string;
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly modelVersion: string;
+  readonly methodId: string;
+  readonly methodVersion: string;
+  readonly runtimeConfigHash: string;
+  readonly reviewerModelLoadReceipt: SemanticDispositionReviewerModelLoadReceiptV1;
+  readonly evaluatorRunId: string;
+  readonly invocationId: string;
+  readonly responseOutput: string;
+  readonly responseOutputHash: string;
+  readonly status: 'success';
+  readonly toolCallCount: 0;
+  readonly recordHash: string;
+}
+
+export interface SemanticDispositionReviewExecutionV3 {
+  readonly schemaVersion: 3;
+  readonly producerRoute: typeof SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3;
+  readonly consumerRoute: typeof SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3;
+  readonly request: SemanticDispositionReviewRequestV3;
+  readonly hostExecution: SemanticDispositionReviewerHostExecutionRecordV3;
+  readonly decision: SemanticDispositionReviewDecisionV3;
+  readonly decisionHash: string;
+  readonly reviewer: ProductionActorIdentityV1;
+  readonly hostAuthorityHash: string;
+  readonly executionId: string;
+  readonly executionHash: string;
+}
+
+export interface SemanticDispositionReviewAgentHostGatewayV3 {
+  readonly authority: SemanticDispositionReviewAgentHostExecutionAuthorityV3;
+  execute(
+    request: SemanticDispositionReviewRequestV3
+  ): Promise<SemanticDispositionReviewExecutionV3>;
+}
+
 interface SemanticDispositionReviewHostAuthorityStateV2 {
   readonly adapter: SemanticDispositionReviewAgentHostAdapterV2;
   readonly executions: Map<string, SemanticDispositionReviewExecutionV2>;
@@ -771,6 +1111,18 @@ interface SemanticDispositionReviewHostAuthorityStateV2 {
 const SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V2 = new WeakMap<
   SemanticDispositionReviewAgentHostExecutionAuthorityV2,
   SemanticDispositionReviewHostAuthorityStateV2
+>();
+
+interface SemanticDispositionReviewHostAuthorityStateV3 {
+  readonly adapter: SemanticDispositionReviewAgentHostAdapterV3;
+  readonly executions: Map<string, SemanticDispositionReviewExecutionV3>;
+  readonly invocationCoordinates: Set<string>;
+  readonly outputHashes: Set<string>;
+}
+
+const SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V3 = new WeakMap<
+  SemanticDispositionReviewAgentHostExecutionAuthorityV3,
+  SemanticDispositionReviewHostAuthorityStateV3
 >();
 
 /**
@@ -935,6 +1287,164 @@ function buildSemanticDispositionReviewExecutionV2(
   });
 }
 
+export function createAgentSemanticDispositionReviewHostGatewayV3(
+  adapter: SemanticDispositionReviewAgentHostAdapterV3
+): SemanticDispositionReviewAgentHostGatewayV3 {
+  const loadReceipt = normalizeReviewerModelLoadReceipt(adapter.reviewerModelLoadReceipt);
+  if (typeof adapter.invoke !== 'function') {
+    fail('SEMANTIC_DISPOSITION_REVIEW_HOST_ADAPTER_V3_INVALID');
+  }
+  const authoritySemantic = {
+    schemaVersion: 3 as const,
+    authorityId: `semantic-review-host-authority-v3:${loadReceipt.loadReceiptHash.slice(7, 31)}`,
+    reviewerModelLoadReceiptHash: loadReceipt.loadReceiptHash,
+  };
+  const authority = freezeDeep({
+    ...authoritySemantic,
+    authorityHash: hashCanonicalJson(authoritySemantic),
+  });
+  const state: SemanticDispositionReviewHostAuthorityStateV3 = {
+    adapter: {
+      reviewerModelLoadReceipt: loadReceipt,
+      invoke: (call) => adapter.invoke(call),
+    },
+    executions: new Map(),
+    invocationCoordinates: new Set(),
+    outputHashes: new Set(),
+  };
+  SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V3.set(authority, state);
+  return freezeDeep({
+    authority,
+    execute: async (request: SemanticDispositionReviewRequestV3) =>
+      executeAgentSemanticDispositionReviewV3(authority, request),
+  });
+}
+
+async function executeAgentSemanticDispositionReviewV3(
+  authority: SemanticDispositionReviewAgentHostExecutionAuthorityV3,
+  request: SemanticDispositionReviewRequestV3
+): Promise<SemanticDispositionReviewExecutionV3> {
+  const state = requireHostAuthorityStateV3(authority);
+  assertSemanticDispositionReviewRequestV3(request);
+  if (
+    state.adapter.reviewerModelLoadReceipt.loadReceiptHash !==
+      request.semanticRequest.calibration.reviewerModelLoadReceipt.loadReceiptHash ||
+    hashCanonicalJson(state.adapter.reviewerModelLoadReceipt) !==
+      hashCanonicalJson(request.semanticRequest.calibration.reviewerModelLoadReceipt)
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_HOST_LOAD_MISMATCH');
+  }
+  const call: SemanticDispositionReviewHostCallV3 = freezeDeep({
+    schemaVersion: 3,
+    producerRoute: SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3,
+    request,
+    requestHash: request.requestHash,
+    compiledPrompt: request.compiledPrompt,
+    compiledPromptHash: request.compiledPromptHash,
+  });
+  const result = await state.adapter.invoke(call);
+  const execution = buildSemanticDispositionReviewExecutionV3(authority, request, result);
+  const coordinate = `${execution.hostExecution.evaluatorRunId}\u0000${execution.hostExecution.invocationId}`;
+  if (
+    state.executions.has(execution.executionHash) ||
+    state.invocationCoordinates.has(coordinate) ||
+    state.outputHashes.has(execution.hostExecution.responseOutputHash)
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_HOST_EXECUTION_REUSED');
+  }
+  state.executions.set(execution.executionHash, execution);
+  state.invocationCoordinates.add(coordinate);
+  state.outputHashes.add(execution.hostExecution.responseOutputHash);
+  return execution;
+}
+
+function buildSemanticDispositionReviewExecutionV3(
+  authority: SemanticDispositionReviewAgentHostExecutionAuthorityV3,
+  request: SemanticDispositionReviewRequestV3,
+  result: SemanticDispositionReviewHostResultV2
+): SemanticDispositionReviewExecutionV3 {
+  for (const value of [result.evaluatorRunId, result.invocationId]) {
+    requireText(value, 'SEMANTIC_DISPOSITION_REVIEW_EXECUTION_IDENTITY_REQUIRED');
+  }
+  if (result.status !== 'success' || result.toolCallCount !== 0 || !result.responseOutput?.trim()) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_HOST_RESULT_INVALID');
+  }
+  const loadReceipt = request.semanticRequest.calibration.reviewerModelLoadReceipt;
+  const responseOutputHash = hashBytes(Buffer.from(result.responseOutput, 'utf8'));
+  const hostSemantic = {
+    schemaVersion: 3 as const,
+    producerRoute: SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3,
+    authorityHash: authority.authorityHash,
+    requestId: request.requestId,
+    requestHash: request.requestHash,
+    compiledPrompt: request.compiledPrompt,
+    compiledPromptHash: request.compiledPromptHash,
+    providerId: loadReceipt.providerId,
+    modelId: loadReceipt.modelId,
+    modelVersion: loadReceipt.modelVersion,
+    methodId: loadReceipt.methodId,
+    methodVersion: loadReceipt.methodVersion,
+    runtimeConfigHash: loadReceipt.runtimeConfigHash,
+    reviewerModelLoadReceipt: loadReceipt,
+    evaluatorRunId: result.evaluatorRunId,
+    invocationId: result.invocationId,
+    responseOutput: result.responseOutput,
+    responseOutputHash,
+    status: result.status,
+    toolCallCount: result.toolCallCount,
+  } as const;
+  const hostExecution = freezeDeep({
+    ...hostSemantic,
+    recordHash: hashCanonicalJson(hostSemantic),
+  });
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.responseOutput);
+  } catch {
+    fail('SEMANTIC_DISPOSITION_REVIEW_OUTPUT_INVALID');
+  }
+  const decision = normalizeDecisionV3(request, parsed as SemanticDispositionReviewDecisionV3);
+  if (hashCanonicalJson(parsed) !== hashCanonicalJson(decision)) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_OUTPUT_DECISION_MISMATCH');
+  }
+  const reviewer = createProductionActorIdentityV1({
+    providerId: hostExecution.providerId,
+    modelId: hostExecution.modelId,
+    modelVersion: `${hostExecution.modelVersion}/${hostExecution.methodId}/${hostExecution.methodVersion}`,
+    promptHash: hostExecution.compiledPromptHash,
+    runId: hostExecution.evaluatorRunId,
+    invocationId: hostExecution.invocationId,
+    loadReceiptHash: hostExecution.reviewerModelLoadReceipt.loadReceiptHash,
+    outputHash: hostExecution.responseOutputHash,
+  });
+  if (
+    reviewer.runId === request.semanticRequest.strictWorkflowRunId ||
+    reviewer.invocationId === request.semanticRequest.producer.invocationId ||
+    reviewer.outputHash === request.semanticRequest.producer.outputHash ||
+    reviewer.actorHash === request.semanticRequest.producer.actorHash
+  ) {
+    fail('KNOWLEDGE_DISPOSITION_REVIEW_NOT_INDEPENDENT');
+  }
+  const decisionHash = hashCanonicalJson(decision);
+  const semantic = {
+    schemaVersion: 3 as const,
+    producerRoute: SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3,
+    consumerRoute: SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3,
+    request,
+    hostExecution,
+    decision,
+    decisionHash,
+    reviewer,
+    hostAuthorityHash: authority.authorityHash,
+  } as const;
+  const executionHash = hashCanonicalJson(semantic);
+  return freezeDeep({
+    ...semantic,
+    executionId: `semantic-review-execution-v3:${executionHash.slice(7, 31)}`,
+    executionHash,
+  });
+}
+
 export function assertSemanticDispositionReviewRequestV2(
   request: SemanticDispositionReviewRequestV2
 ): void {
@@ -949,6 +1459,23 @@ export function assertSemanticDispositionReviewRequestV2(
   }
   if (hashCanonicalJson(rebuilt) !== hashCanonicalJson(request)) {
     fail('SEMANTIC_DISPOSITION_REVIEW_REQUEST_V2_HASH_MISMATCH');
+  }
+}
+
+export function assertSemanticDispositionReviewRequestV3(
+  request: SemanticDispositionReviewRequestV3
+): void {
+  let rebuilt: SemanticDispositionReviewRequestV3;
+  try {
+    rebuilt = createAgentSemanticDispositionReviewRequestV3({
+      semanticRequest: request.semanticRequest,
+      evidenceAuthorities: request.evidenceAuthorities,
+    });
+  } catch {
+    fail('SEMANTIC_DISPOSITION_REVIEW_REQUEST_V3_INVALID');
+  }
+  if (hashCanonicalJson(rebuilt) !== hashCanonicalJson(request)) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_REQUEST_V3_HASH_MISMATCH');
   }
 }
 
@@ -1032,7 +1559,7 @@ export function createProducerZeroDispositionAdmissionAuthorityV1(input: {
  * `@alembic/core/production` 导出；外层调用必须走 durable attestation wrapper。
  */
 export function createProducerZeroDispositionAdmissionAuthorityFromVerifiedExecutionV1(input: {
-  readonly execution: SemanticDispositionReviewExecutionV2;
+  readonly execution: SemanticDispositionReviewExecutionV2 | SemanticDispositionReviewExecutionV3;
   readonly expressionSet: HypothesisExpressionSetReceiptV1;
   readonly corpusInspection: StrictAcceptedCorpusInspectionV1;
 }): ProducerZeroDispositionAdmissionAuthorityV1 {
@@ -1169,12 +1696,171 @@ function evidenceSummaryFromAuthorityV2(
   return { ...semantic, evidenceHash: hashCanonicalJson(semantic) };
 }
 
+function assertAndFreezeEvidenceAuthorityV3(
+  authority: SemanticDispositionReviewEvidenceAuthorityV3,
+  request: SemanticDispositionReviewRequestV1
+): SemanticDispositionReviewEvidenceAuthorityV3 {
+  const { authorityHash, ...semantic } = authority;
+  if (authority.schemaVersion !== 3 || hashCanonicalJson(semantic) !== authorityHash) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+  }
+  const receiptsByHash = new Map(
+    request.executionReceipts.map((receipt) => [receipt.receiptHash, receipt] as const)
+  );
+  const executionReceipts = authority.executionReceiptBindings.map((binding) => {
+    const receipt = receiptsByHash.get(binding.executionReceiptHash);
+    if (
+      !receipt ||
+      binding.obligationId !== receipt.obligationId ||
+      binding.analysisScale !== receipt.analysisScale ||
+      binding.harvestKey !== receipt.harvestKey ||
+      binding.harvestReceiptHash !== receipt.harvestReceiptHash ||
+      binding.sourceRevisionVectorHash !== receipt.sourceRevisionVectorHash ||
+      binding.canonicalSubjectRef !== receipt.canonicalSubjectRef
+    ) {
+      fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+    }
+    const { bindingHash, ...bindingSemantic } = binding;
+    if (hashCanonicalJson(bindingSemantic) !== bindingHash) {
+      fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+    }
+    return receipt;
+  });
+  const rebuilt = createSemanticDispositionReviewEvidenceAuthorityV3({
+    evidenceEntry: authority.evidenceEntry,
+    evidenceLedgerSnapshot: authority.evidenceLedgerSnapshot,
+    witnessBinding: authority.witnessBinding,
+    executionReceipts,
+    semanticRole: authority.semanticRole,
+  });
+  if (hashCanonicalJson(rebuilt) !== hashCanonicalJson(authority)) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_INVALID');
+  }
+  return rebuilt;
+}
+
+function evidenceSummaryFromAuthorityV3(
+  authority: SemanticDispositionReviewEvidenceAuthorityV3,
+  request: SemanticDispositionReviewRequestV1
+): SemanticDispositionReviewEvidenceV1 {
+  const firstBinding = authority.executionReceiptBindings[0];
+  const receipt = request.executionReceipts.find(
+    (candidate) => candidate.receiptHash === firstBinding?.executionReceiptHash
+  );
+  const fileExecution = receipt?.fileExecutions.find(
+    (candidate) => candidate.executionHash === firstBinding?.fileExecutionHash
+  );
+  if (!receipt || !fileExecution) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_AUTHORITY_V3_MISMATCH');
+  }
+  const semantic = {
+    evidenceEntryId: authority.evidenceEntry.id,
+    evidenceSessionId: authority.evidenceEntry.sessionId,
+    sourceRevisionVectorHash: receipt.sourceRevisionVectorHash,
+    canonicalSubjectRef: receipt.canonicalSubjectRef,
+    relativePath: fileExecution.relativePath,
+    blobHash: fileExecution.blobHash,
+    content: authority.evidenceEntry.content,
+    contentHash: authority.evidenceEntry.contentHash,
+    semanticRole: authority.semanticRole,
+  };
+  return { ...semantic, evidenceHash: hashCanonicalJson(semantic) };
+}
+
+/**
+ * Core 从 semantic request 的完整 receipt universe 确定 expected set；Agent store 只负责
+ * 读取/证明 Ledger 与 witness，不得自行猜测 scale grouping。
+ */
+export function createSemanticDispositionReviewExpectedExecutionReceiptBindingsV3(input: {
+  readonly semanticRequest: SemanticDispositionReviewRequestV1;
+  readonly evidence: SemanticDispositionReviewEvidenceV1;
+}): readonly SemanticDispositionReviewExecutionReceiptBindingV3[] {
+  assertSemanticDispositionReviewRequestV1(input.semanticRequest);
+  const rows = input.semanticRequest.executionReceipts
+    .flatMap((receipt) => {
+      const fileExecutions = receipt.fileExecutions.filter(
+        (fileExecution) =>
+          fileExecution.evidenceEntryId === input.evidence.evidenceEntryId &&
+          fileExecution.relativePath === input.evidence.relativePath &&
+          fileExecution.blobHash === input.evidence.blobHash &&
+          receipt.sourceRevisionVectorHash === input.evidence.sourceRevisionVectorHash &&
+          receipt.canonicalSubjectRef === input.evidence.canonicalSubjectRef
+      );
+      if (fileExecutions.length > 1) {
+        fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_EXECUTION_AMBIGUOUS');
+      }
+      if (fileExecutions.length === 0) {
+        return [];
+      }
+      const semantic = {
+        schemaVersion: 3 as const,
+        obligationId: receipt.obligationId,
+        analysisScale: receipt.analysisScale,
+        executionReceiptHash: receipt.receiptHash,
+        harvestKey: receipt.harvestKey,
+        harvestReceiptHash: receipt.harvestReceiptHash,
+        sourceRevisionVectorHash: receipt.sourceRevisionVectorHash,
+        canonicalSubjectRef: receipt.canonicalSubjectRef,
+        fileExecutionHash: fileExecutions[0]!.executionHash,
+      };
+      return [{ ...semantic, bindingHash: hashCanonicalJson(semantic) }];
+    })
+    .sort(
+      (left, right) =>
+        left.obligationId.localeCompare(right.obligationId) ||
+        left.executionReceiptHash.localeCompare(right.executionReceiptHash)
+    );
+  if (
+    rows.length === 0 ||
+    new Set(rows.map((row) => row.executionReceiptHash)).size !== rows.length ||
+    new Set(rows.map((row) => row.obligationId)).size !== rows.length ||
+    new Set(rows.map((row) => row.harvestKey)).size !== 1 ||
+    new Set(rows.map((row) => row.harvestReceiptHash)).size !== 1 ||
+    new Set(rows.map((row) => row.fileExecutionHash)).size !== 1
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EVIDENCE_EXECUTION_SET_INVALID');
+  }
+  return freezeDeep(rows);
+}
+
 function normalizeDecisionV2(
   request: SemanticDispositionReviewRequestV2,
   decision: SemanticDispositionReviewDecisionV2
 ): SemanticDispositionReviewDecisionV2 {
   if (
     decision?.schemaVersion !== 2 ||
+    decision.requestHash !== request.requestHash ||
+    decision.compiledPromptHash !== request.compiledPromptHash ||
+    decision.semanticRequestHash !== request.semanticRequest.requestHash
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_DECISION_CONTEXT_MISMATCH');
+  }
+  const normalizedV1 = normalizeDecision(request.semanticRequest, {
+    schemaVersion: 1,
+    requestHash: request.semanticRequest.requestHash,
+    promptHash: request.semanticRequest.promptHash,
+    contextHash: decision.contextHash,
+    reviewKind: decision.reviewKind,
+    proposedDispositionHash: decision.proposedDispositionHash,
+    verdict: decision.verdict,
+    reasonCode: decision.reasonCode,
+    axisDecisions: decision.axisDecisions,
+    evidenceFindings: decision.evidenceFindings,
+  });
+  return freezeDeep({
+    ...decision,
+    reasonCode: normalizedV1.reasonCode,
+    axisDecisions: normalizedV1.axisDecisions,
+    evidenceFindings: normalizedV1.evidenceFindings,
+  });
+}
+
+function normalizeDecisionV3(
+  request: SemanticDispositionReviewRequestV3,
+  decision: SemanticDispositionReviewDecisionV3
+): SemanticDispositionReviewDecisionV3 {
+  if (
+    decision?.schemaVersion !== 3 ||
     decision.requestHash !== request.requestHash ||
     decision.compiledPromptHash !== request.compiledPromptHash ||
     decision.semanticRequestHash !== request.semanticRequest.requestHash
@@ -1263,9 +1949,72 @@ export function assertSemanticDispositionReviewExecutionStructureV2ForDurableTru
   });
 }
 
+function assertSemanticDispositionReviewExecutionStructureV3(
+  execution: SemanticDispositionReviewExecutionV3,
+  authority: SemanticDispositionReviewAgentHostExecutionAuthorityV3
+): void {
+  assertSemanticDispositionReviewRequestV3(execution.request);
+  const host = execution.hostExecution;
+  const { recordHash: _recordHash, ...hostSemantic } = host;
+  const decision = normalizeDecisionV3(execution.request, execution.decision);
+  let parsedOutput: unknown;
+  try {
+    parsedOutput = JSON.parse(host.responseOutput);
+  } catch {
+    fail('SEMANTIC_DISPOSITION_REVIEW_OUTPUT_INVALID');
+  }
+  const loadReceipt = execution.request.semanticRequest.calibration.reviewerModelLoadReceipt;
+  const expectedReviewer = createProductionActorIdentityV1({
+    providerId: host.providerId,
+    modelId: host.modelId,
+    modelVersion: `${host.modelVersion}/${host.methodId}/${host.methodVersion}`,
+    promptHash: host.compiledPromptHash,
+    runId: host.evaluatorRunId,
+    invocationId: host.invocationId,
+    loadReceiptHash: host.reviewerModelLoadReceipt.loadReceiptHash,
+    outputHash: host.responseOutputHash,
+  });
+  const semantic = {
+    schemaVersion: 3 as const,
+    producerRoute: SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3,
+    consumerRoute: SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3,
+    request: execution.request,
+    hostExecution: host,
+    decision,
+    decisionHash: hashCanonicalJson(decision),
+    reviewer: expectedReviewer,
+    hostAuthorityHash: authority.authorityHash,
+  } as const;
+  if (
+    hostExecutionRequestLineageInvalid(execution, authority) ||
+    hostExecutionModelLineageInvalid(host, loadReceipt) ||
+    hostExecutionPayloadInvalid(host, hostSemantic, parsedOutput, decision) ||
+    semanticExecutionEnvelopeInvalidV3(execution, authority, expectedReviewer, semantic)
+  ) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_EXECUTION_V3_INVALID');
+  }
+}
+
+/**
+ * Durable V4 对完整 V3 execution + shared-harvest store receipts 验签；这里仍只做纯结构校验。
+ */
+export function assertSemanticDispositionReviewExecutionStructureV3ForDurableTrust(
+  execution: SemanticDispositionReviewExecutionV3
+): void {
+  assertSemanticDispositionReviewExecutionStructureV3(execution, {
+    schemaVersion: 3,
+    authorityId: 'durable-attestation-embedded-host-authority-v3',
+    reviewerModelLoadReceiptHash:
+      execution.request.semanticRequest.calibration.reviewerModelLoadReceipt.loadReceiptHash,
+    authorityHash: execution.hostAuthorityHash,
+  });
+}
+
 function hostExecutionRequestLineageInvalid(
-  execution: SemanticDispositionReviewExecutionV2,
-  authority: SemanticDispositionReviewAgentHostExecutionAuthorityV2
+  execution: SemanticDispositionReviewExecutionV2 | SemanticDispositionReviewExecutionV3,
+  authority:
+    | SemanticDispositionReviewAgentHostExecutionAuthorityV2
+    | SemanticDispositionReviewAgentHostExecutionAuthorityV3
 ): boolean {
   const host = execution.hostExecution;
   return (
@@ -1278,7 +2027,9 @@ function hostExecutionRequestLineageInvalid(
 }
 
 function hostExecutionModelLineageInvalid(
-  host: SemanticDispositionReviewerHostExecutionRecordV2,
+  host:
+    | SemanticDispositionReviewerHostExecutionRecordV2
+    | SemanticDispositionReviewerHostExecutionRecordV3,
   loadReceipt: SemanticDispositionReviewerModelLoadReceiptV1
 ): boolean {
   return (
@@ -1293,10 +2044,14 @@ function hostExecutionModelLineageInvalid(
 }
 
 function hostExecutionPayloadInvalid(
-  host: SemanticDispositionReviewerHostExecutionRecordV2,
-  hostSemantic: Omit<SemanticDispositionReviewerHostExecutionRecordV2, 'recordHash'>,
+  host:
+    | SemanticDispositionReviewerHostExecutionRecordV2
+    | SemanticDispositionReviewerHostExecutionRecordV3,
+  hostSemantic:
+    | Omit<SemanticDispositionReviewerHostExecutionRecordV2, 'recordHash'>
+    | Omit<SemanticDispositionReviewerHostExecutionRecordV3, 'recordHash'>,
   parsedOutput: unknown,
-  decision: SemanticDispositionReviewDecisionV2
+  decision: SemanticDispositionReviewDecisionV2 | SemanticDispositionReviewDecisionV3
 ): boolean {
   return (
     hashBytes(Buffer.from(host.compiledPrompt, 'utf8')) !== host.compiledPromptHash ||
@@ -1324,10 +2079,38 @@ function semanticExecutionEnvelopeInvalid(
   );
 }
 
+function semanticExecutionEnvelopeInvalidV3(
+  execution: SemanticDispositionReviewExecutionV3,
+  authority: SemanticDispositionReviewAgentHostExecutionAuthorityV3,
+  expectedReviewer: ProductionActorIdentityV1,
+  semantic: Omit<SemanticDispositionReviewExecutionV3, 'executionId' | 'executionHash'>
+): boolean {
+  return (
+    execution.schemaVersion !== 3 ||
+    execution.producerRoute !== SEMANTIC_DISPOSITION_REVIEW_AGENT_PRODUCER_ROUTE_V3 ||
+    execution.consumerRoute !== SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_ROUTE_V3 ||
+    execution.hostAuthorityHash !== authority.authorityHash ||
+    hashCanonicalJson(execution.reviewer) !== hashCanonicalJson(expectedReviewer) ||
+    execution.decisionHash !== semantic.decisionHash ||
+    execution.executionHash !== hashCanonicalJson(semantic) ||
+    execution.executionId !== `semantic-review-execution-v3:${execution.executionHash.slice(7, 31)}`
+  );
+}
+
 function requireHostAuthorityStateV2(
   authority: SemanticDispositionReviewAgentHostExecutionAuthorityV2
 ): SemanticDispositionReviewHostAuthorityStateV2 {
   const state = SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V2.get(authority);
+  if (!state) {
+    fail('SEMANTIC_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
+  }
+  return state;
+}
+
+function requireHostAuthorityStateV3(
+  authority: SemanticDispositionReviewAgentHostExecutionAuthorityV3
+): SemanticDispositionReviewHostAuthorityStateV3 {
+  const state = SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V3.get(authority);
   if (!state) {
     fail('SEMANTIC_DISPOSITION_REVIEW_HOST_AUTHORITY_REQUIRED');
   }

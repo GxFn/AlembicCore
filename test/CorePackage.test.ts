@@ -110,11 +110,22 @@ describe('Core package baseline', () => {
   it('keeps semantic-review minting outside the Main production facade', async () => {
     const hostAgentWorkflows = await import('../src/host-agent-workflows.js');
     const production = await import('../src/production.js');
+    const testFixtures = await import('../src/test-fixtures.js');
 
     expect(hostAgentWorkflows.createAgentSemanticDispositionReviewDurableGatewayV3).toBeInstanceOf(
       Function
     );
+    expect(hostAgentWorkflows.createAgentSemanticDispositionReviewDurableGatewayV4).toBeInstanceOf(
+      Function
+    );
     expect(production.assertSemanticDispositionReviewDurableAttestationV3).toBeInstanceOf(Function);
+    expect(production.assertSemanticDispositionReviewDurableAttestationV4).toBeInstanceOf(Function);
+    expect(production.consumeMainSemanticDispositionReviewDurableAttestationV4).toBeInstanceOf(
+      Function
+    );
+    expect(testFixtures.consumeTwoScaleSharedHarvestSemanticReviewFixtureV1).toBeInstanceOf(
+      Function
+    );
     expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewHostGatewayV2')).toBe(
       false
     );
@@ -123,6 +134,12 @@ describe('Core package baseline', () => {
     );
     expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewRequestV2')).toBe(false);
     expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewDurableGatewayV3')).toBe(
+      false
+    );
+    expect(Object.hasOwn(production, 'createAgentSemanticDispositionReviewDurableGatewayV4')).toBe(
+      false
+    );
+    expect(Object.hasOwn(production, 'createSemanticDispositionReviewEvidenceAuthorityV3')).toBe(
       false
     );
     expect(Object.hasOwn(production, 'assertSemanticDispositionReviewExecutionV2')).toBe(false);

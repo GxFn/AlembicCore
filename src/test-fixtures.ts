@@ -21,6 +21,16 @@ import {
   plugin as typeScriptAstPlugin,
 } from './core/ast/lang-typescript.js';
 import { resetDiscovererRegistry } from './core/discovery/index.js';
+import {
+  consumeMainSemanticDispositionReviewDurableAttestationV4,
+  type SemanticDispositionReviewDurableAttestationV4,
+  type SemanticDispositionReviewTrustPolicyV3,
+} from './service/production/DurableSemanticDispositionReviewAuthority.js';
+import type {
+  SemanticDispositionReviewEvidenceAuthorityV3,
+  SemanticDispositionReviewRequestV1,
+} from './service/production/SemanticDispositionReviewExecution.js';
+import type { KnowledgeDispositionReviewV1 } from './service/production/StrictAnalysisContracts.js';
 
 export type { ProjectAnalysisResult } from './core/AstAnalyzer.js';
 export {
@@ -144,4 +154,56 @@ export async function prepareProjectAnalysisTestFixtures(
       reload: options.reloadAstPlugins,
     }
   );
+}
+
+/**
+ * Agent 集成测试可复用的两尺度共享收获 consumer。fixture 本身仍必须来自真实 strict fact
+ * schedule 与 durable gateway；这里不制造 receipt，也不放宽 production verifier。
+ */
+export interface TwoScaleSharedHarvestSemanticReviewFixtureV1 {
+  readonly semanticRequest: SemanticDispositionReviewRequestV1;
+  readonly attestation: SemanticDispositionReviewDurableAttestationV4;
+  readonly trustPolicy: SemanticDispositionReviewTrustPolicyV3;
+}
+
+export interface TwoScaleSharedHarvestSemanticReviewFixtureResultV1 {
+  readonly authority: SemanticDispositionReviewEvidenceAuthorityV3;
+  readonly review: KnowledgeDispositionReviewV1;
+}
+
+export function consumeTwoScaleSharedHarvestSemanticReviewFixtureV1(
+  fixture: TwoScaleSharedHarvestSemanticReviewFixtureV1
+): TwoScaleSharedHarvestSemanticReviewFixtureResultV1 {
+  const review = consumeMainSemanticDispositionReviewDurableAttestationV4({
+    attestation: fixture.attestation,
+    expectedSemanticRequest: fixture.semanticRequest,
+    expectedTrustPolicy: fixture.trustPolicy,
+  });
+  const authorities = fixture.attestation.execution.request.evidenceAuthorities;
+  const authority = authorities[0];
+  if (!authority || authorities.length !== 1) {
+    throw new Error('SHARED_HARVEST_FIXTURE_EXACT_ONE_EVIDENCE_AUTHORITY_REQUIRED');
+  }
+  const bindings = authority.executionReceiptBindings;
+  const expectedScales = ['file', 'repository'];
+  const actualScales = bindings.map((binding) => binding.analysisScale).sort();
+  const expectedReceiptHashes = fixture.semanticRequest.executionReceipts
+    .map((receipt) => receipt.receiptHash)
+    .sort();
+  const actualReceiptHashes = bindings.map((binding) => binding.executionReceiptHash).sort();
+  if (
+    bindings.length !== 2 ||
+    JSON.stringify(actualScales) !== JSON.stringify(expectedScales) ||
+    new Set(bindings.map((binding) => binding.obligationId)).size !== 2 ||
+    new Set(bindings.map((binding) => binding.executionReceiptHash)).size !== 2 ||
+    new Set(bindings.map((binding) => binding.harvestKey)).size !== 1 ||
+    new Set(bindings.map((binding) => binding.harvestReceiptHash)).size !== 1 ||
+    new Set(bindings.map((binding) => binding.fileExecutionHash)).size !== 1 ||
+    JSON.stringify(actualReceiptHashes) !== JSON.stringify(expectedReceiptHashes) ||
+    authority.harvestKey !== bindings[0]?.harvestKey ||
+    authority.harvestReceiptHash !== bindings[0]?.harvestReceiptHash
+  ) {
+    throw new Error('SHARED_HARVEST_FIXTURE_CONTRACT_MISMATCH');
+  }
+  return Object.freeze({ authority, review });
 }
