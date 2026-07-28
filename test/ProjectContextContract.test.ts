@@ -44,6 +44,7 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       'ProjectContextCapabilities',
       'buildProjectContextPresenterInput',
       'createProjectContextCapabilities',
+      'createProjectContextFileRef',
       'resolveAstParserLanguage',
     ]);
     expect(ProjectContext.execute).toBeInstanceOf(Function);
@@ -51,6 +52,7 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       Function
     );
     expect(publicModule.buildProjectContextPresenterInput).toBeInstanceOf(Function);
+    expect(publicModule.createProjectContextFileRef).toBeInstanceOf(Function);
   });
 
   it('keeps public request kinds exact and ordered for deterministic dispatch', () => {

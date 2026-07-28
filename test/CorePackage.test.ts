@@ -101,8 +101,10 @@ describe('Core package baseline', () => {
     expect(production.hashKnowledgeDispositionProposalV1).toBeInstanceOf(Function);
     expect(production.hashKnowledgeClusterSetProposalV1).toBeInstanceOf(Function);
     expect(production.buildFactQueryCatalogSnapshot).toBeInstanceOf(Function);
+    const projectContext = await import('../src/project-context.js');
     const projectContextFoundation = await import('../src/projectContextFoundation.js');
-    expect(projectContextFoundation.createProjectContextFileRef).toBeInstanceOf(Function);
+    expect(projectContext.createProjectContextFileRef).toBeInstanceOf(Function);
+    expect(Object.hasOwn(projectContextFoundation, 'createProjectContextFileRef')).toBe(false);
     expect(workspace.validatePrivateCorpusRevisionInitReceiptV1).toBeInstanceOf(Function);
     expect(workspace.validatePrivateCorpusRevisionCheckpointV1).toBeInstanceOf(Function);
   });

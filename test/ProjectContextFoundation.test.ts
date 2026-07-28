@@ -59,6 +59,8 @@ describe('ProjectContext certified facts foundation', () => {
       import: './dist/projectContextFoundation.js',
       types: './dist/projectContextFoundation.d.ts',
     });
+    const publicModule = await import('../src/projectContextFoundation.js');
+    expect(Object.hasOwn(publicModule, 'createProjectContextFileRef')).toBe(false);
   });
 
   it('builds a canonical SourceRevisionVectorV1 and rejects host paths', () => {

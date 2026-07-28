@@ -42,12 +42,12 @@ import {
   type SemanticDispositionReviewDecisionV3,
   type SemanticDispositionReviewDecisionV4,
 } from '../src/production.js';
+import { createProjectContextFileRef } from '../src/project-context.js';
 import {
   buildProjectContextRequestMatrixV2,
   buildProjectScopeManifestV1,
   CERTIFIED_PROJECT_FACTS_CONSUMERS,
   captureCertifiedProjectFactsV2,
-  createProjectContextFileRef,
   createProjectContextRequestAuditPlansV2,
   hashBytes,
   hashCanonicalJson,

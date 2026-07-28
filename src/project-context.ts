@@ -64,3 +64,5 @@ export {
   JS_FAMILY_LANGUAGES,
   resolveAstParserLanguage,
 } from './service/project-context/shared/parserLanguage.js';
+// PC-F final-artifact 合约冻结 foundation 聚合面；文件引用 helper 属于 live ProjectContext 公共能力。
+export { createProjectContextFileRef } from './service/project-context/shared/sourceSlice-fileSymbols/contracts.js';

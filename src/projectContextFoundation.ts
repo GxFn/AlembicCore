@@ -13,4 +13,3 @@ export type {
   SourceRevisionVectorV1,
 } from './service/project-context/foundation/contracts.js';
 export * from './service/project-context/foundation/index.js';
-export { createProjectContextFileRef } from './service/project-context/shared/sourceSlice-fileSymbols/contracts.js';

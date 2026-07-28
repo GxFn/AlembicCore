@@ -42,7 +42,7 @@ import {
   type StrictG1ReceiptV1,
   validateHypothesisExpressionSetReceiptV1,
 } from '../src/production.js';
-import { createProjectContextFileRef } from '../src/projectContextFoundation.js';
+import { createProjectContextFileRef } from '../src/project-context.js';
 import {
   assertSemanticDispositionReviewExecutionV2,
   consumeMainSemanticDispositionReviewExecutionV2,

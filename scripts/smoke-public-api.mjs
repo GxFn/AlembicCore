@@ -199,6 +199,7 @@ const requiredSubpathExports = {
     'ProjectContext',
     'ProjectContextCapabilities',
     'createProjectContextCapabilities',
+    'createProjectContextFileRef',
   ],
   '@alembic/core/project-context-foundation': [
     'CERTIFIED_PROJECT_FACTS_CONSUMERS',
@@ -206,7 +207,6 @@ const requiredSubpathExports = {
     'FileCertifiedProjectFactsStore',
     'NodeProjectContextFoundationHostPorts',
     'captureCertifiedProjectFacts',
-    'createProjectContextFileRef',
   ],
   '@alembic/core/production': [
     'assertSemanticDispositionReviewExecutionV1',
@@ -560,6 +560,9 @@ const requiredTypeDeclarations = {
     'PrivateCorpusRevisionInitReceiptV1',
   ],
 };
+const forbiddenSubpathExports = {
+  '@alembic/core/project-context-foundation': ['createProjectContextFileRef'],
+};
 const forbiddenTypeDeclarationRefs = {
   '@alembic/core/recipe-context-capabilities': [
     './service/recipe-context/adapters/',
@@ -602,6 +605,15 @@ for (const [specifier, exportNames] of Object.entries(requiredSubpathExports)) {
   for (const exportName of exportNames) {
     if (!(exportName in mod)) {
       throw new Error(`Missing ${specifier} export: ${exportName}`);
+    }
+  }
+}
+
+for (const [specifier, exportNames] of Object.entries(forbiddenSubpathExports)) {
+  const mod = await import(specifier);
+  for (const exportName of exportNames) {
+    if (exportName in mod) {
+      throw new Error(`Forbidden ${specifier} export: ${exportName}`);
     }
   }
 }

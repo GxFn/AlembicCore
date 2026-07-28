@@ -34,12 +34,12 @@ import {
   validateHypothesisExpressionSetReceiptV1,
   validateSerialAdmissionLedgerV1,
 } from '@alembic/core/production';
+import { createProjectContextFileRef } from '@alembic/core/project-context';
 import {
   buildProjectContextRequestMatrixV2,
   buildProjectScopeManifestV1,
   captureCertifiedProjectFactsV2,
   CERTIFIED_PROJECT_FACTS_CONSUMERS,
-  createProjectContextFileRef,
   createProjectContextRequestAuditPlansV2,
   hashBytes,
   hashCanonicalJson,
@@ -860,6 +860,7 @@ function writeProbeReport({ real, analysis, falsification, candidate, faults }) 
     analysisReviewContextHash,
     publicSubpaths: [
       '@alembic/core/production',
+      '@alembic/core/project-context',
       '@alembic/core/project-context-foundation',
     ],
     executor: {
