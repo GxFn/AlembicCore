@@ -1,0 +1,1669 @@
+import type {
+  FinalCoverageBindingReceiptV1,
+  ServingSnapshotManifestV1,
+} from '../../production/ProductionPersistenceContracts.js';
+import {
+  canonicalJsonStringify,
+  hashCanonicalJson,
+} from '../../project-context/foundation/canonical.js';
+import type { CanonicalSha256 } from '../../project-context/foundation/contracts.js';
+import {
+  buildDimensionCatalogSnapshot,
+  type ColdStartCellUniverseV1,
+  type CompiledColdStartPlanV2,
+  type DimensionCatalogSnapshotV1,
+  type FactQueryCatalogSnapshotV1,
+  type PlanCellV1,
+  type RequiredFactApplicabilityUniverseV1,
+} from './coldStartProductionPlan.js';
+
+export const STRICT_TEST_DIMENSION_PROFILE_V1 = 'strict-test-dimension' as const;
+export const STRICT_TEST_UNEXECUTED_DISPOSITION_V1 = 'not-executed-by-strict-test-profile' as const;
+export const STRICT_TEST_STATE_SEQUENCE_V1 = Object.freeze([
+  'PREFLIGHT_REQUESTED',
+  'PREFLIGHT_FACTS_FROZEN',
+  'PREFLIGHT_UNIVERSE_VALIDATED',
+  'AWAITING_CONFIRMATION',
+  'SELECTION_CONFIRMED',
+  'PRIVATE_WORKSPACE_READY',
+  'PLAN_COMPILED',
+  'FACT_SCHEDULE_FROZEN',
+  'ANALYSIS_FIXPOINT_CLOSED',
+  'EXPRESSION_SETS_REVIEWED',
+  'PRIVATE_CORPUS_SEALED',
+  'PRIVATE_INDEXES_VERIFIED',
+  'PRIVATE_G4_READY',
+  'PRIVATE_SERVING_VALIDATED',
+  'STRICT_TEST_COMPLETED_PRIVATE',
+] as const);
+
+export type StrictTestStateV1 = (typeof STRICT_TEST_STATE_SEQUENCE_V1)[number];
+export type StrictTestTerminalStateV1 = 'STRICT_TEST_COMPLETED_PRIVATE' | 'STRICT_TEST_FAILED';
+export type StrictTestDimensionApplicabilityV1 = 'applicable' | 'excluded' | 'unknown';
+
+/**
+ * 外层只读 preflight 必须显式提供这些已加载绑定。Core 不读取环境变量、文件系统或宿主
+ * 状态，也不会根据 dimension 数量、budget 或旧 testMode 猜测 profile。
+ */
+export interface StrictTestPreflightBindingsV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly projectRootIdentity: string;
+  readonly controlRootIdentity: string;
+  readonly sourceRootIdentity: string;
+  readonly canonicalProjectIdentityHash: CanonicalSha256;
+  readonly sourceRevisionVectorHash: CanonicalSha256;
+  readonly sourceInventoryHash: CanonicalSha256;
+  readonly sourceFileCount: number;
+  readonly moduleCount: number;
+  readonly languageCount: number;
+  readonly parserCount: number;
+  readonly backendCount: number;
+  readonly certifiedProjectFactsArtifactHash: CanonicalSha256;
+  readonly certifiedProjectFactsContentHash: CanonicalSha256;
+  readonly certifiedProjectFactsSourceArtifactHash: CanonicalSha256;
+  readonly certifiedProjectFactsSourceVectorHash: CanonicalSha256;
+  readonly certifiedProjectFactsConsumerReceiptHash: CanonicalSha256;
+  readonly strictConfigReceiptHash: CanonicalSha256;
+  readonly providerModelHash: CanonicalSha256;
+  readonly promptSopHash: CanonicalSha256;
+  readonly factQueryBackendHash: CanonicalSha256;
+  readonly parserBackendHash: CanonicalSha256;
+  readonly embeddingVectorHash: CanonicalSha256;
+  readonly runtimeArtifactManifestHash: CanonicalSha256;
+  readonly runtimeArtifactBindingHash: CanonicalSha256;
+  readonly productionBeforeStateHash: CanonicalSha256;
+  readonly productionAfterReadStateHash: CanonicalSha256;
+  readonly publicRouteBeforeStateHash: CanonicalSha256;
+  readonly officialRecipeBeforeStateHash: CanonicalSha256;
+  readonly privateWorkspacePolicyHash: CanonicalSha256;
+  readonly generatedAt: string;
+  readonly validUntil: string | null;
+}
+
+export interface StrictTestDimensionPreflightResultV1 {
+  readonly dimensionId: string;
+  readonly status: StrictTestDimensionApplicabilityV1;
+  readonly reasonCode: string;
+  readonly evidenceRefs: readonly string[];
+  readonly eligibleCellIds: readonly string[];
+  readonly excludedCellIds: readonly string[];
+  readonly eligibleCellCount: number;
+  readonly excludedCellCount: number;
+  readonly requiredFactsSupported: boolean;
+  readonly dimensionCellSetHash: CanonicalSha256;
+}
+
+export interface StrictTestDimensionRecommendationV1 {
+  readonly dimensionId: string;
+  readonly reasonCode:
+    | 'ARCHITECTURE_APPLICABLE_AND_SUPPORTED'
+    | 'FIRST_EVIDENCE_SUPPORTED_APPLICABLE_DIMENSION';
+  readonly evidenceRefs: readonly string[];
+  readonly alternativeDimensionIds: readonly string[];
+  readonly recommendationHash: CanonicalSha256;
+}
+
+export interface StrictTestPreflightReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly canonicalizerVersion: 'canonical-json-v1';
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly state: 'AWAITING_CONFIRMATION';
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly projectRootIdentity: string;
+  readonly controlRootIdentity: string;
+  readonly sourceRootIdentity: string;
+  readonly canonicalProjectIdentityHash: CanonicalSha256;
+  readonly sourceRevisionVectorHash: CanonicalSha256;
+  readonly sourceInventoryHash: CanonicalSha256;
+  readonly sourceFileCount: number;
+  readonly moduleCount: number;
+  readonly languageCount: number;
+  readonly parserCount: number;
+  readonly backendCount: number;
+  readonly certifiedProjectFactsArtifactHash: CanonicalSha256;
+  readonly certifiedProjectFactsContentHash: CanonicalSha256;
+  readonly certifiedProjectFactsSourceArtifactHash: CanonicalSha256;
+  readonly certifiedProjectFactsSourceVectorHash: CanonicalSha256;
+  readonly certifiedProjectFactsConsumerReceiptHash: CanonicalSha256;
+  readonly compiledPlanHash: CanonicalSha256;
+  readonly catalog: DimensionCatalogSnapshotV1;
+  readonly cellUniverse: ColdStartCellUniverseV1;
+  readonly fullCellUniverseHash: CanonicalSha256;
+  readonly requiredFactApplicability: RequiredFactApplicabilityUniverseV1;
+  readonly requiredFactApplicabilityUniverseHash: CanonicalSha256;
+  readonly factQueryCatalog: FactQueryCatalogSnapshotV1;
+  readonly factQueryCatalogHash: CanonicalSha256;
+  readonly baselineScheduleHash: CanonicalSha256;
+  readonly dimensionResults: readonly StrictTestDimensionPreflightResultV1[];
+  readonly applicableDimensionCount: number;
+  readonly excludedDimensionCount: number;
+  readonly unknownDimensionCount: 0;
+  readonly unknownApplicabilityCount: 0;
+  readonly unsupportedBackendCount: 0;
+  readonly strictConfigReceiptHash: CanonicalSha256;
+  readonly providerModelHash: CanonicalSha256;
+  readonly promptSopHash: CanonicalSha256;
+  readonly factQueryBackendHash: CanonicalSha256;
+  readonly parserBackendHash: CanonicalSha256;
+  readonly embeddingVectorHash: CanonicalSha256;
+  readonly runtimeArtifactManifestHash: CanonicalSha256;
+  readonly runtimeArtifactBindingHash: CanonicalSha256;
+  readonly productionBeforeStateHash: CanonicalSha256;
+  readonly productionAfterReadStateHash: CanonicalSha256;
+  readonly publicRouteBeforeStateHash: CanonicalSha256;
+  readonly officialRecipeBeforeStateHash: CanonicalSha256;
+  readonly privateWorkspacePolicyHash: CanonicalSha256;
+  readonly recommendation: StrictTestDimensionRecommendationV1;
+  readonly generatedAt: string;
+  readonly validUntil: string | null;
+  readonly bindingHash: CanonicalSha256;
+  readonly driftInvalidationHash: CanonicalSha256;
+  readonly preflightHash: CanonicalSha256;
+}
+
+export interface StrictTestPreflightPreviewV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly preflightHash: CanonicalSha256;
+  readonly state: 'AWAITING_CONFIRMATION';
+  readonly canConfirm: true;
+  readonly recommendation: StrictTestDimensionRecommendationV1;
+  readonly dimensions: readonly StrictTestDimensionPreflightResultV1[];
+  readonly blockers: readonly [];
+  readonly previewHash: CanonicalSha256;
+}
+
+export interface StrictTestSelectionConfirmationV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly state: 'SELECTION_CONFIRMED';
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly preflightHash: CanonicalSha256;
+  readonly bindingHash: CanonicalSha256;
+  readonly selectedDimensionId: string;
+  readonly fullCellUniverseHash: CanonicalSha256;
+  readonly selectedEligibleCellIds: readonly string[];
+  readonly selectedEligibleCellsHash: CanonicalSha256;
+  readonly strictConfigReceiptHash: CanonicalSha256;
+  readonly providerModelHash: CanonicalSha256;
+  readonly runtimeArtifactBindingHash: CanonicalSha256;
+  readonly privateWorkspacePolicyHash: CanonicalSha256;
+  readonly privateStrictTestOnly: true;
+  readonly productionFinalized: false;
+  readonly publicRouteChanged: false;
+  readonly confirmedBy: string;
+  readonly confirmedAt: string;
+  readonly confirmationHash: CanonicalSha256;
+}
+
+export interface StrictTestDimensionExecutionStateV1 {
+  readonly dimensionId: string;
+  readonly disposition: 'selected-for-execution' | typeof STRICT_TEST_UNEXECUTED_DISPOSITION_V1;
+  readonly executionCellIds: readonly string[];
+  readonly executionCellCount: number;
+}
+
+export interface StrictTestDimensionExecutionProjectionV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly state: 'SELECTION_CONFIRMED';
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly preflightHash: CanonicalSha256;
+  readonly confirmationHash: CanonicalSha256;
+  readonly bindingHash: CanonicalSha256;
+  readonly selectedDimensionId: string;
+  readonly executionCellIds: readonly string[];
+  readonly executionCellSetHash: CanonicalSha256;
+  readonly dimensionStates: readonly StrictTestDimensionExecutionStateV1[];
+  readonly fullCatalogHash: CanonicalSha256;
+  readonly fullCatalogSourceArtifactHash: CanonicalSha256;
+  readonly fullCellUniverseHash: CanonicalSha256;
+  readonly fullEligibleCellsHash: CanonicalSha256;
+  readonly fullExcludedCellsHash: CanonicalSha256;
+  readonly fullApplicabilityUniverseHash: CanonicalSha256;
+  readonly fullFactQueryCatalogHash: CanonicalSha256;
+  readonly fullBaselineScheduleHash: CanonicalSha256;
+  readonly certifiedProjectFactsContentHash: CanonicalSha256;
+  readonly sourceRevisionVectorHash: CanonicalSha256;
+  readonly sourceInventoryHash: CanonicalSha256;
+  readonly productionFinalized: false;
+  readonly publicRouteChanged: false;
+  readonly projectionHash: CanonicalSha256;
+}
+
+export interface StrictTestPrivateCompletionReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly terminalState: 'STRICT_TEST_COMPLETED_PRIVATE';
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly preflightHash: CanonicalSha256;
+  readonly confirmationHash: CanonicalSha256;
+  readonly projectionHash: CanonicalSha256;
+  readonly finalCoverageBinding: FinalCoverageBindingReceiptV1;
+  readonly servingSnapshotManifest: ServingSnapshotManifestV1;
+  readonly privateG4ReceiptHash: CanonicalSha256;
+  readonly privateServingValidationHash: CanonicalSha256;
+  readonly privateEvidenceRefs: readonly string[];
+  readonly productionBeforeStateHash: CanonicalSha256;
+  readonly productionAfterStateHash: CanonicalSha256;
+  readonly publicRouteBeforeStateHash: CanonicalSha256;
+  readonly publicRouteAfterStateHash: CanonicalSha256;
+  readonly productionFinalized: false;
+  readonly publicRouteChanged: false;
+  readonly completedAt: string;
+  readonly terminalHash: CanonicalSha256;
+}
+
+export interface StrictTestPrivateFailureReceiptV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly terminalState: 'STRICT_TEST_FAILED';
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly preflightHash: CanonicalSha256;
+  readonly confirmationHash: CanonicalSha256 | null;
+  readonly projectionHash: CanonicalSha256 | null;
+  readonly failedStage: StrictTestStateV1;
+  readonly errorCode: string;
+  readonly privateEvidenceRefs: readonly string[];
+  readonly forbiddenInferences: readonly string[];
+  readonly productionBeforeStateHash: CanonicalSha256;
+  readonly productionAfterStateHash: CanonicalSha256;
+  readonly publicRouteBeforeStateHash: CanonicalSha256;
+  readonly publicRouteAfterStateHash: CanonicalSha256;
+  readonly productionFinalized: false;
+  readonly publicRouteChanged: false;
+  readonly failedAt: string;
+  readonly terminalHash: CanonicalSha256;
+}
+
+export type StrictTestPrivateTerminalReceiptV1 =
+  | StrictTestPrivateCompletionReceiptV1
+  | StrictTestPrivateFailureReceiptV1;
+
+export interface StrictTestAuditReportV1 {
+  readonly schemaVersion: 1;
+  readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
+  readonly demandKey: string;
+  readonly runId: string;
+  readonly preflightHash: CanonicalSha256;
+  readonly confirmationHash: CanonicalSha256;
+  readonly projectionHash: CanonicalSha256;
+  readonly terminalHash: CanonicalSha256;
+  readonly terminalState: StrictTestTerminalStateV1;
+  readonly fullUniverse: {
+    readonly dimensionCount: 26;
+    readonly cellCount: number;
+    readonly eligibleCellCount: number;
+    readonly excludedCellCount: number;
+    readonly cellUniverseHash: CanonicalSha256;
+  };
+  readonly executedProjection: {
+    readonly dimensionId: string;
+    readonly cellCount: number;
+    readonly cellSetHash: CanonicalSha256;
+  };
+  readonly unexecutedDimensionIds: readonly string[];
+  readonly verificationCommands: readonly string[];
+  readonly privateArtifactRefs: readonly string[];
+  readonly forbiddenConclusions: readonly string[];
+  readonly productionFinalized: false;
+  readonly publicRouteChanged: false;
+  readonly reportHash: CanonicalSha256;
+}
+
+const PREFLIGHT_BINDING_KEYS: readonly (keyof StrictTestPreflightBindingsV1)[] = [
+  'schemaVersion',
+  'profile',
+  'demandKey',
+  'runId',
+  'projectRootIdentity',
+  'controlRootIdentity',
+  'sourceRootIdentity',
+  'canonicalProjectIdentityHash',
+  'sourceRevisionVectorHash',
+  'sourceInventoryHash',
+  'sourceFileCount',
+  'moduleCount',
+  'languageCount',
+  'parserCount',
+  'backendCount',
+  'certifiedProjectFactsArtifactHash',
+  'certifiedProjectFactsContentHash',
+  'certifiedProjectFactsSourceArtifactHash',
+  'certifiedProjectFactsSourceVectorHash',
+  'certifiedProjectFactsConsumerReceiptHash',
+  'strictConfigReceiptHash',
+  'providerModelHash',
+  'promptSopHash',
+  'factQueryBackendHash',
+  'parserBackendHash',
+  'embeddingVectorHash',
+  'runtimeArtifactManifestHash',
+  'runtimeArtifactBindingHash',
+  'productionBeforeStateHash',
+  'productionAfterReadStateHash',
+  'publicRouteBeforeStateHash',
+  'officialRecipeBeforeStateHash',
+  'privateWorkspacePolicyHash',
+  'generatedAt',
+  'validUntil',
+];
+
+const CONFIRMATION_INPUT_KEYS = [
+  'preflight',
+  'currentBindings',
+  'selectedDimensionIds',
+  'confirmedBy',
+  'confirmedAt',
+] as const;
+
+const PROJECTION_INPUT_KEYS = ['preflight', 'confirmation', 'currentBindings'] as const;
+const COMPLETION_INPUT_KEYS = [
+  'preflight',
+  'confirmation',
+  'projection',
+  'currentBindings',
+  'finalCoverageBinding',
+  'servingSnapshotManifest',
+  'privateG4ReceiptHash',
+  'privateServingValidationHash',
+  'productionAfterStateHash',
+  'publicRouteAfterStateHash',
+  'privateEvidenceRefs',
+  'completedAt',
+] as const;
+const FAILURE_INPUT_KEYS = [
+  'preflight',
+  'currentBindings',
+  'confirmationHash',
+  'projectionHash',
+  'failedStage',
+  'errorCode',
+  'privateEvidenceRefs',
+  'productionAfterStateHash',
+  'publicRouteAfterStateHash',
+  'failedAt',
+] as const;
+const REPORT_INPUT_KEYS = [
+  'preflight',
+  'confirmation',
+  'projection',
+  'terminal',
+  'verificationCommands',
+  'privateArtifactRefs',
+] as const;
+const RESUME_INPUT_KEYS = [
+  'preflight',
+  'confirmation',
+  'projection',
+  'currentBindings',
+  'privateWorkspacePolicyHash',
+] as const;
+
+export function hashStrictTestPreflightBindingsV1(
+  bindings: StrictTestPreflightBindingsV1
+): CanonicalSha256 {
+  validatePreflightBindings(bindings);
+  return hashCanonicalJson(bindings);
+}
+
+/**
+ * 从已完成生产 Plan 编译的完整分母派生只读 preflight。任何未知、缺失、漂移或 backend
+ * 不可用都会在 receipt 生成前拒绝，外层不能通过删除问题维度获得“可确认”状态。
+ */
+export function validateStrictTestPreflightV1(
+  compiledPlan: CompiledColdStartPlanV2,
+  bindings: StrictTestPreflightBindingsV1
+): StrictTestPreflightReceiptV1 {
+  validatePreflightBindings(bindings);
+  validateCompiledPlan(compiledPlan, bindings);
+
+  const dimensionResults = compiledPlan.catalog.dimensions.map((dimension) =>
+    buildDimensionResult(dimension.id, compiledPlan.universe.cells)
+  );
+  const applicable = dimensionResults.filter((row) => row.status === 'applicable');
+  const excluded = dimensionResults.filter((row) => row.status === 'excluded');
+  const unknown = dimensionResults.filter((row) => row.status === 'unknown');
+  if (unknown.length > 0) {
+    fail(
+      'STRICT_TEST_PREFLIGHT_UNKNOWN_DIMENSION',
+      unknown.map((row) => row.dimensionId).join(',')
+    );
+  }
+  if (applicable.length === 0) {
+    fail('STRICT_TEST_PREFLIGHT_EMPTY_APPLICABLE_UNIVERSE', 'no executable dimension');
+  }
+  const recommendation = buildRecommendation(applicable);
+  const bindingHash = hashCanonicalJson(bindings);
+  const driftInvalidationHash = hashCanonicalJson(buildDriftFields(compiledPlan, bindings));
+  const semantic = {
+    schemaVersion: 1 as const,
+    canonicalizerVersion: 'canonical-json-v1' as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    state: 'AWAITING_CONFIRMATION' as const,
+    demandKey: bindings.demandKey,
+    runId: bindings.runId,
+    projectRootIdentity: bindings.projectRootIdentity,
+    controlRootIdentity: bindings.controlRootIdentity,
+    sourceRootIdentity: bindings.sourceRootIdentity,
+    canonicalProjectIdentityHash: bindings.canonicalProjectIdentityHash,
+    sourceRevisionVectorHash: bindings.sourceRevisionVectorHash,
+    sourceInventoryHash: bindings.sourceInventoryHash,
+    sourceFileCount: bindings.sourceFileCount,
+    moduleCount: bindings.moduleCount,
+    languageCount: bindings.languageCount,
+    parserCount: bindings.parserCount,
+    backendCount: bindings.backendCount,
+    certifiedProjectFactsArtifactHash: bindings.certifiedProjectFactsArtifactHash,
+    certifiedProjectFactsContentHash: bindings.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash: bindings.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsSourceVectorHash: bindings.certifiedProjectFactsSourceVectorHash,
+    certifiedProjectFactsConsumerReceiptHash: bindings.certifiedProjectFactsConsumerReceiptHash,
+    compiledPlanHash: compiledPlan.canonicalPlanHash,
+    catalog: compiledPlan.catalog,
+    cellUniverse: compiledPlan.universe,
+    fullCellUniverseHash: compiledPlan.universe.cellUniverseHash,
+    requiredFactApplicability: compiledPlan.requiredFactApplicability,
+    requiredFactApplicabilityUniverseHash: compiledPlan.requiredFactApplicability.universeHash,
+    factQueryCatalog: compiledPlan.factQueryCatalog,
+    factQueryCatalogHash: compiledPlan.factQueryCatalog.catalogHash,
+    baselineScheduleHash: compiledPlan.schedule.baselineScheduleHash,
+    dimensionResults,
+    applicableDimensionCount: applicable.length,
+    excludedDimensionCount: excluded.length,
+    unknownDimensionCount: 0 as const,
+    unknownApplicabilityCount: 0 as const,
+    unsupportedBackendCount: 0 as const,
+    strictConfigReceiptHash: bindings.strictConfigReceiptHash,
+    providerModelHash: bindings.providerModelHash,
+    promptSopHash: bindings.promptSopHash,
+    factQueryBackendHash: bindings.factQueryBackendHash,
+    parserBackendHash: bindings.parserBackendHash,
+    embeddingVectorHash: bindings.embeddingVectorHash,
+    runtimeArtifactManifestHash: bindings.runtimeArtifactManifestHash,
+    runtimeArtifactBindingHash: bindings.runtimeArtifactBindingHash,
+    productionBeforeStateHash: bindings.productionBeforeStateHash,
+    productionAfterReadStateHash: bindings.productionAfterReadStateHash,
+    publicRouteBeforeStateHash: bindings.publicRouteBeforeStateHash,
+    officialRecipeBeforeStateHash: bindings.officialRecipeBeforeStateHash,
+    privateWorkspacePolicyHash: bindings.privateWorkspacePolicyHash,
+    recommendation,
+    generatedAt: bindings.generatedAt,
+    validUntil: bindings.validUntil,
+    bindingHash,
+    driftInvalidationHash,
+  };
+  return freezeDeep({ ...semantic, preflightHash: hashCanonicalJson(semantic) });
+}
+
+export function assertStrictTestPreflightReceiptV1(receipt: StrictTestPreflightReceiptV1): void {
+  assertPreflightEnvelopeInvariant(receipt);
+  assertPreflightHash(receipt);
+  assertAcceptedPreflightCatalog(receipt.catalog);
+  validateEmbeddedUniverse(receipt.catalog, receipt.cellUniverse);
+  validateApplicability(receipt.requiredFactApplicability);
+  validateFactQueryCatalog(receipt.factQueryCatalog);
+  assertPreflightDimensionConservation(receipt);
+  assertPreflightBindingConservation(receipt);
+  assertPreflightEmbeddedLineage(receipt);
+}
+
+function assertPreflightEnvelopeInvariant(receipt: StrictTestPreflightReceiptV1): void {
+  if (
+    receipt.schemaVersion !== 1 ||
+    receipt.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
+    receipt.state !== 'AWAITING_CONFIRMATION' ||
+    receipt.catalog.dimensions.length !== 26 ||
+    receipt.dimensionResults.length !== 26 ||
+    receipt.unknownDimensionCount !== 0 ||
+    receipt.unknownApplicabilityCount !== 0 ||
+    receipt.unsupportedBackendCount !== 0 ||
+    receipt.applicableDimensionCount < 1 ||
+    receipt.productionBeforeStateHash !== receipt.productionAfterReadStateHash
+  ) {
+    fail('STRICT_TEST_PREFLIGHT_RECEIPT_INVALID', 'invariant');
+  }
+}
+
+function assertPreflightHash(receipt: StrictTestPreflightReceiptV1): void {
+  const { preflightHash, ...semantic } = receipt;
+  if (preflightHash !== hashCanonicalJson(semantic)) {
+    fail('STRICT_TEST_PREFLIGHT_HASH_MISMATCH', 'preflightHash');
+  }
+}
+
+function assertAcceptedPreflightCatalog(catalog: DimensionCatalogSnapshotV1): void {
+  const acceptedCatalog = buildDimensionCatalogSnapshot();
+  if (
+    catalog.catalogHash !== acceptedCatalog.catalogHash ||
+    catalog.sourceArtifactHash !== acceptedCatalog.sourceArtifactHash ||
+    canonicalJsonStringify(catalog.dimensions) !==
+      canonicalJsonStringify(acceptedCatalog.dimensions)
+  ) {
+    fail('STRICT_TEST_DIMENSION_CATALOG_DRIFT', 'embedded catalog');
+  }
+}
+
+function assertPreflightDimensionConservation(receipt: StrictTestPreflightReceiptV1): void {
+  const expectedDimensionResults = receipt.catalog.dimensions.map((dimension) =>
+    buildDimensionResult(dimension.id, receipt.cellUniverse.cells)
+  );
+  if (
+    canonicalJsonStringify(receipt.dimensionResults) !==
+      canonicalJsonStringify(expectedDimensionResults) ||
+    receipt.applicableDimensionCount !==
+      expectedDimensionResults.filter((row) => row.status === 'applicable').length ||
+    receipt.excludedDimensionCount !==
+      expectedDimensionResults.filter((row) => row.status === 'excluded').length
+  ) {
+    fail('STRICT_TEST_PREFLIGHT_RECEIPT_INVALID', 'dimension conservation');
+  }
+  const expectedRecommendation = buildRecommendation(
+    expectedDimensionResults.filter((row) => row.status === 'applicable')
+  );
+  if (
+    canonicalJsonStringify(receipt.recommendation) !==
+    canonicalJsonStringify(expectedRecommendation)
+  ) {
+    fail('STRICT_TEST_PREFLIGHT_RECOMMENDATION_INVALID', 'canonical recommendation');
+  }
+  const recommendation = receipt.dimensionResults.find(
+    (row) => row.dimensionId === receipt.recommendation.dimensionId
+  );
+  if (
+    !recommendation ||
+    recommendation.status !== 'applicable' ||
+    recommendation.eligibleCellCount < 1
+  ) {
+    fail('STRICT_TEST_PREFLIGHT_RECOMMENDATION_INVALID', receipt.recommendation.dimensionId);
+  }
+}
+
+function assertPreflightBindingConservation(receipt: StrictTestPreflightReceiptV1): void {
+  const embeddedBindings = preflightBindingsFromReceipt(receipt);
+  if (receipt.bindingHash !== hashStrictTestPreflightBindingsV1(embeddedBindings)) {
+    fail('STRICT_TEST_PREFLIGHT_RECEIPT_INVALID', 'bindingHash');
+  }
+  const expectedDriftHash = hashCanonicalJson(buildReceiptDriftFields(receipt));
+  if (receipt.driftInvalidationHash !== expectedDriftHash) {
+    fail('STRICT_TEST_PREFLIGHT_RECEIPT_INVALID', 'driftInvalidationHash');
+  }
+}
+
+function assertPreflightEmbeddedLineage(receipt: StrictTestPreflightReceiptV1): void {
+  if (
+    receipt.fullCellUniverseHash !== receipt.cellUniverse.cellUniverseHash ||
+    receipt.requiredFactApplicabilityUniverseHash !==
+      receipt.requiredFactApplicability.universeHash ||
+    receipt.factQueryCatalogHash !== receipt.factQueryCatalog.catalogHash
+  ) {
+    fail('STRICT_TEST_PREFLIGHT_RECEIPT_INVALID', 'embedded lineage');
+  }
+}
+
+export function assertStrictTestPreflightCurrentV1(
+  receipt: StrictTestPreflightReceiptV1,
+  currentBindings: StrictTestPreflightBindingsV1,
+  observedAt?: string
+): void {
+  assertStrictTestPreflightReceiptV1(receipt);
+  const bindingHash = hashStrictTestPreflightBindingsV1(currentBindings);
+  if (
+    bindingHash !== receipt.bindingHash ||
+    currentBindings.demandKey !== receipt.demandKey ||
+    currentBindings.runId !== receipt.runId
+  ) {
+    fail('STRICT_TEST_PREFLIGHT_DRIFT', 'binding hash or demand/run changed');
+  }
+  if (observedAt !== undefined) {
+    requireTimestamp(observedAt, 'STRICT_TEST_PREFLIGHT_TIME_INVALID');
+    if (Date.parse(observedAt) < Date.parse(receipt.generatedAt)) {
+      fail('STRICT_TEST_PREFLIGHT_TIME_INVALID', observedAt);
+    }
+    if (receipt.validUntil !== null && Date.parse(observedAt) > Date.parse(receipt.validUntil)) {
+      fail('STRICT_TEST_PREFLIGHT_EXPIRED', observedAt);
+    }
+  }
+}
+
+export function createStrictTestPreflightPreviewV1(
+  preflight: StrictTestPreflightReceiptV1
+): StrictTestPreflightPreviewV1 {
+  assertStrictTestPreflightReceiptV1(preflight);
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    preflightHash: preflight.preflightHash,
+    state: 'AWAITING_CONFIRMATION' as const,
+    canConfirm: true as const,
+    recommendation: preflight.recommendation,
+    dimensions: preflight.dimensionResults,
+    blockers: [] as const,
+  };
+  return freezeDeep({ ...semantic, previewHash: hashCanonicalJson(semantic) });
+}
+
+export function createStrictTestSelectionConfirmationV1(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly currentBindings: StrictTestPreflightBindingsV1;
+  readonly selectedDimensionIds: readonly string[];
+  readonly confirmedBy: string;
+  readonly confirmedAt: string;
+}): StrictTestSelectionConfirmationV1 {
+  assertExactKeys(input, CONFIRMATION_INPUT_KEYS, 'STRICT_TEST_CONFIRMATION_FIELDS_INVALID');
+  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.confirmedAt);
+  if (input.selectedDimensionIds.length !== 1) {
+    fail('STRICT_TEST_SELECTION_EXACTLY_ONE_REQUIRED', `${input.selectedDimensionIds.length}`);
+  }
+  const selectedDimensionId = input.selectedDimensionIds[0]?.trim() ?? '';
+  if (
+    !selectedDimensionId ||
+    new Set(input.selectedDimensionIds).size !== input.selectedDimensionIds.length
+  ) {
+    fail('STRICT_TEST_SELECTION_EXACTLY_ONE_REQUIRED', 'empty or duplicate');
+  }
+  const selected = input.preflight.dimensionResults.find(
+    (row) => row.dimensionId === selectedDimensionId
+  );
+  if (!selected || selected.status !== 'applicable' || selected.eligibleCellCount === 0) {
+    fail('STRICT_TEST_SELECTION_DIMENSION_NOT_APPLICABLE', selectedDimensionId);
+  }
+  requireText(input.confirmedBy, 'STRICT_TEST_CONFIRMATION_FIELDS_INVALID');
+  requireTimestamp(input.confirmedAt, 'STRICT_TEST_CONFIRMATION_FIELDS_INVALID');
+  const selectedEligibleCellIds = [...selected.eligibleCellIds];
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    state: 'SELECTION_CONFIRMED' as const,
+    demandKey: input.preflight.demandKey,
+    runId: input.preflight.runId,
+    preflightHash: input.preflight.preflightHash,
+    bindingHash: input.preflight.bindingHash,
+    selectedDimensionId,
+    fullCellUniverseHash: input.preflight.fullCellUniverseHash,
+    selectedEligibleCellIds,
+    selectedEligibleCellsHash: hashCanonicalJson(selectedEligibleCellIds),
+    strictConfigReceiptHash: input.preflight.strictConfigReceiptHash,
+    providerModelHash: input.preflight.providerModelHash,
+    runtimeArtifactBindingHash: input.preflight.runtimeArtifactBindingHash,
+    privateWorkspacePolicyHash: input.preflight.privateWorkspacePolicyHash,
+    privateStrictTestOnly: true as const,
+    productionFinalized: false as const,
+    publicRouteChanged: false as const,
+    confirmedBy: input.confirmedBy.trim(),
+    confirmedAt: input.confirmedAt,
+  };
+  return freezeDeep({ ...semantic, confirmationHash: hashCanonicalJson(semantic) });
+}
+
+export function assertStrictTestSelectionConfirmationV1(
+  confirmation: StrictTestSelectionConfirmationV1,
+  preflight?: StrictTestPreflightReceiptV1
+): void {
+  if (
+    confirmation.schemaVersion !== 1 ||
+    confirmation.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
+    confirmation.state !== 'SELECTION_CONFIRMED' ||
+    !confirmation.privateStrictTestOnly ||
+    confirmation.productionFinalized !== false ||
+    confirmation.publicRouteChanged !== false ||
+    confirmation.selectedEligibleCellIds.length === 0 ||
+    confirmation.selectedEligibleCellsHash !==
+      hashCanonicalJson(confirmation.selectedEligibleCellIds)
+  ) {
+    fail('STRICT_TEST_CONFIRMATION_INVALID', 'invariant');
+  }
+  const { confirmationHash, ...semantic } = confirmation;
+  if (confirmationHash !== hashCanonicalJson(semantic)) {
+    fail('STRICT_TEST_CONFIRMATION_HASH_MISMATCH', 'confirmationHash');
+  }
+  if (preflight) {
+    assertStrictTestPreflightReceiptV1(preflight);
+    const selected = preflight.dimensionResults.find(
+      (row) => row.dimensionId === confirmation.selectedDimensionId
+    );
+    if (
+      confirmation.preflightHash !== preflight.preflightHash ||
+      confirmation.bindingHash !== preflight.bindingHash ||
+      confirmation.fullCellUniverseHash !== preflight.fullCellUniverseHash ||
+      !selected ||
+      selected.status !== 'applicable' ||
+      canonicalJsonStringify(confirmation.selectedEligibleCellIds) !==
+        canonicalJsonStringify(selected.eligibleCellIds)
+    ) {
+      fail('STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH', confirmation.selectedDimensionId);
+    }
+  }
+}
+
+export function createStrictTestDimensionExecutionProjectionV1(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly currentBindings: StrictTestPreflightBindingsV1;
+}): StrictTestDimensionExecutionProjectionV1 {
+  assertExactKeys(input, PROJECTION_INPUT_KEYS, 'STRICT_TEST_PROJECTION_FIELDS_INVALID');
+  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings);
+  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  const executionCellIds = [...input.confirmation.selectedEligibleCellIds];
+  const dimensionStates = input.preflight.dimensionResults.map((row) =>
+    row.dimensionId === input.confirmation.selectedDimensionId
+      ? {
+          dimensionId: row.dimensionId,
+          disposition: 'selected-for-execution' as const,
+          executionCellIds,
+          executionCellCount: executionCellIds.length,
+        }
+      : {
+          dimensionId: row.dimensionId,
+          disposition: STRICT_TEST_UNEXECUTED_DISPOSITION_V1,
+          executionCellIds: [] as readonly string[],
+          executionCellCount: 0,
+        }
+  );
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    state: 'SELECTION_CONFIRMED' as const,
+    demandKey: input.preflight.demandKey,
+    runId: input.preflight.runId,
+    preflightHash: input.preflight.preflightHash,
+    confirmationHash: input.confirmation.confirmationHash,
+    bindingHash: input.preflight.bindingHash,
+    selectedDimensionId: input.confirmation.selectedDimensionId,
+    executionCellIds,
+    executionCellSetHash: hashCanonicalJson(executionCellIds),
+    dimensionStates,
+    fullCatalogHash: input.preflight.catalog.catalogHash,
+    fullCatalogSourceArtifactHash: input.preflight.catalog.sourceArtifactHash,
+    fullCellUniverseHash: input.preflight.fullCellUniverseHash,
+    fullEligibleCellsHash: input.preflight.cellUniverse.eligibleCellsHash,
+    fullExcludedCellsHash: input.preflight.cellUniverse.excludedCellsHash,
+    fullApplicabilityUniverseHash: input.preflight.requiredFactApplicabilityUniverseHash,
+    fullFactQueryCatalogHash: input.preflight.factQueryCatalogHash,
+    fullBaselineScheduleHash: input.preflight.baselineScheduleHash,
+    certifiedProjectFactsContentHash: input.preflight.certifiedProjectFactsContentHash,
+    sourceRevisionVectorHash: input.preflight.sourceRevisionVectorHash,
+    sourceInventoryHash: input.preflight.sourceInventoryHash,
+    productionFinalized: false as const,
+    publicRouteChanged: false as const,
+  };
+  return freezeDeep({ ...semantic, projectionHash: hashCanonicalJson(semantic) });
+}
+
+export function assertStrictTestDimensionExecutionProjectionV1(
+  projection: StrictTestDimensionExecutionProjectionV1,
+  preflight?: StrictTestPreflightReceiptV1,
+  confirmation?: StrictTestSelectionConfirmationV1
+): void {
+  assertProjectionShape(projection);
+  const { projectionHash, ...semantic } = projection;
+  if (projectionHash !== hashCanonicalJson(semantic)) {
+    fail('STRICT_TEST_PROJECTION_HASH_MISMATCH', 'projectionHash');
+  }
+  if (preflight && confirmation) {
+    assertProjectionLineage(projection, preflight, confirmation);
+  }
+}
+
+function assertProjectionShape(projection: StrictTestDimensionExecutionProjectionV1): void {
+  const selectedStates = projection.dimensionStates.filter(
+    (state) => state.disposition === 'selected-for-execution'
+  );
+  const invalidUnselectedState = projection.dimensionStates.some((state) =>
+    isInvalidUnselectedDimensionState(state, projection.selectedDimensionId)
+  );
+  if (
+    projection.schemaVersion !== 1 ||
+    projection.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
+    projection.productionFinalized !== false ||
+    projection.publicRouteChanged !== false ||
+    projection.executionCellIds.length === 0 ||
+    projection.executionCellSetHash !== hashCanonicalJson(projection.executionCellIds) ||
+    selectedStates.length !== 1 ||
+    invalidUnselectedState
+  ) {
+    fail('STRICT_TEST_PROJECTION_INVALID', 'conservation invariant');
+  }
+}
+
+function isInvalidUnselectedDimensionState(
+  state: StrictTestDimensionExecutionStateV1,
+  selectedDimensionId: string
+): boolean {
+  return (
+    state.dimensionId !== selectedDimensionId &&
+    (state.disposition !== STRICT_TEST_UNEXECUTED_DISPOSITION_V1 ||
+      state.executionCellCount !== 0 ||
+      state.executionCellIds.length !== 0)
+  );
+}
+
+function assertProjectionLineage(
+  projection: StrictTestDimensionExecutionProjectionV1,
+  preflight: StrictTestPreflightReceiptV1,
+  confirmation: StrictTestSelectionConfirmationV1
+): void {
+  assertStrictTestSelectionConfirmationV1(confirmation, preflight);
+  if (
+    projection.preflightHash !== preflight.preflightHash ||
+    projection.confirmationHash !== confirmation.confirmationHash ||
+    projection.fullCellUniverseHash !== preflight.fullCellUniverseHash ||
+    projection.fullCatalogHash !== preflight.catalog.catalogHash ||
+    projection.fullApplicabilityUniverseHash !== preflight.requiredFactApplicabilityUniverseHash ||
+    canonicalJsonStringify(projection.executionCellIds) !==
+      canonicalJsonStringify(confirmation.selectedEligibleCellIds)
+  ) {
+    fail('STRICT_TEST_PROJECTION_LINEAGE_MISMATCH', projection.selectedDimensionId);
+  }
+}
+
+export function assertStrictTestResumeContextV1(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly projection: StrictTestDimensionExecutionProjectionV1;
+  readonly currentBindings: StrictTestPreflightBindingsV1;
+  readonly privateWorkspacePolicyHash: CanonicalSha256;
+}): void {
+  assertExactKeys(input, RESUME_INPUT_KEYS, 'STRICT_TEST_RESUME_CONTEXT_INVALID');
+  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings);
+  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  assertStrictTestDimensionExecutionProjectionV1(
+    input.projection,
+    input.preflight,
+    input.confirmation
+  );
+  if (
+    input.privateWorkspacePolicyHash !== input.preflight.privateWorkspacePolicyHash ||
+    input.privateWorkspacePolicyHash !== input.confirmation.privateWorkspacePolicyHash
+  ) {
+    fail('STRICT_TEST_RESUME_CONTEXT_DRIFT', 'private workspace owner/policy');
+  }
+}
+
+export function createStrictTestPrivateCompletionReceiptV1(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly projection: StrictTestDimensionExecutionProjectionV1;
+  readonly currentBindings: StrictTestPreflightBindingsV1;
+  readonly finalCoverageBinding: FinalCoverageBindingReceiptV1;
+  readonly servingSnapshotManifest: ServingSnapshotManifestV1;
+  readonly privateG4ReceiptHash: CanonicalSha256;
+  readonly privateServingValidationHash: CanonicalSha256;
+  readonly productionAfterStateHash: CanonicalSha256;
+  readonly publicRouteAfterStateHash: CanonicalSha256;
+  readonly privateEvidenceRefs: readonly string[];
+  readonly completedAt: string;
+}): StrictTestPrivateCompletionReceiptV1 {
+  assertExactKeys(input, COMPLETION_INPUT_KEYS, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
+  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.completedAt);
+  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  assertStrictTestDimensionExecutionProjectionV1(
+    input.projection,
+    input.preflight,
+    input.confirmation
+  );
+  validatePrivateCompletionBindings(input);
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    terminalState: 'STRICT_TEST_COMPLETED_PRIVATE' as const,
+    demandKey: input.preflight.demandKey,
+    runId: input.preflight.runId,
+    preflightHash: input.preflight.preflightHash,
+    confirmationHash: input.confirmation.confirmationHash,
+    projectionHash: input.projection.projectionHash,
+    finalCoverageBinding: input.finalCoverageBinding,
+    servingSnapshotManifest: input.servingSnapshotManifest,
+    privateG4ReceiptHash: input.privateG4ReceiptHash,
+    privateServingValidationHash: input.privateServingValidationHash,
+    privateEvidenceRefs: normalizeStrings(input.privateEvidenceRefs),
+    productionBeforeStateHash: input.preflight.productionBeforeStateHash,
+    productionAfterStateHash: input.productionAfterStateHash,
+    publicRouteBeforeStateHash: input.preflight.publicRouteBeforeStateHash,
+    publicRouteAfterStateHash: input.publicRouteAfterStateHash,
+    productionFinalized: false as const,
+    publicRouteChanged: false as const,
+    completedAt: input.completedAt,
+  };
+  return freezeDeep({ ...semantic, terminalHash: hashCanonicalJson(semantic) });
+}
+
+export function createStrictTestPrivateFailureReceiptV1(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly currentBindings: StrictTestPreflightBindingsV1;
+  readonly confirmationHash: CanonicalSha256 | null;
+  readonly projectionHash: CanonicalSha256 | null;
+  readonly failedStage: StrictTestStateV1;
+  readonly errorCode: string;
+  readonly privateEvidenceRefs: readonly string[];
+  readonly productionAfterStateHash: CanonicalSha256;
+  readonly publicRouteAfterStateHash: CanonicalSha256;
+  readonly failedAt: string;
+}): StrictTestPrivateFailureReceiptV1 {
+  assertExactKeys(input, FAILURE_INPUT_KEYS, 'STRICT_TEST_FAILURE_FIELDS_INVALID');
+  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.failedAt);
+  requireText(input.errorCode, 'STRICT_TEST_FAILURE_FIELDS_INVALID');
+  requireTimestamp(input.failedAt, 'STRICT_TEST_FAILURE_FIELDS_INVALID');
+  if (
+    !new Set<string>(STRICT_TEST_STATE_SEQUENCE_V1).has(input.failedStage) ||
+    input.failedStage === 'STRICT_TEST_COMPLETED_PRIVATE'
+  ) {
+    fail('STRICT_TEST_FAILURE_FIELDS_INVALID', 'unknown/completed stage cannot fail');
+  }
+  if (
+    input.productionAfterStateHash !== input.preflight.productionBeforeStateHash ||
+    input.publicRouteAfterStateHash !== input.preflight.publicRouteBeforeStateHash
+  ) {
+    fail('STRICT_TEST_PRODUCTION_MUTATION_DETECTED', input.failedStage);
+  }
+  for (const hash of [input.confirmationHash, input.projectionHash]) {
+    if (hash !== null) {
+      requireSha(hash, 'STRICT_TEST_FAILURE_FIELDS_INVALID');
+    }
+  }
+  const forbiddenInferences = strictTestForbiddenConclusions();
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    terminalState: 'STRICT_TEST_FAILED' as const,
+    demandKey: input.preflight.demandKey,
+    runId: input.preflight.runId,
+    preflightHash: input.preflight.preflightHash,
+    confirmationHash: input.confirmationHash,
+    projectionHash: input.projectionHash,
+    failedStage: input.failedStage,
+    errorCode: input.errorCode.trim(),
+    privateEvidenceRefs: normalizeStrings(input.privateEvidenceRefs),
+    forbiddenInferences,
+    productionBeforeStateHash: input.preflight.productionBeforeStateHash,
+    productionAfterStateHash: input.productionAfterStateHash,
+    publicRouteBeforeStateHash: input.preflight.publicRouteBeforeStateHash,
+    publicRouteAfterStateHash: input.publicRouteAfterStateHash,
+    productionFinalized: false as const,
+    publicRouteChanged: false as const,
+    failedAt: input.failedAt,
+  };
+  return freezeDeep({ ...semantic, terminalHash: hashCanonicalJson(semantic) });
+}
+
+export function assertStrictTestPrivateTerminalReceiptV1(
+  receipt: StrictTestPrivateTerminalReceiptV1
+): void {
+  assertPrivateTerminalNonMutation(receipt);
+  const { terminalHash, ...semantic } = receipt;
+  if (terminalHash !== hashCanonicalJson(semantic)) {
+    fail('STRICT_TEST_PRIVATE_TERMINAL_HASH_MISMATCH', 'terminalHash');
+  }
+  if (receipt.terminalState === 'STRICT_TEST_COMPLETED_PRIVATE') {
+    assertPrivateCompletionLineage(receipt);
+    return;
+  }
+  assertPrivateFailureLineage(receipt);
+}
+
+function assertPrivateTerminalNonMutation(receipt: StrictTestPrivateTerminalReceiptV1): void {
+  if (
+    receipt.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
+    receipt.productionFinalized !== false ||
+    receipt.publicRouteChanged !== false ||
+    receipt.productionBeforeStateHash !== receipt.productionAfterStateHash ||
+    receipt.publicRouteBeforeStateHash !== receipt.publicRouteAfterStateHash
+  ) {
+    fail('STRICT_TEST_PRIVATE_TERMINAL_INVALID', 'non-mutation invariant');
+  }
+}
+
+function assertPrivateCompletionLineage(receipt: StrictTestPrivateCompletionReceiptV1): void {
+  const finalCoverageSemantic = omitHash(receipt.finalCoverageBinding, 'receiptHash');
+  const servingSemantic = omitHash(receipt.servingSnapshotManifest, 'manifestHash');
+  const hasNonPassingCell = receipt.finalCoverageBinding.cells.some(
+    (cell) => cell.finalDisposition === 'failed' || cell.finalDisposition === 'unknown'
+  );
+  if (
+    receipt.finalCoverageBinding.receiptHash !== hashCanonicalJson(finalCoverageSemantic) ||
+    receipt.servingSnapshotManifest.manifestHash !== hashCanonicalJson(servingSemantic) ||
+    receipt.finalCoverageBinding.g4ReceiptHash !== receipt.privateG4ReceiptHash ||
+    receipt.servingSnapshotManifest.finalCoverageBindingHash !==
+      receipt.finalCoverageBinding.receiptHash ||
+    receipt.servingSnapshotManifest.candidateDataManifestHash !==
+      receipt.finalCoverageBinding.candidateDataManifestHash ||
+    receipt.servingSnapshotManifest.servingSnapshotValidationHash !==
+      receipt.privateServingValidationHash ||
+    receipt.finalCoverageBinding.cells.length === 0 ||
+    hasNonPassingCell
+  ) {
+    fail('STRICT_TEST_PRIVATE_TERMINAL_INVALID', 'private coverage/serving lineage');
+  }
+}
+
+function assertPrivateFailureLineage(receipt: StrictTestPrivateFailureReceiptV1): void {
+  if (
+    !new Set<string>(STRICT_TEST_STATE_SEQUENCE_V1).has(receipt.failedStage) ||
+    receipt.failedStage === 'STRICT_TEST_COMPLETED_PRIVATE' ||
+    !receipt.errorCode ||
+    canonicalJsonStringify(receipt.forbiddenInferences) !==
+      canonicalJsonStringify(strictTestForbiddenConclusions())
+  ) {
+    fail('STRICT_TEST_PRIVATE_TERMINAL_INVALID', 'failure lineage');
+  }
+}
+
+export function createStrictTestAuditReportV1(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly projection: StrictTestDimensionExecutionProjectionV1;
+  readonly terminal: StrictTestPrivateTerminalReceiptV1;
+  readonly verificationCommands: readonly string[];
+  readonly privateArtifactRefs: readonly string[];
+}): StrictTestAuditReportV1 {
+  assertExactKeys(input, REPORT_INPUT_KEYS, 'STRICT_TEST_REPORT_FIELDS_INVALID');
+  assertStrictTestPreflightReceiptV1(input.preflight);
+  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  assertStrictTestDimensionExecutionProjectionV1(
+    input.projection,
+    input.preflight,
+    input.confirmation
+  );
+  assertStrictTestPrivateTerminalReceiptV1(input.terminal);
+  if (
+    input.terminal.preflightHash !== input.preflight.preflightHash ||
+    (input.terminal.confirmationHash !== null &&
+      input.terminal.confirmationHash !== input.confirmation.confirmationHash) ||
+    (input.terminal.projectionHash !== null &&
+      input.terminal.projectionHash !== input.projection.projectionHash)
+  ) {
+    fail('STRICT_TEST_REPORT_LINEAGE_MISMATCH', input.terminal.terminalState);
+  }
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    demandKey: input.preflight.demandKey,
+    runId: input.preflight.runId,
+    preflightHash: input.preflight.preflightHash,
+    confirmationHash: input.confirmation.confirmationHash,
+    projectionHash: input.projection.projectionHash,
+    terminalHash: input.terminal.terminalHash,
+    terminalState: input.terminal.terminalState,
+    fullUniverse: {
+      dimensionCount: 26 as const,
+      cellCount: input.preflight.cellUniverse.universeCount,
+      eligibleCellCount: input.preflight.cellUniverse.eligibleCount,
+      excludedCellCount: input.preflight.cellUniverse.excludedCount,
+      cellUniverseHash: input.preflight.fullCellUniverseHash,
+    },
+    executedProjection: {
+      dimensionId: input.projection.selectedDimensionId,
+      cellCount: input.projection.executionCellIds.length,
+      cellSetHash: input.projection.executionCellSetHash,
+    },
+    unexecutedDimensionIds: input.projection.dimensionStates
+      .filter((row) => row.disposition === STRICT_TEST_UNEXECUTED_DISPOSITION_V1)
+      .map((row) => row.dimensionId),
+    verificationCommands: normalizeStrings(input.verificationCommands),
+    privateArtifactRefs: normalizeStrings(input.privateArtifactRefs),
+    forbiddenConclusions: strictTestForbiddenConclusions(),
+    productionFinalized: false as const,
+    publicRouteChanged: false as const,
+  };
+  return freezeDeep({ ...semantic, reportHash: hashCanonicalJson(semantic) });
+}
+
+function validateCompiledPlan(
+  plan: CompiledColdStartPlanV2,
+  bindings: StrictTestPreflightBindingsV1
+): void {
+  assertCompiledPlanEnvelope(plan);
+  assertAcceptedPreflightCatalog(plan.catalog);
+  validateEmbeddedUniverse(plan.catalog, plan.universe);
+  validateApplicability(plan.requiredFactApplicability);
+  validateFactQueryCatalog(plan.factQueryCatalog);
+  assertCompiledSelectionUniverse(plan, bindings);
+  assertCompiledExecutionLineage(plan, bindings);
+}
+
+function assertCompiledPlanEnvelope(plan: CompiledColdStartPlanV2): void {
+  const { canonicalPlanHash, ...semantic } = plan;
+  if (
+    plan.schemaVersion !== 2 ||
+    plan.compilerVersion !== 'cold-start-plan-compiler-v2' ||
+    canonicalPlanHash !== hashCanonicalJson(semantic)
+  ) {
+    fail('STRICT_TEST_COMPILED_PLAN_INVALID', 'canonical plan hash');
+  }
+}
+
+function assertCompiledSelectionUniverse(
+  plan: CompiledColdStartPlanV2,
+  bindings: StrictTestPreflightBindingsV1
+): void {
+  const moduleIds = normalizeStrings(plan.selection.moduleIds);
+  const dimensionIds = plan.catalog.dimensions.map((row) => row.id);
+  const eligibleCellIds = plan.universe.cells
+    .filter((cell) => cell.status === 'eligible')
+    .map((cell) => cell.cellId);
+  const excludedCellIds = plan.universe.cells
+    .filter((cell) => cell.status === 'excluded')
+    .map((cell) => cell.cellId);
+  if (
+    bindings.moduleCount !== moduleIds.length ||
+    bindings.moduleCount < 1 ||
+    plan.universe.universeCount !== moduleIds.length * dimensionIds.length ||
+    canonicalJsonStringify(plan.selection.dimensionIds) !== canonicalJsonStringify(dimensionIds) ||
+    canonicalJsonStringify(plan.selection.eligibleCellIds) !==
+      canonicalJsonStringify(eligibleCellIds) ||
+    canonicalJsonStringify(plan.selection.excludedCellIds) !==
+      canonicalJsonStringify(excludedCellIds) ||
+    plan.selection.deferredCells.length !== 0
+  ) {
+    fail('STRICT_TEST_FULL_UNIVERSE_CONSERVATION', 'selection/universe mismatch');
+  }
+  const expectedCellIds = moduleIds.flatMap((moduleId) =>
+    dimensionIds.map((dimensionId) => `${moduleId}::${dimensionId}`)
+  );
+  if (
+    !setEquals(new Set(expectedCellIds), new Set(plan.universe.cells.map((cell) => cell.cellId)))
+  ) {
+    fail('STRICT_TEST_FULL_UNIVERSE_CONSERVATION', 'missing or extra module×dimension cell');
+  }
+}
+
+function assertCompiledExecutionLineage(
+  plan: CompiledColdStartPlanV2,
+  bindings: StrictTestPreflightBindingsV1
+): void {
+  const executionCellsMatchSelection =
+    plan.execution.orderedCells.length === plan.selection.eligibleCellIds.length &&
+    setEquals(new Set(plan.execution.orderedCells), new Set(plan.selection.eligibleCellIds));
+  if (
+    plan.execution.factsBindingHash !== bindings.certifiedProjectFactsContentHash ||
+    plan.execution.sourceRevisionVectorHash !== bindings.sourceRevisionVectorHash ||
+    bindings.certifiedProjectFactsSourceVectorHash !== bindings.sourceRevisionVectorHash ||
+    plan.selection.sourceArtifactHash !== bindings.certifiedProjectFactsSourceArtifactHash ||
+    plan.selection.strictConfigReceiptHash !== bindings.strictConfigReceiptHash ||
+    plan.execution.factQueryCatalogHash !== plan.factQueryCatalog.catalogHash ||
+    plan.execution.anatomyApplicabilityHash !== plan.requiredFactApplicability.universeHash ||
+    plan.execution.factHarvestScheduleHash !== plan.schedule.factHarvestScheduleHash ||
+    plan.execution.lensBindingsHash !== plan.schedule.lensBindingsHash ||
+    !executionCellsMatchSelection
+  ) {
+    fail('STRICT_TEST_FACTS_LINEAGE_MISMATCH', 'compiled plan/runtime bindings');
+  }
+}
+
+function validateEmbeddedUniverse(
+  catalog: DimensionCatalogSnapshotV1,
+  universe: ColdStartCellUniverseV1
+): void {
+  const cells = [...universe.cells];
+  const eligible = cells.filter((cell) => cell.status === 'eligible');
+  const excluded = cells.filter((cell) => cell.status === 'excluded');
+  if (
+    cells.length === 0 ||
+    new Set(cells.map((cell) => cell.cellId)).size !== cells.length ||
+    universe.universeCount !== cells.length ||
+    universe.eligibleCount !== eligible.length ||
+    universe.excludedCount !== excluded.length ||
+    eligible.length + excluded.length !== cells.length ||
+    universe.cellUniverseHash !== hashCanonicalJson(cells) ||
+    universe.eligibleCellsHash !== hashCanonicalJson(eligible) ||
+    universe.excludedCellsHash !== hashCanonicalJson(excluded)
+  ) {
+    fail('STRICT_TEST_CELL_UNIVERSE_INVALID', 'hash/count/identity mismatch');
+  }
+  const catalogIds = new Set(catalog.dimensions.map((row) => row.id));
+  for (const cell of cells) {
+    validateCell(cell, catalogIds);
+  }
+}
+
+function validateCell(cell: PlanCellV1, catalogIds: ReadonlySet<string>): void {
+  if (
+    !cell.cellId ||
+    !cell.moduleId ||
+    !cell.scopeId ||
+    !catalogIds.has(cell.dimensionId) ||
+    cell.cellId !== `${cell.moduleId}::${cell.dimensionId}` ||
+    cell.evidenceRefs.length === 0
+  ) {
+    fail('STRICT_TEST_CELL_UNIVERSE_INVALID', cell.cellId);
+  }
+  if (
+    (cell.status === 'eligible' && cell.exclusionReason !== undefined) ||
+    (cell.status === 'excluded' && !cell.exclusionReason)
+  ) {
+    fail('STRICT_TEST_CELL_APPLICABILITY_INVALID', cell.cellId);
+  }
+}
+
+function validateApplicability(universe: RequiredFactApplicabilityUniverseV1): void {
+  const required = universe.rows.filter((row) => row.status === 'required');
+  const excluded = universe.rows.filter((row) => row.status === 'typed-excluded');
+  const unsupported = universe.rows.filter((row) => row.status === 'unsupported-blocked');
+  if (
+    universe.rows.length === 0 ||
+    new Set(universe.rows.map((row) => row.applicabilityId)).size !== universe.rows.length ||
+    universe.universeCount !== universe.rows.length ||
+    universe.requiredCount !== required.length ||
+    universe.typedExcludedCount !== excluded.length ||
+    universe.unsupportedBlockedCount !== unsupported.length ||
+    required.length + excluded.length + unsupported.length !== universe.rows.length ||
+    universe.universeHash !== hashCanonicalJson(universe.rows) ||
+    universe.requiredHash !== hashCanonicalJson(required) ||
+    universe.exclusionsHash !== hashCanonicalJson([...excluded, ...unsupported]) ||
+    unsupported.length > 0
+  ) {
+    fail('STRICT_TEST_REQUIRED_FACT_APPLICABILITY_INVALID', 'unknown/unsupported/hash mismatch');
+  }
+  for (const row of universe.rows) {
+    if (
+      !row.applicabilityId ||
+      !row.scopeId ||
+      row.evidenceRefs.length === 0 ||
+      (row.status === 'required' && row.reasonCode !== null) ||
+      (row.status !== 'required' && !row.reasonCode)
+    ) {
+      fail('STRICT_TEST_REQUIRED_FACT_APPLICABILITY_INVALID', row.applicabilityId);
+    }
+  }
+}
+
+function validateFactQueryCatalog(catalog: FactQueryCatalogSnapshotV1): void {
+  const semantic = {
+    schemaVersion: 1 as const,
+    capabilities: catalog.capabilities,
+    families: catalog.families,
+  };
+  if (
+    catalog.families.length === 0 ||
+    catalog.capabilities.length === 0 ||
+    new Set(catalog.families.map((family) => family.id)).size !== catalog.families.length ||
+    new Set(catalog.capabilities).size !== catalog.capabilities.length ||
+    canonicalJsonStringify(catalog.capabilities) !==
+      canonicalJsonStringify(
+        [...new Set(catalog.families.map((family) => family.capabilityId))].sort()
+      ) ||
+    catalog.catalogHash !== hashCanonicalJson(semantic)
+  ) {
+    fail('STRICT_TEST_FACT_QUERY_BACKEND_INVALID', 'catalog');
+  }
+  for (const family of catalog.families) {
+    if (
+      !family.id ||
+      !family.capabilityId ||
+      !family.loadedProducer ||
+      family.supportedScales.length === 0 ||
+      !family.queryPackHash
+    ) {
+      fail('STRICT_TEST_FACT_QUERY_BACKEND_UNSUPPORTED', family.id);
+    }
+    for (const hash of [
+      family.queryPackHash,
+      family.producerManifestHash,
+      family.loadReceiptHash,
+      family.positiveFixtureHash,
+      family.negativeFixtureHash,
+      family.edgeFixtureHash,
+    ]) {
+      requireSha(hash, 'STRICT_TEST_FACT_QUERY_BACKEND_INVALID');
+    }
+  }
+}
+
+function buildDimensionResult(
+  dimensionId: string,
+  cells: readonly PlanCellV1[]
+): StrictTestDimensionPreflightResultV1 {
+  const dimensionCells = cells.filter((cell) => cell.dimensionId === dimensionId);
+  const eligible = dimensionCells.filter((cell) => cell.status === 'eligible');
+  const excluded = dimensionCells.filter((cell) => cell.status === 'excluded');
+  let status: StrictTestDimensionApplicabilityV1 = 'unknown';
+  let reasonCode = 'DIMENSION_APPLICABILITY_UNKNOWN';
+  if (eligible.length > 0 && eligible.length + excluded.length === dimensionCells.length) {
+    status = 'applicable';
+    reasonCode = 'ELIGIBLE_CELLS_PRESENT';
+  } else if (
+    dimensionCells.length > 0 &&
+    excluded.length === dimensionCells.length &&
+    excluded.every((cell) => Boolean(cell.exclusionReason) && cell.evidenceRefs.length > 0)
+  ) {
+    status = 'excluded';
+    reasonCode = 'ALL_MODULE_CELLS_TYPED_EXCLUDED';
+  }
+  const evidenceRefs = normalizeStrings(dimensionCells.flatMap((cell) => cell.evidenceRefs));
+  const semantic = {
+    dimensionId,
+    status,
+    reasonCode,
+    evidenceRefs,
+    eligibleCellIds: eligible.map((cell) => cell.cellId),
+    excludedCellIds: excluded.map((cell) => cell.cellId),
+    eligibleCellCount: eligible.length,
+    excludedCellCount: excluded.length,
+    requiredFactsSupported: true,
+  };
+  return freezeDeep({ ...semantic, dimensionCellSetHash: hashCanonicalJson(dimensionCells) });
+}
+
+function buildRecommendation(
+  applicable: readonly StrictTestDimensionPreflightResultV1[]
+): StrictTestDimensionRecommendationV1 {
+  const architecture = applicable.find(
+    (row) =>
+      row.dimensionId === 'architecture' && row.eligibleCellCount > 0 && row.requiredFactsSupported
+  );
+  const selected = architecture ?? applicable[0];
+  if (!selected) {
+    fail('STRICT_TEST_PREFLIGHT_EMPTY_APPLICABLE_UNIVERSE', 'recommendation');
+  }
+  const semantic = {
+    dimensionId: selected.dimensionId,
+    reasonCode: architecture
+      ? ('ARCHITECTURE_APPLICABLE_AND_SUPPORTED' as const)
+      : ('FIRST_EVIDENCE_SUPPORTED_APPLICABLE_DIMENSION' as const),
+    evidenceRefs: selected.evidenceRefs,
+    alternativeDimensionIds: applicable
+      .filter((row) => row.dimensionId !== selected.dimensionId)
+      .map((row) => row.dimensionId),
+  };
+  return freezeDeep({ ...semantic, recommendationHash: hashCanonicalJson(semantic) });
+}
+
+function validatePreflightBindings(bindings: StrictTestPreflightBindingsV1): void {
+  assertExactKeys(bindings, PREFLIGHT_BINDING_KEYS, 'STRICT_TEST_PREFLIGHT_BINDINGS_INVALID');
+  if (bindings.schemaVersion !== 1 || bindings.profile !== STRICT_TEST_DIMENSION_PROFILE_V1) {
+    fail('STRICT_TEST_PROFILE_INVALID', String(bindings.profile));
+  }
+  for (const value of [
+    bindings.demandKey,
+    bindings.runId,
+    bindings.projectRootIdentity,
+    bindings.controlRootIdentity,
+    bindings.sourceRootIdentity,
+  ]) {
+    requireText(value, 'STRICT_TEST_PREFLIGHT_BINDINGS_INVALID');
+  }
+  for (const count of [
+    bindings.sourceFileCount,
+    bindings.moduleCount,
+    bindings.languageCount,
+    bindings.parserCount,
+    bindings.backendCount,
+  ]) {
+    if (!Number.isSafeInteger(count) || count < 1) {
+      fail('STRICT_TEST_PREFLIGHT_EMPTY_SOURCE_UNIVERSE', `${count}`);
+    }
+  }
+  for (const hash of PREFLIGHT_BINDING_KEYS.filter((key) => key.endsWith('Hash')).map(
+    (key) => bindings[key]
+  )) {
+    requireSha(hash, 'STRICT_TEST_PREFLIGHT_BINDINGS_INVALID');
+  }
+  requireTimestamp(bindings.generatedAt, 'STRICT_TEST_PREFLIGHT_BINDINGS_INVALID');
+  if (bindings.validUntil !== null) {
+    requireTimestamp(bindings.validUntil, 'STRICT_TEST_PREFLIGHT_BINDINGS_INVALID');
+    if (Date.parse(bindings.validUntil) <= Date.parse(bindings.generatedAt)) {
+      fail('STRICT_TEST_PREFLIGHT_BINDINGS_INVALID', 'validUntil');
+    }
+  }
+  if (
+    bindings.certifiedProjectFactsSourceVectorHash !== bindings.sourceRevisionVectorHash ||
+    bindings.productionBeforeStateHash !== bindings.productionAfterReadStateHash
+  ) {
+    fail('STRICT_TEST_FACTS_LINEAGE_MISMATCH', 'source vector or before-state');
+  }
+}
+
+function buildDriftFields(
+  plan: CompiledColdStartPlanV2,
+  bindings: StrictTestPreflightBindingsV1
+): object {
+  return {
+    demandKey: bindings.demandKey,
+    runId: bindings.runId,
+    roots: [
+      bindings.projectRootIdentity,
+      bindings.controlRootIdentity,
+      bindings.sourceRootIdentity,
+    ],
+    canonicalProjectIdentityHash: bindings.canonicalProjectIdentityHash,
+    sourceRevisionVectorHash: bindings.sourceRevisionVectorHash,
+    sourceInventoryHash: bindings.sourceInventoryHash,
+    certifiedProjectFactsArtifactHash: bindings.certifiedProjectFactsArtifactHash,
+    certifiedProjectFactsContentHash: bindings.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash: bindings.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsConsumerReceiptHash: bindings.certifiedProjectFactsConsumerReceiptHash,
+    catalogHash: plan.catalog.catalogHash,
+    catalogSourceArtifactHash: plan.catalog.sourceArtifactHash,
+    applicabilityUniverseHash: plan.requiredFactApplicability.universeHash,
+    factQueryCatalogHash: plan.factQueryCatalog.catalogHash,
+    cellUniverseHash: plan.universe.cellUniverseHash,
+    strictConfigReceiptHash: bindings.strictConfigReceiptHash,
+    providerModelHash: bindings.providerModelHash,
+    promptSopHash: bindings.promptSopHash,
+    factQueryBackendHash: bindings.factQueryBackendHash,
+    parserBackendHash: bindings.parserBackendHash,
+    embeddingVectorHash: bindings.embeddingVectorHash,
+    runtimeArtifactManifestHash: bindings.runtimeArtifactManifestHash,
+    runtimeArtifactBindingHash: bindings.runtimeArtifactBindingHash,
+    privateWorkspacePolicyHash: bindings.privateWorkspacePolicyHash,
+  };
+}
+
+function preflightBindingsFromReceipt(
+  receipt: StrictTestPreflightReceiptV1
+): StrictTestPreflightBindingsV1 {
+  return {
+    schemaVersion: 1,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    demandKey: receipt.demandKey,
+    runId: receipt.runId,
+    projectRootIdentity: receipt.projectRootIdentity,
+    controlRootIdentity: receipt.controlRootIdentity,
+    sourceRootIdentity: receipt.sourceRootIdentity,
+    canonicalProjectIdentityHash: receipt.canonicalProjectIdentityHash,
+    sourceRevisionVectorHash: receipt.sourceRevisionVectorHash,
+    sourceInventoryHash: receipt.sourceInventoryHash,
+    sourceFileCount: receipt.sourceFileCount,
+    moduleCount: receipt.moduleCount,
+    languageCount: receipt.languageCount,
+    parserCount: receipt.parserCount,
+    backendCount: receipt.backendCount,
+    certifiedProjectFactsArtifactHash: receipt.certifiedProjectFactsArtifactHash,
+    certifiedProjectFactsContentHash: receipt.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash: receipt.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsSourceVectorHash: receipt.certifiedProjectFactsSourceVectorHash,
+    certifiedProjectFactsConsumerReceiptHash: receipt.certifiedProjectFactsConsumerReceiptHash,
+    strictConfigReceiptHash: receipt.strictConfigReceiptHash,
+    providerModelHash: receipt.providerModelHash,
+    promptSopHash: receipt.promptSopHash,
+    factQueryBackendHash: receipt.factQueryBackendHash,
+    parserBackendHash: receipt.parserBackendHash,
+    embeddingVectorHash: receipt.embeddingVectorHash,
+    runtimeArtifactManifestHash: receipt.runtimeArtifactManifestHash,
+    runtimeArtifactBindingHash: receipt.runtimeArtifactBindingHash,
+    productionBeforeStateHash: receipt.productionBeforeStateHash,
+    productionAfterReadStateHash: receipt.productionAfterReadStateHash,
+    publicRouteBeforeStateHash: receipt.publicRouteBeforeStateHash,
+    officialRecipeBeforeStateHash: receipt.officialRecipeBeforeStateHash,
+    privateWorkspacePolicyHash: receipt.privateWorkspacePolicyHash,
+    generatedAt: receipt.generatedAt,
+    validUntil: receipt.validUntil,
+  };
+}
+
+function buildReceiptDriftFields(receipt: StrictTestPreflightReceiptV1): object {
+  return {
+    demandKey: receipt.demandKey,
+    runId: receipt.runId,
+    roots: [receipt.projectRootIdentity, receipt.controlRootIdentity, receipt.sourceRootIdentity],
+    canonicalProjectIdentityHash: receipt.canonicalProjectIdentityHash,
+    sourceRevisionVectorHash: receipt.sourceRevisionVectorHash,
+    sourceInventoryHash: receipt.sourceInventoryHash,
+    certifiedProjectFactsArtifactHash: receipt.certifiedProjectFactsArtifactHash,
+    certifiedProjectFactsContentHash: receipt.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash: receipt.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsConsumerReceiptHash: receipt.certifiedProjectFactsConsumerReceiptHash,
+    catalogHash: receipt.catalog.catalogHash,
+    catalogSourceArtifactHash: receipt.catalog.sourceArtifactHash,
+    applicabilityUniverseHash: receipt.requiredFactApplicabilityUniverseHash,
+    factQueryCatalogHash: receipt.factQueryCatalogHash,
+    cellUniverseHash: receipt.fullCellUniverseHash,
+    strictConfigReceiptHash: receipt.strictConfigReceiptHash,
+    providerModelHash: receipt.providerModelHash,
+    promptSopHash: receipt.promptSopHash,
+    factQueryBackendHash: receipt.factQueryBackendHash,
+    parserBackendHash: receipt.parserBackendHash,
+    embeddingVectorHash: receipt.embeddingVectorHash,
+    runtimeArtifactManifestHash: receipt.runtimeArtifactManifestHash,
+    runtimeArtifactBindingHash: receipt.runtimeArtifactBindingHash,
+    privateWorkspacePolicyHash: receipt.privateWorkspacePolicyHash,
+  };
+}
+
+function validatePrivateCompletionBindings(input: {
+  readonly preflight: StrictTestPreflightReceiptV1;
+  readonly projection: StrictTestDimensionExecutionProjectionV1;
+  readonly finalCoverageBinding: FinalCoverageBindingReceiptV1;
+  readonly servingSnapshotManifest: ServingSnapshotManifestV1;
+  readonly privateG4ReceiptHash: CanonicalSha256;
+  readonly privateServingValidationHash: CanonicalSha256;
+  readonly productionAfterStateHash: CanonicalSha256;
+  readonly publicRouteAfterStateHash: CanonicalSha256;
+  readonly privateEvidenceRefs: readonly string[];
+  readonly completedAt: string;
+}): void {
+  requireTimestamp(input.completedAt, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
+  requireSha(input.privateG4ReceiptHash, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
+  requireSha(input.privateServingValidationHash, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
+  if (input.privateEvidenceRefs.length === 0) {
+    fail('STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID', 'private evidence');
+  }
+  if (normalizeStrings(input.privateEvidenceRefs).length === 0) {
+    fail('STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID', 'private evidence');
+  }
+  for (const hash of [
+    input.finalCoverageBinding.candidateCoverageReceiptHash,
+    input.finalCoverageBinding.candidateCellSetHash,
+    input.finalCoverageBinding.g4ReceiptHash,
+    input.finalCoverageBinding.candidateDataManifestHash,
+    input.finalCoverageBinding.receiptHash,
+    input.servingSnapshotManifest.finalCoverageBindingHash,
+    input.servingSnapshotManifest.servingSnapshotValidationHash,
+    input.servingSnapshotManifest.vectorManifestHash,
+    input.servingSnapshotManifest.certifiedProjectFactsHash,
+    input.servingSnapshotManifest.sourceRevisionVectorHash,
+    input.servingSnapshotManifest.analysisFixpointHash,
+    input.servingSnapshotManifest.manifestHash,
+  ]) {
+    requireSha(hash, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
+  }
+  const finalCoverageSemantic = omitHash(input.finalCoverageBinding, 'receiptHash');
+  const servingSemantic = omitHash(input.servingSnapshotManifest, 'manifestHash');
+  const selectedCellIds = input.finalCoverageBinding.cells.map((cell) => cell.cellId);
+  if (
+    input.finalCoverageBinding.receiptHash !== hashCanonicalJson(finalCoverageSemantic) ||
+    input.servingSnapshotManifest.manifestHash !== hashCanonicalJson(servingSemantic) ||
+    canonicalJsonStringify(selectedCellIds) !==
+      canonicalJsonStringify(input.projection.executionCellIds) ||
+    input.finalCoverageBinding.candidateCellSetHash !==
+      hashCanonicalJson(input.projection.executionCellIds) ||
+    input.finalCoverageBinding.g4ReceiptHash !== input.privateG4ReceiptHash ||
+    input.servingSnapshotManifest.finalCoverageBindingHash !==
+      input.finalCoverageBinding.receiptHash ||
+    input.servingSnapshotManifest.candidateDataManifestHash !==
+      input.finalCoverageBinding.candidateDataManifestHash ||
+    input.servingSnapshotManifest.servingSnapshotValidationHash !==
+      input.privateServingValidationHash ||
+    input.servingSnapshotManifest.certifiedProjectFactsHash !==
+      input.preflight.certifiedProjectFactsContentHash ||
+    input.servingSnapshotManifest.sourceRevisionVectorHash !==
+      input.preflight.sourceRevisionVectorHash ||
+    input.finalCoverageBinding.cells.some(
+      (cell) => cell.finalDisposition === 'failed' || cell.finalDisposition === 'unknown'
+    )
+  ) {
+    fail('STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID', 'G4/final coverage/serving');
+  }
+  if (
+    input.productionAfterStateHash !== input.preflight.productionBeforeStateHash ||
+    input.publicRouteAfterStateHash !== input.preflight.publicRouteBeforeStateHash
+  ) {
+    fail('STRICT_TEST_PRODUCTION_MUTATION_DETECTED', 'completion');
+  }
+}
+
+function strictTestForbiddenConclusions(): readonly string[] {
+  return Object.freeze([
+    'full-production-coverage',
+    'production-finalized',
+    'public-route-published',
+    'unselected-dimensions-completed',
+    'strict-production-accepted',
+  ]);
+}
+
+function omitHash<T extends object, K extends keyof T>(value: T, key: K): Omit<T, K> {
+  const result = { ...value };
+  delete result[key];
+  return result;
+}
+
+function assertExactKeys(value: object, expected: readonly PropertyKey[], code: string): void {
+  const actual = Reflect.ownKeys(value).sort((left, right) =>
+    String(left).localeCompare(String(right))
+  );
+  const normalizedExpected = [...expected].sort((left, right) =>
+    String(left).localeCompare(String(right))
+  );
+  if (canonicalJsonStringify(actual) !== canonicalJsonStringify(normalizedExpected)) {
+    fail(code, 'unknown/missing fields');
+  }
+}
+
+function normalizeStrings(values: readonly string[]): string[] {
+  return [...new Set(values.map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function requireText(value: unknown, code: string): asserts value is string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    fail(code, 'text');
+  }
+}
+
+function requireSha(value: unknown, code: string): asserts value is CanonicalSha256 {
+  if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value)) {
+    fail(code, 'canonical sha256');
+  }
+}
+
+function requireTimestamp(value: string, code: string): void {
+  if (!value || !Number.isFinite(Date.parse(value))) {
+    fail(code, 'timestamp');
+  }
+}
+
+function setEquals<T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean {
+  return left.size === right.size && [...left].every((value) => right.has(value));
+}
+
+function fail(code: string, detail: string): never {
+  throw new Error(`${code}: ${detail}`);
+}
+
+function freezeDeep<T>(value: T): T {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value as Record<string, unknown>)) {
+      freezeDeep(child);
+    }
+  }
+  return value;
+}

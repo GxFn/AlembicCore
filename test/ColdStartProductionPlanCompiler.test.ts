@@ -14,6 +14,9 @@ import {
   hashStrictPlanIntentV1,
   type PlanCognitionReceiptV1,
   type ResolvedStrictColdStartConfigReceiptV1,
+  STRICT_TEST_DIMENSION_PROFILE_V1,
+  type StrictTestPreflightBindingsV1,
+  validateStrictTestPreflightV1,
 } from '../src/plans.js';
 import { hashCanonicalJson } from '../src/service/project-context/foundation/canonical.js';
 
@@ -296,6 +299,14 @@ describe('cold-start production Plan compiler', () => {
     expect(compiled.schedule.factHarvestObligations.every((row) => !('dimensionId' in row))).toBe(
       true
     );
+
+    const strictTestPreflight = validateStrictTestPreflightV1(
+      compiled,
+      strictTestBindings(compiled.selection.sourceArtifactHash)
+    );
+    expect(strictTestPreflight.compiledPlanHash).toBe(compiled.canonicalPlanHash);
+    expect(strictTestPreflight.fullCellUniverseHash).toBe(compiled.universe.cellUniverseHash);
+    expect(strictTestPreflight.dimensionResults).toHaveLength(26);
   });
 
   it('is enumeration-order independent', () => {
@@ -320,7 +331,10 @@ describe('cold-start production Plan compiler', () => {
   it('normalizes cognition and action enumeration without changing the compiled plan', () => {
     const leftCognition = cognition();
     const left = compile(leftCognition);
-    const question = leftCognition.intent.investigationDecomposition!.questions[0]!;
+    const question = leftCognition.intent.investigationDecomposition?.questions[0];
+    if (!question) {
+      throw new Error('fixture question missing');
+    }
     const shuffledIntent = {
       ...leftCognition.intent,
       investigationDecomposition: {
@@ -530,9 +544,8 @@ function compile(receipt: PlanCognitionReceiptV1) {
 }
 
 function baseQuestion(questionId: string) {
-  return cognition().intent.investigationDecomposition!.questions[0]
-    ? { ...cognition().intent.investigationDecomposition!.questions[0], questionId }
-    : neverQuestion();
+  const question = cognition().intent.investigationDecomposition?.questions[0];
+  return question ? { ...question, questionId } : neverQuestion();
 }
 
 function cognitionWithQuestion(
@@ -605,12 +618,56 @@ function family(
     id,
     capabilityId,
     supportedScales,
+    queryPackHash: sha(`${id}:query-pack`),
     loadedProducer: `loaded:${capabilityId}:test-v1`,
     producerManifestHash: sha(`${id}:producer`),
     loadReceiptHash: sha(`${id}:load`),
     positiveFixtureHash: sha(`${id}:positive`),
     negativeFixtureHash: sha(`${id}:negative`),
     edgeFixtureHash: sha(`${id}:edge`),
+  };
+}
+
+function strictTestBindings(
+  certifiedProjectFactsSourceArtifactHash: string
+): StrictTestPreflightBindingsV1 {
+  return {
+    schemaVersion: 1,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    demandKey: 'strict-test-compiler-integration',
+    runId: 'run-1',
+    projectRootIdentity: 'project-root:test',
+    controlRootIdentity: 'control-root:test',
+    sourceRootIdentity: 'source-root:test',
+    canonicalProjectIdentityHash: sha('project-identity'),
+    sourceRevisionVectorHash: FACTS.sourceRevisionVectorHash as `sha256:${string}`,
+    sourceInventoryHash: sha('source-inventory'),
+    sourceFileCount: MODULES.reduce((total, module) => total + module.ownedProductionFileCount, 0),
+    moduleCount: MODULES.length,
+    languageCount: new Set(MODULES.flatMap((module) => module.languages)).size,
+    parserCount: 1,
+    backendCount: LOADED_FACT_FAMILIES.length,
+    certifiedProjectFactsArtifactHash: sha('facts-artifact'),
+    certifiedProjectFactsContentHash: FACTS.factsHash as `sha256:${string}`,
+    certifiedProjectFactsSourceArtifactHash:
+      certifiedProjectFactsSourceArtifactHash as `sha256:${string}`,
+    certifiedProjectFactsSourceVectorHash: FACTS.sourceRevisionVectorHash as `sha256:${string}`,
+    certifiedProjectFactsConsumerReceiptHash: sha('facts-consumer'),
+    strictConfigReceiptHash: CONFIG.loadHash,
+    providerModelHash: sha('provider-model'),
+    promptSopHash: sha('prompt-sop'),
+    factQueryBackendHash: sha('fact-query-backend'),
+    parserBackendHash: sha('parser-backend'),
+    embeddingVectorHash: sha('embedding-vector'),
+    runtimeArtifactManifestHash: sha('runtime-manifest'),
+    runtimeArtifactBindingHash: sha('runtime-binding'),
+    productionBeforeStateHash: sha('production-before'),
+    productionAfterReadStateHash: sha('production-before'),
+    publicRouteBeforeStateHash: sha('public-route-before'),
+    officialRecipeBeforeStateHash: sha('official-recipe-before'),
+    privateWorkspacePolicyHash: sha('private-workspace-policy'),
+    generatedAt: '2026-07-30T06:00:00.000Z',
+    validUntil: null,
   };
 }
 
