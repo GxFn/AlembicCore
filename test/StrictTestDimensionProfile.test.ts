@@ -421,6 +421,118 @@ describe('strict-test-dimension profile foundation', () => {
     ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
   });
 
+  it('validates and reports a pre-confirmation failure without future authority', () => {
+    const bindings = preflightBindings();
+    const terminal = createStrictTestPrivateFailureReceiptV1({
+      preflight: null,
+      confirmation: null,
+      projection: null,
+      currentBindings: bindings,
+      failedStage: 'PREFLIGHT_UNIVERSE_VALIDATED',
+      errorCode: 'PREFLIGHT_UNIVERSE_REJECTED',
+      privateEvidenceRefs: ['private:preflight:error'],
+      productionAfterStateHash: bindings.productionBeforeStateHash,
+      publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+      failedAt: '2026-07-30T06:00:30.000Z',
+    });
+
+    expect(() =>
+      assertStrictTestPrivateTerminalReceiptV1(terminal, null, null, null)
+    ).not.toThrow();
+    expect(() => {
+      const { preflight, confirmation, projection } = privateCompletionChain();
+      assertStrictTestPrivateTerminalReceiptV1(
+        terminal,
+        preflight,
+        confirmation,
+        projection
+      );
+    }).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+
+    const report = createStrictTestAuditReportV1({
+      preflight: null,
+      confirmation: null,
+      projection: null,
+      terminal,
+      verificationCommands: ['strict-test status --run strict-test-fixture-1'],
+      privateArtifactRefs: ['private:preflight:error'],
+    });
+    expect(report.preflightHash).toBeNull();
+    expect(report.confirmationHash).toBeNull();
+    expect(report.projectionHash).toBeNull();
+    expect(report.fullUniverse).toBeNull();
+    expect(report.executedProjection).toBeNull();
+  });
+
+  it('rejects late-stage failures with missing or mismatched predecessor authority', () => {
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
+
+    expect(() =>
+      createStrictTestPrivateFailureReceiptV1({
+        preflight,
+        confirmation: null,
+        projection: null,
+        currentBindings: bindings,
+        failedStage: 'PRIVATE_G4_READY',
+        errorCode: 'PRIVATE_G4_REJECTED',
+        privateEvidenceRefs: ['private:g4:error'],
+        productionAfterStateHash: bindings.productionBeforeStateHash,
+        publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+        failedAt: '2026-07-30T06:20:00.000Z',
+      })
+    ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+
+    const terminal = createStrictTestPrivateFailureReceiptV1({
+      preflight,
+      confirmation,
+      projection,
+      currentBindings: bindings,
+      failedStage: 'PRIVATE_G4_READY',
+      errorCode: 'PRIVATE_G4_REJECTED',
+      privateEvidenceRefs: ['private:g4:error'],
+      productionAfterStateHash: bindings.productionBeforeStateHash,
+      publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+      failedAt: '2026-07-30T06:20:00.000Z',
+    });
+    const { terminalHash: _terminalHash, ...terminalSemantic } = terminal;
+    const forgedSemantic = {
+      ...terminalSemantic,
+      confirmationHash: sha('mismatched-confirmation'),
+    };
+    const forged = {
+      ...forgedSemantic,
+      terminalHash: hashCanonicalJson(forgedSemantic),
+    };
+
+    expect(() =>
+      assertStrictTestPrivateTerminalReceiptV1(
+        forged,
+        preflight,
+        confirmation,
+        projection
+      )
+    ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+  });
+
+  it('rejects confirmation or projection authority produced after the failure time', () => {
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
+
+    expect(() =>
+      createStrictTestPrivateFailureReceiptV1({
+        preflight,
+        confirmation,
+        projection,
+        currentBindings: bindings,
+        failedStage: 'PRIVATE_G4_READY',
+        errorCode: 'PRIVATE_G4_REJECTED',
+        privateEvidenceRefs: ['private:g4:error'],
+        productionAfterStateHash: bindings.productionBeforeStateHash,
+        publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+        failedAt: '2026-07-30T06:00:30.000Z',
+      })
+    ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
+  });
+
   it('exports the same executable contract from plans and production facades', async () => {
     const plans = await import('../src/plans.js');
     const production = await import('../src/production.js');
