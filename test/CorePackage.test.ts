@@ -101,6 +101,10 @@ describe('Core package baseline', () => {
     expect(production.hashKnowledgeDispositionProposalV1).toBeInstanceOf(Function);
     expect(production.hashKnowledgeClusterSetProposalV1).toBeInstanceOf(Function);
     expect(production.buildFactQueryCatalogSnapshot).toBeInstanceOf(Function);
+    expect(production.createStrictTestAutomaticSelectionReceiptV1).toBeInstanceOf(Function);
+    expect(production.assertStrictTestAutomaticSelectionReceiptV1).toBeInstanceOf(Function);
+    expect(Object.hasOwn(production, 'createStrictTestSelectionConfirmationV1')).toBe(false);
+    expect(Object.hasOwn(production, 'assertStrictTestSelectionConfirmationV1')).toBe(false);
     const projectContext = await import('../src/project-context.js');
     const projectContextFoundation = await import('../src/projectContextFoundation.js');
     expect(projectContext.createProjectContextFileRef).toBeInstanceOf(Function);

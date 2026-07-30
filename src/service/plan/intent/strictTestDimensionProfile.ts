@@ -24,8 +24,8 @@ export const STRICT_TEST_STATE_SEQUENCE_V1 = Object.freeze([
   'PREFLIGHT_REQUESTED',
   'PREFLIGHT_FACTS_FROZEN',
   'PREFLIGHT_UNIVERSE_VALIDATED',
-  'AWAITING_CONFIRMATION',
-  'SELECTION_CONFIRMED',
+  'AUTOMATIC_SELECTION_READY',
+  'SELECTION_AUTO_SELECTED',
   'PRIVATE_WORKSPACE_READY',
   'PLAN_COMPILED',
   'FACT_SCHEDULE_FROZEN',
@@ -46,7 +46,7 @@ export type StrictTestFailureAuthorityRequirementV1 = 'required' | 'forbidden';
 
 export interface StrictTestFailureStageAuthorityV1 {
   readonly preflight: StrictTestFailureAuthorityRequirementV1;
-  readonly confirmation: StrictTestFailureAuthorityRequirementV1;
+  readonly automaticSelection: StrictTestFailureAuthorityRequirementV1;
   readonly projection: StrictTestFailureAuthorityRequirementV1;
 }
 
@@ -59,72 +59,72 @@ export const STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1: Readonly<
 > = freezeDeep({
   PREFLIGHT_REQUESTED: {
     preflight: 'forbidden',
-    confirmation: 'forbidden',
+    automaticSelection: 'forbidden',
     projection: 'forbidden',
   },
   PREFLIGHT_FACTS_FROZEN: {
     preflight: 'forbidden',
-    confirmation: 'forbidden',
+    automaticSelection: 'forbidden',
     projection: 'forbidden',
   },
   PREFLIGHT_UNIVERSE_VALIDATED: {
     preflight: 'forbidden',
-    confirmation: 'forbidden',
+    automaticSelection: 'forbidden',
     projection: 'forbidden',
   },
-  AWAITING_CONFIRMATION: {
+  AUTOMATIC_SELECTION_READY: {
     preflight: 'required',
-    confirmation: 'forbidden',
+    automaticSelection: 'forbidden',
     projection: 'forbidden',
   },
-  SELECTION_CONFIRMED: {
+  SELECTION_AUTO_SELECTED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'forbidden',
   },
   PRIVATE_WORKSPACE_READY: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   PLAN_COMPILED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   FACT_SCHEDULE_FROZEN: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   ANALYSIS_FIXPOINT_CLOSED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   EXPRESSION_SETS_REVIEWED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   PRIVATE_CORPUS_SEALED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   PRIVATE_INDEXES_VERIFIED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   PRIVATE_G4_READY: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
   PRIVATE_SERVING_VALIDATED: {
     preflight: 'required',
-    confirmation: 'required',
+    automaticSelection: 'required',
     projection: 'required',
   },
 });
@@ -210,7 +210,7 @@ export interface StrictTestPreflightReceiptV1 {
   readonly schemaVersion: 1;
   readonly canonicalizerVersion: 'canonical-json-v1';
   readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
-  readonly state: 'AWAITING_CONFIRMATION';
+  readonly state: 'AUTOMATIC_SELECTION_READY';
   readonly demandKey: string;
   readonly runId: string;
   readonly projectRootIdentity: string;
@@ -269,36 +269,62 @@ export interface StrictTestPreflightPreviewV1 {
   readonly schemaVersion: 1;
   readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
   readonly preflightHash: CanonicalSha256;
-  readonly state: 'AWAITING_CONFIRMATION';
-  readonly canConfirm: true;
+  readonly state: 'AUTOMATIC_SELECTION_READY';
+  readonly canAutoSelect: true;
   readonly recommendation: StrictTestDimensionRecommendationV1;
   readonly dimensions: readonly StrictTestDimensionPreflightResultV1[];
   readonly blockers: readonly [];
   readonly previewHash: CanonicalSha256;
 }
 
-export interface StrictTestSelectionConfirmationV1 {
+export interface StrictTestAutomaticSelectionReceiptV1 {
   readonly schemaVersion: 1;
+  readonly canonicalizerVersion: 'canonical-json-v1';
   readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
-  readonly state: 'SELECTION_CONFIRMED';
+  readonly algorithmVersion: 'strict-test-preflight-recommendation-v1';
+  readonly state: 'SELECTION_AUTO_SELECTED';
   readonly demandKey: string;
   readonly runId: string;
+  readonly projectRootIdentity: string;
+  readonly controlRootIdentity: string;
+  readonly sourceRootIdentity: string;
   readonly preflightHash: CanonicalSha256;
   readonly bindingHash: CanonicalSha256;
-  readonly selectedDimensionId: string;
+  readonly driftInvalidationHash: CanonicalSha256;
+  readonly fullCatalogHash: CanonicalSha256;
+  readonly fullCatalogSourceArtifactHash: CanonicalSha256;
   readonly fullCellUniverseHash: CanonicalSha256;
+  readonly fullEligibleCellsHash: CanonicalSha256;
+  readonly fullExcludedCellsHash: CanonicalSha256;
+  readonly fullApplicabilityUniverseHash: CanonicalSha256;
+  readonly fullFactQueryCatalogHash: CanonicalSha256;
+  readonly fullBaselineScheduleHash: CanonicalSha256;
+  readonly certifiedProjectFactsContentHash: CanonicalSha256;
+  readonly certifiedProjectFactsSourceArtifactHash: CanonicalSha256;
+  readonly certifiedProjectFactsSourceVectorHash: CanonicalSha256;
+  readonly certifiedProjectFactsConsumerReceiptHash: CanonicalSha256;
+  readonly sourceRevisionVectorHash: CanonicalSha256;
+  readonly sourceInventoryHash: CanonicalSha256;
+  readonly selectedDimensionId: string;
   readonly selectedEligibleCellIds: readonly string[];
+  readonly selectedEligibleCellCount: number;
   readonly selectedEligibleCellsHash: CanonicalSha256;
+  readonly recommendationReasonCode: StrictTestDimensionRecommendationV1['reasonCode'];
+  readonly recommendationEvidenceRefs: readonly string[];
   readonly strictConfigReceiptHash: CanonicalSha256;
   readonly providerModelHash: CanonicalSha256;
+  readonly promptSopHash: CanonicalSha256;
+  readonly factQueryBackendHash: CanonicalSha256;
+  readonly parserBackendHash: CanonicalSha256;
+  readonly embeddingVectorHash: CanonicalSha256;
+  readonly runtimeArtifactManifestHash: CanonicalSha256;
   readonly runtimeArtifactBindingHash: CanonicalSha256;
   readonly privateWorkspacePolicyHash: CanonicalSha256;
   readonly privateStrictTestOnly: true;
   readonly productionFinalized: false;
   readonly publicRouteChanged: false;
-  readonly confirmedBy: string;
-  readonly confirmedAt: string;
-  readonly confirmationHash: CanonicalSha256;
+  readonly selectedAt: string;
+  readonly automaticSelectionHash: CanonicalSha256;
 }
 
 export interface StrictTestDimensionExecutionStateV1 {
@@ -311,11 +337,11 @@ export interface StrictTestDimensionExecutionStateV1 {
 export interface StrictTestDimensionExecutionProjectionV1 {
   readonly schemaVersion: 1;
   readonly profile: typeof STRICT_TEST_DIMENSION_PROFILE_V1;
-  readonly state: 'SELECTION_CONFIRMED';
+  readonly state: 'SELECTION_AUTO_SELECTED';
   readonly demandKey: string;
   readonly runId: string;
   readonly preflightHash: CanonicalSha256;
-  readonly confirmationHash: CanonicalSha256;
+  readonly automaticSelectionHash: CanonicalSha256;
   readonly bindingHash: CanonicalSha256;
   readonly selectedDimensionId: string;
   readonly executionCellIds: readonly string[];
@@ -341,7 +367,7 @@ export interface StrictTestDimensionExecutionProjectionV1 {
 export interface StrictTestPrivateTerminalAuthorityContextV1 {
   readonly currentBindings: StrictTestPreflightBindingsV1;
   readonly preflight: StrictTestPreflightReceiptV1 | null;
-  readonly confirmation: StrictTestSelectionConfirmationV1 | null;
+  readonly automaticSelection: StrictTestAutomaticSelectionReceiptV1 | null;
   readonly projection: StrictTestDimensionExecutionProjectionV1 | null;
 }
 
@@ -352,7 +378,7 @@ export interface StrictTestPrivateCompletionReceiptV1 {
   readonly demandKey: string;
   readonly runId: string;
   readonly preflightHash: CanonicalSha256;
-  readonly confirmationHash: CanonicalSha256;
+  readonly automaticSelectionHash: CanonicalSha256;
   readonly projectionHash: CanonicalSha256;
   readonly finalCoverageBinding: FinalCoverageBindingReceiptV1;
   readonly servingSnapshotManifest: ServingSnapshotManifestV1;
@@ -377,7 +403,7 @@ export interface StrictTestPrivateFailureReceiptV1 {
   readonly runId: string;
   readonly observedBindingsHash: CanonicalSha256;
   readonly preflightHash: CanonicalSha256 | null;
-  readonly confirmationHash: CanonicalSha256 | null;
+  readonly automaticSelectionHash: CanonicalSha256 | null;
   readonly projectionHash: CanonicalSha256 | null;
   readonly failedStage: StrictTestFailureStageV1;
   readonly errorCode: string;
@@ -403,7 +429,7 @@ export interface StrictTestAuditReportV1 {
   readonly demandKey: string;
   readonly runId: string;
   readonly preflightHash: CanonicalSha256 | null;
-  readonly confirmationHash: CanonicalSha256 | null;
+  readonly automaticSelectionHash: CanonicalSha256 | null;
   readonly projectionHash: CanonicalSha256 | null;
   readonly terminalHash: CanonicalSha256;
   readonly terminalState: StrictTestTerminalStateV1;
@@ -470,23 +496,17 @@ const PREFLIGHT_BINDING_KEYS: readonly (keyof StrictTestPreflightBindingsV1)[] =
   'validUntil',
 ];
 
-const CONFIRMATION_INPUT_KEYS = [
-  'preflight',
-  'currentBindings',
-  'selectedDimensionIds',
-  'confirmedBy',
-  'confirmedAt',
-] as const;
+const AUTOMATIC_SELECTION_INPUT_KEYS = ['preflight', 'currentBindings', 'selectedAt'] as const;
 
 const PROJECTION_INPUT_KEYS = [
   'preflight',
-  'confirmation',
+  'automaticSelection',
   'currentBindings',
   'projectedAt',
 ] as const;
 const COMPLETION_INPUT_KEYS = [
   'preflight',
-  'confirmation',
+  'automaticSelection',
   'projection',
   'currentBindings',
   'finalCoverageBinding',
@@ -516,38 +536,64 @@ const REPORT_INPUT_KEYS = [
 const TERMINAL_AUTHORITY_CONTEXT_KEYS = [
   'currentBindings',
   'preflight',
-  'confirmation',
+  'automaticSelection',
   'projection',
 ] as const;
 const RESUME_INPUT_KEYS = [
   'preflight',
-  'confirmation',
+  'automaticSelection',
   'projection',
   'currentBindings',
   'privateWorkspacePolicyHash',
 ] as const;
-const CONFIRMATION_RECEIPT_KEYS = [
+const AUTOMATIC_SELECTION_RECEIPT_KEYS = [
   'schemaVersion',
+  'canonicalizerVersion',
   'profile',
+  'algorithmVersion',
   'state',
   'demandKey',
   'runId',
+  'projectRootIdentity',
+  'controlRootIdentity',
+  'sourceRootIdentity',
   'preflightHash',
   'bindingHash',
-  'selectedDimensionId',
+  'driftInvalidationHash',
+  'fullCatalogHash',
+  'fullCatalogSourceArtifactHash',
   'fullCellUniverseHash',
+  'fullEligibleCellsHash',
+  'fullExcludedCellsHash',
+  'fullApplicabilityUniverseHash',
+  'fullFactQueryCatalogHash',
+  'fullBaselineScheduleHash',
+  'certifiedProjectFactsContentHash',
+  'certifiedProjectFactsSourceArtifactHash',
+  'certifiedProjectFactsSourceVectorHash',
+  'certifiedProjectFactsConsumerReceiptHash',
+  'sourceRevisionVectorHash',
+  'sourceInventoryHash',
+  'selectedDimensionId',
   'selectedEligibleCellIds',
+  'selectedEligibleCellCount',
   'selectedEligibleCellsHash',
+  'recommendationReasonCode',
+  'recommendationEvidenceRefs',
   'strictConfigReceiptHash',
   'providerModelHash',
+  'promptSopHash',
+  'factQueryBackendHash',
+  'parserBackendHash',
+  'embeddingVectorHash',
+  'runtimeArtifactManifestHash',
   'runtimeArtifactBindingHash',
   'privateWorkspacePolicyHash',
   'privateStrictTestOnly',
   'productionFinalized',
   'publicRouteChanged',
-  'confirmedBy',
-  'confirmedAt',
-  'confirmationHash',
+  'selectedAt',
+  'automaticSelectionHash',
 ] as const;
 const PROJECTION_RECEIPT_KEYS = [
   'schemaVersion',
@@ -556,7 +602,7 @@ const PROJECTION_RECEIPT_KEYS = [
   'demandKey',
   'runId',
   'preflightHash',
-  'confirmationHash',
+  'automaticSelectionHash',
   'bindingHash',
   'selectedDimensionId',
   'executionCellIds',
@@ -591,7 +637,7 @@ const PRIVATE_COMPLETION_RECEIPT_KEYS = [
   'demandKey',
   'runId',
   'preflightHash',
-  'confirmationHash',
+  'automaticSelectionHash',
   'projectionHash',
   'finalCoverageBinding',
   'servingSnapshotManifest',
@@ -615,7 +661,7 @@ const PRIVATE_FAILURE_RECEIPT_KEYS = [
   'runId',
   'observedBindingsHash',
   'preflightHash',
-  'confirmationHash',
+  'automaticSelectionHash',
   'projectionHash',
   'failedStage',
   'errorCode',
@@ -686,7 +732,7 @@ export function validateStrictTestPreflightV1(
     schemaVersion: 1 as const,
     canonicalizerVersion: 'canonical-json-v1' as const,
     profile: STRICT_TEST_DIMENSION_PROFILE_V1,
-    state: 'AWAITING_CONFIRMATION' as const,
+    state: 'AUTOMATIC_SELECTION_READY' as const,
     demandKey: bindings.demandKey,
     runId: bindings.runId,
     projectRootIdentity: bindings.projectRootIdentity,
@@ -758,7 +804,7 @@ function assertPreflightEnvelopeInvariant(receipt: StrictTestPreflightReceiptV1)
   if (
     receipt.schemaVersion !== 1 ||
     receipt.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
-    receipt.state !== 'AWAITING_CONFIRMATION' ||
+    receipt.state !== 'AUTOMATIC_SELECTION_READY' ||
     receipt.catalog.dimensions.length !== 26 ||
     receipt.dimensionResults.length !== 26 ||
     receipt.unknownDimensionCount !== 0 ||
@@ -880,8 +926,8 @@ export function createStrictTestPreflightPreviewV1(
     schemaVersion: 1 as const,
     profile: STRICT_TEST_DIMENSION_PROFILE_V1,
     preflightHash: preflight.preflightHash,
-    state: 'AWAITING_CONFIRMATION' as const,
-    canConfirm: true as const,
+    state: 'AUTOMATIC_SELECTION_READY' as const,
+    canAutoSelect: true as const,
     recommendation: preflight.recommendation,
     dimensions: preflight.dimensionResults,
     blockers: [] as const,
@@ -889,187 +935,347 @@ export function createStrictTestPreflightPreviewV1(
   return freezeDeep({ ...semantic, previewHash: hashCanonicalJson(semantic) });
 }
 
-export function createStrictTestSelectionConfirmationV1(input: {
+export function createStrictTestAutomaticSelectionReceiptV1(input: {
   readonly preflight: StrictTestPreflightReceiptV1;
   readonly currentBindings: StrictTestPreflightBindingsV1;
-  readonly selectedDimensionIds: readonly string[];
-  readonly confirmedBy: string;
-  readonly confirmedAt: string;
-}): StrictTestSelectionConfirmationV1 {
-  assertExactKeys(input, CONFIRMATION_INPUT_KEYS, 'STRICT_TEST_CONFIRMATION_FIELDS_INVALID');
-  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.confirmedAt);
-  if (input.selectedDimensionIds.length !== 1) {
-    fail('STRICT_TEST_SELECTION_EXACTLY_ONE_REQUIRED', `${input.selectedDimensionIds.length}`);
-  }
-  const selectedDimensionId = input.selectedDimensionIds[0]?.trim() ?? '';
-  if (
-    !selectedDimensionId ||
-    new Set(input.selectedDimensionIds).size !== input.selectedDimensionIds.length
-  ) {
-    fail('STRICT_TEST_SELECTION_EXACTLY_ONE_REQUIRED', 'empty or duplicate');
-  }
+  readonly selectedAt: string;
+}): StrictTestAutomaticSelectionReceiptV1 {
+  assertExactKeys(
+    input,
+    AUTOMATIC_SELECTION_INPUT_KEYS,
+    'STRICT_TEST_AUTOMATIC_SELECTION_FIELDS_INVALID'
+  );
+  assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.selectedAt);
+  assertPreflightDimensionConservation(input.preflight);
+  const selectedDimensionId = input.preflight.recommendation.dimensionId;
   const selected = input.preflight.dimensionResults.find(
     (row) => row.dimensionId === selectedDimensionId
   );
-  if (!selected || selected.status !== 'applicable' || selected.eligibleCellCount === 0) {
-    fail('STRICT_TEST_SELECTION_DIMENSION_NOT_APPLICABLE', selectedDimensionId);
+  if (
+    !selected ||
+    selected.status !== 'applicable' ||
+    !selected.requiredFactsSupported ||
+    selected.eligibleCellCount < 1 ||
+    selected.eligibleCellIds.length !== selected.eligibleCellCount ||
+    selected.dimensionCellSetHash !==
+      hashCanonicalJson(
+        input.preflight.cellUniverse.cells.filter(
+          (cell) => cell.dimensionId === selectedDimensionId
+        )
+      )
+  ) {
+    fail('STRICT_TEST_AUTOMATIC_SELECTION_RECOMMENDATION_INVALID', selectedDimensionId);
   }
-  requireText(input.confirmedBy, 'STRICT_TEST_CONFIRMATION_FIELDS_INVALID');
-  requireTimestamp(input.confirmedAt, 'STRICT_TEST_CONFIRMATION_FIELDS_INVALID');
+  requireTimestamp(input.selectedAt, 'STRICT_TEST_AUTOMATIC_SELECTION_FIELDS_INVALID');
   const selectedEligibleCellIds = [...selected.eligibleCellIds];
   const semantic = {
     schemaVersion: 1 as const,
+    canonicalizerVersion: 'canonical-json-v1' as const,
     profile: STRICT_TEST_DIMENSION_PROFILE_V1,
-    state: 'SELECTION_CONFIRMED' as const,
+    algorithmVersion: 'strict-test-preflight-recommendation-v1' as const,
+    state: 'SELECTION_AUTO_SELECTED' as const,
     demandKey: input.preflight.demandKey,
     runId: input.preflight.runId,
+    projectRootIdentity: input.preflight.projectRootIdentity,
+    controlRootIdentity: input.preflight.controlRootIdentity,
+    sourceRootIdentity: input.preflight.sourceRootIdentity,
     preflightHash: input.preflight.preflightHash,
     bindingHash: input.preflight.bindingHash,
-    selectedDimensionId,
+    driftInvalidationHash: input.preflight.driftInvalidationHash,
+    fullCatalogHash: input.preflight.catalog.catalogHash,
+    fullCatalogSourceArtifactHash: input.preflight.catalog.sourceArtifactHash,
     fullCellUniverseHash: input.preflight.fullCellUniverseHash,
+    fullEligibleCellsHash: input.preflight.cellUniverse.eligibleCellsHash,
+    fullExcludedCellsHash: input.preflight.cellUniverse.excludedCellsHash,
+    fullApplicabilityUniverseHash: input.preflight.requiredFactApplicabilityUniverseHash,
+    fullFactQueryCatalogHash: input.preflight.factQueryCatalogHash,
+    fullBaselineScheduleHash: input.preflight.baselineScheduleHash,
+    certifiedProjectFactsContentHash: input.preflight.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash:
+      input.preflight.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsSourceVectorHash: input.preflight.certifiedProjectFactsSourceVectorHash,
+    certifiedProjectFactsConsumerReceiptHash:
+      input.preflight.certifiedProjectFactsConsumerReceiptHash,
+    sourceRevisionVectorHash: input.preflight.sourceRevisionVectorHash,
+    sourceInventoryHash: input.preflight.sourceInventoryHash,
+    selectedDimensionId,
     selectedEligibleCellIds,
+    selectedEligibleCellCount: selectedEligibleCellIds.length,
     selectedEligibleCellsHash: hashCanonicalJson(selectedEligibleCellIds),
+    recommendationReasonCode: input.preflight.recommendation.reasonCode,
+    recommendationEvidenceRefs: [...input.preflight.recommendation.evidenceRefs],
     strictConfigReceiptHash: input.preflight.strictConfigReceiptHash,
     providerModelHash: input.preflight.providerModelHash,
+    promptSopHash: input.preflight.promptSopHash,
+    factQueryBackendHash: input.preflight.factQueryBackendHash,
+    parserBackendHash: input.preflight.parserBackendHash,
+    embeddingVectorHash: input.preflight.embeddingVectorHash,
+    runtimeArtifactManifestHash: input.preflight.runtimeArtifactManifestHash,
     runtimeArtifactBindingHash: input.preflight.runtimeArtifactBindingHash,
     privateWorkspacePolicyHash: input.preflight.privateWorkspacePolicyHash,
     privateStrictTestOnly: true as const,
     productionFinalized: false as const,
     publicRouteChanged: false as const,
-    confirmedBy: input.confirmedBy.trim(),
-    confirmedAt: input.confirmedAt,
+    selectedAt: input.selectedAt,
   };
-  return freezeDeep({ ...semantic, confirmationHash: hashCanonicalJson(semantic) });
+  return freezeDeep({ ...semantic, automaticSelectionHash: hashCanonicalJson(semantic) });
 }
 
-export function assertStrictTestSelectionConfirmationV1(
-  confirmation: StrictTestSelectionConfirmationV1,
+export function assertStrictTestAutomaticSelectionReceiptV1(
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1,
   preflight: StrictTestPreflightReceiptV1
 ): void {
-  assertExactKeys(confirmation, CONFIRMATION_RECEIPT_KEYS, 'STRICT_TEST_CONFIRMATION_INVALID');
-  assertConfirmationShape(confirmation);
-  assertConfirmationFields(confirmation);
-  const { confirmationHash, ...semantic } = confirmation;
-  if (confirmationHash !== hashCanonicalJson(semantic)) {
-    fail('STRICT_TEST_CONFIRMATION_HASH_MISMATCH', 'confirmationHash');
+  assertExactKeys(
+    automaticSelection,
+    AUTOMATIC_SELECTION_RECEIPT_KEYS,
+    'STRICT_TEST_AUTOMATIC_SELECTION_INVALID'
+  );
+  assertAutomaticSelectionShape(automaticSelection);
+  assertAutomaticSelectionFields(automaticSelection);
+  const { automaticSelectionHash, ...semantic } = automaticSelection;
+  if (automaticSelectionHash !== hashCanonicalJson(semantic)) {
+    fail('STRICT_TEST_AUTOMATIC_SELECTION_HASH_MISMATCH', 'automaticSelectionHash');
   }
   if (!preflight) {
-    fail('STRICT_TEST_CONFIRMATION_CONTEXT_REQUIRED', 'preflight');
+    fail('STRICT_TEST_AUTOMATIC_SELECTION_CONTEXT_REQUIRED', 'preflight');
   }
   assertStrictTestPreflightCurrentV1(
     preflight,
     preflightBindingsFromReceipt(preflight),
-    confirmation.confirmedAt
+    automaticSelection.selectedAt
   );
-  assertConfirmationPreflightLineage(confirmation, preflight);
+  assertAutomaticSelectionPreflightLineage(automaticSelection, preflight);
 }
 
-function assertConfirmationShape(confirmation: StrictTestSelectionConfirmationV1): void {
+function assertAutomaticSelectionShape(
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1
+): void {
   if (
-    confirmation.schemaVersion !== 1 ||
-    confirmation.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
-    confirmation.state !== 'SELECTION_CONFIRMED' ||
-    !confirmation.privateStrictTestOnly ||
-    confirmation.productionFinalized !== false ||
-    confirmation.publicRouteChanged !== false ||
-    confirmation.selectedEligibleCellIds.length === 0 ||
-    new Set(confirmation.selectedEligibleCellIds).size !==
-      confirmation.selectedEligibleCellIds.length ||
-    confirmation.selectedEligibleCellIds.some((cellId) => !cellId.trim()) ||
-    confirmation.selectedEligibleCellsHash !==
-      hashCanonicalJson(confirmation.selectedEligibleCellIds)
+    automaticSelection.schemaVersion !== 1 ||
+    automaticSelection.canonicalizerVersion !== 'canonical-json-v1' ||
+    automaticSelection.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
+    automaticSelection.algorithmVersion !== 'strict-test-preflight-recommendation-v1' ||
+    automaticSelection.state !== 'SELECTION_AUTO_SELECTED' ||
+    !automaticSelection.privateStrictTestOnly ||
+    automaticSelection.productionFinalized !== false ||
+    automaticSelection.publicRouteChanged !== false ||
+    automaticSelection.selectedEligibleCellIds.length === 0 ||
+    automaticSelection.selectedEligibleCellCount !==
+      automaticSelection.selectedEligibleCellIds.length ||
+    new Set(automaticSelection.selectedEligibleCellIds).size !==
+      automaticSelection.selectedEligibleCellIds.length ||
+    automaticSelection.selectedEligibleCellIds.some((cellId) => !cellId.trim()) ||
+    automaticSelection.selectedEligibleCellsHash !==
+      hashCanonicalJson(automaticSelection.selectedEligibleCellIds)
   ) {
-    fail('STRICT_TEST_CONFIRMATION_INVALID', 'invariant');
+    fail('STRICT_TEST_AUTOMATIC_SELECTION_INVALID', 'invariant');
   }
 }
 
-function assertConfirmationFields(confirmation: StrictTestSelectionConfirmationV1): void {
+function assertAutomaticSelectionFields(
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1
+): void {
   for (const value of [
-    confirmation.demandKey,
-    confirmation.runId,
-    confirmation.selectedDimensionId,
-    confirmation.confirmedBy,
+    automaticSelection.demandKey,
+    automaticSelection.runId,
+    automaticSelection.projectRootIdentity,
+    automaticSelection.controlRootIdentity,
+    automaticSelection.sourceRootIdentity,
+    automaticSelection.selectedDimensionId,
+    automaticSelection.recommendationReasonCode,
   ]) {
-    requireText(value, 'STRICT_TEST_CONFIRMATION_INVALID');
+    requireText(value, 'STRICT_TEST_AUTOMATIC_SELECTION_INVALID');
   }
-  requireTimestamp(confirmation.confirmedAt, 'STRICT_TEST_CONFIRMATION_INVALID');
+  requireTimestamp(automaticSelection.selectedAt, 'STRICT_TEST_AUTOMATIC_SELECTION_TIME_INVALID');
   for (const hash of [
-    confirmation.preflightHash,
-    confirmation.bindingHash,
-    confirmation.fullCellUniverseHash,
-    confirmation.selectedEligibleCellsHash,
-    confirmation.strictConfigReceiptHash,
-    confirmation.providerModelHash,
-    confirmation.runtimeArtifactBindingHash,
-    confirmation.privateWorkspacePolicyHash,
-    confirmation.confirmationHash,
+    automaticSelection.preflightHash,
+    automaticSelection.bindingHash,
+    automaticSelection.driftInvalidationHash,
+    automaticSelection.fullCatalogHash,
+    automaticSelection.fullCatalogSourceArtifactHash,
+    automaticSelection.fullCellUniverseHash,
+    automaticSelection.fullEligibleCellsHash,
+    automaticSelection.fullExcludedCellsHash,
+    automaticSelection.fullApplicabilityUniverseHash,
+    automaticSelection.fullFactQueryCatalogHash,
+    automaticSelection.fullBaselineScheduleHash,
+    automaticSelection.certifiedProjectFactsContentHash,
+    automaticSelection.certifiedProjectFactsSourceArtifactHash,
+    automaticSelection.certifiedProjectFactsSourceVectorHash,
+    automaticSelection.certifiedProjectFactsConsumerReceiptHash,
+    automaticSelection.sourceRevisionVectorHash,
+    automaticSelection.sourceInventoryHash,
+    automaticSelection.selectedEligibleCellsHash,
+    automaticSelection.strictConfigReceiptHash,
+    automaticSelection.providerModelHash,
+    automaticSelection.promptSopHash,
+    automaticSelection.factQueryBackendHash,
+    automaticSelection.parserBackendHash,
+    automaticSelection.embeddingVectorHash,
+    automaticSelection.runtimeArtifactManifestHash,
+    automaticSelection.runtimeArtifactBindingHash,
+    automaticSelection.privateWorkspacePolicyHash,
+    automaticSelection.automaticSelectionHash,
   ]) {
-    requireSha(hash, 'STRICT_TEST_CONFIRMATION_INVALID');
+    requireSha(hash, 'STRICT_TEST_AUTOMATIC_SELECTION_INVALID');
   }
 }
 
-function assertConfirmationPreflightLineage(
-  confirmation: StrictTestSelectionConfirmationV1,
+function assertAutomaticSelectionPreflightLineage(
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1,
+  preflight: StrictTestPreflightReceiptV1
+): void {
+  assertPreflightDimensionConservation(preflight);
+  assertAutomaticSelectionCopiedLineage(automaticSelection, preflight);
+  assertAutomaticSelectionRecommendationLineage(automaticSelection, preflight);
+}
+
+function assertAutomaticSelectionCopiedLineage(
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1,
+  preflight: StrictTestPreflightReceiptV1
+): void {
+  const copiedLineage = {
+    demandKey: automaticSelection.demandKey,
+    runId: automaticSelection.runId,
+    projectRootIdentity: automaticSelection.projectRootIdentity,
+    controlRootIdentity: automaticSelection.controlRootIdentity,
+    sourceRootIdentity: automaticSelection.sourceRootIdentity,
+    preflightHash: automaticSelection.preflightHash,
+    bindingHash: automaticSelection.bindingHash,
+    driftInvalidationHash: automaticSelection.driftInvalidationHash,
+    fullCatalogHash: automaticSelection.fullCatalogHash,
+    fullCatalogSourceArtifactHash: automaticSelection.fullCatalogSourceArtifactHash,
+    fullCellUniverseHash: automaticSelection.fullCellUniverseHash,
+    fullEligibleCellsHash: automaticSelection.fullEligibleCellsHash,
+    fullExcludedCellsHash: automaticSelection.fullExcludedCellsHash,
+    fullApplicabilityUniverseHash: automaticSelection.fullApplicabilityUniverseHash,
+    fullFactQueryCatalogHash: automaticSelection.fullFactQueryCatalogHash,
+    fullBaselineScheduleHash: automaticSelection.fullBaselineScheduleHash,
+    certifiedProjectFactsContentHash: automaticSelection.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash:
+      automaticSelection.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsSourceVectorHash: automaticSelection.certifiedProjectFactsSourceVectorHash,
+    certifiedProjectFactsConsumerReceiptHash:
+      automaticSelection.certifiedProjectFactsConsumerReceiptHash,
+    sourceRevisionVectorHash: automaticSelection.sourceRevisionVectorHash,
+    sourceInventoryHash: automaticSelection.sourceInventoryHash,
+    strictConfigReceiptHash: automaticSelection.strictConfigReceiptHash,
+    providerModelHash: automaticSelection.providerModelHash,
+    promptSopHash: automaticSelection.promptSopHash,
+    factQueryBackendHash: automaticSelection.factQueryBackendHash,
+    parserBackendHash: automaticSelection.parserBackendHash,
+    embeddingVectorHash: automaticSelection.embeddingVectorHash,
+    runtimeArtifactManifestHash: automaticSelection.runtimeArtifactManifestHash,
+    runtimeArtifactBindingHash: automaticSelection.runtimeArtifactBindingHash,
+    privateWorkspacePolicyHash: automaticSelection.privateWorkspacePolicyHash,
+  };
+  const expectedLineage = {
+    demandKey: preflight.demandKey,
+    runId: preflight.runId,
+    projectRootIdentity: preflight.projectRootIdentity,
+    controlRootIdentity: preflight.controlRootIdentity,
+    sourceRootIdentity: preflight.sourceRootIdentity,
+    preflightHash: preflight.preflightHash,
+    bindingHash: preflight.bindingHash,
+    driftInvalidationHash: preflight.driftInvalidationHash,
+    fullCatalogHash: preflight.catalog.catalogHash,
+    fullCatalogSourceArtifactHash: preflight.catalog.sourceArtifactHash,
+    fullCellUniverseHash: preflight.fullCellUniverseHash,
+    fullEligibleCellsHash: preflight.cellUniverse.eligibleCellsHash,
+    fullExcludedCellsHash: preflight.cellUniverse.excludedCellsHash,
+    fullApplicabilityUniverseHash: preflight.requiredFactApplicabilityUniverseHash,
+    fullFactQueryCatalogHash: preflight.factQueryCatalogHash,
+    fullBaselineScheduleHash: preflight.baselineScheduleHash,
+    certifiedProjectFactsContentHash: preflight.certifiedProjectFactsContentHash,
+    certifiedProjectFactsSourceArtifactHash: preflight.certifiedProjectFactsSourceArtifactHash,
+    certifiedProjectFactsSourceVectorHash: preflight.certifiedProjectFactsSourceVectorHash,
+    certifiedProjectFactsConsumerReceiptHash: preflight.certifiedProjectFactsConsumerReceiptHash,
+    sourceRevisionVectorHash: preflight.sourceRevisionVectorHash,
+    sourceInventoryHash: preflight.sourceInventoryHash,
+    strictConfigReceiptHash: preflight.strictConfigReceiptHash,
+    providerModelHash: preflight.providerModelHash,
+    promptSopHash: preflight.promptSopHash,
+    factQueryBackendHash: preflight.factQueryBackendHash,
+    parserBackendHash: preflight.parserBackendHash,
+    embeddingVectorHash: preflight.embeddingVectorHash,
+    runtimeArtifactManifestHash: preflight.runtimeArtifactManifestHash,
+    runtimeArtifactBindingHash: preflight.runtimeArtifactBindingHash,
+    privateWorkspacePolicyHash: preflight.privateWorkspacePolicyHash,
+  };
+  if (canonicalJsonStringify(copiedLineage) !== canonicalJsonStringify(expectedLineage)) {
+    fail(
+      'STRICT_TEST_AUTOMATIC_SELECTION_PREFLIGHT_MISMATCH',
+      automaticSelection.selectedDimensionId
+    );
+  }
+}
+
+function assertAutomaticSelectionRecommendationLineage(
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1,
   preflight: StrictTestPreflightReceiptV1
 ): void {
   const selected = preflight.dimensionResults.find(
-    (row) => row.dimensionId === confirmation.selectedDimensionId
+    (row) => row.dimensionId === automaticSelection.selectedDimensionId
   );
   if (
-    confirmation.demandKey !== preflight.demandKey ||
-    confirmation.runId !== preflight.runId ||
-    confirmation.preflightHash !== preflight.preflightHash ||
-    confirmation.bindingHash !== preflight.bindingHash ||
-    confirmation.fullCellUniverseHash !== preflight.fullCellUniverseHash ||
-    confirmation.strictConfigReceiptHash !== preflight.strictConfigReceiptHash ||
-    confirmation.providerModelHash !== preflight.providerModelHash ||
-    confirmation.runtimeArtifactBindingHash !== preflight.runtimeArtifactBindingHash ||
-    confirmation.privateWorkspacePolicyHash !== preflight.privateWorkspacePolicyHash ||
+    automaticSelection.selectedDimensionId !== preflight.recommendation.dimensionId ||
+    automaticSelection.recommendationReasonCode !== preflight.recommendation.reasonCode ||
+    canonicalJsonStringify(automaticSelection.recommendationEvidenceRefs) !==
+      canonicalJsonStringify(preflight.recommendation.evidenceRefs) ||
     !selected ||
     selected.status !== 'applicable' ||
+    !selected.requiredFactsSupported ||
     selected.eligibleCellCount === 0 ||
-    confirmation.selectedEligibleCellsHash !== hashCanonicalJson(selected.eligibleCellIds) ||
-    canonicalJsonStringify(confirmation.selectedEligibleCellIds) !==
+    automaticSelection.selectedEligibleCellCount !== selected.eligibleCellCount ||
+    automaticSelection.selectedEligibleCellsHash !== hashCanonicalJson(selected.eligibleCellIds) ||
+    canonicalJsonStringify(automaticSelection.selectedEligibleCellIds) !==
       canonicalJsonStringify(selected.eligibleCellIds)
   ) {
-    fail('STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH', confirmation.selectedDimensionId);
+    fail(
+      'STRICT_TEST_AUTOMATIC_SELECTION_PREFLIGHT_MISMATCH',
+      automaticSelection.selectedDimensionId
+    );
   }
 }
 
 export function createStrictTestDimensionExecutionProjectionV1(input: {
   readonly preflight: StrictTestPreflightReceiptV1;
-  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly automaticSelection: StrictTestAutomaticSelectionReceiptV1;
   readonly currentBindings: StrictTestPreflightBindingsV1;
   readonly projectedAt: string;
 }): StrictTestDimensionExecutionProjectionV1 {
   assertExactKeys(input, PROJECTION_INPUT_KEYS, 'STRICT_TEST_PROJECTION_FIELDS_INVALID');
   assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.projectedAt);
-  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  assertStrictTestAutomaticSelectionReceiptV1(input.automaticSelection, input.preflight);
   requireTimestamp(input.projectedAt, 'STRICT_TEST_PROJECTION_TIME_INVALID');
-  if (Date.parse(input.projectedAt) < Date.parse(input.confirmation.confirmedAt)) {
-    fail('STRICT_TEST_PROJECTION_TIME_INVALID', 'projectedAt precedes confirmedAt');
+  if (Date.parse(input.projectedAt) < Date.parse(input.automaticSelection.selectedAt)) {
+    fail('STRICT_TEST_PROJECTION_TIME_INVALID', 'projectedAt precedes selectedAt');
   }
-  const semantic = buildProjectionSemantic(input.preflight, input.confirmation, input.projectedAt);
+  const semantic = buildProjectionSemantic(
+    input.preflight,
+    input.automaticSelection,
+    input.projectedAt
+  );
   return freezeDeep({ ...semantic, projectionHash: hashCanonicalJson(semantic) });
 }
 
 function buildProjectionSemantic(
   preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1,
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1,
   projectedAt: string
 ) {
-  const executionCellIds = [...confirmation.selectedEligibleCellIds];
-  const dimensionStates = buildProjectionDimensionStates(preflight, confirmation);
+  const executionCellIds = [...automaticSelection.selectedEligibleCellIds];
+  const dimensionStates = buildProjectionDimensionStates(preflight, automaticSelection);
   return {
     schemaVersion: 1 as const,
     profile: STRICT_TEST_DIMENSION_PROFILE_V1,
-    state: 'SELECTION_CONFIRMED' as const,
+    state: 'SELECTION_AUTO_SELECTED' as const,
     demandKey: preflight.demandKey,
     runId: preflight.runId,
     preflightHash: preflight.preflightHash,
-    confirmationHash: confirmation.confirmationHash,
+    automaticSelectionHash: automaticSelection.automaticSelectionHash,
     bindingHash: preflight.bindingHash,
-    selectedDimensionId: confirmation.selectedDimensionId,
+    selectedDimensionId: automaticSelection.selectedDimensionId,
     executionCellIds,
     executionCellSetHash: hashCanonicalJson(executionCellIds),
     dimensionStates,
@@ -1092,11 +1298,11 @@ function buildProjectionSemantic(
 
 function buildProjectionDimensionStates(
   preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1
 ): StrictTestDimensionExecutionStateV1[] {
-  const executionCellIds = [...confirmation.selectedEligibleCellIds];
+  const executionCellIds = [...automaticSelection.selectedEligibleCellIds];
   return preflight.dimensionResults.map((row) =>
-    row.dimensionId === confirmation.selectedDimensionId
+    row.dimensionId === automaticSelection.selectedDimensionId
       ? {
           dimensionId: row.dimensionId,
           disposition: 'selected-for-execution' as const,
@@ -1115,17 +1321,17 @@ function buildProjectionDimensionStates(
 export function assertStrictTestDimensionExecutionProjectionV1(
   projection: StrictTestDimensionExecutionProjectionV1,
   preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1
 ): void {
   assertProjectionShape(projection);
   const { projectionHash, ...semantic } = projection;
   if (projectionHash !== hashCanonicalJson(semantic)) {
     fail('STRICT_TEST_PROJECTION_HASH_MISMATCH', 'projectionHash');
   }
-  if (!preflight || !confirmation) {
-    fail('STRICT_TEST_PROJECTION_CONTEXT_REQUIRED', 'preflight and confirmation');
+  if (!preflight || !automaticSelection) {
+    fail('STRICT_TEST_PROJECTION_CONTEXT_REQUIRED', 'preflight and automaticSelection');
   }
-  assertProjectionLineage(projection, preflight, confirmation);
+  assertProjectionLineage(projection, preflight, automaticSelection);
 }
 
 function assertProjectionShape(projection: StrictTestDimensionExecutionProjectionV1): void {
@@ -1164,7 +1370,7 @@ function assertProjectionEnvelopeShape(projection: StrictTestDimensionExecutionP
   if (
     projection.schemaVersion !== 1 ||
     projection.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
-    projection.state !== 'SELECTION_CONFIRMED' ||
+    projection.state !== 'SELECTION_AUTO_SELECTED' ||
     projection.productionFinalized !== false ||
     projection.publicRouteChanged !== false ||
     projection.executionCellIds.length === 0 ||
@@ -1192,7 +1398,7 @@ function assertProjectionEnvelopeShape(projection: StrictTestDimensionExecutionP
 function assertProjectionHashFields(projection: StrictTestDimensionExecutionProjectionV1): void {
   for (const hash of [
     projection.preflightHash,
-    projection.confirmationHash,
+    projection.automaticSelectionHash,
     projection.bindingHash,
     projection.executionCellSetHash,
     projection.fullCatalogHash,
@@ -1227,37 +1433,41 @@ function isInvalidUnselectedDimensionState(
 function assertProjectionLineage(
   projection: StrictTestDimensionExecutionProjectionV1,
   preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1
+  automaticSelection: StrictTestAutomaticSelectionReceiptV1
 ): void {
-  assertStrictTestSelectionConfirmationV1(confirmation, preflight);
+  assertStrictTestAutomaticSelectionReceiptV1(automaticSelection, preflight);
   const { projectionHash: _projectionHash, ...projectionSemantic } = projection;
-  const expectedSemantic = buildProjectionSemantic(preflight, confirmation, projection.projectedAt);
+  const expectedSemantic = buildProjectionSemantic(
+    preflight,
+    automaticSelection,
+    projection.projectedAt
+  );
   if (canonicalJsonStringify(projectionSemantic) !== canonicalJsonStringify(expectedSemantic)) {
     fail('STRICT_TEST_PROJECTION_LINEAGE_MISMATCH', projection.selectedDimensionId);
   }
-  if (Date.parse(projection.projectedAt) < Date.parse(confirmation.confirmedAt)) {
-    fail('STRICT_TEST_PROJECTION_TIME_INVALID', 'projectedAt precedes confirmedAt');
+  if (Date.parse(projection.projectedAt) < Date.parse(automaticSelection.selectedAt)) {
+    fail('STRICT_TEST_PROJECTION_TIME_INVALID', 'projectedAt precedes selectedAt');
   }
 }
 
 export function assertStrictTestResumeContextV1(input: {
   readonly preflight: StrictTestPreflightReceiptV1;
-  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly automaticSelection: StrictTestAutomaticSelectionReceiptV1;
   readonly projection: StrictTestDimensionExecutionProjectionV1;
   readonly currentBindings: StrictTestPreflightBindingsV1;
   readonly privateWorkspacePolicyHash: CanonicalSha256;
 }): void {
   assertExactKeys(input, RESUME_INPUT_KEYS, 'STRICT_TEST_RESUME_CONTEXT_INVALID');
   assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings);
-  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  assertStrictTestAutomaticSelectionReceiptV1(input.automaticSelection, input.preflight);
   assertStrictTestDimensionExecutionProjectionV1(
     input.projection,
     input.preflight,
-    input.confirmation
+    input.automaticSelection
   );
   if (
     input.privateWorkspacePolicyHash !== input.preflight.privateWorkspacePolicyHash ||
-    input.privateWorkspacePolicyHash !== input.confirmation.privateWorkspacePolicyHash
+    input.privateWorkspacePolicyHash !== input.automaticSelection.privateWorkspacePolicyHash
   ) {
     fail('STRICT_TEST_RESUME_CONTEXT_DRIFT', 'private workspace owner/policy');
   }
@@ -1265,7 +1475,7 @@ export function assertStrictTestResumeContextV1(input: {
 
 export function createStrictTestPrivateCompletionReceiptV1(input: {
   readonly preflight: StrictTestPreflightReceiptV1;
-  readonly confirmation: StrictTestSelectionConfirmationV1;
+  readonly automaticSelection: StrictTestAutomaticSelectionReceiptV1;
   readonly projection: StrictTestDimensionExecutionProjectionV1;
   readonly currentBindings: StrictTestPreflightBindingsV1;
   readonly finalCoverageBinding: FinalCoverageBindingReceiptV1;
@@ -1279,11 +1489,11 @@ export function createStrictTestPrivateCompletionReceiptV1(input: {
 }): StrictTestPrivateCompletionReceiptV1 {
   assertExactKeys(input, COMPLETION_INPUT_KEYS, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
   assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings, input.completedAt);
-  assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
+  assertStrictTestAutomaticSelectionReceiptV1(input.automaticSelection, input.preflight);
   assertStrictTestDimensionExecutionProjectionV1(
     input.projection,
     input.preflight,
-    input.confirmation
+    input.automaticSelection
   );
   validatePrivateCompletionBindings(input);
   const semantic = {
@@ -1293,7 +1503,7 @@ export function createStrictTestPrivateCompletionReceiptV1(input: {
     demandKey: input.preflight.demandKey,
     runId: input.preflight.runId,
     preflightHash: input.preflight.preflightHash,
-    confirmationHash: input.confirmation.confirmationHash,
+    automaticSelectionHash: input.automaticSelection.automaticSelectionHash,
     projectionHash: input.projection.projectionHash,
     finalCoverageBinding: input.finalCoverageBinding,
     servingSnapshotManifest: input.servingSnapshotManifest,
@@ -1347,7 +1557,7 @@ export function createStrictTestPrivateFailureReceiptV1(input: {
     runId: authority.runId,
     observedBindingsHash: authority.observedBindingsHash,
     preflightHash: authority.preflightHash,
-    confirmationHash: authority.confirmationHash,
+    automaticSelectionHash: authority.automaticSelectionHash,
     projectionHash: authority.projectionHash,
     failedStage: input.failedStage,
     errorCode: input.errorCode.trim(),
@@ -1402,13 +1612,16 @@ function assertPrivateCompletionAuthorityContext(
   receipt: StrictTestPrivateCompletionReceiptV1,
   context: StrictTestPrivateTerminalAuthorityContextV1
 ): void {
-  const { preflight, confirmation, projection } = context;
-  if (!preflight || !confirmation || !projection) {
-    fail('STRICT_TEST_PRIVATE_TERMINAL_CONTEXT_REQUIRED', 'preflight, confirmation and projection');
+  const { preflight, automaticSelection, projection } = context;
+  if (!preflight || !automaticSelection || !projection) {
+    fail(
+      'STRICT_TEST_PRIVATE_TERMINAL_CONTEXT_REQUIRED',
+      'preflight, automaticSelection and projection'
+    );
   }
   assertStrictTestPreflightCurrentV1(preflight, context.currentBindings, receipt.completedAt);
-  assertStrictTestSelectionConfirmationV1(confirmation, preflight);
-  assertStrictTestDimensionExecutionProjectionV1(projection, preflight, confirmation);
+  assertStrictTestAutomaticSelectionReceiptV1(automaticSelection, preflight);
+  assertStrictTestDimensionExecutionProjectionV1(projection, preflight, automaticSelection);
   if (
     receipt.demandKey !== preflight.demandKey ||
     receipt.runId !== preflight.runId ||
@@ -1420,7 +1633,7 @@ function assertPrivateCompletionAuthorityContext(
   }
   assertPrivateCompletionLineage(receipt);
   if (
-    receipt.confirmationHash !== confirmation.confirmationHash ||
+    receipt.automaticSelectionHash !== automaticSelection.automaticSelectionHash ||
     receipt.projectionHash !== projection.projectionHash ||
     Date.parse(receipt.completedAt) < Date.parse(projection.projectedAt)
   ) {
@@ -1455,7 +1668,7 @@ function assertPrivateFailureAuthorityContext(
     receipt.runId !== authority.runId ||
     receipt.observedBindingsHash !== authority.observedBindingsHash ||
     receipt.preflightHash !== authority.preflightHash ||
-    receipt.confirmationHash !== authority.confirmationHash ||
+    receipt.automaticSelectionHash !== authority.automaticSelectionHash ||
     receipt.projectionHash !== authority.projectionHash ||
     receipt.productionBeforeStateHash !== authority.productionBeforeStateHash ||
     receipt.publicRouteBeforeStateHash !== authority.publicRouteBeforeStateHash
@@ -1476,7 +1689,7 @@ function validateStrictTestFailureAuthorityContextV1(
   );
   requireTimestamp(failedAt, 'STRICT_TEST_FAILURE_FIELDS_INVALID');
   const matrix = resolveStrictTestFailureStageAuthorityV1(failedStage);
-  for (const key of ['preflight', 'confirmation', 'projection'] as const) {
+  for (const key of ['preflight', 'automaticSelection', 'projection'] as const) {
     // 运行时调用方可能绕过 TypeScript 传入 undefined；authority 只有非 null/undefined
     // 才算存在，避免 required 槽位以“有 key、无 receipt”的方式穿过矩阵。
     const present = context[key] !== null && context[key] !== undefined;
@@ -1490,7 +1703,7 @@ function validateStrictTestFailureAuthorityContextV1(
     fail('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE', 'currentBindings.generatedAt');
   }
 
-  const { preflight, confirmation, projection } = context;
+  const { preflight, automaticSelection, projection } = context;
   if (preflight) {
     assertStrictTestPreflightReceiptV1(preflight);
     if (
@@ -1503,20 +1716,20 @@ function validateStrictTestFailureAuthorityContextV1(
       fail('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE', 'preflight.generatedAt');
     }
   }
-  if (confirmation) {
+  if (automaticSelection) {
     if (!preflight) {
-      fail('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH', 'confirmation without preflight');
+      fail('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH', 'automaticSelection without preflight');
     }
-    assertStrictTestSelectionConfirmationV1(confirmation, preflight);
-    if (Date.parse(confirmation.confirmedAt) > Date.parse(failedAt)) {
-      fail('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE', 'confirmation.confirmedAt');
+    assertStrictTestAutomaticSelectionReceiptV1(automaticSelection, preflight);
+    if (Date.parse(automaticSelection.selectedAt) > Date.parse(failedAt)) {
+      fail('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE', 'automaticSelection.selectedAt');
     }
   }
   if (projection) {
-    if (!preflight || !confirmation) {
+    if (!preflight || !automaticSelection) {
       fail('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH', 'projection without predecessors');
     }
-    assertStrictTestDimensionExecutionProjectionV1(projection, preflight, confirmation);
+    assertStrictTestDimensionExecutionProjectionV1(projection, preflight, automaticSelection);
     if (Date.parse(projection.projectedAt) > Date.parse(failedAt)) {
       fail('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE', 'projection.projectedAt');
     }
@@ -1525,7 +1738,7 @@ function validateStrictTestFailureAuthorityContextV1(
   return {
     observedBindingsHash,
     preflightHash: preflight?.preflightHash ?? null,
-    confirmationHash: confirmation?.confirmationHash ?? null,
+    automaticSelectionHash: automaticSelection?.automaticSelectionHash ?? null,
     projectionHash: projection?.projectionHash ?? null,
     demandKey: preflight?.demandKey ?? context.currentBindings.demandKey,
     runId: preflight?.runId ?? context.currentBindings.runId,
@@ -1566,7 +1779,7 @@ function assertPrivateTerminalNonMutation(receipt: StrictTestPrivateTerminalRece
 
 function assertPrivateCompletionLineage(receipt: StrictTestPrivateCompletionReceiptV1): void {
   requireTimestamp(receipt.completedAt, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  requireSha(receipt.confirmationHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
+  requireSha(receipt.automaticSelectionHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
   requireSha(receipt.projectionHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
   requireSha(receipt.privateG4ReceiptHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
   requireSha(receipt.privateServingValidationHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
@@ -1596,7 +1809,11 @@ function assertPrivateCompletionLineage(receipt: StrictTestPrivateCompletionRece
 function assertPrivateFailureLineage(receipt: StrictTestPrivateFailureReceiptV1): void {
   requireTimestamp(receipt.failedAt, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
   requireSha(receipt.observedBindingsHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  for (const hash of [receipt.preflightHash, receipt.confirmationHash, receipt.projectionHash]) {
+  for (const hash of [
+    receipt.preflightHash,
+    receipt.automaticSelectionHash,
+    receipt.projectionHash,
+  ]) {
     if (hash !== null) {
       requireSha(hash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
     }
@@ -1639,7 +1856,7 @@ export function createStrictTestAuditReportV1(input: {
     demandKey: input.terminal.demandKey,
     runId: input.terminal.runId,
     preflightHash: input.terminal.preflightHash,
-    confirmationHash: input.terminal.confirmationHash,
+    automaticSelectionHash: input.terminal.automaticSelectionHash,
     projectionHash: input.terminal.projectionHash,
     terminalHash: input.terminal.terminalHash,
     terminalState: input.terminal.terminalState,
