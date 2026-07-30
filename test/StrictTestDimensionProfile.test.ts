@@ -20,6 +20,7 @@ import {
   type FactQueryFamilyV1,
   hashStrictTestPreflightBindingsV1,
   type PlanCellV1,
+  resolveStrictTestFailureStageAuthorityV1,
   STRICT_TEST_DIMENSION_PROFILE_V1,
   type StrictTestPreflightBindingsV1,
   validateStrictTestPreflightV1,
@@ -368,17 +369,15 @@ describe('strict-test-dimension profile foundation', () => {
     expect(terminal.terminalState).toBe('STRICT_TEST_COMPLETED_PRIVATE');
     expect(terminal.productionFinalized).toBe(false);
     expect(terminal.publicRouteChanged).toBe(false);
-    expect(report.fullUniverse.dimensionCount).toBe(26);
-    expect(report.executedProjection.cellCount).toBe(1);
+    expect(report.fullUniverse?.dimensionCount).toBe(26);
+    expect(report.executedProjection?.cellCount).toBe(1);
     expect(report.unexecutedDimensionIds).toHaveLength(25);
+    expect(report.failure).toBeNull();
     expect(report.forbiddenConclusions).toContain('full-production-coverage');
 
     expect(() =>
       createStrictTestPrivateFailureReceiptV1({
-        preflight,
-        currentBindings: bindings,
-        confirmationHash: confirmation.confirmationHash,
-        projectionHash: projection.projectionHash,
+        context: { currentBindings: bindings, preflight, confirmation, projection },
         failedStage: 'PRIVATE_G4_READY',
         errorCode: 'PRIVATE_G4_REJECTED',
         privateEvidenceRefs: ['private:g4:error'],
@@ -538,15 +537,24 @@ describe('strict-test-dimension profile foundation', () => {
         ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
       }
     }
+
+    const awaiting = failureAuthorityContext(
+      chain,
+      FAILURE_STAGE_AUTHORITY_CASES.find((row) => row.failedStage === 'AWAITING_CONFIRMATION')!
+    );
+    expect(() =>
+      createFailureReceipt({ ...awaiting, preflight: undefined } as never, 'AWAITING_CONFIRMATION')
+    ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+    expect(() => resolveStrictTestFailureStageAuthorityV1('STRICT_TEST_COMPLETED_PRIVATE')).toThrow(
+      'STRICT_TEST_FAILURE_FIELDS_INVALID'
+    );
   });
 
-  it('rejects rehashed predecessor and observed-bindings substitutions', () => {
+  it('rejects rehashed authority predecessors and terminal hash substitutions', () => {
     const chain = privateCompletionChain();
     const context = failureAuthorityContext(
       chain,
-      FAILURE_STAGE_AUTHORITY_CASES.find(
-        (row) => row.failedStage === 'PRIVATE_G4_READY'
-      )!
+      FAILURE_STAGE_AUTHORITY_CASES.find((row) => row.failedStage === 'PRIVATE_G4_READY')!
     );
     const terminal = createFailureReceipt(context, 'PRIVATE_G4_READY');
 
@@ -566,6 +574,32 @@ describe('strict-test-dimension profile foundation', () => {
         'STRICT_TEST_FAILURE_AUTHORITY_MISMATCH'
       );
     }
+
+    const { confirmationHash: _confirmationHash, ...confirmationSemantic } = chain.confirmation;
+    const forgedConfirmationSemantic = {
+      ...confirmationSemantic,
+      preflightHash: sha('mismatched-confirmation-preflight'),
+    };
+    const forgedConfirmation = {
+      ...forgedConfirmationSemantic,
+      confirmationHash: hashCanonicalJson(forgedConfirmationSemantic),
+    };
+    expect(() =>
+      createFailureReceipt({ ...context, confirmation: forgedConfirmation }, 'PRIVATE_G4_READY')
+    ).toThrow('STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH');
+
+    const { projectionHash: _projectionHash, ...projectionSemantic } = chain.projection;
+    const forgedProjectionSemantic = {
+      ...projectionSemantic,
+      confirmationHash: sha('mismatched-projection-confirmation'),
+    };
+    const forgedProjection = {
+      ...forgedProjectionSemantic,
+      projectionHash: hashCanonicalJson(forgedProjectionSemantic),
+    };
+    expect(() =>
+      createFailureReceipt({ ...context, projection: forgedProjection }, 'PRIVATE_G4_READY')
+    ).toThrow('STRICT_TEST_PROJECTION_LINEAGE_MISMATCH');
   });
 
   it('rejects each authority timestamp that occurs after failedAt', () => {
@@ -592,10 +626,7 @@ describe('strict-test-dimension profile foundation', () => {
       generatedAt: '2026-07-30T06:10:00.000Z',
       validUntil: '2026-07-30T07:10:00.000Z',
     };
-    const futurePreflight = validateStrictTestPreflightV1(
-      compiledPlan(),
-      futurePreflightBindings
-    );
+    const futurePreflight = validateStrictTestPreflightV1(compiledPlan(), futurePreflightBindings);
     expect(() =>
       createFailureReceipt(
         {
@@ -645,6 +676,26 @@ describe('strict-test-dimension profile foundation', () => {
   });
 
   it('records expired or drifted preflight evidence instead of applying success currency gates', () => {
+    const expiredBindings = {
+      ...preflightBindings(),
+      validUntil: '2026-07-30T06:05:00.000Z',
+    };
+    const expiredPreflight = validateStrictTestPreflightV1(compiledPlan(), expiredBindings);
+    const expiredContext = {
+      currentBindings: expiredBindings,
+      preflight: expiredPreflight,
+      confirmation: null,
+      projection: null,
+    };
+    const expiredTerminal = createFailureReceipt(
+      expiredContext,
+      'AWAITING_CONFIRMATION',
+      '2026-07-30T06:20:00.000Z'
+    );
+    expect(() =>
+      assertStrictTestPrivateTerminalReceiptV1(expiredTerminal, expiredContext)
+    ).not.toThrow();
+
     const chain = privateCompletionChain();
     const observedBindings = {
       ...chain.bindings,
@@ -664,14 +715,43 @@ describe('strict-test-dimension profile foundation', () => {
       'AWAITING_CONFIRMATION',
       '2026-07-30T06:20:00.000Z'
     );
-    expect(terminal.observedBindingsHash).toBe(
-      hashStrictTestPreflightBindingsV1(observedBindings)
-    );
+    expect(terminal.observedBindingsHash).toBe(hashStrictTestPreflightBindingsV1(observedBindings));
     expect(() => assertStrictTestPrivateTerminalReceiptV1(terminal, context)).not.toThrow();
   });
 
+  it('rejects the retired raw-hash failure input instead of providing an overload or fallback', () => {
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
+    const legacyInput = {
+      preflight,
+      currentBindings: bindings,
+      confirmationHash: confirmation.confirmationHash,
+      projectionHash: projection.projectionHash,
+      failedStage: 'PRIVATE_G4_READY',
+      errorCode: 'PRIVATE_G4_REJECTED',
+      privateEvidenceRefs: ['private:g4:error'],
+      productionAfterStateHash: bindings.productionBeforeStateHash,
+      publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+      failedAt: '2026-07-30T06:20:00.000Z',
+    };
+
+    expect(() => createStrictTestPrivateFailureReceiptV1(legacyInput as never)).toThrow(
+      'STRICT_TEST_FAILURE_FIELDS_INVALID'
+    );
+  });
+
   it('hash-binds projectedAt and rejects projection before confirmation', () => {
-    const { bindings, preflight, confirmation } = privateCompletionChain();
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
+
+    expect(() =>
+      assertStrictTestDimensionExecutionProjectionV1(
+        {
+          ...projection,
+          projectedAt: '2026-07-30T06:03:00.000Z',
+        },
+        preflight,
+        confirmation
+      )
+    ).toThrow('STRICT_TEST_PROJECTION_HASH_MISMATCH');
 
     expect(() =>
       createStrictTestDimensionExecutionProjectionV1({
@@ -709,6 +789,17 @@ describe('strict-test-dimension profile foundation', () => {
         ])
       )
     );
+    expect(Object.isFrozen(plans.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1)).toBe(true);
+    for (const row of FAILURE_STAGE_AUTHORITY_CASES) {
+      expect(plans.resolveStrictTestFailureStageAuthorityV1(row.failedStage)).toEqual({
+        preflight: row.preflight,
+        confirmation: row.confirmation,
+        projection: row.projection,
+      });
+      expect(Object.isFrozen(plans.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1[row.failedStage])).toBe(
+        true
+      );
+    }
   });
 });
 
@@ -915,10 +1006,7 @@ function createFailureReceipt(
 }
 
 function privateCompletionChain(
-  timestamps: {
-    readonly confirmedAt: string;
-    readonly projectedAt: string;
-  } = {
+  timestamps: { readonly confirmedAt: string; readonly projectedAt: string } = {
     confirmedAt: '2026-07-30T06:01:00.000Z',
     projectedAt: '2026-07-30T06:02:00.000Z',
   }
