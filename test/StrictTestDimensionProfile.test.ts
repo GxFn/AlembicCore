@@ -41,54 +41,6 @@ const FACT_FAMILIES: readonly FactQueryFamilyV1[] = [
 ];
 
 const FACT_QUERY_CATALOG: FactQueryCatalogSnapshotV1 = buildFactQueryCatalogSnapshot(FACT_FAMILIES);
-const FAILURE_STAGE_AUTHORITY_CASES = [
-  {
-    failedStage: 'PREFLIGHT_REQUESTED',
-    preflight: 'forbidden',
-    confirmation: 'forbidden',
-    projection: 'forbidden',
-  },
-  {
-    failedStage: 'PREFLIGHT_FACTS_FROZEN',
-    preflight: 'forbidden',
-    confirmation: 'forbidden',
-    projection: 'forbidden',
-  },
-  {
-    failedStage: 'PREFLIGHT_UNIVERSE_VALIDATED',
-    preflight: 'forbidden',
-    confirmation: 'forbidden',
-    projection: 'forbidden',
-  },
-  {
-    failedStage: 'AWAITING_CONFIRMATION',
-    preflight: 'required',
-    confirmation: 'forbidden',
-    projection: 'forbidden',
-  },
-  {
-    failedStage: 'SELECTION_CONFIRMED',
-    preflight: 'required',
-    confirmation: 'required',
-    projection: 'forbidden',
-  },
-  ...[
-    'PRIVATE_WORKSPACE_READY',
-    'PLAN_COMPILED',
-    'FACT_SCHEDULE_FROZEN',
-    'ANALYSIS_FIXPOINT_CLOSED',
-    'EXPRESSION_SETS_REVIEWED',
-    'PRIVATE_CORPUS_SEALED',
-    'PRIVATE_INDEXES_VERIFIED',
-    'PRIVATE_G4_READY',
-    'PRIVATE_SERVING_VALIDATED',
-  ].map((failedStage) => ({
-    failedStage,
-    preflight: 'required',
-    confirmation: 'required',
-    projection: 'required',
-  })),
-] as const;
 const FIXTURE_MODULE = {
   moduleId: 'core',
   scopeId: 'repo:core',
@@ -140,7 +92,6 @@ describe('strict-test-dimension profile foundation', () => {
       preflight,
       confirmation,
       currentBindings: bindings,
-      projectedAt: '2026-07-30T06:02:00.000Z',
     });
 
     expect(confirmation.selectedDimensionId).toBe('architecture');
@@ -305,7 +256,6 @@ describe('strict-test-dimension profile foundation', () => {
       preflight,
       confirmation,
       currentBindings: bindings,
-      projectedAt: '2026-07-30T06:02:00.000Z',
     });
     const privateG4ReceiptHash = sha('private-g4');
     const candidateDataManifestHash = sha('candidate-data-manifest');
@@ -359,7 +309,9 @@ describe('strict-test-dimension profile foundation', () => {
       completedAt: '2026-07-30T06:30:00.000Z',
     });
     const report = createStrictTestAuditReportV1({
-      context: { currentBindings: bindings, preflight, confirmation, projection },
+      preflight,
+      confirmation,
+      projection,
       terminal,
       verificationCommands: ['strict-test status --run strict-test-fixture-1'],
       privateArtifactRefs: ['private:report'],
@@ -441,20 +393,15 @@ describe('strict-test-dimension profile foundation', () => {
     const forgedLineageOnly = forgePrivateCompletionTerminal(terminal, false);
 
     expect(() =>
-      assertStrictTestPrivateTerminalReceiptV1(forged, {
-        currentBindings: preflightBindings(),
-        preflight,
-        confirmation,
-        projection,
-      })
+      assertStrictTestPrivateTerminalReceiptV1(forged, preflight, confirmation, projection)
     ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
     expect(() =>
-      assertStrictTestPrivateTerminalReceiptV1(forgedLineageOnly, {
-        currentBindings: preflightBindings(),
+      assertStrictTestPrivateTerminalReceiptV1(
+        forgedLineageOnly,
         preflight,
         confirmation,
-        projection,
-      })
+        projection
+      )
     ).toThrow('STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID');
   });
 
@@ -464,12 +411,9 @@ describe('strict-test-dimension profile foundation', () => {
 
     expect(() =>
       createStrictTestAuditReportV1({
-        context: {
-          currentBindings: preflightBindings(),
-          preflight,
-          confirmation,
-          projection,
-        },
+        preflight,
+        confirmation,
+        projection,
         terminal: forged,
         verificationCommands: ['strict-test status --run strict-test-fixture-1'],
         privateArtifactRefs: ['private:report'],
@@ -477,210 +421,116 @@ describe('strict-test-dimension profile foundation', () => {
     ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
   });
 
-  it('applies the exact failure authority matrix to all 14 non-completed stages', () => {
-    const chain = privateCompletionChain();
-
-    for (const row of FAILURE_STAGE_AUTHORITY_CASES) {
-      const context = failureAuthorityContext(chain, row);
-      const terminal = createFailureReceipt(context, row.failedStage);
-
-      expect(() => assertStrictTestPrivateTerminalReceiptV1(terminal, context)).not.toThrow();
-      expect(terminal.observedBindingsHash).toBe(
-        hashStrictTestPreflightBindingsV1(context.currentBindings)
-      );
-      expect(terminal.preflightHash).toBe(context.preflight?.preflightHash ?? null);
-      expect(terminal.confirmationHash).toBe(context.confirmation?.confirmationHash ?? null);
-      expect(terminal.projectionHash).toBe(context.projection?.projectionHash ?? null);
-
-      const report = createStrictTestAuditReportV1({
-        context,
-        terminal,
-        verificationCommands: ['strict-test status --run strict-test-fixture-1'],
-        privateArtifactRefs: ['private:report'],
-      });
-      expect(report.preflightHash).toBe(terminal.preflightHash);
-      expect(report.confirmationHash).toBe(terminal.confirmationHash);
-      expect(report.projectionHash).toBe(terminal.projectionHash);
-      expect(report.fullUniverse === null).toBe(context.preflight === null);
-      expect(report.executedProjection === null).toBe(context.projection === null);
-      expect(report.unexecutedDimensionIds === null).toBe(context.projection === null);
-      expect(report.failure).toEqual({
-        failedStage: row.failedStage,
-        errorCode: `${row.failedStage}_REJECTED`,
-      });
-      expect(report.privateArtifactRefs).toEqual([
-        `private:failure:${row.failedStage}`,
-        'private:report',
-      ]);
-    }
-  });
-
-  it('rejects every missing required authority and every forbidden extra authority', () => {
-    const chain = privateCompletionChain();
-
-    for (const row of FAILURE_STAGE_AUTHORITY_CASES) {
-      const exact = failureAuthorityContext(chain, row);
-      const missingKey = (['projection', 'confirmation', 'preflight'] as const).find(
-        (key) => row[key] === 'required'
-      );
-      if (missingKey) {
-        expect(() =>
-          createFailureReceipt({ ...exact, [missingKey]: null }, row.failedStage)
-        ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
-      }
-
-      const extraKey = (['preflight', 'confirmation', 'projection'] as const).find(
-        (key) => row[key] === 'forbidden'
-      );
-      if (extraKey) {
-        expect(() =>
-          createFailureReceipt({ ...exact, [extraKey]: chain[extraKey] }, row.failedStage)
-        ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
-      }
-    }
-  });
-
-  it('rejects rehashed predecessor and observed-bindings substitutions', () => {
-    const chain = privateCompletionChain();
-    const context = failureAuthorityContext(
-      chain,
-      FAILURE_STAGE_AUTHORITY_CASES.find(
-        (row) => row.failedStage === 'PRIVATE_G4_READY'
-      )!
-    );
-    const terminal = createFailureReceipt(context, 'PRIVATE_G4_READY');
-
-    for (const field of [
-      'observedBindingsHash',
-      'preflightHash',
-      'confirmationHash',
-      'projectionHash',
-    ] as const) {
-      const { terminalHash: _terminalHash, ...semantic } = terminal;
-      const forgedSemantic = { ...semantic, [field]: sha(`mismatched-${field}`) };
-      const forged = {
-        ...forgedSemantic,
-        terminalHash: hashCanonicalJson(forgedSemantic),
-      };
-      expect(() => assertStrictTestPrivateTerminalReceiptV1(forged, context)).toThrow(
-        'STRICT_TEST_FAILURE_AUTHORITY_MISMATCH'
-      );
-    }
-  });
-
-  it('rejects each authority timestamp that occurs after failedAt', () => {
-    const currentBindingsAfterFailure = {
-      ...preflightBindings(),
-      generatedAt: '2026-07-30T06:10:00.000Z',
-      validUntil: '2026-07-30T07:10:00.000Z',
-    };
-    expect(() =>
-      createFailureReceipt(
-        {
-          currentBindings: currentBindingsAfterFailure,
-          preflight: null,
-          confirmation: null,
-          projection: null,
-        },
-        'PREFLIGHT_REQUESTED',
-        '2026-07-30T06:05:00.000Z'
-      )
-    ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
-
-    const futurePreflightBindings = {
-      ...preflightBindings(),
-      generatedAt: '2026-07-30T06:10:00.000Z',
-      validUntil: '2026-07-30T07:10:00.000Z',
-    };
-    const futurePreflight = validateStrictTestPreflightV1(
-      compiledPlan(),
-      futurePreflightBindings
-    );
-    expect(() =>
-      createFailureReceipt(
-        {
-          currentBindings: futurePreflightBindings,
-          preflight: futurePreflight,
-          confirmation: null,
-          projection: null,
-        },
-        'AWAITING_CONFIRMATION',
-        '2026-07-30T06:05:00.000Z'
-      )
-    ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
-
-    const confirmationAfterFailure = privateCompletionChain({
-      confirmedAt: '2026-07-30T06:10:00.000Z',
-      projectedAt: '2026-07-30T06:11:00.000Z',
-    });
-    expect(() =>
-      createFailureReceipt(
-        {
-          currentBindings: confirmationAfterFailure.bindings,
-          preflight: confirmationAfterFailure.preflight,
-          confirmation: confirmationAfterFailure.confirmation,
-          projection: null,
-        },
-        'SELECTION_CONFIRMED',
-        '2026-07-30T06:05:00.000Z'
-      )
-    ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
-
-    const projectionAfterFailure = privateCompletionChain({
-      confirmedAt: '2026-07-30T06:01:00.000Z',
-      projectedAt: '2026-07-30T06:10:00.000Z',
-    });
-    expect(() =>
-      createFailureReceipt(
-        {
-          currentBindings: projectionAfterFailure.bindings,
-          preflight: projectionAfterFailure.preflight,
-          confirmation: projectionAfterFailure.confirmation,
-          projection: projectionAfterFailure.projection,
-        },
-        'PRIVATE_WORKSPACE_READY',
-        '2026-07-30T06:05:00.000Z'
-      )
-    ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
-  });
-
-  it('records expired or drifted preflight evidence instead of applying success currency gates', () => {
-    const chain = privateCompletionChain();
-    const observedBindings = {
-      ...chain.bindings,
-      strictConfigReceiptHash: sha('drifted-strict-config'),
-      generatedAt: '2026-07-30T06:15:00.000Z',
-      validUntil: '2026-07-30T07:15:00.000Z',
-    };
-    const context = {
-      currentBindings: observedBindings,
-      preflight: chain.preflight,
+  it('validates and reports a pre-confirmation failure without future authority', () => {
+    const bindings = preflightBindings();
+    const terminal = createStrictTestPrivateFailureReceiptV1({
+      preflight: null,
       confirmation: null,
       projection: null,
-    };
-
-    const terminal = createFailureReceipt(
-      context,
-      'AWAITING_CONFIRMATION',
-      '2026-07-30T06:20:00.000Z'
-    );
-    expect(terminal.observedBindingsHash).toBe(
-      hashStrictTestPreflightBindingsV1(observedBindings)
-    );
-    expect(() => assertStrictTestPrivateTerminalReceiptV1(terminal, context)).not.toThrow();
-  });
-
-  it('hash-binds projectedAt and rejects projection before confirmation', () => {
-    const { bindings, preflight, confirmation } = privateCompletionChain();
+      currentBindings: bindings,
+      failedStage: 'PREFLIGHT_UNIVERSE_VALIDATED',
+      errorCode: 'PREFLIGHT_UNIVERSE_REJECTED',
+      privateEvidenceRefs: ['private:preflight:error'],
+      productionAfterStateHash: bindings.productionBeforeStateHash,
+      publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+      failedAt: '2026-07-30T06:00:30.000Z',
+    });
 
     expect(() =>
-      createStrictTestDimensionExecutionProjectionV1({
+      assertStrictTestPrivateTerminalReceiptV1(terminal, null, null, null)
+    ).not.toThrow();
+    expect(() => {
+      const { preflight, confirmation, projection } = privateCompletionChain();
+      assertStrictTestPrivateTerminalReceiptV1(
+        terminal,
         preflight,
         confirmation,
+        projection
+      );
+    }).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+
+    const report = createStrictTestAuditReportV1({
+      preflight: null,
+      confirmation: null,
+      projection: null,
+      terminal,
+      verificationCommands: ['strict-test status --run strict-test-fixture-1'],
+      privateArtifactRefs: ['private:preflight:error'],
+    });
+    expect(report.preflightHash).toBeNull();
+    expect(report.confirmationHash).toBeNull();
+    expect(report.projectionHash).toBeNull();
+    expect(report.fullUniverse).toBeNull();
+    expect(report.executedProjection).toBeNull();
+  });
+
+  it('rejects late-stage failures with missing or mismatched predecessor authority', () => {
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
+
+    expect(() =>
+      createStrictTestPrivateFailureReceiptV1({
+        preflight,
+        confirmation: null,
+        projection: null,
         currentBindings: bindings,
-        projectedAt: '2026-07-30T06:00:30.000Z',
+        failedStage: 'PRIVATE_G4_READY',
+        errorCode: 'PRIVATE_G4_REJECTED',
+        privateEvidenceRefs: ['private:g4:error'],
+        productionAfterStateHash: bindings.productionBeforeStateHash,
+        publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+        failedAt: '2026-07-30T06:20:00.000Z',
       })
-    ).toThrow('STRICT_TEST_PROJECTION_TIME_INVALID');
+    ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+
+    const terminal = createStrictTestPrivateFailureReceiptV1({
+      preflight,
+      confirmation,
+      projection,
+      currentBindings: bindings,
+      failedStage: 'PRIVATE_G4_READY',
+      errorCode: 'PRIVATE_G4_REJECTED',
+      privateEvidenceRefs: ['private:g4:error'],
+      productionAfterStateHash: bindings.productionBeforeStateHash,
+      publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+      failedAt: '2026-07-30T06:20:00.000Z',
+    });
+    const { terminalHash: _terminalHash, ...terminalSemantic } = terminal;
+    const forgedSemantic = {
+      ...terminalSemantic,
+      confirmationHash: sha('mismatched-confirmation'),
+    };
+    const forged = {
+      ...forgedSemantic,
+      terminalHash: hashCanonicalJson(forgedSemantic),
+    };
+
+    expect(() =>
+      assertStrictTestPrivateTerminalReceiptV1(
+        forged,
+        preflight,
+        confirmation,
+        projection
+      )
+    ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
+  });
+
+  it('rejects confirmation or projection authority produced after the failure time', () => {
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
+
+    expect(() =>
+      createStrictTestPrivateFailureReceiptV1({
+        preflight,
+        confirmation,
+        projection,
+        currentBindings: bindings,
+        failedStage: 'PRIVATE_G4_READY',
+        errorCode: 'PRIVATE_G4_REJECTED',
+        privateEvidenceRefs: ['private:g4:error'],
+        productionAfterStateHash: bindings.productionBeforeStateHash,
+        publicRouteAfterStateHash: bindings.publicRouteBeforeStateHash,
+        failedAt: '2026-07-30T06:00:30.000Z',
+      })
+    ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
   });
 
   it('exports the same executable contract from plans and production facades', async () => {
@@ -691,24 +541,6 @@ describe('strict-test-dimension profile foundation', () => {
     expect(production.validateStrictTestPreflightV1).toBe(plans.validateStrictTestPreflightV1);
     expect(production.createStrictTestSelectionConfirmationV1).toBeInstanceOf(Function);
     expect(production.createStrictTestDimensionExecutionProjectionV1).toBeInstanceOf(Function);
-    expect(production.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1).toBe(
-      plans.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1
-    );
-    expect(production.resolveStrictTestFailureStageAuthorityV1).toBe(
-      plans.resolveStrictTestFailureStageAuthorityV1
-    );
-    expect(plans.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1).toEqual(
-      Object.fromEntries(
-        FAILURE_STAGE_AUTHORITY_CASES.map((row) => [
-          row.failedStage,
-          {
-            preflight: row.preflight,
-            confirmation: row.confirmation,
-            projection: row.projection,
-          },
-        ])
-      )
-    );
   });
 });
 
@@ -882,47 +714,7 @@ function preflightBindings(): StrictTestPreflightBindingsV1 {
   };
 }
 
-function failureAuthorityContext(
-  chain: ReturnType<typeof privateCompletionChain>,
-  row: (typeof FAILURE_STAGE_AUTHORITY_CASES)[number]
-) {
-  return {
-    currentBindings: chain.bindings,
-    preflight: row.preflight === 'required' ? chain.preflight : null,
-    confirmation: row.confirmation === 'required' ? chain.confirmation : null,
-    projection: row.projection === 'required' ? chain.projection : null,
-  };
-}
-
-function createFailureReceipt(
-  context: ReturnType<typeof failureAuthorityContext>,
-  failedStage: (typeof FAILURE_STAGE_AUTHORITY_CASES)[number]['failedStage'],
-  failedAt = '2026-07-30T06:20:00.000Z'
-) {
-  return createStrictTestPrivateFailureReceiptV1({
-    context,
-    failedStage,
-    errorCode: `${failedStage}_REJECTED`,
-    privateEvidenceRefs: [`private:failure:${failedStage}`],
-    productionAfterStateHash:
-      context.preflight?.productionBeforeStateHash ??
-      context.currentBindings.productionBeforeStateHash,
-    publicRouteAfterStateHash:
-      context.preflight?.publicRouteBeforeStateHash ??
-      context.currentBindings.publicRouteBeforeStateHash,
-    failedAt,
-  });
-}
-
-function privateCompletionChain(
-  timestamps: {
-    readonly confirmedAt: string;
-    readonly projectedAt: string;
-  } = {
-    confirmedAt: '2026-07-30T06:01:00.000Z',
-    projectedAt: '2026-07-30T06:02:00.000Z',
-  }
-) {
+function privateCompletionChain() {
   const bindings = preflightBindings();
   const preflight = validateStrictTestPreflightV1(compiledPlan(), bindings);
   const confirmation = createStrictTestSelectionConfirmationV1({
@@ -930,13 +722,12 @@ function privateCompletionChain(
     currentBindings: bindings,
     selectedDimensionIds: ['architecture'],
     confirmedBy: 'user:fixture',
-    confirmedAt: timestamps.confirmedAt,
+    confirmedAt: '2026-07-30T06:01:00.000Z',
   });
   const projection = createStrictTestDimensionExecutionProjectionV1({
     preflight,
     confirmation,
     currentBindings: bindings,
-    projectedAt: timestamps.projectedAt,
   });
   const privateG4ReceiptHash = sha('private-g4');
   const candidateDataManifestHash = sha('candidate-data-manifest');
