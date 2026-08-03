@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  assertStrictTestAutomaticSelectionReceiptV1,
   assertStrictTestDimensionExecutionProjectionV1,
   assertStrictTestPrivateTerminalReceiptV1,
+  assertStrictTestSelectionConfirmationV1,
   buildAnatomyLensCatalogSnapshot,
   buildDimensionCatalogSnapshot,
   buildFactQueryCatalogSnapshot,
   buildRequiredFactApplicabilityUniverseV1,
   type CompiledColdStartPlanV2,
   createStrictTestAuditReportV1,
-  createStrictTestAutomaticSelectionReceiptV1,
   createStrictTestDimensionExecutionProjectionV1,
   createStrictTestPreflightPreviewV1,
   createStrictTestPrivateCompletionReceiptV1,
   createStrictTestPrivateFailureReceiptV1,
+  createStrictTestSelectionConfirmationV1,
   type DimensionCatalogSnapshotV1,
   type FactQueryCatalogSnapshotV1,
   type FactQueryFamilyV1,
@@ -46,31 +46,31 @@ const FAILURE_STAGE_AUTHORITY_CASES = [
   {
     failedStage: 'PREFLIGHT_REQUESTED',
     preflight: 'forbidden',
-    automaticSelection: 'forbidden',
+    confirmation: 'forbidden',
     projection: 'forbidden',
   },
   {
     failedStage: 'PREFLIGHT_FACTS_FROZEN',
     preflight: 'forbidden',
-    automaticSelection: 'forbidden',
+    confirmation: 'forbidden',
     projection: 'forbidden',
   },
   {
     failedStage: 'PREFLIGHT_UNIVERSE_VALIDATED',
     preflight: 'forbidden',
-    automaticSelection: 'forbidden',
+    confirmation: 'forbidden',
     projection: 'forbidden',
   },
   {
-    failedStage: 'AUTOMATIC_SELECTION_READY',
+    failedStage: 'AWAITING_CONFIRMATION',
     preflight: 'required',
-    automaticSelection: 'forbidden',
+    confirmation: 'forbidden',
     projection: 'forbidden',
   },
   {
-    failedStage: 'SELECTION_AUTO_SELECTED',
+    failedStage: 'SELECTION_CONFIRMED',
     preflight: 'required',
-    automaticSelection: 'required',
+    confirmation: 'required',
     projection: 'forbidden',
   },
   ...[
@@ -86,7 +86,7 @@ const FAILURE_STAGE_AUTHORITY_CASES = [
   ].map((failedStage) => ({
     failedStage,
     preflight: 'required',
-    automaticSelection: 'required',
+    confirmation: 'required',
     projection: 'required',
   })),
 ] as const;
@@ -121,50 +121,38 @@ describe('strict-test-dimension profile foundation', () => {
     expect(preflight.unknownDimensionCount).toBe(0);
     expect(preflight.unknownApplicabilityCount).toBe(0);
     expect(preflight.recommendation.dimensionId).toBe('architecture');
-    expect(preview.canAutoSelect).toBe(true);
+    expect(preview.canConfirm).toBe(true);
     expect(preview.blockers).toEqual([]);
     expect(preflight.bindingHash).toBe(hashStrictTestPreflightBindingsV1(bindings));
   });
 
-  it('automatically selects the recommendation and projects its complete eligible-cell set', () => {
+  it('confirms exactly one dimension and projects every eligible cell without mutating the full universe', () => {
     const plan = compiledPlan();
     const bindings = preflightBindings();
     const preflight = validateStrictTestPreflightV1(plan, bindings);
-    const automaticSelection = createStrictTestAutomaticSelectionReceiptV1({
+    const confirmation = createStrictTestSelectionConfirmationV1({
       preflight,
       currentBindings: bindings,
-      selectedAt: '2026-07-30T06:01:00.000Z',
+      selectedDimensionIds: ['architecture'],
+      confirmedBy: 'user:fixture',
+      confirmedAt: '2026-07-30T06:01:00.000Z',
     });
     const projection = createStrictTestDimensionExecutionProjectionV1({
       preflight,
-      automaticSelection,
+      confirmation,
       currentBindings: bindings,
       projectedAt: '2026-07-30T06:02:00.000Z',
     });
 
-    expect(automaticSelection.selectedDimensionId).toBe('architecture');
-    expect(automaticSelection.selectedEligibleCellIds).toEqual(['core::architecture']);
-    expect(automaticSelection.algorithmVersion).toBe('strict-test-preflight-recommendation-v1');
-    expect(automaticSelection.recommendationReasonCode).toBe(preflight.recommendation.reasonCode);
-    expect(automaticSelection.recommendationEvidenceRefs).toEqual(
-      preflight.recommendation.evidenceRefs
-    );
-    expect(projection.executionCellIds).toEqual(automaticSelection.selectedEligibleCellIds);
+    expect(confirmation.selectedDimensionId).toBe('architecture');
+    expect(confirmation.selectedEligibleCellIds).toEqual(['core::architecture']);
+    expect(projection.executionCellIds).toEqual(confirmation.selectedEligibleCellIds);
     expect(projection.fullCellUniverseHash).toBe(preflight.fullCellUniverseHash);
     expect(projection.fullCatalogHash).toBe(preflight.catalog.catalogHash);
-    expect(projection.fullCatalogSourceArtifactHash).toBe(preflight.catalog.sourceArtifactHash);
-    expect(projection.fullEligibleCellsHash).toBe(preflight.cellUniverse.eligibleCellsHash);
-    expect(projection.fullExcludedCellsHash).toBe(preflight.cellUniverse.excludedCellsHash);
     expect(projection.fullApplicabilityUniverseHash).toBe(
       preflight.requiredFactApplicabilityUniverseHash
     );
-    expect(projection.fullFactQueryCatalogHash).toBe(preflight.factQueryCatalogHash);
-    expect(projection.fullBaselineScheduleHash).toBe(preflight.baselineScheduleHash);
-    expect(projection.automaticSelectionHash).toBe(automaticSelection.automaticSelectionHash);
     expect(projection.dimensionStates).toHaveLength(26);
-    expect(
-      projection.dimensionStates.filter((state) => state.disposition === 'selected-for-execution')
-    ).toHaveLength(1);
     expect(
       projection.dimensionStates.find((state) => state.dimensionId === 'coding-standards')
         ?.disposition
@@ -174,59 +162,54 @@ describe('strict-test-dimension profile foundation', () => {
     expect(plan.selection.deferredCells).toEqual([]);
   });
 
-  it('rejects caller selection/manual hints and fails closed for binding drift', () => {
+  it('fails closed for zero/multiple dimensions, excluded dimensions, and binding drift', () => {
     const bindings = preflightBindings();
     const preflight = validateStrictTestPreflightV1(
       compiledPlan(new Set(['architecture'])),
       bindings
     );
 
-    for (const forbiddenField of [
-      ['selectedDimensionId', 'architecture'],
-      ['selectedDimensionIds', ['architecture']],
-      ['confirmedBy', 'user:fixture'],
-      ['dimensions', ['architecture']],
-      ['testMode', true],
-      ['pluginHint', 'architecture'],
-      ['dashboardHint', 'architecture'],
-    ] as const) {
-      expect(() =>
-        createStrictTestAutomaticSelectionReceiptV1({
-          preflight,
-          currentBindings: bindings,
-          selectedAt: '2026-07-30T06:01:00.000Z',
-          [forbiddenField[0]]: forbiddenField[1],
-        } as never)
-      ).toThrow('STRICT_TEST_AUTOMATIC_SELECTION_FIELDS_INVALID');
-    }
-
-    const automaticSelection = createStrictTestAutomaticSelectionReceiptV1({
-      preflight,
-      currentBindings: bindings,
-      selectedAt: '2026-07-30T06:01:00.000Z',
-    });
-    expect(automaticSelection.selectedDimensionId).toBe(preflight.recommendation.dimensionId);
-    expect(automaticSelection.selectedDimensionId).not.toBe('architecture');
+    expect(() =>
+      createStrictTestSelectionConfirmationV1({
+        preflight,
+        currentBindings: bindings,
+        selectedDimensionIds: [],
+        confirmedBy: 'user:fixture',
+        confirmedAt: '2026-07-30T06:01:00.000Z',
+      })
+    ).toThrow('STRICT_TEST_SELECTION_EXACTLY_ONE_REQUIRED');
+    expect(() =>
+      createStrictTestSelectionConfirmationV1({
+        preflight,
+        currentBindings: bindings,
+        selectedDimensionIds: ['architecture', 'coding-standards'],
+        confirmedBy: 'user:fixture',
+        confirmedAt: '2026-07-30T06:01:00.000Z',
+      })
+    ).toThrow('STRICT_TEST_SELECTION_EXACTLY_ONE_REQUIRED');
+    expect(() =>
+      createStrictTestSelectionConfirmationV1({
+        preflight,
+        currentBindings: bindings,
+        selectedDimensionIds: ['architecture'],
+        confirmedBy: 'user:fixture',
+        confirmedAt: '2026-07-30T06:01:00.000Z',
+      })
+    ).toThrow('STRICT_TEST_SELECTION_DIMENSION_NOT_APPLICABLE');
 
     const drifted = {
       ...bindings,
       strictConfigReceiptHash: sha('different-config'),
     };
     expect(() =>
-      createStrictTestAutomaticSelectionReceiptV1({
+      createStrictTestSelectionConfirmationV1({
         preflight,
         currentBindings: drifted,
-        selectedAt: '2026-07-30T06:01:00.000Z',
+        selectedDimensionIds: ['coding-standards'],
+        confirmedBy: 'user:fixture',
+        confirmedAt: '2026-07-30T06:01:00.000Z',
       })
     ).toThrow('STRICT_TEST_PREFLIGHT_DRIFT');
-
-    expect(() =>
-      createStrictTestAutomaticSelectionReceiptV1({
-        preflight,
-        currentBindings: bindings,
-        selectedAt: '2026-07-30T05:59:59.000Z',
-      })
-    ).toThrow('STRICT_TEST_PREFLIGHT_TIME_INVALID');
   });
 
   it('rejects missing catalog rows, duplicate cells, unsupported backends, and facts lineage drift', () => {
@@ -297,11 +280,6 @@ describe('strict-test-dimension profile foundation', () => {
       compiledPlan(new Set(['architecture'])),
       preflightBindings()
     );
-    const automaticSelection = createStrictTestAutomaticSelectionReceiptV1({
-      preflight,
-      currentBindings: preflightBindings(),
-      selectedAt: '2026-07-30T06:01:00.000Z',
-    });
 
     expect(
       preflight.dimensionResults.find((row) => row.dimensionId === 'architecture')
@@ -312,90 +290,21 @@ describe('strict-test-dimension profile foundation', () => {
     });
     expect(preflight.recommendation.dimensionId).not.toBe('architecture');
     expect(preflight.recommendation.alternativeDimensionIds).not.toContain('architecture');
-    expect(automaticSelection.selectedDimensionId).toBe(preflight.recommendation.dimensionId);
-    expect(automaticSelection.recommendationReasonCode).toBe(
-      'FIRST_EVIDENCE_SUPPORTED_APPLICABLE_DIMENSION'
-    );
-  });
-
-  it('fails before selection for zero, unknown, unsupported, empty, or forged recommendations', () => {
-    const allDimensions = buildDimensionCatalogSnapshot().dimensions.map(
-      (dimension) => dimension.id
-    );
-    expect(() =>
-      validateStrictTestPreflightV1(compiledPlan(new Set(allDimensions)), preflightBindings())
-    ).toThrow('STRICT_TEST_PREFLIGHT_EMPTY_APPLICABLE_UNIVERSE');
-
-    const preflight = validateStrictTestPreflightV1(compiledPlan(), preflightBindings());
-    const recommendationSemantic = {
-      ...preflight.recommendation,
-      dimensionId: 'unknown-dimension',
-      recommendationHash: undefined,
-    };
-    const { recommendationHash: _recommendationHash, ...recommendationWithoutHash } =
-      recommendationSemantic;
-    const forgedRecommendation = {
-      ...recommendationWithoutHash,
-      recommendationHash: hashCanonicalJson(recommendationWithoutHash),
-    };
-    const { preflightHash: _preflightHash, ...preflightSemantic } = preflight;
-    const forgedPreflightSemantic = {
-      ...preflightSemantic,
-      recommendation: forgedRecommendation,
-    };
-    const forgedPreflight = {
-      ...forgedPreflightSemantic,
-      preflightHash: hashCanonicalJson(forgedPreflightSemantic),
-    };
-
-    expect(() =>
-      createStrictTestAutomaticSelectionReceiptV1({
-        preflight: forgedPreflight,
-        currentBindings: preflightBindings(),
-        selectedAt: '2026-07-30T06:01:00.000Z',
-      })
-    ).toThrow('STRICT_TEST_PREFLIGHT_RECOMMENDATION_INVALID');
-
-    const selectedIndex = preflight.dimensionResults.findIndex(
-      (row) => row.dimensionId === preflight.recommendation.dimensionId
-    );
-    for (const selectedPatch of [
-      { status: 'unknown' as const },
-      { requiredFactsSupported: false },
-      { eligibleCellIds: [] as readonly string[], eligibleCellCount: 0 },
-    ]) {
-      const dimensionResults = preflight.dimensionResults.map((row, index) =>
-        index === selectedIndex ? { ...row, ...selectedPatch } : row
-      );
-      const forgedSemantic = {
-        ...preflightSemantic,
-        dimensionResults,
-      };
-      const forged = {
-        ...forgedSemantic,
-        preflightHash: hashCanonicalJson(forgedSemantic),
-      };
-      expect(() =>
-        createStrictTestAutomaticSelectionReceiptV1({
-          preflight: forged,
-          currentBindings: preflightBindings(),
-          selectedAt: '2026-07-30T06:01:00.000Z',
-        })
-      ).toThrow('STRICT_TEST_PREFLIGHT_RECEIPT_INVALID');
-    }
   });
 
   it('binds private final coverage, G4, serving validation, non-mutation, and audit terminal', () => {
     const bindings = preflightBindings();
     const preflight = validateStrictTestPreflightV1(compiledPlan(), bindings);
-    const automaticSelection = createStrictTestAutomaticSelectionReceiptV1({
+    const confirmation = createStrictTestSelectionConfirmationV1({
       preflight,
       currentBindings: bindings,
-      selectedAt: '2026-07-30T06:01:00.000Z',
+      selectedDimensionIds: ['architecture'],
+      confirmedBy: 'user:fixture',
+      confirmedAt: '2026-07-30T06:01:00.000Z',
     });
     const projection = createStrictTestDimensionExecutionProjectionV1({
       preflight,
-      automaticSelection,
+      confirmation,
       currentBindings: bindings,
       projectedAt: '2026-07-30T06:02:00.000Z',
     });
@@ -438,7 +347,7 @@ describe('strict-test-dimension profile foundation', () => {
     };
     const terminal = createStrictTestPrivateCompletionReceiptV1({
       preflight,
-      automaticSelection,
+      confirmation,
       projection,
       currentBindings: bindings,
       finalCoverageBinding,
@@ -451,7 +360,7 @@ describe('strict-test-dimension profile foundation', () => {
       completedAt: '2026-07-30T06:30:00.000Z',
     });
     const report = createStrictTestAuditReportV1({
-      context: { currentBindings: bindings, preflight, automaticSelection, projection },
+      context: { currentBindings: bindings, preflight, confirmation, projection },
       terminal,
       verificationCommands: ['strict-test status --run strict-test-fixture-1'],
       privateArtifactRefs: ['private:report'],
@@ -468,7 +377,7 @@ describe('strict-test-dimension profile foundation', () => {
 
     expect(() =>
       createStrictTestPrivateFailureReceiptV1({
-        context: { currentBindings: bindings, preflight, automaticSelection, projection },
+        context: { currentBindings: bindings, preflight, confirmation, projection },
         failedStage: 'PRIVATE_G4_READY',
         errorCode: 'PRIVATE_G4_REJECTED',
         privateEvidenceRefs: ['private:g4:error'],
@@ -480,7 +389,7 @@ describe('strict-test-dimension profile foundation', () => {
   });
 
   it('rejects a rehashed projection that omits 25 dimension states', () => {
-    const { preflight, automaticSelection, projection } = privateCompletionChain();
+    const { preflight, confirmation, projection } = privateCompletionChain();
     const selectedState = projection.dimensionStates.find(
       (state) => state.dimensionId === projection.selectedDimensionId
     );
@@ -492,90 +401,41 @@ describe('strict-test-dimension profile foundation', () => {
     });
 
     expect(() =>
-      assertStrictTestDimensionExecutionProjectionV1(forged, preflight, automaticSelection)
+      assertStrictTestDimensionExecutionProjectionV1(forged, preflight, confirmation)
     ).toThrow('STRICT_TEST_PROJECTION_INVALID');
   });
 
   it('rejects a rehashed projection with forged full-universe lineage', () => {
-    const { preflight, automaticSelection, projection } = privateCompletionChain();
+    const { preflight, confirmation, projection } = privateCompletionChain();
     const forged = rehashProjection(projection, {
       fullEligibleCellsHash: sha('forged-full-eligible-cells'),
     });
 
     expect(() =>
-      assertStrictTestDimensionExecutionProjectionV1(forged, preflight, automaticSelection)
+      assertStrictTestDimensionExecutionProjectionV1(forged, preflight, confirmation)
     ).toThrow('STRICT_TEST_PROJECTION_LINEAGE_MISMATCH');
   });
 
-  it('rejects stale, rehashed, cross-run, cross-demand, or tampered automatic selection', () => {
-    const { preflight, automaticSelection } = privateCompletionChain();
-    const { automaticSelectionHash: _automaticSelectionHash, ...automaticSelectionSemantic } =
-      automaticSelection;
+  it('rejects a rehashed confirmation moved to another demand and run', () => {
+    const { preflight, confirmation } = privateCompletionChain();
+    const { confirmationHash: _confirmationHash, ...confirmationSemantic } = confirmation;
     const forgedSemantic = {
-      ...automaticSelectionSemantic,
+      ...confirmationSemantic,
       demandKey: 'forged-demand',
       runId: 'forged-run',
     };
     const forged = {
       ...forgedSemantic,
-      automaticSelectionHash: hashCanonicalJson(forgedSemantic),
+      confirmationHash: hashCanonicalJson(forgedSemantic),
     };
 
-    expect(() => assertStrictTestAutomaticSelectionReceiptV1(forged, preflight)).toThrow(
-      'STRICT_TEST_AUTOMATIC_SELECTION_PREFLIGHT_MISMATCH'
+    expect(() => assertStrictTestSelectionConfirmationV1(forged, preflight)).toThrow(
+      'STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH'
     );
-
-    expect(() =>
-      assertStrictTestAutomaticSelectionReceiptV1(
-        {
-          ...automaticSelection,
-          selectedDimensionId: 'coding-standards',
-        },
-        preflight
-      )
-    ).toThrow('STRICT_TEST_AUTOMATIC_SELECTION_HASH_MISMATCH');
-
-    const invalidTimeSemantic = {
-      ...automaticSelectionSemantic,
-      selectedAt: 'not-a-timestamp',
-    };
-    const invalidTime = {
-      ...invalidTimeSemantic,
-      automaticSelectionHash: hashCanonicalJson(invalidTimeSemantic),
-    };
-    expect(() => assertStrictTestAutomaticSelectionReceiptV1(invalidTime, preflight)).toThrow(
-      'STRICT_TEST_AUTOMATIC_SELECTION_TIME_INVALID'
-    );
-
-    const replacedCellsSemantic = {
-      ...automaticSelectionSemantic,
-      selectedEligibleCellIds: ['forged::cell'],
-      selectedEligibleCellsHash: hashCanonicalJson(['forged::cell']),
-    };
-    const replacedCells = {
-      ...replacedCellsSemantic,
-      automaticSelectionHash: hashCanonicalJson(replacedCellsSemantic),
-    };
-    expect(() => assertStrictTestAutomaticSelectionReceiptV1(replacedCells, preflight)).toThrow(
-      'STRICT_TEST_AUTOMATIC_SELECTION_PREFLIGHT_MISMATCH'
-    );
-
-    const expiredBindings = {
-      ...preflightBindings(),
-      validUntil: '2026-07-30T06:00:30.000Z',
-    };
-    const expiredPreflight = validateStrictTestPreflightV1(compiledPlan(), expiredBindings);
-    expect(() =>
-      createStrictTestAutomaticSelectionReceiptV1({
-        preflight: expiredPreflight,
-        currentBindings: expiredBindings,
-        selectedAt: '2026-07-30T06:01:00.000Z',
-      })
-    ).toThrow('STRICT_TEST_PREFLIGHT_EXPIRED');
   });
 
   it('rejects a rehashed terminal with forged serving facts, source, and snapshot identity', () => {
-    const { preflight, automaticSelection, projection, terminal } = privateCompletionChain();
+    const { preflight, confirmation, projection, terminal } = privateCompletionChain();
     const forged = forgePrivateCompletionTerminal(terminal);
     const forgedLineageOnly = forgePrivateCompletionTerminal(terminal, false);
 
@@ -583,7 +443,7 @@ describe('strict-test-dimension profile foundation', () => {
       assertStrictTestPrivateTerminalReceiptV1(forged, {
         currentBindings: preflightBindings(),
         preflight,
-        automaticSelection,
+        confirmation,
         projection,
       })
     ).toThrow('SERVING_SNAPSHOT_FIELDS_INVALID');
@@ -591,14 +451,14 @@ describe('strict-test-dimension profile foundation', () => {
       assertStrictTestPrivateTerminalReceiptV1(forgedLineageOnly, {
         currentBindings: preflightBindings(),
         preflight,
-        automaticSelection,
+        confirmation,
         projection,
       })
     ).toThrow('STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID');
   });
 
   it('refuses to mint an audit report from a rehashed forged terminal', () => {
-    const { preflight, automaticSelection, projection, terminal } = privateCompletionChain();
+    const { preflight, confirmation, projection, terminal } = privateCompletionChain();
     const forged = forgePrivateCompletionTerminal(terminal);
 
     expect(() =>
@@ -606,7 +466,7 @@ describe('strict-test-dimension profile foundation', () => {
         context: {
           currentBindings: preflightBindings(),
           preflight,
-          automaticSelection,
+          confirmation,
           projection,
         },
         terminal: forged,
@@ -628,9 +488,7 @@ describe('strict-test-dimension profile foundation', () => {
         hashStrictTestPreflightBindingsV1(context.currentBindings)
       );
       expect(terminal.preflightHash).toBe(context.preflight?.preflightHash ?? null);
-      expect(terminal.automaticSelectionHash).toBe(
-        context.automaticSelection?.automaticSelectionHash ?? null
-      );
+      expect(terminal.confirmationHash).toBe(context.confirmation?.confirmationHash ?? null);
       expect(terminal.projectionHash).toBe(context.projection?.projectionHash ?? null);
 
       const report = createStrictTestAuditReportV1({
@@ -640,7 +498,7 @@ describe('strict-test-dimension profile foundation', () => {
         privateArtifactRefs: ['private:report'],
       });
       expect(report.preflightHash).toBe(terminal.preflightHash);
-      expect(report.automaticSelectionHash).toBe(terminal.automaticSelectionHash);
+      expect(report.confirmationHash).toBe(terminal.confirmationHash);
       expect(report.projectionHash).toBe(terminal.projectionHash);
       expect(report.fullUniverse === null).toBe(context.preflight === null);
       expect(report.executedProjection === null).toBe(context.projection === null);
@@ -661,7 +519,7 @@ describe('strict-test-dimension profile foundation', () => {
 
     for (const row of FAILURE_STAGE_AUTHORITY_CASES) {
       const exact = failureAuthorityContext(chain, row);
-      const missingKey = (['projection', 'automaticSelection', 'preflight'] as const).find(
+      const missingKey = (['projection', 'confirmation', 'preflight'] as const).find(
         (key) => row[key] === 'required'
       );
       if (missingKey) {
@@ -670,7 +528,7 @@ describe('strict-test-dimension profile foundation', () => {
         ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
       }
 
-      const extraKey = (['preflight', 'automaticSelection', 'projection'] as const).find(
+      const extraKey = (['preflight', 'confirmation', 'projection'] as const).find(
         (key) => row[key] === 'forbidden'
       );
       if (extraKey) {
@@ -682,13 +540,10 @@ describe('strict-test-dimension profile foundation', () => {
 
     const awaiting = failureAuthorityContext(
       chain,
-      FAILURE_STAGE_AUTHORITY_CASES.find((row) => row.failedStage === 'AUTOMATIC_SELECTION_READY')!
+      FAILURE_STAGE_AUTHORITY_CASES.find((row) => row.failedStage === 'AWAITING_CONFIRMATION')!
     );
     expect(() =>
-      createFailureReceipt(
-        { ...awaiting, preflight: undefined } as never,
-        'AUTOMATIC_SELECTION_READY'
-      )
+      createFailureReceipt({ ...awaiting, preflight: undefined } as never, 'AWAITING_CONFIRMATION')
     ).toThrow('STRICT_TEST_FAILURE_AUTHORITY_MISMATCH');
     expect(() => resolveStrictTestFailureStageAuthorityV1('STRICT_TEST_COMPLETED_PRIVATE')).toThrow(
       'STRICT_TEST_FAILURE_FIELDS_INVALID'
@@ -706,7 +561,7 @@ describe('strict-test-dimension profile foundation', () => {
     for (const field of [
       'observedBindingsHash',
       'preflightHash',
-      'automaticSelectionHash',
+      'confirmationHash',
       'projectionHash',
     ] as const) {
       const { terminalHash: _terminalHash, ...semantic } = terminal;
@@ -720,27 +575,23 @@ describe('strict-test-dimension profile foundation', () => {
       );
     }
 
-    const { automaticSelectionHash: _automaticSelectionHash, ...automaticSelectionSemantic } =
-      chain.automaticSelection;
-    const forgedAutomaticSelectionSemantic = {
-      ...automaticSelectionSemantic,
-      preflightHash: sha('mismatched-automaticSelection-preflight'),
+    const { confirmationHash: _confirmationHash, ...confirmationSemantic } = chain.confirmation;
+    const forgedConfirmationSemantic = {
+      ...confirmationSemantic,
+      preflightHash: sha('mismatched-confirmation-preflight'),
     };
-    const forgedAutomaticSelection = {
-      ...forgedAutomaticSelectionSemantic,
-      automaticSelectionHash: hashCanonicalJson(forgedAutomaticSelectionSemantic),
+    const forgedConfirmation = {
+      ...forgedConfirmationSemantic,
+      confirmationHash: hashCanonicalJson(forgedConfirmationSemantic),
     };
     expect(() =>
-      createFailureReceipt(
-        { ...context, automaticSelection: forgedAutomaticSelection },
-        'PRIVATE_G4_READY'
-      )
-    ).toThrow('STRICT_TEST_AUTOMATIC_SELECTION_PREFLIGHT_MISMATCH');
+      createFailureReceipt({ ...context, confirmation: forgedConfirmation }, 'PRIVATE_G4_READY')
+    ).toThrow('STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH');
 
     const { projectionHash: _projectionHash, ...projectionSemantic } = chain.projection;
     const forgedProjectionSemantic = {
       ...projectionSemantic,
-      automaticSelectionHash: sha('mismatched-projection-automaticSelection'),
+      confirmationHash: sha('mismatched-projection-confirmation'),
     };
     const forgedProjection = {
       ...forgedProjectionSemantic,
@@ -762,7 +613,7 @@ describe('strict-test-dimension profile foundation', () => {
         {
           currentBindings: currentBindingsAfterFailure,
           preflight: null,
-          automaticSelection: null,
+          confirmation: null,
           projection: null,
         },
         'PREFLIGHT_REQUESTED',
@@ -781,33 +632,33 @@ describe('strict-test-dimension profile foundation', () => {
         {
           currentBindings: futurePreflightBindings,
           preflight: futurePreflight,
-          automaticSelection: null,
+          confirmation: null,
           projection: null,
         },
-        'AUTOMATIC_SELECTION_READY',
+        'AWAITING_CONFIRMATION',
         '2026-07-30T06:05:00.000Z'
       )
     ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
 
-    const automaticSelectionAfterFailure = privateCompletionChain({
-      selectedAt: '2026-07-30T06:10:00.000Z',
+    const confirmationAfterFailure = privateCompletionChain({
+      confirmedAt: '2026-07-30T06:10:00.000Z',
       projectedAt: '2026-07-30T06:11:00.000Z',
     });
     expect(() =>
       createFailureReceipt(
         {
-          currentBindings: automaticSelectionAfterFailure.bindings,
-          preflight: automaticSelectionAfterFailure.preflight,
-          automaticSelection: automaticSelectionAfterFailure.automaticSelection,
+          currentBindings: confirmationAfterFailure.bindings,
+          preflight: confirmationAfterFailure.preflight,
+          confirmation: confirmationAfterFailure.confirmation,
           projection: null,
         },
-        'SELECTION_AUTO_SELECTED',
+        'SELECTION_CONFIRMED',
         '2026-07-30T06:05:00.000Z'
       )
     ).toThrow('STRICT_TEST_FAILURE_CONTEXT_AFTER_FAILURE');
 
     const projectionAfterFailure = privateCompletionChain({
-      selectedAt: '2026-07-30T06:01:00.000Z',
+      confirmedAt: '2026-07-30T06:01:00.000Z',
       projectedAt: '2026-07-30T06:10:00.000Z',
     });
     expect(() =>
@@ -815,7 +666,7 @@ describe('strict-test-dimension profile foundation', () => {
         {
           currentBindings: projectionAfterFailure.bindings,
           preflight: projectionAfterFailure.preflight,
-          automaticSelection: projectionAfterFailure.automaticSelection,
+          confirmation: projectionAfterFailure.confirmation,
           projection: projectionAfterFailure.projection,
         },
         'PRIVATE_WORKSPACE_READY',
@@ -833,12 +684,12 @@ describe('strict-test-dimension profile foundation', () => {
     const expiredContext = {
       currentBindings: expiredBindings,
       preflight: expiredPreflight,
-      automaticSelection: null,
+      confirmation: null,
       projection: null,
     };
     const expiredTerminal = createFailureReceipt(
       expiredContext,
-      'AUTOMATIC_SELECTION_READY',
+      'AWAITING_CONFIRMATION',
       '2026-07-30T06:20:00.000Z'
     );
     expect(() =>
@@ -855,13 +706,13 @@ describe('strict-test-dimension profile foundation', () => {
     const context = {
       currentBindings: observedBindings,
       preflight: chain.preflight,
-      automaticSelection: null,
+      confirmation: null,
       projection: null,
     };
 
     const terminal = createFailureReceipt(
       context,
-      'AUTOMATIC_SELECTION_READY',
+      'AWAITING_CONFIRMATION',
       '2026-07-30T06:20:00.000Z'
     );
     expect(terminal.observedBindingsHash).toBe(hashStrictTestPreflightBindingsV1(observedBindings));
@@ -869,11 +720,11 @@ describe('strict-test-dimension profile foundation', () => {
   });
 
   it('rejects the retired raw-hash failure input instead of providing an overload or fallback', () => {
-    const { bindings, preflight, automaticSelection, projection } = privateCompletionChain();
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
     const legacyInput = {
       preflight,
       currentBindings: bindings,
-      automaticSelectionHash: automaticSelection.automaticSelectionHash,
+      confirmationHash: confirmation.confirmationHash,
       projectionHash: projection.projectionHash,
       failedStage: 'PRIVATE_G4_READY',
       errorCode: 'PRIVATE_G4_REJECTED',
@@ -888,8 +739,8 @@ describe('strict-test-dimension profile foundation', () => {
     );
   });
 
-  it('hash-binds projectedAt and rejects projection before automaticSelection', () => {
-    const { bindings, preflight, automaticSelection, projection } = privateCompletionChain();
+  it('hash-binds projectedAt and rejects projection before confirmation', () => {
+    const { bindings, preflight, confirmation, projection } = privateCompletionChain();
 
     expect(() =>
       assertStrictTestDimensionExecutionProjectionV1(
@@ -898,75 +749,18 @@ describe('strict-test-dimension profile foundation', () => {
           projectedAt: '2026-07-30T06:03:00.000Z',
         },
         preflight,
-        automaticSelection
+        confirmation
       )
     ).toThrow('STRICT_TEST_PROJECTION_HASH_MISMATCH');
 
     expect(() =>
       createStrictTestDimensionExecutionProjectionV1({
         preflight,
-        automaticSelection,
+        confirmation,
         currentBindings: bindings,
         projectedAt: '2026-07-30T06:00:30.000Z',
       })
     ).toThrow('STRICT_TEST_PROJECTION_TIME_INVALID');
-  });
-
-  it('emits deterministic automatic-selection runtime lineage JSON on demand', () => {
-    const chain = privateCompletionChain();
-    const automaticReadyRow = FAILURE_STAGE_AUTHORITY_CASES.find(
-      (row) => row.failedStage === 'AUTOMATIC_SELECTION_READY'
-    );
-    if (!automaticReadyRow) {
-      throw new Error('automatic-selection-ready authority fixture missing');
-    }
-    const failure = createFailureReceipt(
-      failureAuthorityContext(chain, automaticReadyRow),
-      'AUTOMATIC_SELECTION_READY'
-    );
-    const runtimeProbe = {
-      recommendation: chain.preflight.recommendation.dimensionId,
-      selectedDimension: chain.automaticSelection.selectedDimensionId,
-      selectedCells: chain.automaticSelection.selectedEligibleCellIds,
-      automaticSelectionHash: chain.automaticSelection.automaticSelectionHash,
-      projectionHash: chain.projection.projectionHash,
-      fullUniverseHashes: {
-        catalog: chain.automaticSelection.fullCatalogHash,
-        catalogSourceArtifact: chain.automaticSelection.fullCatalogSourceArtifactHash,
-        cellUniverse: chain.automaticSelection.fullCellUniverseHash,
-        eligibleCells: chain.automaticSelection.fullEligibleCellsHash,
-        excludedCells: chain.automaticSelection.fullExcludedCellsHash,
-        applicability: chain.automaticSelection.fullApplicabilityUniverseHash,
-        factQueryCatalog: chain.automaticSelection.fullFactQueryCatalogHash,
-        baselineSchedule: chain.automaticSelection.fullBaselineScheduleHash,
-      },
-      completion: {
-        terminalState: chain.terminal.terminalState,
-        automaticSelectionHash: chain.terminal.automaticSelectionHash,
-        projectionHash: chain.terminal.projectionHash,
-      },
-      failure: {
-        failedStage: failure.failedStage,
-        preflightHash: failure.preflightHash,
-        automaticSelectionHash: failure.automaticSelectionHash,
-        projectionHash: failure.projectionHash,
-        observedBindingsHash: failure.observedBindingsHash,
-      },
-    };
-
-    expect(runtimeProbe.recommendation).toBe(runtimeProbe.selectedDimension);
-    expect(runtimeProbe.selectedCells).toEqual(['core::architecture']);
-    expect(runtimeProbe.completion.automaticSelectionHash).toBe(
-      runtimeProbe.automaticSelectionHash
-    );
-    expect(runtimeProbe.failure).toMatchObject({
-      failedStage: 'AUTOMATIC_SELECTION_READY',
-      automaticSelectionHash: null,
-      projectionHash: null,
-    });
-    if (process.env.STRICT_TEST_RUNTIME_PROBE === '1') {
-      process.stdout.write(`${JSON.stringify(runtimeProbe)}\n`);
-    }
   });
 
   it('exports the same executable contract from plans and production facades', async () => {
@@ -975,12 +769,7 @@ describe('strict-test-dimension profile foundation', () => {
 
     expect(plans.validateStrictTestPreflightV1).toBeInstanceOf(Function);
     expect(production.validateStrictTestPreflightV1).toBe(plans.validateStrictTestPreflightV1);
-    expect(production.createStrictTestAutomaticSelectionReceiptV1).toBeInstanceOf(Function);
-    expect(production.assertStrictTestAutomaticSelectionReceiptV1).toBeInstanceOf(Function);
-    expect(Object.hasOwn(plans, 'createStrictTestSelectionConfirmationV1')).toBe(false);
-    expect(Object.hasOwn(plans, 'assertStrictTestSelectionConfirmationV1')).toBe(false);
-    expect(Object.hasOwn(production, 'createStrictTestSelectionConfirmationV1')).toBe(false);
-    expect(Object.hasOwn(production, 'assertStrictTestSelectionConfirmationV1')).toBe(false);
+    expect(production.createStrictTestSelectionConfirmationV1).toBeInstanceOf(Function);
     expect(production.createStrictTestDimensionExecutionProjectionV1).toBeInstanceOf(Function);
     expect(production.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1).toBe(
       plans.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1
@@ -994,7 +783,7 @@ describe('strict-test-dimension profile foundation', () => {
           row.failedStage,
           {
             preflight: row.preflight,
-            automaticSelection: row.automaticSelection,
+            confirmation: row.confirmation,
             projection: row.projection,
           },
         ])
@@ -1004,7 +793,7 @@ describe('strict-test-dimension profile foundation', () => {
     for (const row of FAILURE_STAGE_AUTHORITY_CASES) {
       expect(plans.resolveStrictTestFailureStageAuthorityV1(row.failedStage)).toEqual({
         preflight: row.preflight,
-        automaticSelection: row.automaticSelection,
+        confirmation: row.confirmation,
         projection: row.projection,
       });
       expect(Object.isFrozen(plans.STRICT_TEST_FAILURE_STAGE_AUTHORITY_V1[row.failedStage])).toBe(
@@ -1191,7 +980,7 @@ function failureAuthorityContext(
   return {
     currentBindings: chain.bindings,
     preflight: row.preflight === 'required' ? chain.preflight : null,
-    automaticSelection: row.automaticSelection === 'required' ? chain.automaticSelection : null,
+    confirmation: row.confirmation === 'required' ? chain.confirmation : null,
     projection: row.projection === 'required' ? chain.projection : null,
   };
 }
@@ -1217,21 +1006,23 @@ function createFailureReceipt(
 }
 
 function privateCompletionChain(
-  timestamps: { readonly selectedAt: string; readonly projectedAt: string } = {
-    selectedAt: '2026-07-30T06:01:00.000Z',
+  timestamps: { readonly confirmedAt: string; readonly projectedAt: string } = {
+    confirmedAt: '2026-07-30T06:01:00.000Z',
     projectedAt: '2026-07-30T06:02:00.000Z',
   }
 ) {
   const bindings = preflightBindings();
   const preflight = validateStrictTestPreflightV1(compiledPlan(), bindings);
-  const automaticSelection = createStrictTestAutomaticSelectionReceiptV1({
+  const confirmation = createStrictTestSelectionConfirmationV1({
     preflight,
     currentBindings: bindings,
-    selectedAt: timestamps.selectedAt,
+    selectedDimensionIds: ['architecture'],
+    confirmedBy: 'user:fixture',
+    confirmedAt: timestamps.confirmedAt,
   });
   const projection = createStrictTestDimensionExecutionProjectionV1({
     preflight,
-    automaticSelection,
+    confirmation,
     currentBindings: bindings,
     projectedAt: timestamps.projectedAt,
   });
@@ -1274,7 +1065,7 @@ function privateCompletionChain(
   };
   const terminal = createStrictTestPrivateCompletionReceiptV1({
     preflight,
-    automaticSelection,
+    confirmation,
     projection,
     currentBindings: bindings,
     finalCoverageBinding,
@@ -1286,7 +1077,7 @@ function privateCompletionChain(
     privateEvidenceRefs: ['private:coverage', 'private:serving'],
     completedAt: '2026-07-30T06:30:00.000Z',
   });
-  return { bindings, preflight, automaticSelection, projection, terminal };
+  return { bindings, preflight, confirmation, projection, terminal };
 }
 
 function rehashProjection(
