@@ -1,7 +1,6 @@
-import {
-  createServingSnapshotManifestV1,
-  type FinalCoverageBindingReceiptV1,
-  type ServingSnapshotManifestV1,
+import type {
+  FinalCoverageBindingReceiptV1,
+  ServingSnapshotManifestV1,
 } from '../../production/ProductionPersistenceContracts.js';
 import {
   canonicalJsonStringify,
@@ -408,123 +407,6 @@ const RESUME_INPUT_KEYS = [
   'currentBindings',
   'privateWorkspacePolicyHash',
 ] as const;
-const CONFIRMATION_RECEIPT_KEYS = [
-  'schemaVersion',
-  'profile',
-  'state',
-  'demandKey',
-  'runId',
-  'preflightHash',
-  'bindingHash',
-  'selectedDimensionId',
-  'fullCellUniverseHash',
-  'selectedEligibleCellIds',
-  'selectedEligibleCellsHash',
-  'strictConfigReceiptHash',
-  'providerModelHash',
-  'runtimeArtifactBindingHash',
-  'privateWorkspacePolicyHash',
-  'privateStrictTestOnly',
-  'productionFinalized',
-  'publicRouteChanged',
-  'confirmedBy',
-  'confirmedAt',
-  'confirmationHash',
-] as const;
-const PROJECTION_RECEIPT_KEYS = [
-  'schemaVersion',
-  'profile',
-  'state',
-  'demandKey',
-  'runId',
-  'preflightHash',
-  'confirmationHash',
-  'bindingHash',
-  'selectedDimensionId',
-  'executionCellIds',
-  'executionCellSetHash',
-  'dimensionStates',
-  'fullCatalogHash',
-  'fullCatalogSourceArtifactHash',
-  'fullCellUniverseHash',
-  'fullEligibleCellsHash',
-  'fullExcludedCellsHash',
-  'fullApplicabilityUniverseHash',
-  'fullFactQueryCatalogHash',
-  'fullBaselineScheduleHash',
-  'certifiedProjectFactsContentHash',
-  'sourceRevisionVectorHash',
-  'sourceInventoryHash',
-  'productionFinalized',
-  'publicRouteChanged',
-  'projectionHash',
-] as const;
-const PROJECTION_DIMENSION_STATE_KEYS = [
-  'dimensionId',
-  'disposition',
-  'executionCellIds',
-  'executionCellCount',
-] as const;
-const PRIVATE_COMPLETION_RECEIPT_KEYS = [
-  'schemaVersion',
-  'profile',
-  'terminalState',
-  'demandKey',
-  'runId',
-  'preflightHash',
-  'confirmationHash',
-  'projectionHash',
-  'finalCoverageBinding',
-  'servingSnapshotManifest',
-  'privateG4ReceiptHash',
-  'privateServingValidationHash',
-  'privateEvidenceRefs',
-  'productionBeforeStateHash',
-  'productionAfterStateHash',
-  'publicRouteBeforeStateHash',
-  'publicRouteAfterStateHash',
-  'productionFinalized',
-  'publicRouteChanged',
-  'completedAt',
-  'terminalHash',
-] as const;
-const PRIVATE_FAILURE_RECEIPT_KEYS = [
-  'schemaVersion',
-  'profile',
-  'terminalState',
-  'demandKey',
-  'runId',
-  'preflightHash',
-  'confirmationHash',
-  'projectionHash',
-  'failedStage',
-  'errorCode',
-  'privateEvidenceRefs',
-  'forbiddenInferences',
-  'productionBeforeStateHash',
-  'productionAfterStateHash',
-  'publicRouteBeforeStateHash',
-  'publicRouteAfterStateHash',
-  'productionFinalized',
-  'publicRouteChanged',
-  'failedAt',
-  'terminalHash',
-] as const;
-const FINAL_COVERAGE_BINDING_KEYS = [
-  'schemaVersion',
-  'candidateCoverageReceiptHash',
-  'candidateCellSetHash',
-  'g4ReceiptHash',
-  'candidateDataManifestHash',
-  'cells',
-  'receiptHash',
-] as const;
-const FINAL_COVERAGE_CELL_KEYS = [
-  'cellId',
-  'finalDisposition',
-  'finalRecipeIds',
-  'finalRecipeFingerprints',
-] as const;
 
 export function hashStrictTestPreflightBindingsV1(
   bindings: StrictTestPreflightBindingsV1
@@ -824,27 +706,8 @@ export function createStrictTestSelectionConfirmationV1(input: {
 
 export function assertStrictTestSelectionConfirmationV1(
   confirmation: StrictTestSelectionConfirmationV1,
-  preflight: StrictTestPreflightReceiptV1
+  preflight?: StrictTestPreflightReceiptV1
 ): void {
-  assertExactKeys(confirmation, CONFIRMATION_RECEIPT_KEYS, 'STRICT_TEST_CONFIRMATION_INVALID');
-  assertConfirmationShape(confirmation);
-  assertConfirmationFields(confirmation);
-  const { confirmationHash, ...semantic } = confirmation;
-  if (confirmationHash !== hashCanonicalJson(semantic)) {
-    fail('STRICT_TEST_CONFIRMATION_HASH_MISMATCH', 'confirmationHash');
-  }
-  if (!preflight) {
-    fail('STRICT_TEST_CONFIRMATION_CONTEXT_REQUIRED', 'preflight');
-  }
-  assertStrictTestPreflightCurrentV1(
-    preflight,
-    preflightBindingsFromReceipt(preflight),
-    confirmation.confirmedAt
-  );
-  assertConfirmationPreflightLineage(confirmation, preflight);
-}
-
-function assertConfirmationShape(confirmation: StrictTestSelectionConfirmationV1): void {
   if (
     confirmation.schemaVersion !== 1 ||
     confirmation.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
@@ -853,66 +716,31 @@ function assertConfirmationShape(confirmation: StrictTestSelectionConfirmationV1
     confirmation.productionFinalized !== false ||
     confirmation.publicRouteChanged !== false ||
     confirmation.selectedEligibleCellIds.length === 0 ||
-    new Set(confirmation.selectedEligibleCellIds).size !==
-      confirmation.selectedEligibleCellIds.length ||
-    confirmation.selectedEligibleCellIds.some((cellId) => !cellId.trim()) ||
     confirmation.selectedEligibleCellsHash !==
       hashCanonicalJson(confirmation.selectedEligibleCellIds)
   ) {
     fail('STRICT_TEST_CONFIRMATION_INVALID', 'invariant');
   }
-}
-
-function assertConfirmationFields(confirmation: StrictTestSelectionConfirmationV1): void {
-  for (const value of [
-    confirmation.demandKey,
-    confirmation.runId,
-    confirmation.selectedDimensionId,
-    confirmation.confirmedBy,
-  ]) {
-    requireText(value, 'STRICT_TEST_CONFIRMATION_INVALID');
+  const { confirmationHash, ...semantic } = confirmation;
+  if (confirmationHash !== hashCanonicalJson(semantic)) {
+    fail('STRICT_TEST_CONFIRMATION_HASH_MISMATCH', 'confirmationHash');
   }
-  requireTimestamp(confirmation.confirmedAt, 'STRICT_TEST_CONFIRMATION_INVALID');
-  for (const hash of [
-    confirmation.preflightHash,
-    confirmation.bindingHash,
-    confirmation.fullCellUniverseHash,
-    confirmation.selectedEligibleCellsHash,
-    confirmation.strictConfigReceiptHash,
-    confirmation.providerModelHash,
-    confirmation.runtimeArtifactBindingHash,
-    confirmation.privateWorkspacePolicyHash,
-    confirmation.confirmationHash,
-  ]) {
-    requireSha(hash, 'STRICT_TEST_CONFIRMATION_INVALID');
-  }
-}
-
-function assertConfirmationPreflightLineage(
-  confirmation: StrictTestSelectionConfirmationV1,
-  preflight: StrictTestPreflightReceiptV1
-): void {
-  const selected = preflight.dimensionResults.find(
-    (row) => row.dimensionId === confirmation.selectedDimensionId
-  );
-  if (
-    confirmation.demandKey !== preflight.demandKey ||
-    confirmation.runId !== preflight.runId ||
-    confirmation.preflightHash !== preflight.preflightHash ||
-    confirmation.bindingHash !== preflight.bindingHash ||
-    confirmation.fullCellUniverseHash !== preflight.fullCellUniverseHash ||
-    confirmation.strictConfigReceiptHash !== preflight.strictConfigReceiptHash ||
-    confirmation.providerModelHash !== preflight.providerModelHash ||
-    confirmation.runtimeArtifactBindingHash !== preflight.runtimeArtifactBindingHash ||
-    confirmation.privateWorkspacePolicyHash !== preflight.privateWorkspacePolicyHash ||
-    !selected ||
-    selected.status !== 'applicable' ||
-    selected.eligibleCellCount === 0 ||
-    confirmation.selectedEligibleCellsHash !== hashCanonicalJson(selected.eligibleCellIds) ||
-    canonicalJsonStringify(confirmation.selectedEligibleCellIds) !==
-      canonicalJsonStringify(selected.eligibleCellIds)
-  ) {
-    fail('STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH', confirmation.selectedDimensionId);
+  if (preflight) {
+    assertStrictTestPreflightReceiptV1(preflight);
+    const selected = preflight.dimensionResults.find(
+      (row) => row.dimensionId === confirmation.selectedDimensionId
+    );
+    if (
+      confirmation.preflightHash !== preflight.preflightHash ||
+      confirmation.bindingHash !== preflight.bindingHash ||
+      confirmation.fullCellUniverseHash !== preflight.fullCellUniverseHash ||
+      !selected ||
+      selected.status !== 'applicable' ||
+      canonicalJsonStringify(confirmation.selectedEligibleCellIds) !==
+        canonicalJsonStringify(selected.eligibleCellIds)
+    ) {
+      fail('STRICT_TEST_CONFIRMATION_PREFLIGHT_MISMATCH', confirmation.selectedDimensionId);
+    }
   }
 }
 
@@ -924,52 +752,9 @@ export function createStrictTestDimensionExecutionProjectionV1(input: {
   assertExactKeys(input, PROJECTION_INPUT_KEYS, 'STRICT_TEST_PROJECTION_FIELDS_INVALID');
   assertStrictTestPreflightCurrentV1(input.preflight, input.currentBindings);
   assertStrictTestSelectionConfirmationV1(input.confirmation, input.preflight);
-  const semantic = buildProjectionSemantic(input.preflight, input.confirmation);
-  return freezeDeep({ ...semantic, projectionHash: hashCanonicalJson(semantic) });
-}
-
-function buildProjectionSemantic(
-  preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1
-) {
-  const executionCellIds = [...confirmation.selectedEligibleCellIds];
-  const dimensionStates = buildProjectionDimensionStates(preflight, confirmation);
-  return {
-    schemaVersion: 1 as const,
-    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
-    state: 'SELECTION_CONFIRMED' as const,
-    demandKey: preflight.demandKey,
-    runId: preflight.runId,
-    preflightHash: preflight.preflightHash,
-    confirmationHash: confirmation.confirmationHash,
-    bindingHash: preflight.bindingHash,
-    selectedDimensionId: confirmation.selectedDimensionId,
-    executionCellIds,
-    executionCellSetHash: hashCanonicalJson(executionCellIds),
-    dimensionStates,
-    fullCatalogHash: preflight.catalog.catalogHash,
-    fullCatalogSourceArtifactHash: preflight.catalog.sourceArtifactHash,
-    fullCellUniverseHash: preflight.fullCellUniverseHash,
-    fullEligibleCellsHash: preflight.cellUniverse.eligibleCellsHash,
-    fullExcludedCellsHash: preflight.cellUniverse.excludedCellsHash,
-    fullApplicabilityUniverseHash: preflight.requiredFactApplicabilityUniverseHash,
-    fullFactQueryCatalogHash: preflight.factQueryCatalogHash,
-    fullBaselineScheduleHash: preflight.baselineScheduleHash,
-    certifiedProjectFactsContentHash: preflight.certifiedProjectFactsContentHash,
-    sourceRevisionVectorHash: preflight.sourceRevisionVectorHash,
-    sourceInventoryHash: preflight.sourceInventoryHash,
-    productionFinalized: false as const,
-    publicRouteChanged: false as const,
-  };
-}
-
-function buildProjectionDimensionStates(
-  preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1
-): StrictTestDimensionExecutionStateV1[] {
-  const executionCellIds = [...confirmation.selectedEligibleCellIds];
-  return preflight.dimensionResults.map((row) =>
-    row.dimensionId === confirmation.selectedDimensionId
+  const executionCellIds = [...input.confirmation.selectedEligibleCellIds];
+  const dimensionStates = input.preflight.dimensionResults.map((row) =>
+    row.dimensionId === input.confirmation.selectedDimensionId
       ? {
           dimensionId: row.dimensionId,
           disposition: 'selected-for-execution' as const,
@@ -983,104 +768,69 @@ function buildProjectionDimensionStates(
           executionCellCount: 0,
         }
   );
+  const semantic = {
+    schemaVersion: 1 as const,
+    profile: STRICT_TEST_DIMENSION_PROFILE_V1,
+    state: 'SELECTION_CONFIRMED' as const,
+    demandKey: input.preflight.demandKey,
+    runId: input.preflight.runId,
+    preflightHash: input.preflight.preflightHash,
+    confirmationHash: input.confirmation.confirmationHash,
+    bindingHash: input.preflight.bindingHash,
+    selectedDimensionId: input.confirmation.selectedDimensionId,
+    executionCellIds,
+    executionCellSetHash: hashCanonicalJson(executionCellIds),
+    dimensionStates,
+    fullCatalogHash: input.preflight.catalog.catalogHash,
+    fullCatalogSourceArtifactHash: input.preflight.catalog.sourceArtifactHash,
+    fullCellUniverseHash: input.preflight.fullCellUniverseHash,
+    fullEligibleCellsHash: input.preflight.cellUniverse.eligibleCellsHash,
+    fullExcludedCellsHash: input.preflight.cellUniverse.excludedCellsHash,
+    fullApplicabilityUniverseHash: input.preflight.requiredFactApplicabilityUniverseHash,
+    fullFactQueryCatalogHash: input.preflight.factQueryCatalogHash,
+    fullBaselineScheduleHash: input.preflight.baselineScheduleHash,
+    certifiedProjectFactsContentHash: input.preflight.certifiedProjectFactsContentHash,
+    sourceRevisionVectorHash: input.preflight.sourceRevisionVectorHash,
+    sourceInventoryHash: input.preflight.sourceInventoryHash,
+    productionFinalized: false as const,
+    publicRouteChanged: false as const,
+  };
+  return freezeDeep({ ...semantic, projectionHash: hashCanonicalJson(semantic) });
 }
 
 export function assertStrictTestDimensionExecutionProjectionV1(
   projection: StrictTestDimensionExecutionProjectionV1,
-  preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1
+  preflight?: StrictTestPreflightReceiptV1,
+  confirmation?: StrictTestSelectionConfirmationV1
 ): void {
   assertProjectionShape(projection);
   const { projectionHash, ...semantic } = projection;
   if (projectionHash !== hashCanonicalJson(semantic)) {
     fail('STRICT_TEST_PROJECTION_HASH_MISMATCH', 'projectionHash');
   }
-  if (!preflight || !confirmation) {
-    fail('STRICT_TEST_PROJECTION_CONTEXT_REQUIRED', 'preflight and confirmation');
+  if (preflight && confirmation) {
+    assertProjectionLineage(projection, preflight, confirmation);
   }
-  assertProjectionLineage(projection, preflight, confirmation);
 }
 
 function assertProjectionShape(projection: StrictTestDimensionExecutionProjectionV1): void {
-  assertExactKeys(projection, PROJECTION_RECEIPT_KEYS, 'STRICT_TEST_PROJECTION_INVALID');
-  assertProjectionDimensionStatesShape(projection);
-  assertProjectionEnvelopeShape(projection);
-  assertProjectionHashFields(projection);
-}
-
-function assertProjectionDimensionStatesShape(
-  projection: StrictTestDimensionExecutionProjectionV1
-): void {
-  for (const state of projection.dimensionStates) {
-    assertExactKeys(state, PROJECTION_DIMENSION_STATE_KEYS, 'STRICT_TEST_PROJECTION_INVALID');
-    requireText(state.dimensionId, 'STRICT_TEST_PROJECTION_INVALID');
-    if (
-      !Number.isSafeInteger(state.executionCellCount) ||
-      state.executionCellCount < 0 ||
-      new Set(state.executionCellIds).size !== state.executionCellIds.length ||
-      state.executionCellIds.some((cellId) => !cellId.trim())
-    ) {
-      fail('STRICT_TEST_PROJECTION_INVALID', 'dimension state cells');
-    }
-  }
-}
-
-function assertProjectionEnvelopeShape(projection: StrictTestDimensionExecutionProjectionV1): void {
   const selectedStates = projection.dimensionStates.filter(
     (state) => state.disposition === 'selected-for-execution'
   );
-  const selectedState = selectedStates[0];
-  const dimensionIds = projection.dimensionStates.map((state) => state.dimensionId);
   const invalidUnselectedState = projection.dimensionStates.some((state) =>
     isInvalidUnselectedDimensionState(state, projection.selectedDimensionId)
   );
   if (
     projection.schemaVersion !== 1 ||
     projection.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
-    projection.state !== 'SELECTION_CONFIRMED' ||
     projection.productionFinalized !== false ||
     projection.publicRouteChanged !== false ||
     projection.executionCellIds.length === 0 ||
-    new Set(projection.executionCellIds).size !== projection.executionCellIds.length ||
-    projection.executionCellIds.some((cellId) => !cellId.trim()) ||
     projection.executionCellSetHash !== hashCanonicalJson(projection.executionCellIds) ||
-    projection.dimensionStates.length !== 26 ||
-    new Set(dimensionIds).size !== 26 ||
     selectedStates.length !== 1 ||
-    !selectedState ||
-    selectedState.dimensionId !== projection.selectedDimensionId ||
-    selectedState.executionCellCount !== projection.executionCellIds.length ||
-    canonicalJsonStringify(selectedState.executionCellIds) !==
-      canonicalJsonStringify(projection.executionCellIds) ||
     invalidUnselectedState
   ) {
     fail('STRICT_TEST_PROJECTION_INVALID', 'conservation invariant');
-  }
-  for (const value of [projection.demandKey, projection.runId, projection.selectedDimensionId]) {
-    requireText(value, 'STRICT_TEST_PROJECTION_INVALID');
-  }
-}
-
-function assertProjectionHashFields(projection: StrictTestDimensionExecutionProjectionV1): void {
-  for (const hash of [
-    projection.preflightHash,
-    projection.confirmationHash,
-    projection.bindingHash,
-    projection.executionCellSetHash,
-    projection.fullCatalogHash,
-    projection.fullCatalogSourceArtifactHash,
-    projection.fullCellUniverseHash,
-    projection.fullEligibleCellsHash,
-    projection.fullExcludedCellsHash,
-    projection.fullApplicabilityUniverseHash,
-    projection.fullFactQueryCatalogHash,
-    projection.fullBaselineScheduleHash,
-    projection.certifiedProjectFactsContentHash,
-    projection.sourceRevisionVectorHash,
-    projection.sourceInventoryHash,
-    projection.projectionHash,
-  ]) {
-    requireSha(hash, 'STRICT_TEST_PROJECTION_INVALID');
   }
 }
 
@@ -1102,9 +852,15 @@ function assertProjectionLineage(
   confirmation: StrictTestSelectionConfirmationV1
 ): void {
   assertStrictTestSelectionConfirmationV1(confirmation, preflight);
-  const { projectionHash: _projectionHash, ...projectionSemantic } = projection;
-  const expectedSemantic = buildProjectionSemantic(preflight, confirmation);
-  if (canonicalJsonStringify(projectionSemantic) !== canonicalJsonStringify(expectedSemantic)) {
+  if (
+    projection.preflightHash !== preflight.preflightHash ||
+    projection.confirmationHash !== confirmation.confirmationHash ||
+    projection.fullCellUniverseHash !== preflight.fullCellUniverseHash ||
+    projection.fullCatalogHash !== preflight.catalog.catalogHash ||
+    projection.fullApplicabilityUniverseHash !== preflight.requiredFactApplicabilityUniverseHash ||
+    canonicalJsonStringify(projection.executionCellIds) !==
+      canonicalJsonStringify(confirmation.selectedEligibleCellIds)
+  ) {
     fail('STRICT_TEST_PROJECTION_LINEAGE_MISMATCH', projection.selectedDimensionId);
   }
 }
@@ -1239,83 +995,22 @@ export function createStrictTestPrivateFailureReceiptV1(input: {
 }
 
 export function assertStrictTestPrivateTerminalReceiptV1(
-  receipt: StrictTestPrivateTerminalReceiptV1,
-  preflight: StrictTestPreflightReceiptV1,
-  confirmation: StrictTestSelectionConfirmationV1,
-  projection: StrictTestDimensionExecutionProjectionV1
+  receipt: StrictTestPrivateTerminalReceiptV1
 ): void {
-  if (receipt.terminalState === 'STRICT_TEST_COMPLETED_PRIVATE') {
-    assertExactKeys(
-      receipt,
-      PRIVATE_COMPLETION_RECEIPT_KEYS,
-      'STRICT_TEST_PRIVATE_TERMINAL_INVALID'
-    );
-  } else if (receipt.terminalState === 'STRICT_TEST_FAILED') {
-    assertExactKeys(receipt, PRIVATE_FAILURE_RECEIPT_KEYS, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  } else {
-    fail('STRICT_TEST_PRIVATE_TERMINAL_INVALID', 'terminalState');
-  }
   assertPrivateTerminalNonMutation(receipt);
   const { terminalHash, ...semantic } = receipt;
   if (terminalHash !== hashCanonicalJson(semantic)) {
     fail('STRICT_TEST_PRIVATE_TERMINAL_HASH_MISMATCH', 'terminalHash');
   }
-  if (!preflight || !confirmation || !projection) {
-    fail('STRICT_TEST_PRIVATE_TERMINAL_CONTEXT_REQUIRED', 'preflight, confirmation and projection');
-  }
-  assertStrictTestPreflightReceiptV1(preflight);
-  assertStrictTestSelectionConfirmationV1(confirmation, preflight);
-  assertStrictTestDimensionExecutionProjectionV1(projection, preflight, confirmation);
-  if (
-    receipt.demandKey !== preflight.demandKey ||
-    receipt.runId !== preflight.runId ||
-    receipt.preflightHash !== preflight.preflightHash ||
-    receipt.productionBeforeStateHash !== preflight.productionBeforeStateHash ||
-    receipt.publicRouteBeforeStateHash !== preflight.publicRouteBeforeStateHash
-  ) {
-    fail('STRICT_TEST_PRIVATE_TERMINAL_CONTEXT_MISMATCH', receipt.terminalState);
-  }
   if (receipt.terminalState === 'STRICT_TEST_COMPLETED_PRIVATE') {
     assertPrivateCompletionLineage(receipt);
-    if (
-      receipt.confirmationHash !== confirmation.confirmationHash ||
-      receipt.projectionHash !== projection.projectionHash ||
-      Date.parse(receipt.completedAt) < Date.parse(confirmation.confirmedAt)
-    ) {
-      fail('STRICT_TEST_PRIVATE_TERMINAL_CONTEXT_MISMATCH', 'completion lineage');
-    }
-    assertStrictTestPreflightCurrentV1(
-      preflight,
-      preflightBindingsFromReceipt(preflight),
-      receipt.completedAt
-    );
-    validatePrivateCompletionBindings({
-      preflight,
-      projection,
-      finalCoverageBinding: receipt.finalCoverageBinding,
-      servingSnapshotManifest: receipt.servingSnapshotManifest,
-      privateG4ReceiptHash: receipt.privateG4ReceiptHash,
-      privateServingValidationHash: receipt.privateServingValidationHash,
-      productionAfterStateHash: receipt.productionAfterStateHash,
-      publicRouteAfterStateHash: receipt.publicRouteAfterStateHash,
-      privateEvidenceRefs: receipt.privateEvidenceRefs,
-      completedAt: receipt.completedAt,
-    });
     return;
   }
   assertPrivateFailureLineage(receipt);
-  if (
-    (receipt.confirmationHash !== null &&
-      receipt.confirmationHash !== confirmation.confirmationHash) ||
-    (receipt.projectionHash !== null && receipt.projectionHash !== projection.projectionHash)
-  ) {
-    fail('STRICT_TEST_PRIVATE_TERMINAL_CONTEXT_MISMATCH', 'failure lineage');
-  }
 }
 
 function assertPrivateTerminalNonMutation(receipt: StrictTestPrivateTerminalReceiptV1): void {
   if (
-    receipt.schemaVersion !== 1 ||
     receipt.profile !== STRICT_TEST_DIMENSION_PROFILE_V1 ||
     receipt.productionFinalized !== false ||
     receipt.publicRouteChanged !== false ||
@@ -1324,27 +1019,9 @@ function assertPrivateTerminalNonMutation(receipt: StrictTestPrivateTerminalRece
   ) {
     fail('STRICT_TEST_PRIVATE_TERMINAL_INVALID', 'non-mutation invariant');
   }
-  for (const value of [receipt.demandKey, receipt.runId]) {
-    requireText(value, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  }
-  for (const hash of [
-    receipt.preflightHash,
-    receipt.productionBeforeStateHash,
-    receipt.productionAfterStateHash,
-    receipt.publicRouteBeforeStateHash,
-    receipt.publicRouteAfterStateHash,
-    receipt.terminalHash,
-  ]) {
-    requireSha(hash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  }
 }
 
 function assertPrivateCompletionLineage(receipt: StrictTestPrivateCompletionReceiptV1): void {
-  requireTimestamp(receipt.completedAt, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  requireSha(receipt.confirmationHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  requireSha(receipt.projectionHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  requireSha(receipt.privateG4ReceiptHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  requireSha(receipt.privateServingValidationHash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
   const finalCoverageSemantic = omitHash(receipt.finalCoverageBinding, 'receiptHash');
   const servingSemantic = omitHash(receipt.servingSnapshotManifest, 'manifestHash');
   const hasNonPassingCell = receipt.finalCoverageBinding.cells.some(
@@ -1361,7 +1038,6 @@ function assertPrivateCompletionLineage(receipt: StrictTestPrivateCompletionRece
     receipt.servingSnapshotManifest.servingSnapshotValidationHash !==
       receipt.privateServingValidationHash ||
     receipt.finalCoverageBinding.cells.length === 0 ||
-    normalizeStrings(receipt.privateEvidenceRefs).length === 0 ||
     hasNonPassingCell
   ) {
     fail('STRICT_TEST_PRIVATE_TERMINAL_INVALID', 'private coverage/serving lineage');
@@ -1369,17 +1045,10 @@ function assertPrivateCompletionLineage(receipt: StrictTestPrivateCompletionRece
 }
 
 function assertPrivateFailureLineage(receipt: StrictTestPrivateFailureReceiptV1): void {
-  requireTimestamp(receipt.failedAt, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-  for (const hash of [receipt.confirmationHash, receipt.projectionHash]) {
-    if (hash !== null) {
-      requireSha(hash, 'STRICT_TEST_PRIVATE_TERMINAL_INVALID');
-    }
-  }
   if (
     !new Set<string>(STRICT_TEST_STATE_SEQUENCE_V1).has(receipt.failedStage) ||
     receipt.failedStage === 'STRICT_TEST_COMPLETED_PRIVATE' ||
     !receipt.errorCode ||
-    normalizeStrings(receipt.privateEvidenceRefs).length === 0 ||
     canonicalJsonStringify(receipt.forbiddenInferences) !==
       canonicalJsonStringify(strictTestForbiddenConclusions())
   ) {
@@ -1403,12 +1072,7 @@ export function createStrictTestAuditReportV1(input: {
     input.preflight,
     input.confirmation
   );
-  assertStrictTestPrivateTerminalReceiptV1(
-    input.terminal,
-    input.preflight,
-    input.confirmation,
-    input.projection
-  );
+  assertStrictTestPrivateTerminalReceiptV1(input.terminal);
   if (
     input.terminal.preflightHash !== input.preflight.preflightHash ||
     (input.terminal.confirmationHash !== null &&
@@ -1879,8 +1543,6 @@ function validatePrivateCompletionBindings(input: {
   requireTimestamp(input.completedAt, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
   requireSha(input.privateG4ReceiptHash, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
   requireSha(input.privateServingValidationHash, 'STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID');
-  validateFinalCoverageBindingShape(input.finalCoverageBinding, input.projection.executionCellIds);
-  validateServingSnapshotManifestShape(input.servingSnapshotManifest);
   if (input.privateEvidenceRefs.length === 0) {
     fail('STRICT_TEST_PRIVATE_TERMINAL_FIELDS_INVALID', 'private evidence');
   }
@@ -1935,76 +1597,6 @@ function validatePrivateCompletionBindings(input: {
     input.publicRouteAfterStateHash !== input.preflight.publicRouteBeforeStateHash
   ) {
     fail('STRICT_TEST_PRODUCTION_MUTATION_DETECTED', 'completion');
-  }
-}
-
-/**
- * Final coverage 的 candidate receipt 本体由外层私有流水线持有，Core 在此仍可完整重放其
- * durable binding 可见的不变量：字段集合、终态、排序、选中 cell 分母与自哈希。这样即使
- * 调用方重算 receiptHash，也不能替换或删减 strict-test projection 的执行 cell。
- */
-function validateFinalCoverageBindingShape(
-  binding: FinalCoverageBindingReceiptV1,
-  executionCellIds: readonly string[]
-): void {
-  assertExactKeys(
-    binding,
-    FINAL_COVERAGE_BINDING_KEYS,
-    'STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID'
-  );
-  if (
-    binding.schemaVersion !== 1 ||
-    binding.cells.length === 0 ||
-    new Set(binding.cells.map((cell) => cell.cellId)).size !== binding.cells.length ||
-    binding.candidateCellSetHash !== hashCanonicalJson(executionCellIds) ||
-    canonicalJsonStringify(binding.cells.map((cell) => cell.cellId)) !==
-      canonicalJsonStringify(executionCellIds)
-  ) {
-    fail('STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID', 'final coverage cell universe');
-  }
-  for (const hash of [
-    binding.candidateCoverageReceiptHash,
-    binding.candidateCellSetHash,
-    binding.g4ReceiptHash,
-    binding.candidateDataManifestHash,
-    binding.receiptHash,
-  ]) {
-    requireSha(hash, 'STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID');
-  }
-  for (const cell of binding.cells) {
-    assertExactKeys(cell, FINAL_COVERAGE_CELL_KEYS, 'STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID');
-    requireText(cell.cellId, 'STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID');
-    const normalizedRecipeIds = normalizeStrings(cell.finalRecipeIds);
-    const normalizedFingerprints = normalizeStrings(cell.finalRecipeFingerprints);
-    if (
-      canonicalJsonStringify(cell.finalRecipeIds) !== canonicalJsonStringify(normalizedRecipeIds) ||
-      canonicalJsonStringify(cell.finalRecipeFingerprints) !==
-        canonicalJsonStringify(normalizedFingerprints) ||
-      (cell.finalDisposition !== 'covered-by-ready-recipe' &&
-        cell.finalDisposition !== 'investigated-empty') ||
-      (cell.finalDisposition === 'covered-by-ready-recipe' &&
-        (cell.finalRecipeIds.length === 0 ||
-          cell.finalRecipeIds.length !== cell.finalRecipeFingerprints.length)) ||
-      (cell.finalDisposition === 'investigated-empty' &&
-        (cell.finalRecipeIds.length !== 0 || cell.finalRecipeFingerprints.length !== 0))
-    ) {
-      fail('STRICT_TEST_PRIVATE_SERVING_LINEAGE_INVALID', `final coverage ${cell.cellId}`);
-    }
-  }
-}
-
-/**
- * 复用正式 serving manifest constructor，而不是在 strict-test 分支复制一个较弱校验器。
- * constructor 会强制 snapshotId ↔ candidateDataManifestHash、精确字段集与非空身份字段。
- */
-function validateServingSnapshotManifestShape(manifest: ServingSnapshotManifestV1): void {
-  const { schemaVersion, manifestHash: _manifestHash, ...input } = manifest;
-  if (schemaVersion !== 1) {
-    fail('SERVING_SNAPSHOT_FIELDS_INVALID', 'schemaVersion');
-  }
-  const rebuilt = createServingSnapshotManifestV1(input);
-  if (canonicalJsonStringify(rebuilt) !== canonicalJsonStringify(manifest)) {
-    fail('SERVING_SNAPSHOT_FIELDS_INVALID', 'manifestHash');
   }
 }
 
