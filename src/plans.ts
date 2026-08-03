@@ -39,7 +39,6 @@ export {
   unique,
   validateCompletePlanIntent,
 } from './service/plan/intent/index.js';
-export * from './service/plan/intent/strictTestDimensionProfile.js';
 export type {
   BuildPlanDraftInformationPackageInput,
   PlanCodeRecipeMapping,

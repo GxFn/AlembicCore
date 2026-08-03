@@ -6,7 +6,6 @@
  */
 
 export { buildFactQueryCatalogSnapshot } from './service/plan/intent/coldStartProductionPlan.js';
-export * from './service/plan/intent/strictTestDimensionProfile.js';
 export {
   assertSemanticDispositionReviewDurableAttestationV3,
   assertSemanticDispositionReviewDurableAttestationV4,
