@@ -6,6 +6,7 @@ import Lifecycle, {
   CANDIDATE_STATES,
   CONSUMABLE_STATES,
   DEGRADED_STATES,
+  inferKind,
   isCandidate,
   isConsumable,
   isDegraded,
@@ -37,6 +38,8 @@ describe('Lifecycle — 六态状态机', () => {
     expect(normalizeLifecycle('evolving')).toBe('evolving');
     expect(normalizeLifecycle('decaying')).toBe('decaying');
     expect(normalizeLifecycle('invalid')).toBe('pending');
+    expect(normalizeLifecycle('')).toBe('pending');
+    expect(normalizeLifecycle('draft')).toBe('pending');
   });
 
   describe('transition table', () => {
@@ -50,6 +53,7 @@ describe('Lifecycle — 六态状态机', () => {
       ['active', 'decaying'],
       ['active', 'deprecated'],
       ['evolving', 'active'],
+      ['evolving', 'staging'],
       ['evolving', 'decaying'],
       ['decaying', 'active'],
       ['decaying', 'deprecated'],
@@ -84,6 +88,32 @@ describe('Lifecycle — 六态状态机', () => {
     }
   });
 
+  it('rejects self-transitions for every lifecycle state', () => {
+    for (const state of Object.values(Lifecycle)) {
+      expect(isValidTransition(state, state)).toBe(false);
+    }
+  });
+
+  it.each([
+    ['code-standard', 'rule'],
+    ['code-style', 'rule'],
+    ['best-practice', 'rule'],
+    ['boundary-constraint', 'rule'],
+    ['code-pattern', 'pattern'],
+    ['architecture', 'pattern'],
+    ['solution', 'pattern'],
+    ['anti-pattern', 'pattern'],
+    ['code-relation', 'fact'],
+    ['inheritance', 'fact'],
+    ['call-chain', 'fact'],
+    ['data-flow', 'fact'],
+    ['module-dependency', 'fact'],
+    ['dev-document', 'fact'],
+    ['unknown-type', 'pattern'],
+  ])('infers %s as %s', (knowledgeType, kind) => {
+    expect(inferKind(knowledgeType)).toBe(kind);
+  });
+
   it('CANDIDATE_STATES includes pending and staging', () => {
     expect(CANDIDATE_STATES).toContain('pending');
     expect(CANDIDATE_STATES).toContain('staging');
@@ -106,6 +136,7 @@ describe('Lifecycle — 六态状态机', () => {
     expect(isCandidate('pending')).toBe(true);
     expect(isCandidate('staging')).toBe(true);
     expect(isCandidate('active')).toBe(false);
+    expect(isCandidate('deprecated')).toBe(false);
   });
 
   it('isConsumable returns true for staging, active, evolving', () => {

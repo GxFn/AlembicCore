@@ -114,6 +114,35 @@ describe('aggregateCandidates', () => {
 });
 
 describe('validateCandidatesUnified', () => {
+  test.each([
+    { title: 42 },
+    { category: 42 },
+    { language: { name: 'typescript' } },
+    { reasoning: { whyStandard: ['wrong type'], sources: ['src/file.ts'], confidence: 0.9 } },
+    { content: { markdown: { text: 'wrong type' }, rationale: 'why' } },
+    null,
+    [],
+    'not an object',
+  ])('isolates malformed candidate %# without aborting the next valid candidate', (malformed) => {
+    const bad =
+      malformed && !Array.isArray(malformed) && typeof malformed === 'object'
+        ? strongCandidate({ title: 'Malformed candidate fixture', ...malformed })
+        : malformed;
+    const good = strongCandidate();
+    const expectedGood = validateCandidatesUnified([good], { skipUniqueness: true }).items[0];
+    const result = validateCandidatesUnified([bad, good] as Record<string, unknown>[], {
+      skipUniqueness: true,
+    });
+
+    expect(result.items).toHaveLength(2);
+    expect(result.items[0].candidate).toBe(bad);
+    expect(result.items[0].valid).toBe(false);
+    expect(result.items[0].recipe.valid).toBe(false);
+    expect(result.items[0].unified.pass).toBe(false);
+    expect(result.items[1]).toEqual(expectedGood);
+    expect(result.duplicates).toEqual([]);
+  });
+
   test('a strong candidate passes both validators with valid=true', () => {
     const result = validateCandidatesUnified([strongCandidate()], { skipUniqueness: true });
     expect(result.items).toHaveLength(1);

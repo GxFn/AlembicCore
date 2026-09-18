@@ -79,6 +79,26 @@ describe('RecipeSourceRefRepository floor', () => {
     expect(renamed[0]?.newPath).toBe('src/moved/a.ts');
   });
 
+  test('bare-file lookups include its bounded references without matching sibling names', () => {
+    for (const sourcePath of [
+      'src/a_b.ts:1-3',
+      'src/a_b.ts#L5',
+      'src/aXb.ts:2',
+      'src/a_b.tsx:2',
+      'src/a_b.ts:invalid',
+      'src/A_b.ts:2',
+    ]) {
+      repo.upsert({ recipeId: 'r1', sourcePath, verifiedAt: 1 });
+    }
+    expect(repo.findBySourcePath('src/a_b.ts').map((ref) => ref.sourcePath)).toEqual([
+      'src/a_b.ts:1-3',
+      'src/a_b.ts#L5',
+    ]);
+    expect(repo.findBySourcePath('src/a_b.ts:1-3').map((ref) => ref.sourcePath)).toEqual([
+      'src/a_b.ts:1-3',
+    ]);
+  });
+
   test('replaceSourcePath rewrites the key, resets status to active and clears newPath', () => {
     repo.upsert({ recipeId: 'r1', sourcePath: 'src/old.ts', status: 'renamed', verifiedAt: 1 });
 

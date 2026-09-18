@@ -38,12 +38,15 @@ export class HnswVectorAdapter extends VectorStore {
   #dimension = 0;
   /** 数据是否已修改 */
   #dirty = false;
+  /** 内存写入代次，异步快照只能确认其开始时的代次。 */
+  #revision = 0;
   /** flush 定时器 */
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
   /** 待刷盘操作计数 */
   #pendingOps = 0;
-  /** 是否正在刷盘 */
-  #flushing = false;
+  /** WAL与兼容非WAL路径共用同一写入锁，禁止旧快照晚完成覆盖新快照。 */
+  #persistPromise: Promise<void> | null = null;
+  #destroyed = false;
   /** WAL 持久化管理 */
   #wal: AsyncPersistence | null = null;
 
@@ -102,6 +105,7 @@ export class HnswVectorAdapter extends VectorStore {
    * 自动检测 JSON 旧索引并迁移
    */
   async init() {
+    this.#destroyed = false;
     // 确保目录存在
     if (this.#wz) {
       const rel = relative(this.#wz.dataRoot, this.#indexDir);
@@ -113,7 +117,8 @@ export class HnswVectorAdapter extends VectorStore {
       }
     }
 
-    // 尝试加载二进制索引
+    // 只把解码失败归为旧索引损坏；WAL 恢复后的写盘失败必须向调用方传播。
+    let snapshotLoaded = false;
     if (existsSync(this.#indexPath) && BinaryPersistence.isValid(this.#indexPath)) {
       try {
         const loaded = BinaryPersistence.load(this.#indexPath);
@@ -134,19 +139,19 @@ export class HnswVectorAdapter extends VectorStore {
         // 恢复 metadata 和 contents
         this.#metadata = metadata;
         this.#contents = contents;
-
-        // 初始化 WAL + replay 崩溃前未刷盘的操作
-        this.#initWal();
-        const { replayed } = this.#wal?.recover() || { replayed: 0 };
-        if (replayed > 0) {
-          this.#dirty = true;
-          await this.#persist();
-        }
-
-        return;
+        snapshotLoaded = true;
       } catch {
         // 损坏的文件, 忽略, 重新构建
       }
+    }
+    if (snapshotLoaded) {
+      this.#initWal();
+      const { replayed } = this.#wal?.recover() || { replayed: 0 };
+      if (replayed > 0) {
+        this.#markDirty();
+        await this.#wal?.flush();
+      }
+      return;
     }
 
     // 尝试从 JSON 迁移
@@ -161,8 +166,8 @@ export class HnswVectorAdapter extends VectorStore {
     this.#initWal();
     const { replayed } = this.#wal?.recover() || { replayed: 0 };
     if (replayed > 0) {
-      this.#dirty = true;
-      await this.#persist();
+      this.#markDirty();
+      await this.#wal?.flush();
     }
   }
 
@@ -171,6 +176,7 @@ export class HnswVectorAdapter extends VectorStore {
    * 注意: 同步路径无法执行 async 迁移, 但会尝试同步加载 JSON
    */
   initSync() {
+    this.#destroyed = false;
     if (this.#wz) {
       const rel = relative(this.#wz.dataRoot, this.#indexDir);
       this.#wz.ensureDir(this.#wz.data(rel));
@@ -181,7 +187,8 @@ export class HnswVectorAdapter extends VectorStore {
       }
     }
 
-    // 尝试加载二进制索引
+    // 同步恢复也区分解码失败与落盘失败，后者不能触发迁移 fallback。
+    let snapshotLoaded = false;
     if (existsSync(this.#indexPath) && BinaryPersistence.isValid(this.#indexPath)) {
       try {
         const loaded = BinaryPersistence.load(this.#indexPath);
@@ -196,38 +203,22 @@ export class HnswVectorAdapter extends VectorStore {
         }
         this.#metadata = metadata;
         this.#contents = contents;
-
-        // 初始化 WAL + replay
-        this.#initWal();
-        const { replayed } = this.#wal?.recover() || { replayed: 0 };
-        if (replayed > 0) {
-          this.#dirty = true;
-          BinaryPersistence.save(
-            this.#indexPath,
-            {
-              index: this.#index,
-              quantizer: this.#quantizer,
-              metadata: this.#metadata,
-              contents: this.#contents,
-            },
-            this.#wz ?? undefined
-          );
-          this.#dirty = false;
-        }
-        return;
+        snapshotLoaded = true;
       } catch {
         // 损坏或不兼容, 尝试从 JSON 迁移
       }
     }
 
     // 同步迁移: 读取 JSON 索引并加载到内存
-    this.#syncMigrateFromJson();
+    if (!snapshotLoaded) {
+      this.#syncMigrateFromJson();
+    }
 
     // 初始化 WAL + replay 未刷盘操作
     this.#initWal();
     const { replayed } = this.#wal?.recover() || { replayed: 0 };
     if (replayed > 0) {
-      this.#dirty = true;
+      this.#markDirty();
       BinaryPersistence.save(
         this.#indexPath,
         {
@@ -239,6 +230,7 @@ export class HnswVectorAdapter extends VectorStore {
         this.#wz ?? undefined
       );
       this.#dirty = false;
+      // initSync 已同步保存；WAL 留到下一次异步 flush 确认，崩溃最多重复重放。
     }
   }
 
@@ -341,9 +333,15 @@ export class HnswVectorAdapter extends VectorStore {
     if (vector.length > 0) {
       const qvector = this.#quantizer?.trained ? this.#quantizer.encode(vector) : null;
       this.#index.addPoint(item.id, vector, { qvector });
+    } else {
+      // 空向量是新的关键词条目状态，不能继续召回此前内容的旧 embedding。
+      this.#index.removePoint(item.id);
+      Logger.getInstance().debug('[HnswVectorAdapter] upsert stored without ANN vector', {
+        id: item.id,
+      });
     }
 
-    this.#dirty = true;
+    this.#markDirty();
     this.#pendingOps++;
 
     // 定期检查是否需要训练量化器 (每 500 次 upsert 检查一次)
@@ -404,6 +402,11 @@ export class HnswVectorAdapter extends VectorStore {
       if (vector.length > 0) {
         const qvector = this.#quantizer?.trained ? this.#quantizer.encode(vector) : null;
         this.#index.addPoint(item.id, vector, { qvector });
+      } else {
+        this.#index.removePoint(item.id);
+        Logger.getInstance().debug('[HnswVectorAdapter] batch upsert stored without ANN vector', {
+          id: item.id,
+        });
       }
 
       walOps.push({
@@ -415,7 +418,7 @@ export class HnswVectorAdapter extends VectorStore {
       });
     }
 
-    this.#dirty = true;
+    this.#markDirty();
     this.#pendingOps += items.length;
 
     // 检查是否需要训练/重训练量化器
@@ -435,7 +438,7 @@ export class HnswVectorAdapter extends VectorStore {
     this.#index.removePoint(id);
     this.#metadata.delete(id);
     this.#contents.delete(id);
-    this.#dirty = true;
+    this.#markDirty();
     this.#pendingOps++;
 
     if (this.#wal) {
@@ -711,7 +714,7 @@ export class HnswVectorAdapter extends VectorStore {
     this.#contents.clear();
     this.#quantizer = null;
     this.#dimension = 0;
-    this.#dirty = true;
+    this.#markDirty();
 
     if (this.#wal) {
       this.#wal.appendWal({ t: WAL_OP.CLEAR });
@@ -771,6 +774,11 @@ export class HnswVectorAdapter extends VectorStore {
         if (vector.length > 0) {
           const qvector = this.#quantizer?.trained ? this.#quantizer.encode(vector) : null;
           this.#index.addPoint(op.id as string, vector, { qvector });
+        } else {
+          this.#index.removePoint(op.id as string);
+          Logger.getInstance().debug('[HnswVectorAdapter] replay stored without ANN vector', {
+            id: op.id,
+          });
         }
         break;
       }
@@ -795,21 +803,24 @@ export class HnswVectorAdapter extends VectorStore {
 
   /** 手动触发持久化 (测试/关闭时使用) */
   async flush() {
+    this.#cancelFlushTimer();
     if (this.#wal) {
       await this.#wal.flush();
     }
-    if (this.#dirty) {
+    // 显式关闭/flush必须覆盖等待期间的新操作，不能仅等第一个快照结束。
+    while (this.#persistPromise || this.#dirty) {
       await this.#persist();
     }
+    this.#cancelFlushTimer();
   }
 
-  #scheduleFlush() {
-    if (this.#flushing) {
+  #scheduleFlush(afterFailure = false) {
+    if (this.#destroyed || this.#persistPromise || !this.#dirty) {
       return;
     }
 
     // 如果积累了足够操作, 立即 flush
-    if (this.#pendingOps >= this.#config.flushBatchSize) {
+    if (!afterFailure && this.#pendingOps >= this.#config.flushBatchSize) {
       this.#doFlush();
       return;
     }
@@ -829,36 +840,100 @@ export class HnswVectorAdapter extends VectorStore {
   }
 
   async #doFlush() {
-    if (this.#flushing || !this.#dirty) {
-      return;
-    }
-    this.#flushing = true;
-    this.#pendingOps = 0;
     try {
       await this.#persist();
     } catch {
-      /* persist failure is non-fatal */
-    } finally {
-      this.#flushing = false;
+      // 后台没有调用者接收拒绝；#persist已记录失败并安排有间隔的重试。
     }
   }
 
   async #persist() {
-    try {
-      await BinaryPersistence.saveAsync(
-        this.#indexPath,
-        {
-          index: this.#index,
-          quantizer: this.#quantizer,
-          metadata: this.#metadata,
-          contents: this.#contents,
-        },
-        this.#wz ?? undefined
-      );
-      this.#dirty = false;
-    } catch {
-      /* 写入失败暂时忽略, 下次重试 */
+    while (this.#persistPromise) {
+      await this.#persistPromise;
     }
+    if (!this.#dirty) {
+      return;
+    }
+    this.#cancelFlushTimer();
+    // WAL路径的计数还驱动每500次upsert的量化检查，沿用既有累计语义。
+    if (!this.#wal) {
+      this.#pendingOps = 0;
+    }
+    const snapshotRevision = this.#revision;
+    let failed = false;
+    const saving = BinaryPersistence.saveAsync(
+      this.#indexPath,
+      {
+        index: this.#index,
+        quantizer: this.#quantizer,
+        metadata: this.#metadata,
+        contents: this.#contents,
+      },
+      this.#wz ?? undefined
+    )
+      .then(() => {
+        this.#dirty = this.#revision !== snapshotRevision;
+        if (this.#destroyed && this.#dirty) {
+          // destroy保持同步void契约。在途旧写晚完成时，仅有界补存一次最新状态。
+          Logger.getInstance().debug(
+            '[HnswVectorAdapter] completing snapshot after destroy; saving latest revision',
+            {
+              indexPath: this.#indexPath,
+              snapshotRevision,
+              currentRevision: this.#revision,
+            }
+          );
+          this.#persistSync();
+        }
+      })
+      .catch((error: unknown) => {
+        failed = true;
+        this.#dirty = true;
+        // 上层 WAL 只有收到成功才能确认本批；吞掉错误会把唯一恢复记录删掉。
+        Logger.getInstance().warn(
+          '[HnswVectorAdapter] snapshot write failed; retaining dirty state',
+          {
+            indexPath: this.#indexPath,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
+        throw error;
+      })
+      .finally(() => {
+        this.#persistPromise = null;
+        // WAL自行管理批次确认与后续调度；非WAL仍须保存await期间的新revision。
+        if (!this.#wal && this.#dirty) {
+          this.#scheduleFlush(failed);
+        }
+      });
+    this.#persistPromise = saving;
+    await saving;
+  }
+
+  #markDirty() {
+    this.#dirty = true;
+    this.#revision++;
+  }
+
+  #cancelFlushTimer() {
+    if (this.#flushTimer) {
+      clearTimeout(this.#flushTimer);
+      this.#flushTimer = null;
+    }
+  }
+
+  #persistSync() {
+    BinaryPersistence.save(
+      this.#indexPath,
+      {
+        index: this.#index,
+        quantizer: this.#quantizer,
+        metadata: this.#metadata,
+        contents: this.#contents,
+      },
+      this.#wz ?? undefined
+    );
+    this.#dirty = false;
   }
 
   // ── 量化器 ──
@@ -904,31 +979,22 @@ export class HnswVectorAdapter extends VectorStore {
 
   /** 销毁: 清理定时器 */
   destroy() {
+    this.#destroyed = true;
     // 清理 WAL
     if (this.#wal) {
       this.#wal.destroy();
     }
     // 清理 legacy 定时器
-    if (this.#flushTimer) {
-      clearTimeout(this.#flushTimer);
-      this.#flushTimer = null;
-    }
+    this.#cancelFlushTimer();
     // 同步最后一次 persist
     if (this.#dirty) {
       try {
-        BinaryPersistence.save(
-          this.#indexPath,
-          {
-            index: this.#index,
-            quantizer: this.#quantizer,
-            metadata: this.#metadata,
-            contents: this.#contents,
-          },
-          this.#wz ?? undefined
-        );
-        this.#dirty = false;
-      } catch {
-        /* ignore */
+        this.#persistSync();
+      } catch (error) {
+        Logger.getInstance().warn('[HnswVectorAdapter] synchronous shutdown snapshot failed', {
+          indexPath: this.#indexPath,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }

@@ -1,11 +1,11 @@
 /**
- * KnowledgeUnitOfWork — 知识实体写操作的原子协调器
+ * KnowledgeUnitOfWork — 文件真相优先的知识写入协调器
  *
  * 策略: "文件优先 + DB 补偿"
  *
  *   1. 收集所有 DB 变更意图（不执行）
  *   2. 依次执行文件操作（writeFileSync 同步写入）
- *   3. 若任何文件操作失败 → 回滚已完成的文件操作，整体中止
+ *   3. 若任何文件操作失败 → 保留已完成的写入/移动，尽力重建已删文件，中止 DB 提交
  *   4. 全部文件操作成功 → 开启 SQLite 事务，提交所有 DB 变更
  *   5. 若 DB 事务失败 → 文件保留（真相源），抛出 DivergenceError 并发出
  *      file/DB 分歧诊断（CO3 W2 write-strict：不再静默等待 SyncService）
@@ -17,10 +17,9 @@
  *     → SyncService 会标记 deprecated → 数据丢失 ❌
  *   - 文件优先确保：无论哪步失败，.md 文件的存在性始终是判定真相的依据
  *
- * 当前代码现状（改造前）：
- *   - KnowledgeService.create/update: DB 先 → file 后（不一致风险）
- *   - KnowledgeService.delete: file 先 → DB 后（已是正确顺序）
- *   - 本 UoW 统一所有操作为 file-first
+ * 本类只协调显式注册的批次，不保证文件批次原子回滚：fileStore 没有旧字节快照，
+ * 无法安全区分新建与覆盖写。后续失败时删除已写文件可能直接删掉已有知识真相。
+ * 部分文件成功必须以 FileWriteError + 明细诊断暴露，并由 SyncService 对齐 DB。
  */
 
 import type { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';
@@ -84,7 +83,8 @@ export class KnowledgeUnitOfWork {
    * 提交：文件操作 → DB 事务
    *
    * 失败模式:
-   *   1. 文件写失败：中止，回滚已写文件，不触碰 DB → 干净状态（FileWriteError）
+   *   1. 文件写失败：中止、不触碰 DB；保留已写真相，尽力恢复删除，抛 FileWriteError。
+   *      已完成文件不代表整批成功；诊断列明条目/完成数和后续同步路径。
    *   2. 文件全成功 + DB 失败：文件保留（真相源不回滚）→ 抛出 DivergenceError，
    *      携带分歧明细与修复路径（KnowledgeSyncService.sync 从文件重建 DB），
    *      并以稳定码 core.diagnostic.knowledge.file-db-divergence 记录诊断。
@@ -99,12 +99,28 @@ export class KnowledgeUnitOfWork {
         this.#executeFileOp(op);
         this.#completedFileOps.push(op);
       } catch (err: unknown) {
-        // 回滚已完成的文件操作
-        this.#rollbackFileOps();
+        const partialTruth = {
+          entryIds: this.#completedFileOps.map((completed) => completed.entry.id),
+          fileOpsCompleted: this.#completedFileOps.length,
+          reconcileVia: 'KnowledgeSyncService.sync',
+        };
+        this.#compensateFileOps();
+        this.#logger.error(
+          'UoW: file batch aborted; partial file truth retained, DB not committed',
+          {
+            ...partialTruth,
+            failedEntryId: op.entry.id,
+            failedOperation: op.type,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
         this.#reset();
-        throw new FileWriteError(`File operation failed: ${op.type} for ${op.entry.id}`, {
-          cause: err,
-        });
+        throw new FileWriteError(
+          `File operation failed: ${op.type} for ${op.entry.id}; partial file truth retained: ` +
+            `entryIds=${JSON.stringify(partialTruth.entryIds)}, fileOpsCompleted=${partialTruth.fileOpsCompleted}; ` +
+            `reconcileVia=${partialTruth.reconcileVia}`,
+          { cause: err }
+        );
       }
     }
 
@@ -161,29 +177,43 @@ export class KnowledgeUnitOfWork {
   }
 
   #executeFileOp(op: PendingFileOp): void {
+    let result: string | null | boolean;
     switch (op.type) {
       case 'write':
-        this.#fileStore.persist(op.entry);
+        result = this.#fileStore.persist(op.entry);
         break;
       case 'move':
-        this.#fileStore.moveOnLifecycleChange(op.entry);
+        result = this.#fileStore.moveOnLifecycleChange(op.entry);
         break;
       case 'delete':
-        this.#fileStore.remove(op.entry);
+        result = this.#fileStore.remove(op.entry);
         break;
+    }
+    // 文件 port 用 null / false 表达失败，不保证抛错；真相源未写成时不能提交 DB。
+    // 交给 commit 的既有异常路径做补偿，并统一向调用方抛 FileWriteError。
+    if (result === null || result === false) {
+      this.#logger.error('UoW: file operation returned a failure result; DB commit aborted', {
+        type: op.type,
+        entryId: op.entry.id,
+        sourceFile: op.entry.sourceFile,
+        result,
+      });
+      throw new Error(`File store rejected ${op.type} for ${op.entry.id}`);
     }
   }
 
-  /** 尽力回滚已完成的文件操作 */
-  #rollbackFileOps(): void {
+  /** 尽力恢复删除；写入和移动缺少旧快照，必须保留而不能伪造原子回滚。 */
+  #compensateFileOps(): void {
     for (const op of [...this.#completedFileOps].reverse()) {
       try {
         switch (op.type) {
           case 'write':
-            this.#fileStore.remove(op.entry); // 回滚写入 → 删除
+            // 新建与覆盖都保留；删除“覆盖后的文件”会把原有知识一起抹掉。
             break;
           case 'delete':
-            this.#fileStore.persist(op.entry); // 回滚删除 → 重写
+            if (this.#fileStore.persist(op.entry) === null) {
+              throw new Error('File store could not restore the deleted entry');
+            }
             break;
           case 'move':
             // move 回滚较复杂，记录日志等 SyncService 修复
@@ -194,7 +224,7 @@ export class KnowledgeUnitOfWork {
         }
       } catch {
         // 回滚失败不再抛出，记录日志
-        this.#logger.error('UoW: File rollback failed', {
+        this.#logger.error('UoW: File compensation failed', {
           type: op.type,
           entryId: op.entry.id,
         });

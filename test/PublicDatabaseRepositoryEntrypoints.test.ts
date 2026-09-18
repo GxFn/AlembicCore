@@ -130,6 +130,29 @@ describe('public database and repository entrypoints', () => {
     expect(isAlembicRepositoryKey('tokenUsageStore')).toBe(false);
   });
 
+  it('round-trips opaque custom dimension ids without inheriting Object prototype entries', async () => {
+    const { generateRepository } = createAlembicRepositories(runtime.connection);
+    await generateRepository.create({
+      id: 'custom-dimension-snapshot',
+      projectRoot: tmpDir,
+      createdAt: new Date().toISOString(),
+      fileHashes: {},
+      dimensionMeta: {},
+    });
+    await generateRepository.saveDimFiles(
+      ['constructor', '__proto__', 'architecture'].map((dimId) => ({
+        snapshotId: 'custom-dimension-snapshot',
+        dimId,
+        filePath: `${dimId}.ts`,
+      }))
+    );
+    const dimensions = await generateRepository.getDimFileMap('custom-dimension-snapshot');
+    for (const dimId of ['constructor', '__proto__', 'architecture']) {
+      expect(Object.hasOwn(dimensions, dimId)).toBe(true);
+      expect([...dimensions[dimId]]).toEqual([`${dimId}.ts`]);
+    }
+  });
+
   it('exposes high-reference repository implementations and adapters through the stable facade', () => {
     expect(KnowledgeRepositoryImpl).toBeDefined();
     expect(KnowledgeEdgeRepositoryImpl).toBeDefined();
@@ -141,5 +164,48 @@ describe('public database and repository entrypoints', () => {
     expect(WarningRepository).toBeDefined();
     expect(RawDbSyncAdapter).toBeDefined();
     expect(TokenUsageStore).toBeDefined();
+  });
+
+  it('clears every snapshot for one project without a hidden row limit', async () => {
+    const repositories = createAlembicRepositories(runtime.connection);
+    const insert = runtime.sqlite.prepare(
+      'INSERT INTO bootstrap_snapshots (id, project_root, created_at) VALUES (?, ?, ?)'
+    );
+    runtime.sqlite.transaction(() => {
+      for (let index = 0; index < 10_001; index++) {
+        insert.run(`snapshot-${index}`, tmpDir, '2026-01-01T00:00:00Z');
+      }
+      insert.run('other-project', '/other-project', '2026-01-01T00:00:00Z');
+    })();
+    expect(await repositories.generateRepository.clearProject(tmpDir)).toBe(10_001);
+    expect(await repositories.generateRepository.getSnapshotCount(tmpDir)).toBe(0);
+    expect(await repositories.generateRepository.getSnapshotCount('/other-project')).toBe(1);
+  });
+
+  it('preserves snapshot fields through both public creation routes', async () => {
+    const repo = createAlembicRepositories(runtime.connection).generateRepository;
+    const fields = {
+      projectRoot: tmpDir,
+      createdAt: '2026-01-01T00:00:00Z',
+      sessionId: 'snapshot-session',
+      primaryLang: 'typescript',
+      fileHashes: { 'src/main.ts': 'content-hash' },
+      dimensionMeta: {
+        architecture: { candidateCount: 1, analysisChars: 12, referencedFiles: 1, durationMs: 2 },
+      },
+      episodicData: { findings: ['boundary verified'] },
+      isIncremental: true,
+      changedFiles: ['src/main.ts'],
+      affectedDims: ['architecture'],
+    };
+    const direct = await repo.create({ ...fields, id: 'direct-snapshot' });
+    const atomic = await repo.saveWithDimFiles({ ...fields, id: 'atomic-snapshot' }, [
+      { snapshotId: 'atomic-snapshot', dimId: 'architecture', filePath: 'src/main.ts' },
+    ]);
+    expect(direct).toMatchObject(fields);
+    expect({ ...direct, id: atomic.id }).toEqual(atomic);
+    expect(await repo.getDimFiles(atomic.id)).toEqual([
+      { dimId: 'architecture', filePath: 'src/main.ts' },
+    ]);
   });
 });

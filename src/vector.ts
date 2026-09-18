@@ -81,7 +81,6 @@ export {
   syncRecipeSemanticRegionVectors,
   testRecipeSemanticRegionGeneration,
 } from './service/vector/RecipeRegionVectorIndex.js';
-export type { StrictRecipeVectorGenerationReceiptV1 } from './service/vector/RecipeVectorGeneration.js';
 export * from './service/vector/RecipeVectorGeneration.js';
 export type {
   RecipeVectorTruthRemover,

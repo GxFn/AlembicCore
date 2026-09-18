@@ -2,6 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { AppConfigSchema } from '../../shared/schemas/config.js';
 
+function assertSafeConfigKey(key: string): void {
+  if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+    process.stderr.write(`[ConfigLoader] Unsafe config key rejected: ${key}\n`);
+    throw new TypeError(`Unsafe config key: ${key}`);
+  }
+}
+
 /**
  * ConfigLoader - 配置加载器
  * 直接读取 JSON 配置文件，避免 node-config 模块在 import 阶段就读取配置目录的时序问题
@@ -86,6 +93,7 @@ export class ConfigLoader {
   ): Record<string, unknown> {
     const output: Record<string, unknown> = { ...target };
     for (const key of Object.keys(source)) {
+      assertSafeConfigKey(key);
       if (
         source[key] &&
         typeof source[key] === 'object' &&
@@ -114,6 +122,10 @@ export class ConfigLoader {
     let value: unknown = this.config;
 
     for (const k of keys) {
+      // 配置只来自对象自己的字段，不能把 Object.prototype 上的方法当成配置值。
+      if (value == null || !Object.hasOwn(Object(value), k)) {
+        throw new Error(`Config key not found: ${key}`);
+      }
       value = (value as Record<string, unknown>)?.[k];
       if (value === undefined) {
         throw new Error(`Config key not found: ${key}`);
@@ -133,16 +145,17 @@ export class ConfigLoader {
   }
 
   static set(key: string, value: unknown) {
+    const keys = key.split('.');
+    keys.forEach(assertSafeConfigKey);
     if (!this.config) {
       this.load();
     }
 
-    const keys = key.split('.');
     let obj: Record<string, unknown> = this.config as Record<string, unknown>;
 
     for (let i = 0; i < keys.length - 1; i++) {
       const k = keys[i];
-      if (!obj[k]) {
+      if (!Object.hasOwn(obj, k) || !obj[k]) {
         obj[k] = {};
       }
       obj = obj[k] as Record<string, unknown>;

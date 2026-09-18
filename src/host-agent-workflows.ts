@@ -26,16 +26,6 @@ export {
   type SemanticDispositionReviewEvidenceStoreLoadResultV4,
   type SemanticDispositionReviewEvidenceStoreLoadResultV5,
 } from './service/production/DurableSemanticDispositionReviewAuthority.js';
-export type {
-  AnalysisArtifactProjectionV1,
-  AnalysisFixpointReceiptV1,
-  FactRecordV1,
-  FinalExpandedMiningScheduleReceiptV1,
-  HypothesisExpressionSetReceiptV1,
-  KnowledgeClusterV1,
-  ObservationPopulationV1,
-  TypedGateReturnV1,
-} from './service/production/StrictAnalysisContracts.js';
 export * from './service/production/StrictAnalysisContracts.js';
 export * from './service/production/StrictFactExecution.js';
 export type {

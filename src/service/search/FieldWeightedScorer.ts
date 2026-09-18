@@ -70,8 +70,9 @@ export class FieldWeightedScorer implements Scorer {
   constructor() {
     this.documents = [];
     this.totalDocs = 0;
-    this.docFreq = {};
-    this.topicDocFreq = {};
+    // token 可以是 constructor 等合法代码词，词频字典不能继承 Object.prototype 的同名值。
+    this.docFreq = Object.create(null);
+    this.topicDocFreq = Object.create(null);
     this._idIndex = new Map();
     this._totalLength = 0;
     this.avgLength = 0;
@@ -225,8 +226,8 @@ export class FieldWeightedScorer implements Scorer {
   /** 清空索引 */
   clear() {
     this.documents = [];
-    this.docFreq = {};
-    this.topicDocFreq = {};
+    this.docFreq = Object.create(null);
+    this.topicDocFreq = Object.create(null);
     this.totalDocs = 0;
     this._totalLength = 0;
     this.avgLength = 0;

@@ -128,7 +128,13 @@ describe('ContentPatcher', () => {
       expect(result.skipped).toBe(false);
       expect(result.fieldsPatched).toContain('coreCode');
       expect(result.beforeSnapshot.coreCode).toBe('func original() {}');
+      expect(result.beforeSnapshot.doClause).toBe('Use original pattern');
+      expect(result.beforeSnapshot.sourceRefs).toEqual([]);
       expect(result.afterSnapshot.coreCode).toBe('func updated() {}');
+      expect(mockRepo.updates[0]).toMatchObject({
+        id: 'r-001',
+        data: { coreCode: 'func updated() {}' },
+      });
     });
 
     it('applies multiple field changes', async () => {
@@ -411,38 +417,6 @@ describe('ContentPatcher', () => {
       expect(result.success).toBe(true);
       // Only coreCode should be patched, id and lifecycle should be skipped
       expect(result.fieldsPatched).toEqual(['coreCode']);
-    });
-  });
-
-  describe('applyProposal — snapshots', () => {
-    it('creates before and after snapshots', async () => {
-      const proposal = makeProposal();
-      const result = await patcher.applyProposal(proposal, 'agent-suggestion');
-
-      expect(result.beforeSnapshot).toBeDefined();
-      expect(result.afterSnapshot).toBeDefined();
-
-      // Before snapshot matches original
-      expect(result.beforeSnapshot.coreCode).toBe('func original() {}');
-      expect(result.beforeSnapshot.doClause).toBe('Use original pattern');
-      expect(result.beforeSnapshot.sourceRefs).toEqual([]);
-
-      // After snapshot reflects patch
-      expect(result.afterSnapshot.coreCode).toBe('func updated() {}');
-    });
-  });
-
-  describe('applyProposal — DB persistence', () => {
-    it('persists updated recipe to repo', async () => {
-      const proposal = makeProposal();
-      await patcher.applyProposal(proposal, 'agent-suggestion');
-
-      // Verify update was called
-      expect(mockRepo.update).toHaveBeenCalled();
-      expect(mockRepo.updates.length).toBeGreaterThan(0);
-      const updateCall = mockRepo.updates[0];
-      expect(updateCall.id).toBe('r-001');
-      expect(updateCall.data.coreCode).toBe('func updated() {}');
     });
   });
 });

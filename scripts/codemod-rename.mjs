@@ -162,12 +162,15 @@ for (const filePath of allFiles.filter((file) => CODE_EXTENSIONS.test(file))) {
       continue;
     }
     const renamed = fromByAbsolute.get(resolution.resolved);
-    if (!renamed) {
+    const movedImporter = fromByAbsolute.get(filePath);
+    if (!renamed && !movedImporter) {
       continue;
     }
+    // 导入方换目录后，即使依赖本身不移动，相对路径也必须从新目录重新计算。
+    // 同批同时移动导入方与依赖时，两端都使用计划中的最终位置。
     const newSpecifier = toSpecifier(
-      path.dirname(filePath),
-      path.join(root, renamed.to),
+      path.dirname(movedImporter ? path.join(root, movedImporter.to) : filePath),
+      renamed ? path.join(root, renamed.to) : resolution.resolved,
       resolution.suffix
     );
     if (newSpecifier !== specifier) {

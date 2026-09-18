@@ -7,6 +7,7 @@ import type { KnowledgeFileWriter } from '../../service/knowledge/KnowledgeFileW
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
 import type { ConfidenceRouter } from './ConfidenceRouter.js';
 import type { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import { persistKnowledgeUpdate } from './persistKnowledgeUpdate.js';
 import {
   evaluateRecipeRetrievalReadiness,
   RECIPE_RETRIEVAL_PROFILE_SCHEMA_VERSION,
@@ -40,6 +41,18 @@ type AfterPublishHook = () => void | Promise<void>;
 type RetrievalReadinessEvaluator = (entry: KnowledgeEntry) => RetrievalReadinessReport;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// 宿主操作名保持兼容；计数持久化只使用 Stats 已有字段，不以类型断言创造新计数器。
+const USAGE_COUNTERS = {
+  adoption: 'adoptions',
+  application: 'applications',
+  view: 'views',
+  adoptions: 'adoptions',
+  applications: 'applications',
+  views: 'views',
+  guardHits: 'guardHits',
+  searchHits: 'searchHits',
+} as const;
 
 // 编辑入口只拦 wire 结构错误和不支持的 schema：空值、未接地、重复或 source hash 失配仍是
 // pending/staging 可修复的 readiness 问题。passthrough 保留未来扩展字段，null 保持旧 Recipe 的
@@ -456,6 +469,7 @@ export class KnowledgeService {
           case 'doClause':
           case 'dontClause':
           case 'coreCode':
+          case 'usageGuide':
             dbUpdates[key] = data[key];
             break;
 
@@ -500,16 +514,18 @@ export class KnowledgeService {
       // DB 更新不再执行 → 库/盘都停在旧态、调用方可重试。若吞掉 null 继续写 DB，则 .md 停在旧内容而
       // DB 已更新，下一轮 syncAll/rescan 以 .md 为真相源会把 DB 更新回滚覆盖 → 用户更新静默丢失。
       if (this._fileWriter) {
-        Object.assign(_entry, dbUpdates);
-        const persistedPath = this._fileWriter.persist(_entry);
+        // 结构化编辑输入是普通 JSON；通过聚合根恢复 Content/Reasoning 等值对象，
+        // 不能 Object.assign 覆盖实例后再调用它们的 toJSON。
+        const prospective = KnowledgeEntry.fromJSON({ ..._entry.toJSON(), ...dbUpdates });
+        const persistedPath = this._fileWriter.persist(prospective);
         if (persistedPath === null) {
           throw new Error(
             `Knowledge file persist failed for "${_entry.title}" — aborting update (file-first source of truth; see fileWriter error log)`
           );
         }
         // fileWriter 可能更新 sourceFile，同步到 dbUpdates
-        if (_entry.sourceFile) {
-          dbUpdates.sourceFile = _entry.sourceFile;
+        if (prospective.sourceFile) {
+          dbUpdates.sourceFile = prospective.sourceFile;
         }
       }
 
@@ -808,22 +824,40 @@ export class KnowledgeService {
     options: { actor?: string; feedback?: string } = {}
   ) {
     try {
+      const counter = Object.hasOwn(USAGE_COUNTERS, type)
+        ? USAGE_COUNTERS[type as keyof typeof USAGE_COUNTERS]
+        : null;
+      if (type !== 'feedback' && counter === null) {
+        throw new ValidationError(`Unknown knowledge usage type: ${type}`, {
+          field: 'type',
+          value: type,
+          allowedTypes: [...Object.keys(USAGE_COUNTERS), 'feedback'],
+        });
+      }
       const entry = await this._findOrThrow(id);
-      entry.stats.increment(
-        type as 'views' | 'adoptions' | 'applications' | 'guardHits' | 'searchHits'
-      );
-
-      const statsJson = entry.stats.toJSON();
-      await this.repository.update(id, {
-        stats: JSON.stringify(statsJson),
-        updatedAt: Math.floor(Date.now() / 1000),
-      });
+      if (counter) {
+        entry.stats.increment(counter);
+        // 计数也是 Markdown 真相的一部分；只写 DB 会在下次文件同步时归零。
+        await persistKnowledgeUpdate(
+          this.repository,
+          this._fileWriter,
+          id,
+          { stats: entry.stats.toJSON(), updatedAt: Math.floor(Date.now() / 1000) },
+          'knowledge-usage'
+        );
+      }
+      // feedback 保持已有审计语义，无计数变化时不产生额外文件写入。
 
       await this._audit(`knowledge_${type}`, id, options.actor || 'system', {
         feedback: options.feedback,
       });
 
-      this.logger.debug(`Knowledge ${type} incremented`, { id, type });
+      this.logger.debug('Knowledge usage recorded', {
+        id,
+        type,
+        counter,
+        persisted: counter !== null,
+      });
 
       return entry;
     } catch (error: unknown) {

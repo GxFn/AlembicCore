@@ -1001,18 +1001,27 @@ function summarizePanorama(
     return null;
   }
   try {
-    // PanoramaResult.layers: LayerHierarchy { levels: LayerLevel[] }
+    // ProjectContext/snapshot 已归一为数组；旧扫描结果仍使用 levels/Map/cycles。
+    // 在此统一形状再应用同一预算，避免已有结构事实被当作空结果。
     const layerHierarchy = panoramaResult.layers as
       | { levels?: Array<{ level: number; name: string; modules: string[] }> }
+      | Array<{ level: number; name: string; modules: string[] }>
       | undefined;
-    const layers = layerHierarchy?.levels ?? [];
+    const layers = Array.isArray(layerHierarchy) ? layerHierarchy : (layerHierarchy?.levels ?? []);
 
     // PanoramaResult.modules: Map<string, PanoramaModule>
     const modules = panoramaResult.modules as
       | Map<string, { name: string; fanIn: number; fanOut: number }>
       | undefined;
-    const couplingHotspots: Array<{ module: string; fanIn: number; fanOut: number }> = [];
-    if (modules instanceof Map) {
+    const normalizedHotspots = Array.isArray(panoramaResult.couplingHotspots)
+      ? (panoramaResult.couplingHotspots as Array<{
+          module: string;
+          fanIn: number;
+          fanOut: number;
+        }>)
+      : null;
+    const couplingHotspots = normalizedHotspots ? [...normalizedHotspots] : [];
+    if (!normalizedHotspots && modules instanceof Map) {
       for (const [, mod] of modules) {
         if (mod.fanIn >= 10 || mod.fanOut >= 10) {
           couplingHotspots.push({ module: mod.name, fanIn: mod.fanIn, fanOut: mod.fanOut });
@@ -1022,11 +1031,14 @@ function summarizePanorama(
     }
 
     // PanoramaResult.cycles: CyclicDependency[]
-    const cycles = (panoramaResult.cycles as Array<{ cycle: string[]; severity: string }>) ?? [];
+    const cycles = (panoramaResult.cyclicDependencies ?? panoramaResult.cycles ?? []) as Array<{
+      cycle: string[];
+      severity: string;
+    }>;
 
     // PanoramaResult.gaps: KnowledgeGap[] (dimension-based)
     const gaps =
-      (panoramaResult.gaps as Array<{
+      ((panoramaResult.knowledgeGaps ?? panoramaResult.gaps) as Array<{
         dimension: string;
         dimensionName: string;
         recipeCount: number;
@@ -1350,16 +1362,14 @@ function buildProjectContextLanguageStats(
   input: ProjectContextPresenterInput
 ): Record<string, number> {
   const stats = new Map<string, number>();
-  for (const language of input.repo?.languages ?? []) {
-    stats.set(language.language, language.fileCount ?? 0);
-  }
   for (const file of input.files) {
-    if (file.language && !stats.has(file.language)) {
-      stats.set(file.language, 0);
-    }
     if (file.language) {
       stats.set(file.language, (stats.get(file.language) ?? 0) + 1);
     }
+  }
+  // repo 给的是同一 scope 的总量；files 常为已读子集，只补缺少统计的语言。
+  for (const language of input.repo?.languages ?? []) {
+    stats.set(language.language, language.fileCount ?? stats.get(language.language) ?? 0);
   }
   return Object.fromEntries(
     [...stats.entries()].sort(([left], [right]) => left.localeCompare(right))

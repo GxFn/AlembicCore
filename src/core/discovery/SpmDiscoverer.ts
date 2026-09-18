@@ -127,7 +127,9 @@ export class SpmDiscoverer extends ProjectDiscoverer {
         if (matchTarget.path) {
           candidates.push(join(pkgDir, matchTarget.path));
         }
-        candidates.push(join(pkgDir, 'Sources', targetName));
+        candidates.push(
+          join(pkgDir, matchTarget.type === 'testTarget' ? 'Tests' : 'Sources', targetName)
+        );
         candidates.push(join(pkgDir, targetName));
         for (const dir of candidates) {
           if (existsSync(dir)) {
@@ -362,12 +364,46 @@ export class SpmDiscoverer extends ProjectDiscoverer {
 
         const pathMatch = block.match(/path\s*:\s*"([^"]+)"/);
         const depsMatch = block.match(/dependencies\s*:\s*\[([^\]]*)\]/s);
-        const deps: string[] = [];
+        const dependencies: { name: string; index: number }[] = [];
         if (depsMatch) {
           const depRe = /\.(?:product|target)\s*\(\s*name\s*:\s*"([^"]+)"/g;
           let dm: RegExpExecArray | null;
           while ((dm = depRe.exec(depsMatch[1])) !== null) {
-            deps.push(dm[1]);
+            dependencies.push({ name: dm[1], index: dm.index });
+          }
+          const literalStarts = new Set<number>();
+          let nesting = 0;
+          let quoted = false;
+          let escaped = false;
+          for (let index = 0; index < depsMatch[1].length; index++) {
+            const character = depsMatch[1][index];
+            if (quoted) {
+              if (escaped) {
+                escaped = false;
+              } else if (character === '\\') {
+                escaped = true;
+              } else if (character === '"') {
+                quoted = false;
+              }
+            } else if (character === '"') {
+              quoted = true;
+              if (nesting === 0) {
+                literalStarts.add(index);
+              }
+            } else if (character === '(' || character === '[') {
+              nesting++;
+            } else if (character === ')' || character === ']') {
+              nesting--;
+            }
+          }
+          // SPM普通字符串依赖与.product/.target混排时仍保持清单顺序，
+          // 不把调用内部的package参数字符串误作另一个依赖。
+          const literalRe = /(?:^|,)\s*"([^"]+)"(?=\s*(?:,|$))/g;
+          while ((dm = literalRe.exec(depsMatch[1])) !== null) {
+            // computedDependency("a", "b", "c")中的参数也不是静态依赖声明。
+            if (literalStarts.has(dm.index + dm[0].indexOf('"'))) {
+              dependencies.push({ name: dm[1], index: dm.index });
+            }
           }
         }
 
@@ -375,7 +411,7 @@ export class SpmDiscoverer extends ProjectDiscoverer {
           name: nameMatch[1],
           type,
           path: pathMatch ? pathMatch[1] : null,
-          dependencies: deps,
+          dependencies: dependencies.sort((a, b) => a.index - b.index).map((dep) => dep.name),
         });
       }
     }

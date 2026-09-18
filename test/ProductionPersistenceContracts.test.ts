@@ -34,12 +34,16 @@ import {
   validateSerialAdmissionLedgerV1,
 } from '../src/knowledge.js';
 import { createAlembicRepositories } from '../src/repositories.js';
-import { hashCanonicalJson } from '../src/service/project-context/foundation/canonical.js';
+import {
+  hashBytes,
+  hashCanonicalJson,
+} from '../src/service/project-context/foundation/canonical.js';
 import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 import {
   assertPrivateCorpusRevisionHandleV1,
   createPrivateCorpusRevisionCheckpointV1,
   initializePrivateCorpusRevisionV1,
+  openPrivateCorpusRevisionDatabaseV1,
   PrivateCorpusRevisionHandleV1,
   type PrivateCorpusRevisionInitReceiptV1,
   rehydratePrivateCorpusRevisionV1,
@@ -59,6 +63,57 @@ afterEach(() => {
 });
 
 describe('production persistence contracts', () => {
+  it('refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-checkpoint-busy-'));
+    roots.push(root);
+    const initialized = await initializePrivateCorpusRevisionV1(privateScopeResolver(root), {
+      runId: 'run-checkpoint-busy',
+      revisionId: 'revision-1',
+      analysisFixpointHash: `sha256:${'1'.repeat(64)}`,
+      configReceiptHash,
+      runtimeReceiptHash,
+      credentialLocationSymbol: 'config-ref:checkpoint-test',
+      acceptedMigrationBundleSemanticHash,
+    });
+    const { handle, runtime } = initialized;
+    const reader = await openPrivateCorpusRevisionDatabaseV1(handle);
+    try {
+      runtime.sqlite.exec(
+        'CREATE TABLE checkpoint_probe (id INTEGER); INSERT INTO checkpoint_probe VALUES (1)'
+      );
+      runtime.sqlite.pragma('wal_checkpoint(TRUNCATE)');
+      reader.sqlite.exec('BEGIN');
+      reader.sqlite.prepare('SELECT COUNT(*) FROM checkpoint_probe').get();
+      runtime.sqlite.exec('INSERT INTO checkpoint_probe VALUES (2)');
+      runtime.sqlite.pragma('busy_timeout = 1');
+      const uncheckpointed = runtime.sqlite.pragma('wal_checkpoint(PASSIVE)') as Array<{
+        log: number;
+        checkpointed: number;
+      }>;
+      expect(uncheckpointed[0].log).toBeGreaterThan(uncheckpointed[0].checkpointed);
+      const staleDatabaseHash = hashBytes(fs.readFileSync(handle.resolver.databasePath));
+      const context = expectedRevisionContext(handle.initReceipt);
+
+      expect(() => createPrivateCorpusRevisionCheckpointV1(handle, runtime, context)).toThrow(
+        'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE'
+      );
+
+      reader.sqlite.exec('ROLLBACK');
+      const receipt = createPrivateCorpusRevisionCheckpointV1(handle, runtime, context);
+      expect(receipt.databaseHash).not.toBe(staleDatabaseHash);
+      expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
+      expect(
+        validatePrivateCorpusRevisionCheckpointV1(receipt, handle.initReceipt, context)
+      ).toEqual(receipt);
+    } finally {
+      if (reader.sqlite.inTransaction) {
+        reader.sqlite.exec('ROLLBACK');
+      }
+      reader.close();
+      runtime.close();
+    }
+  });
+
   it('rehydrates an initialized private revision through the public workspace API', async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-private-revision-'));
     roots.push(root);

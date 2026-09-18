@@ -396,7 +396,10 @@ export function computeJobDisplaySnapshotChecksum(snapshot: JobDisplaySnapshot):
       checksum: null,
     },
   };
-  return createHash('sha256').update(stableStringify(payload)).digest('hex');
+  // checksum 绑定实际 JSON wire：undefined 对象键省略，数组空位/undefined 变 null。
+  // 普通 JSON 输入的 canonical 字节不变，避免快照刚落盘读回就自报 checksum mismatch。
+  const wirePayload: unknown = JSON.parse(JSON.stringify(payload));
+  return createHash('sha256').update(stableStringify(wirePayload)).digest('hex');
 }
 
 export function validateJobDisplaySnapshot(

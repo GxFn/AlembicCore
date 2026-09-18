@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { assessFileImpact } from '../../src/service/sustain/ContentImpactAnalyzer.js';
-import { getFileDiff } from '../../src/shared/diffParser.js';
+import { getFileDiff, parseDiffHunks } from '../../src/shared/diffParser.js';
 import type { RecipeTokens } from '../../src/shared/recipeTokens.js';
 
 function git(cwd: string, args: string[]): void {
@@ -38,6 +38,30 @@ function writeFile(root: string, rel: string, content: string): void {
 const REL = 'src/widget.ts';
 
 describe('maint-fix-core — diffParser.getFileDiff revisionRange', () => {
+  it('保留以连续加减号开头的真实源码变更，不将 hunk 内容误当文件头', () => {
+    const root = setupRepo();
+    try {
+      writeFile(root, REL, '--remainingRequests;\n');
+      git(root, ['add', '-A']);
+      git(root, ['commit', '-q', '-m', 'baseline']);
+      writeFile(root, REL, '++completedRequests;\n');
+
+      const diff = getFileDiff(root, REL);
+      expect(diff).not.toBeNull();
+      expect(parseDiffHunks(diff!)).toEqual([
+        { removedLines: ['--remainingRequests;'], addedLines: ['++completedRequests;'] },
+      ]);
+      expect(
+        assessFileImpact(root, REL, {
+          tokens: new Set(['remainingRequests', 'completedRequests']),
+          sources: new Map(),
+        })?.matchedTokens
+      ).toEqual(expect.arrayContaining(['remainingRequests', 'completedRequests']));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('验收1 默认零回归：不传 revisionRange → 工作树 `git diff HEAD`（未提交可见、已提交为空）', () => {
     const root = setupRepo();
     try {

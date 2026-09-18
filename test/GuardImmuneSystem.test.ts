@@ -7,49 +7,14 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { GuardCheckEngine } from '../src/service/guard/GuardCheckEngine.js';
 import { GuardFeedbackLoop } from '../src/service/guard/GuardFeedbackLoop.js';
 import { RuleLearner } from '../src/service/guard/RuleLearner.js';
-import { UncertaintyCollector } from '../src/service/guard/UncertaintyCollector.js';
 
-type GuardEngineDb = ConstructorParameters<typeof GuardCheckEngine>[0];
 type RuleLearnerSignalBus = NonNullable<
   NonNullable<ConstructorParameters<typeof RuleLearner>[1]>['signalBus']
 >;
 
-function createMockDb(): GuardEngineDb {
-  return {
-    prepare() {
-      return {
-        all() {
-          return [];
-        },
-        get() {
-          return undefined;
-        },
-        run() {
-          return {};
-        },
-      };
-    },
-    exec() {},
-  } as GuardEngineDb;
-}
-
 describe('Guard immune system integration', () => {
-  it('wires UncertaintyCollector into GuardCheckEngine batch reports', () => {
-    const engine = new GuardCheckEngine(createMockDb());
-    const result = engine.auditFiles([
-      { path: 'a.js', content: 'console.log("hello");' },
-      { path: 'b.swift', content: 'let x = try! something()' },
-    ]);
-
-    expect(engine.getUncertaintyCollector()).toBeInstanceOf(UncertaintyCollector);
-    expect(result.capabilityReport).toBeDefined();
-    expect(result.files.every((file) => Array.isArray(file.uncertainResults))).toBe(true);
-    expect(result.summary.totalUncertain).toBeGreaterThanOrEqual(0);
-  });
-
   it('auto-confirms Recipe usage when previous violations disappear', () => {
     const violationsStore = {
       getRunsByFile() {

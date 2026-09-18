@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { DataPath, WriteZone } from '../io/index.js';
+import Logger from '../logging/Logger.js';
 import type { Signal, SignalBus } from './SignalBus.js';
 
 export interface SignalTraceQueryOptions {
@@ -123,10 +124,10 @@ export class SignalTraceWriter {
       }
       const entries = this.#readJsonl(filePath);
       for (const e of entries) {
-        if (opts.from && e.timestamp < opts.from) {
+        if (opts.from !== undefined && e.timestamp < opts.from) {
           continue;
         }
-        if (opts.to && e.timestamp > opts.to) {
+        if (opts.to !== undefined && e.timestamp > opts.to) {
           continue;
         }
         total++;
@@ -149,6 +150,11 @@ export class SignalTraceWriter {
   }
 
   #resolveFile(type: string): string {
+    // HTTP 查询透传的 type 只表示信号名，不允许将其解释成相对/绝对路径。
+    if (!/^[a-z][a-z0-9_-]*$/i.test(type)) {
+      Logger.getInstance().warn('[SignalTraceWriter] rejected invalid signal type path', { type });
+      throw new TypeError('Signal type must be a single signal name');
+    }
     return path.join(this.#baseDir, `${type}.jsonl`);
   }
 

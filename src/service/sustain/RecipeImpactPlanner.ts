@@ -11,11 +11,18 @@
  * @module service/sustain/RecipeImpactPlanner
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
 import { isConsumable, isDegraded } from '../../domain/knowledge/Lifecycle.js';
+import Logger from '../../infrastructure/logging/Logger.js';
 import type { ProposalSource } from '../../repository/evolution/ProposalRepository.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
-import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
+import type {
+  RecipeSourceRefEntity,
+  RecipeSourceRefRepositoryImpl,
+} from '../../repository/sourceref/RecipeSourceRefRepository.js';
 import { extractRecipeTokens } from '../../shared/recipeTokens.js';
+import { stripSourceRangeSuffix } from '../../shared/sourceRefPath.js';
 import { assessImpactUnified } from './ContentImpactAnalyzer.js';
 import type { EvolutionAction, EvolutionDecision, EvolutionResult } from './ProposalGateway.js';
 
@@ -122,6 +129,7 @@ export class RecipeImpactPlanner {
 
     const candidateMap = new Map<string, EvolutionCandidate>();
     const ignored: IgnoredChange[] = [];
+    const deletedFiles = new Set(diff.deleted.map(stripSourceRangeSuffix));
 
     // ── Phase A: deleted 文件 → source-deleted / source-deleted-partial ──
     for (const deletedPath of diff.deleted) {
@@ -133,10 +141,13 @@ export class RecipeImpactPlanner {
       for (const ref of refs) {
         const allRefs = this.#sourceRefRepo.findByRecipeId(ref.recipeId);
         const activeRefs = allRefs.filter(
-          (r) => r.status === 'active' && r.sourcePath !== deletedPath
+          (r) => r.status === 'active' && !deletedFiles.has(stripSourceRangeSuffix(r.sourcePath))
         );
-        const reason: EvolutionCandidateReason =
-          activeRefs.length === 0 ? 'source-deleted' : 'source-deleted-partial';
+        // activeRefCount 继续统计健康来源；内容漂移/已移动但仍存在的来源不能判作「全丢」。
+        const hasSurvivingSource = allRefs.some((r) => this.#sourceSurvives(r, deletedFiles));
+        const reason: EvolutionCandidateReason = hasSurvivingSource
+          ? 'source-deleted-partial'
+          : 'source-deleted';
         await this.#mergeCandidate(candidateMap, ref.recipeId, {
           reason,
           affectedFiles: [deletedPath],
@@ -194,6 +205,34 @@ export class RecipeImpactPlanner {
   }
 
   // ── Private ──
+
+  #sourceSurvives(ref: RecipeSourceRefEntity, deletedFiles: ReadonlySet<string>): boolean {
+    if (ref.status === 'active' || ref.status === 'drifted') {
+      return !deletedFiles.has(stripSourceRangeSuffix(ref.sourcePath));
+    }
+    if (ref.status !== 'renamed' || !ref.newPath) {
+      return false;
+    }
+    const currentPath = stripSourceRangeSuffix(ref.newPath);
+    if (deletedFiles.has(currentPath)) {
+      return false;
+    }
+    try {
+      return fs.statSync(path.resolve(this.#projectRoot, currentPath)).isFile();
+    } catch (error) {
+      // 无法确认存在时保守保留来源，不能把访问失败转译为自动弃用证据。
+      const code = (error as NodeJS.ErrnoException).code;
+      const missing = code === 'ENOENT' || code === 'ENOTDIR';
+      Logger.getInstance().debug('RecipeImpactPlanner: renamed source target check failed', {
+        recipeId: ref.recipeId,
+        sourcePath: ref.sourcePath,
+        newPath: ref.newPath,
+        code,
+        result: missing ? 'not-surviving' : 'unknown-preserved',
+      });
+      return !missing;
+    }
+  }
 
   async #buildPlanFromStaleOnly(): Promise<EvolutionCandidatePlan> {
     const candidateMap = new Map<string, EvolutionCandidate>();

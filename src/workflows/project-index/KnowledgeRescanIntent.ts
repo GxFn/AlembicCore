@@ -144,7 +144,8 @@ function normalizeKnowledgeRescanPositiveInteger(
         ? Number(value)
         : null;
 
-  if (numericValue === null || !Number.isFinite(numericValue) || numericValue <= 0) {
+  // 小于 1 的正数取整后会变成 0，也按既有无效预算策略回退默认值。
+  if (numericValue === null || !Number.isFinite(numericValue) || numericValue < 1) {
     return defaultValue;
   }
 

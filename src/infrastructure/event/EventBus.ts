@@ -25,9 +25,11 @@ export class EventBus extends EventEmitter {
   /** 异步 emit — 串行等待所有 listener 完成 */
   async emitAsync(eventName: string | symbol, ...args: unknown[]) {
     this.#recordEvent(eventName, args);
-    const listeners = this.listeners(eventName);
+    // rawListeners 保留 once 包装器；listeners 会解包，导致一次性监听器永不移除。
+    // 同时保持 EventEmitter 的 this 绑定，异步派发只改变等待方式。
+    const listeners = this.rawListeners(eventName);
     for (const listener of listeners) {
-      await listener(...args);
+      await listener.apply(this, args);
     }
   }
 

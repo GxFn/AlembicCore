@@ -51,6 +51,23 @@ describe('OutputBudget mechanism', () => {
     expect(Buffer.from(result.content, 'utf8').toString('utf8')).toBe(result.content);
   });
 
+  test('keeps complete UTF-8 characters at the boundary and drops only partial ones', () => {
+    const budget = CORE_TOOL_OUTPUT_BUDGETS.alembic_prime.budgetBytes;
+    for (const character of ['é', '中', '🙂']) {
+      const width = Buffer.byteLength(character, 'utf8');
+      const prefix = `${'a'.repeat(budget - width)}${character}`;
+      const exact = applyOutputBudget('alembic_prime', `${prefix}tail`);
+      expect(exact.content).toBe(prefix);
+      expect(exact.overflow?.omittedBytes).toBe(4);
+      for (let remaining = 1; remaining < width; remaining++) {
+        const ascii = 'a'.repeat(budget - remaining);
+        const partial = applyOutputBudget('alembic_prime', `${ascii}${character}tail`);
+        expect(partial.content).toBe(ascii);
+        expect(partial.truncated).toBe(true);
+      }
+    }
+  });
+
   test('budgets carry the MT1 measured values, not estimates', () => {
     expect(CORE_TOOL_OUTPUT_BUDGETS.alembic_job).toMatchObject({
       budgetBytes: 16_384,

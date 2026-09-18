@@ -405,7 +405,9 @@ function _computeTier(fileCount: number): 'full-cha' | 'full' | 'sampled' | 'imp
 
 /** 抽样核心文件 — 优先选取 src/、lib/、app/、core/ 等核心目录 */
 function _sampleCoreFiles(fileSummaries: FileSummary[], limit: number): FileSummary[] {
-  const CORE_DIRS = /\/(src|lib|app|core|pkg|internal|domain|service|controller|handler|api)\//i;
+  // fileSummaries 通常传入 src/foo.ts 这样的相对路径，首段同样是核心目录边界。
+  const CORE_DIRS =
+    /(?:^|\/)(src|lib|app|core|pkg|internal|domain|service|controller|handler|api)\//i;
   const scored = fileSummaries.map((f: FileSummary) => ({
     f,
     score: CORE_DIRS.test(f.file) ? 2 : 1,

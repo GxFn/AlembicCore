@@ -11,6 +11,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import Logger from '../../../../infrastructure/logging/Logger.js';
 import type { DimensionDef } from '../../../../types/ProjectSnapshot.js';
 import type { SessionCacheShape } from '../../../../types/SnapshotViews.js';
 import {
@@ -212,6 +213,16 @@ export class GenerateSession {
     this.completedDimensions = new Map<string, DimensionCompletion>(
       Object.entries(completedDimensions ?? {})
     );
+    const unknownDimensions = [...this.completedDimensions.keys()].filter(
+      (id) => !dimensions.some((dimension) => dimension.id === id)
+    );
+    if (unknownDimensions.length > 0) {
+      Logger.getInstance().warn('[GenerateSession] restored unknown completions do not count', {
+        sessionId: this.id,
+        unknownDimensions,
+        declaredDimensions: dimensions.map((dimension) => dimension.id),
+      });
+    }
     this.sessionStore = sessionStore
       ? MiningSessionStore.fromJSON(sessionStore as unknown as Record<string, unknown>)
       : new MiningSessionStore(initialProjectContext);
@@ -247,7 +258,7 @@ export class GenerateSession {
   }
 
   get isComplete() {
-    return this.completedDimensions.size >= this.dimensions.length;
+    return this.dimensions.every((dimension) => this.completedDimensions.has(dimension.id));
   }
 
   get isBlockingLease() {
@@ -255,10 +266,15 @@ export class GenerateSession {
   }
 
   getProgress() {
+    // 历史快照保留原始完成记录供诊断；只有本会话声明的维度可以计入进度或释放租约。
+    const declaredIds = new Set(this.dimensions.map((dimension) => dimension.id));
+    const completedDimIds = [...this.completedDimensions.keys()].filter((id) =>
+      declaredIds.has(id)
+    );
     return {
-      completed: this.completedDimensions.size,
+      completed: completedDimIds.length,
       total: this.dimensions.length,
-      completedDimIds: [...this.completedDimensions.keys()],
+      completedDimIds,
       remainingDimIds: this.dimensions
         .map((d: DimensionDef) => d.id)
         .filter((id: string) => !this.completedDimensions.has(id)),
@@ -302,6 +318,13 @@ export class GenerateSession {
     dimId: string,
     report: DimensionReport
   ): { updated: boolean; qualityReport: DimensionQualityReport } {
+    if (!this.dimensions.some((dimension) => dimension.id === dimId)) {
+      Logger.getInstance().warn('[GenerateSession] completion rejected for unknown dimension', {
+        sessionId: this.id,
+        dimensionId: dimId,
+      });
+      throw new RangeError(`Unknown dimensionId: ${dimId}`);
+    }
     const updated = this.completedDimensions.has(dimId);
 
     this.completedDimensions.set(dimId, {
@@ -669,10 +692,23 @@ export class GenerateSessionManager {
       if (!isSessionSnapshot(snapshot)) {
         continue;
       }
-      const session = new GenerateSession({
-        ...snapshot,
-        onChange: () => this.#persist(),
-      });
+      const existing = this.#sessionsByProject.get(sessionProjectKey(snapshot.projectRoot));
+      const restored = new GenerateSession(snapshot);
+      // 同一租约保留已交给宿主的对象身份，同时恢复磁盘的新进度；不能只保留旧对象，
+      // 否则另一个 manager 保存的完成记录会被下一次本地更新覆盖。
+      const session = existing?.id === snapshot.id ? existing : restored;
+      if (session === existing) {
+        session.setOnChange(null);
+        Object.assign(session, restored);
+        // #projectContext 不属于可枚举字段，使用现有入口恢复；此时暂不触发持久化。
+        session.replaceProjectContext(snapshot.projectContext);
+        Logger.getInstance().debug('[GenerateSession] store reload retained the live lease', {
+          sessionId: session.id,
+          projectRoot: session.projectRoot,
+          completedDimensions: session.getProgress().completed,
+        });
+      }
+      session.setOnChange(() => this.#persist());
       sessionsByProject.set(sessionProjectKey(session.projectRoot), session);
     }
     this.#sessionsByProject = sessionsByProject;

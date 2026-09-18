@@ -2,13 +2,37 @@
 
 import type {
   RecipeContextQueryError,
+  RecipeContextRef,
   RecipeRelationScoreImpact,
   RecipeSourceRefGroup,
   RecipeSourceRefView,
 } from '../../../domain/recipe-context/index.js';
 import type { RecipeContextHandlerResult } from '../interface/contracts.js';
+import { renamedRefDiagnostic, staleRefDiagnostic } from '../interface/diagnostics.js';
 import { createUnavailableRecipeContextData } from '../interface/response.js';
 import type { RecipeSourceRefRow } from '../ports.js';
+
+/** 内容漂移沿用 stale-ref 警告契约，但不能误报为文件不存在。 */
+export function sourceRefDiagnostics(
+  row: RecipeSourceRefRow,
+  ref: RecipeContextRef
+): RecipeContextQueryError[] {
+  if (row.status === 'stale') {
+    return [staleRefDiagnostic(row.recipeId, row.sourcePath, ref)];
+  }
+  if (row.status === 'drifted') {
+    return [
+      {
+        ...staleRefDiagnostic(row.recipeId, row.sourcePath, ref),
+        message: `Recipe ${row.recipeId} source ref ${row.sourcePath} has drifted (the referenced content changed).`,
+      },
+    ];
+  }
+  if (row.status === 'renamed') {
+    return [renamedRefDiagnostic(row.recipeId, row.sourcePath, row.newPath, ref)];
+  }
+  return [];
+}
 
 /** Relation types whose presence is a caution signal rather than a recommendation. */
 const CAUTION_RELATION_TYPES = new Set([

@@ -37,11 +37,14 @@ export function aggregateCandidates(items: CandidateItem[], opts: AggregateOpts 
   const duplicates: { item: CandidateItem; duplicateOf: string }[] = [];
 
   for (const item of items) {
-    const titleTokens = tokenizeForSimilarity(item.title || '');
+    // 去重只比较真实字符串；坏 JSON 原样保留给后续 validator 产生逐条诊断。
+    const titleTokens = tokenizeForSimilarity(typeof item?.title === 'string' ? item.title : '');
     let isDuplicate = false;
 
     for (const existing of kept) {
-      const existingTokens = tokenizeForSimilarity(existing.title || '');
+      const existingTokens = tokenizeForSimilarity(
+        typeof existing?.title === 'string' ? existing.title : ''
+      );
       const sim = jaccardSimilarity(titleTokens, existingTokens);
       if (sim >= threshold) {
         duplicates.push({ item, duplicateOf: existing.title });

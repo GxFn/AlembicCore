@@ -165,8 +165,8 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
 
     // ── 计算 content hash 并替换 placeholder ──
     const md = lines.join('\n');
-    const cleanedForHash = md.replace(`_contentHash: ${hashPlaceholder}`, '');
-    const hash = computeKnowledgeHash(cleanedForHash);
+    // 与文件同步共用同一整行排除规则；只删字段文本会遗留空行，误报合法文件被手改。
+    const hash = computeKnowledgeHash(md);
     return md.replace(hashPlaceholder, hash);
   }
 
@@ -273,6 +273,12 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       const { dir, filename } = this._resolveFilePath(entry);
       const filePath = path.join(dir, filename);
 
+      // 保留历史 trigger/slug 文件名，但同名不代表同一知识条目。
+      // 覆盖其他 id（或无法确认所有者的文件）会丢失真相源；必须在写入/清旧文件前拒绝。
+      if (fs.existsSync(filePath) && !this.#isOwnedFile(filePath, entry.id, 'persist')) {
+        throw new Error(`KNOWLEDGE_FILE_ID_COLLISION: path=${filePath}, requestedId=${entry.id}`);
+      }
+
       // sourceFile is part of persisted truth, so set the destination before
       // serializing frontmatter rather than repairing it after the write.
       entry.sourceFile = path.relative(this.projectRoot, filePath);
@@ -308,7 +314,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
     // 先尝试 sourceFile 精确删除
     if (entry.sourceFile) {
       const fullPath = path.join(this.projectRoot, entry.sourceFile);
-      if (fs.existsSync(fullPath)) {
+      if (fs.existsSync(fullPath) && this.#isOwnedFile(fullPath, entry.id, 'remove')) {
         if (this.#wz) {
           const rel = fullPath.replace(this.#wz.dataRoot, '').replace(/^\//, '');
           this.#wz.remove(this.#wz.data(rel));
@@ -331,7 +337,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
 
     for (const dir of searchDirs) {
       const fp = path.join(dir, filename);
-      if (fs.existsSync(fp)) {
+      if (fs.existsSync(fp) && this.#isOwnedFile(fp, entry.id, 'remove')) {
         if (this.#wz) {
           const rel = fp.replace(this.#wz.dataRoot, '').replace(/^\//, '');
           this.#wz.remove(this.#wz.data(rel));
@@ -416,6 +422,10 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       return;
     }
 
+    if (!this.#isOwnedFile(oldPath, entry.id, 'cleanup')) {
+      return;
+    }
+
     if (this.#wz) {
       const rel = oldPath.replace(this.#wz.dataRoot, '').replace(/^\//, '');
       this.#wz.remove(this.#wz.data(rel));
@@ -464,13 +474,41 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
     }
   }
 
+  #isOwnedFile(filePath: string, entryId: string, operation: string): boolean {
+    try {
+      const existingId = readKnowledgeFileOwnerId(fs.readFileSync(filePath, 'utf8'));
+      if (existingId === entryId) {
+        return true;
+      }
+      const details = { operation, entryId, existingId, path: filePath, result: 'preserved' };
+      // id 扫描遇到别的条目是正常分支；显式路径提示错配则提示宿主修复元数据。
+      if (operation === 'id-scan') {
+        this.logger.debug('Knowledge file skipped: owner id mismatch', details);
+      } else {
+        this.logger.warn('Knowledge file preserved: owner id mismatch', details);
+      }
+    } catch (error) {
+      this.logger.warn('Knowledge file preserved: owner id could not be verified', {
+        operation,
+        entryId,
+        path: filePath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    return false;
+  }
+
   _removeByIdScan(id: string): boolean {
     for (const baseDir of [this.candidatesDir, this.recipesDir]) {
       if (!fs.existsSync(baseDir)) {
         continue;
       }
       try {
-        const found = _walkAndRemoveById(baseDir, id, this.#wz);
+        const found = _walkAndRemoveById(
+          baseDir,
+          (filePath) => this.#isOwnedFile(filePath, id, 'id-scan'),
+          this.#wz
+        );
         if (found) {
           this.logger.info('Knowledge entry file removed by id scan', { id });
           return true;
@@ -743,19 +781,39 @@ function _yamlValue(key: string, val: string | number | boolean): string {
   return str;
 }
 
-function _walkAndRemoveById(dir: string, id: string, wz?: WriteZone | null): boolean {
+/** 只读取顶层 frontmatter 的完整 id；正文中的 id 文本和前缀都不是文件所有权。 */
+function readKnowledgeFileOwnerId(content: string): string | null {
+  const frontmatter = content.match(/^---\s*\r?\n([\s\S]*?)\r?\n---/);
+  // 与旧解析器的 key.trim() 语义对齐，兼容 id : / 前导空白；重复 id 仍拒绝。
+  const ids = [...(frontmatter?.[1] ?? '').matchAll(/^[ \t]*id[ \t]*:[ \t]*(.*)$/gm)];
+  if (ids.length !== 1) {
+    return null;
+  }
+  const raw = ids[0][1].trim();
+  if (raw.startsWith('"')) {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === 'string' ? parsed : null;
+  }
+  // id 是字符串身份；保留未加引号的数字形 id，不能把 0007 强转成 7。
+  return raw || null;
+}
+
+function _walkAndRemoveById(
+  dir: string,
+  isOwnedFile: (filePath: string) => boolean,
+  wz?: WriteZone | null
+): boolean {
   if (!fs.existsSync(dir)) {
     return false;
   }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (_walkAndRemoveById(full, id, wz)) {
+      if (_walkAndRemoveById(full, isOwnedFile, wz)) {
         return true;
       }
     } else if (entry.name.endsWith('.md') && !entry.name.startsWith('_')) {
-      const head = fs.readFileSync(full, 'utf8').slice(0, 500);
-      if (head.includes(`id: ${id}`)) {
+      if (isOwnedFile(full)) {
         if (wz) {
           const rel = full.replace(wz.dataRoot, '').replace(/^\//, '');
           wz.remove(wz.data(rel));

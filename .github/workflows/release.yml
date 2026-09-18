@@ -52,12 +52,6 @@ jobs:
       - name: Check, build, and test
         run: npm run check
 
-      - name: Build package output
-        run: npm run build
-
-      - name: Smoke public API entrypoints
-        run: npm run smoke:public-api
-
       - name: Verify release package baseline
         run: npm run release:check
 

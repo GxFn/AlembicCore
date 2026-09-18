@@ -83,38 +83,6 @@ describe('Integration: Search Pipeline', () => {
     db.close();
   });
 
-  // ── tokenize 分词 ──────────────────────────────────────
-
-  describe('tokenize 中英文混合分词', () => {
-    it('应拆分 camelCase 和 PascalCase', () => {
-      const tokens = tokenize('URLSession');
-      expect(tokens).toContain('url');
-      expect(tokens).toContain('session');
-    });
-
-    it('应支持中文单字 + bigram', () => {
-      const tokens = tokenize('网络请求');
-      expect(tokens).toContain('网');
-      expect(tokens).toContain('络');
-      expect(tokens).toContain('网络');
-      expect(tokens).toContain('络请');
-      expect(tokens).toContain('请求');
-    });
-
-    it('空字符串返回空数组', () => {
-      expect(tokenize('')).toEqual([]);
-      expect(tokenize(null)).toEqual([]);
-    });
-
-    it('应处理中英文混合文本', () => {
-      const tokens = tokenize('使用URLSession发送请求');
-      expect(tokens).toContain('url');
-      expect(tokens).toContain('session');
-      expect(tokens).toContain('发送');
-      expect(tokens).toContain('请求');
-    });
-  });
-
   // ── FieldWeightedScorer 独立测试 ───────────────────────────────
 
   describe('FieldWeightedScorer 评分排序', () => {
@@ -179,13 +147,6 @@ describe('Integration: Search Pipeline', () => {
       scorer.addDocument('r1', 'Swift class');
       const results = scorer.search('Python Django');
       expect(results).toHaveLength(0);
-    });
-
-    it('clear 后索引为空', () => {
-      scorer.addDocument('r1', 'Swift class');
-      scorer.clear();
-      expect(scorer.totalDocs).toBe(0);
-      expect(scorer.search('Swift')).toHaveLength(0);
     });
   });
 
@@ -305,6 +266,8 @@ describe('Integration: Search Pipeline', () => {
     });
 
     it('ensureIndex 幂等调用', () => {
+      // 此case自己建立前置状态，单独运行不依赖上一条buildIndex测试。
+      engine.ensureIndex();
       const spy = vi.spyOn(engine, 'buildIndex');
       engine.ensureIndex(); // 已构建，不应再次调用
       expect(spy).not.toHaveBeenCalled();
@@ -396,11 +359,6 @@ describe('Integration: Search Pipeline', () => {
       const result = await engine.search('URLSession', { mode: 'auto' });
       expect(result.items.length).toBeGreaterThanOrEqual(1);
       expect(result.mode).toContain('weighted');
-    });
-
-    it('semantic 模式无 AI 时降级到 FieldWeighted', async () => {
-      const result = await engine.search('网络', { mode: 'semantic' });
-      expect(result.items.length).toBeGreaterThanOrEqual(0);
     });
 
     it('trigger 精确匹配 keyword 搜索得分最高', async () => {

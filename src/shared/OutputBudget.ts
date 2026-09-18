@@ -158,13 +158,10 @@ function truncateToBytes(value: string, maxBytes: number): string {
   if (utf8Bytes(value) <= maxBytes) {
     return value;
   }
-  const buffer = Buffer.from(value, 'utf8').subarray(0, maxBytes);
-  // Strip a trailing partial multi-byte sequence.
-  let end = buffer.length;
-  while (end > 0 && (buffer[end - 1] & 0b1100_0000) === 0b1000_0000) {
-    end--;
-  }
-  if (end > 0 && (buffer[end - 1] & 0b1100_0000) === 0b1100_0000) {
+  const buffer = Buffer.from(value, 'utf8');
+  // 预算后的首字节若是 continuation，才回退到该字符开头；完整结尾必须保留。
+  let end = maxBytes;
+  while (end > 0 && (buffer[end] & 0b1100_0000) === 0b1000_0000) {
     end--;
   }
   return buffer.subarray(0, end).toString('utf8');

@@ -321,7 +321,10 @@ function resolveModuleChangedFiles(
   const previousFiles = new Set(previous.files ?? []);
   const currentFiles = new Set(current.files ?? []);
   if (changedFileSet.size > 0) {
-    return uniqueSorted([...currentFiles].filter((file) => changedFileSet.has(file)));
+    // 删除文件已不在 current 中，仍属于该模块本轮的真实变化。
+    return uniqueSorted(
+      [...previousFiles, ...currentFiles].filter((file) => changedFileSet.has(file))
+    );
   }
   return uniqueSorted([
     ...[...currentFiles].filter((file) => !previousFiles.has(file)),

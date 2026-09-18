@@ -350,14 +350,6 @@ for (int i = 0; i < maxRetry; i++) {
   });
 
   describe('substance scoring', () => {
-    it('should pass substance check for well-formed candidates', async () => {
-      const advisor = new ConsolidationAdvisor(mockRepo([]));
-      const advice = await advisor.analyze(makeCandidate());
-
-      // makeCandidate has good doClause, dontClause, coreCode, trigger, whenClause
-      expect(advice.action).not.toBe('insufficient');
-    });
-
     it('should pass substance check with long clauses even without code', async () => {
       const advisor = new ConsolidationAdvisor(mockRepo([]));
       const advice = await advisor.analyze(

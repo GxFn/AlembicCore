@@ -11,17 +11,23 @@ import path from 'node:path';
 
 /** 扩展名 → AstAnalyzer 语言标识(与 resources/grammars 的 wasm 资产一一对应)。 */
 export const EXTENSION_PARSER_LANGUAGE: Record<string, string> = {
+  '.cjs': 'javascript',
+  '.cts': 'typescript',
   '.dart': 'dart',
   '.go': 'go',
   '.java': 'java',
+  '.js': 'javascript',
   '.jsx': 'javascript',
   '.kt': 'kotlin',
   '.kts': 'kotlin',
   '.m': 'objectivec',
   '.mm': 'objectivec',
+  '.mjs': 'javascript',
+  '.mts': 'typescript',
   '.py': 'python',
   '.rs': 'rust',
   '.swift': 'swift',
+  '.ts': 'typescript',
   '.tsx': 'tsx',
 };
 

@@ -8,14 +8,21 @@ truth; this document explains the gate set and the standing decisions.
 
 | Order | Gate | Script | What failing means |
 | --- | --- | --- | --- |
-| 1 | `build:check` | `tsc --noEmit` | Type errors. |
+| 1 | `build` | clean dist + `tsc` | Type errors or invalid build output. |
 | 2 | `lint:public-api-boundary` | `scripts/check-public-api-boundary.mjs` | Surface drift: unclassified exports, count growth, a removed export resurrected, unowned transitional surface, missing deprecation/review-by marks, a provisional facade above its narrowness budget, raised maxCounts, or a broken source-graph canonical invariant. |
-| 3 | `lint:consumer-core-imports` | `scripts/lint-consumer-core-imports-all.mjs` | A sibling consumer repository (Alembic, AlembicAgent, AlembicPlugin) imports Core outside its own boundary config. Siblings absent from the checkout are reported as skipped — their own CI guards their trees. |
-| 4 | `smoke:public-api` | `scripts/smoke-public-api.mjs` | A public entrypoint no longer imports, or a required symbol/type declaration is missing. |
-| 5 | `test` | vitest | Behavior regressions. |
-| 6 | `lint` | biome | Style/correctness lint. |
+| 3 | `lint:layer-contract` | `scripts/lint-layer-contract.mjs` | A runtime dependency violates the layer matrix. |
+| 4 | `lint:consumer-core-imports` | `scripts/lint-consumer-core-imports-all.mjs` | A sibling consumer repository (Alembic, AlembicAgent, AlembicPlugin) imports Core outside its own boundary config. Siblings absent from the checkout are reported as skipped — their own CI guards their trees. |
+| 5 | `lint:scope-resolution` | `scripts/lint-scope-resolution.mjs` | A scan/write path bypasses the declared scope resolver. |
+| 6 | `smoke:public-api` | `scripts/smoke-public-api.mjs` | A public entrypoint no longer imports, or a required exported declaration is missing. |
+| 7 | `check:output-budgets` | `scripts/check-output-budgets.mjs` | Output budget or overflow behavior drifted. |
+| 8 | `check:space-edges` | `scripts/check-space-edges.mjs` | Workspace dependency or toolchain constraints were violated. |
+| 9 | `lint:doctrine` | `scripts/lint-doctrine.mjs` | An undeclared module-level mutable binding was introduced. |
+| 10 | `lint:naming` | `scripts/lint-naming.mjs` | An active naming rule was violated. |
+| 11 | `test` | vitest | Behavior regressions. |
+| 12 | `lint` | biome | Style/correctness lint. |
+| 13 | `lint:retired-symbols` | `scripts/lint-retired-symbols.mjs` | Retired names returned outside compatibility exceptions. |
 
-Gates 2 (narrowness checks) and 4 import the built `dist/`; run
+Gates 2 (narrowness checks) and 6 import the built `dist/`; run
 `npm run build` after changing the export surface, otherwise they fail with an
 explicit import error rather than passing silently.
 
@@ -23,7 +30,9 @@ explicit import error rather than passing silently.
 
 `smoke:public-api` verifies **import accessibility only**: every exact export
 path resolves and imports from `dist/`, required runtime symbols exist, and
-required type names appear in declaration files. It is **not a behavioral
+required declaration names resolve through TypeScript's exported-symbol graph,
+including `export *` chains and values used through `typeof`. Text in a comment
+or a private declaration does not satisfy the gate. It is **not a behavioral
 contract test** — behavior is covered by the vitest suites. A green smoke run
 means "the surface is reachable", nothing more.
 
@@ -59,8 +68,9 @@ part of the final acceptance matrix.
   never be raised. Append trend entries with
   `node scripts/check-public-api-boundary.mjs --record-trend` after
   intentional shrink waves.
-- **Source-graph canonical.** `./source-graph` is the single canonical facade
-  (shape frozen for CKG2/CKG4); the removed variant facades may not return.
+- **Retired source-graph facades stay retired.** The removed subpaths, including
+  `./source-graph`, are recorded in `closeout.removedExports`. Current consumers
+  use the remaining approved package facades; do not restore retired keys.
 
 ## AlembicPlugin keep-alive constraint
 
@@ -68,5 +78,5 @@ AlembicPlugin consumes Core through a live `file:../AlembicCore` link. Its
 frozen keep-alive specifier list (see `closeout.transitionalOwnership`
 `plugin-keep-alive`) is a hard runtime constraint: every listed specifier must
 stay importable and behavior-identical until the Plugin migrates post-CKG. The
-list may only shrink via Plugin-side commits. Core-side waves never edit
-AlembicPlugin.
+list may only shrink via Plugin-side commits. Changes to AlembicPlugin require
+explicit cross-repository authorization.

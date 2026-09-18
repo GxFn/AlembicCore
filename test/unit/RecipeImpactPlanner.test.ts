@@ -381,7 +381,9 @@ describe('RecipeImpactPlanner', () => {
     expect(plan.candidates).toHaveLength(1);
     expect(plan.candidates[0].affectedFiles).toContain('src/a.ts');
     expect(plan.candidates[0].affectedFiles).toContain('src/b.ts');
-    expect(plan.candidates[0].reason).toBe('source-deleted-partial');
+    expect(plan.candidates[0].reason).toBe('source-deleted');
+    expect(plan.candidates[0].activeRefCount).toBe(0);
+    expect(plan.candidates[0].impactScore).toBe(1);
   });
 
   it('should produce correct summary', async () => {

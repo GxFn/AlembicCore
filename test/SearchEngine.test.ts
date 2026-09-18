@@ -2,6 +2,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { vi } from 'vitest';
+import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
+import { pathGuard } from '../src/io.js';
+import { createAlembicRepositories } from '../src/repositories.js';
+import { createSearchEngine } from '../src/search.js';
 import {
   buildSearchResponseMeta,
   FieldWeightedScorer,
@@ -9,6 +13,270 @@ import {
   SearchEngine,
   tokenize,
 } from '../src/service/search/SearchEngine.js';
+
+async function withSearchDatabase(
+  run: (runtime: AlembicDatabaseRuntime) => Promise<void>
+): Promise<void> {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-search-ranking-'));
+  const oldQuiet = process.env.ALEMBIC_QUIET;
+  process.env.ALEMBIC_QUIET = '1';
+  pathGuard.configure({ projectRoot: root, knowledgeBaseDir: 'Alembic' });
+  let runtime: AlembicDatabaseRuntime | undefined;
+  try {
+    runtime = await openAlembicDatabase({ path: '.asd/alembic.db' });
+    await run(runtime);
+  } finally {
+    runtime?.close();
+    pathGuard._reset();
+    fs.rmSync(root, { recursive: true, force: true });
+    if (oldQuiet === undefined) {
+      delete process.env.ALEMBIC_QUIET;
+    } else {
+      process.env.ALEMBIC_QUIET = oldQuiet;
+    }
+  }
+}
+
+describe('search index timestamp consistency', () => {
+  test.each([
+    'raw-adapter',
+    'knowledge-repository',
+  ] as const)('refreshes same-second inserts, edits and deprecations through %s', async (adapter) => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1_800_000_000_500);
+    try {
+      await withSearchDatabase(async (runtime) => {
+        const repository = createAlembicRepositories(runtime.connection).knowledgeRepository;
+        const engine = new SearchEngine(
+          runtime.sqlite,
+          adapter === 'raw-adapter' ? {} : { knowledgeRepo: repository }
+        );
+        engine.buildIndex();
+        runtime.sqlite
+          .prepare(
+            `INSERT INTO knowledge_entries (id, title, lifecycle, createdAt, updatedAt) VALUES ('new', 'Uniqueinsert guidance', 'active', 1800000000, 1800000000)`
+          )
+          .run();
+        engine.refreshIndex();
+        expect(
+          (await engine.search('Uniqueinsert', { mode: 'weighted' })).items.map((item) => item.id)
+        ).toContain('new');
+
+        runtime.sqlite
+          .prepare("UPDATE knowledge_entries SET title = 'Uniqueedit guidance' WHERE id = 'new'")
+          .run();
+        engine.refreshIndex();
+        expect(
+          (await engine.search('Uniqueedit', { mode: 'weighted' })).items.map((item) => item.id)
+        ).toContain('new');
+
+        runtime.sqlite
+          .prepare("UPDATE knowledge_entries SET lifecycle = 'deprecated' WHERE id = 'new'")
+          .run();
+        engine.refreshIndex();
+        expect((await engine.search('Uniqueedit', { mode: 'weighted' })).items).toEqual([]);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe('search vocabulary dictionary boundaries', () => {
+  test('retrieves a constructor-tagged recipe through the public engine and real SQLite', async () => {
+    await withSearchDatabase(async (runtime) => {
+      runtime.sqlite
+        .prepare(
+          `INSERT INTO knowledge_entries (id, title, tags, content, lifecycle, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, 'active', 1800000000, 1800000000)`
+        )
+        .run(
+          'constructor-recipe',
+          'constructor',
+          JSON.stringify(['constructor']),
+          JSON.stringify({ markdown: 'constructor dependency injection' })
+        );
+      const engine = createSearchEngine(runtime.sqlite);
+      for (const mode of ['weighted', 'auto']) {
+        const response = await engine.search('constructor', { mode, rank: false });
+        expect(response.items.map((item) => item.id)).toEqual(['constructor-recipe']);
+        expect(Number.isFinite(response.items[0].score)).toBe(true);
+      }
+      // 重建走 clear()，不能把已经修正的词频字典重新变回有原型的对象。
+      engine.refreshIndex({ force: true });
+      expect((await engine.search('constructor', { mode: 'weighted' })).items[0]?.id).toBe(
+        'constructor-recipe'
+      );
+    });
+  });
+});
+
+describe('search knowledge collection type aliases', () => {
+  function insertKnowledgeCollection(runtime: AlembicDatabaseRuntime) {
+    const insert = runtime.sqlite.prepare(
+      `INSERT INTO knowledge_entries (id, title, kind, knowledgeType, scope, dimensionId, tags, lifecycle, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 1800000000, 1800000000)`
+    );
+    insert.run(
+      'pattern-entry',
+      'Factory pattern',
+      'pattern',
+      'code-pattern',
+      'universal',
+      'patterns',
+      '["factory-pattern"]'
+    );
+    insert.run(
+      'rule-entry',
+      'Factory boundary',
+      'rule',
+      'boundary-constraint',
+      'project',
+      'boundaries',
+      '["factory-rule"]'
+    );
+  }
+
+  test.each([
+    'raw-adapter',
+    'knowledge-repository',
+  ] as const)('preserves collection aliases and rule filters through %s', async (adapter) => {
+    await withSearchDatabase(async (runtime) => {
+      insertKnowledgeCollection(runtime);
+      const repository = createAlembicRepositories(runtime.connection).knowledgeRepository;
+      const engine = createSearchEngine(
+        runtime.sqlite,
+        adapter === 'raw-adapter' ? {} : { knowledgeRepo: repository }
+      );
+
+      for (const mode of ['keyword', 'weighted', 'auto', 'semantic']) {
+        for (const type of ['all', 'recipe', 'solution', 'knowledge']) {
+          const result = await engine.search('Factory', { mode, type, rank: false });
+          expect(result.items.map((item) => item.id).sort()).toEqual([
+            'pattern-entry',
+            'rule-entry',
+          ]);
+          expect(result.items.every((item) => item.type === 'knowledge')).toBe(true);
+        }
+        expect(
+          (await engine.search('Factory', { mode, type: 'rule', rank: false })).items.map(
+            (item) => item.id
+          )
+        ).toEqual(['rule-entry']);
+        // type 数组是 OR：全知识集合别名已覆盖 rule，不能剔除别名后错误缩窄成只有 rule。
+        for (const alias of ['recipe', 'solution', 'knowledge']) {
+          const result = await engine.search('Factory', {
+            mode,
+            rank: false,
+            filters: { type: [alias, 'rule'] },
+          });
+          expect(result.items.map((item) => item.id).sort()).toEqual([
+            'pattern-entry',
+            'rule-entry',
+          ]);
+          expect(result.searchMeta?.appliedFilters).toBeUndefined();
+        }
+        expect((await engine.search('Factory', { mode, type: 'unknown-type' })).items).toEqual([]);
+        expect(
+          (
+            await engine.search('Factory', {
+              mode,
+              type: 'recipe',
+              scope: 'project',
+              rank: false,
+            })
+          ).items.map((item) => item.id)
+        ).toEqual(['rule-entry']);
+      }
+    });
+  });
+
+  test.each([
+    'raw-adapter',
+    'knowledge-repository',
+  ] as const)('preserves facets before and after incremental refresh through %s', async (adapter) => {
+    await withSearchDatabase(async (runtime) => {
+      insertKnowledgeCollection(runtime);
+      const repository = createAlembicRepositories(runtime.connection).knowledgeRepository;
+      const engine = createSearchEngine(
+        runtime.sqlite,
+        adapter === 'raw-adapter' ? {} : { knowledgeRepo: repository }
+      );
+      const assertFacets = async () => {
+        for (const mode of ['keyword', 'weighted']) {
+          const response = await engine.search('Factory', {
+            mode,
+            rank: false,
+            type: 'recipe',
+            scope: 'project',
+            dimensionId: 'boundaries',
+            tags: ['factory-rule'],
+          });
+          expect(response.items.map((item) => item.id)).toEqual(['rule-entry']);
+          expect(response.items[0]).toMatchObject({
+            scope: 'project',
+            dimensionId: 'boundaries',
+            tags: ['factory-rule'],
+          });
+        }
+      };
+      await assertFacets();
+      runtime.sqlite
+        .prepare('UPDATE knowledge_entries SET updatedAt = ? WHERE id = ?')
+        .run(Math.floor(Date.now() / 1000), 'rule-entry');
+      engine.refreshIndex();
+      await assertFacets();
+    });
+  });
+
+  test.each([
+    'vector-service',
+    'legacy-vector-store',
+  ] as const)('keeps aliases on the real injected semantic %s lane', async (lane) => {
+    await withSearchDatabase(async (runtime) => {
+      insertKnowledgeCollection(runtime);
+      const hits = [
+        {
+          id: 'entry_pattern-entry',
+          score: 0.9,
+          metadata: { entryId: 'pattern-entry', kind: 'pattern' },
+        },
+        {
+          id: 'entry_rule-entry',
+          score: 0.8,
+          metadata: { entryId: 'rule-entry', kind: 'rule' },
+        },
+      ];
+      const search = vi.fn(async () =>
+        hits.map((hit) => ({ item: { id: hit.id, metadata: hit.metadata }, score: hit.score }))
+      );
+      const engine = createSearchEngine(
+        runtime.sqlite,
+        lane === 'vector-service'
+          ? { vectorService: { search, hybridSearch: vi.fn(async () => []) } }
+          : {
+              aiProvider: { embed: async () => [1] },
+              vectorStore: { query: async () => hits },
+            }
+      );
+      for (const type of ['recipe', 'solution', 'knowledge']) {
+        const result = await engine.search('Factory', { mode: 'semantic', type, rank: false });
+        expect(result.items.map((item) => item.id)).toEqual(['pattern-entry', 'rule-entry']);
+        expect(result.items.every((item) => item.type === 'recipe')).toBe(true);
+        expect(result.searchMeta?.vectorUsed).toBe(true);
+      }
+      if (lane === 'vector-service') {
+        expect(search).toHaveBeenLastCalledWith('Factory', { topK: 40, filter: null });
+      }
+      const rules = await engine.search('Factory', {
+        mode: 'semantic',
+        type: 'rule',
+        rank: false,
+      });
+      expect(rules.items.map((item) => item.id)).toEqual(['rule-entry']);
+    });
+  });
+});
 
 /* ────────────────────────────────────────────
  *  tokenize()
@@ -59,9 +327,16 @@ describe('tokenize', () => {
     expect(result).toContain('ef');
   });
 
-  test('should handle Chinese text', () => {
-    const result = tokenize('错误处理 网络请求');
-    expect(result.length).toBeGreaterThan(0);
+  test('supports Chinese unigrams and bigrams', () => {
+    expect(tokenize('网络请求')).toEqual(
+      expect.arrayContaining(['网', '络', '网络', '络请', '请求'])
+    );
+  });
+
+  test('keeps Chinese tokens around camel-case English identifiers', () => {
+    expect(tokenize('使用URLSession发送请求')).toEqual(
+      expect.arrayContaining(['url', 'session', '发送', '请求'])
+    );
   });
 
   test('should strip punctuation', () => {
@@ -79,6 +354,20 @@ describe('FieldWeightedScorer', () => {
 
   beforeEach(() => {
     scorer = new FieldWeightedScorer();
+  });
+
+  test('tracks constructor token frequencies through add, remove and clear', () => {
+    scorer.addDocument('constructor-doc', 'constructor', { tags: ['constructor'] });
+    expect(scorer.docFreq.constructor).toBe(1);
+    expect(scorer.topicDocFreq.constructor).toBe(1);
+    expect(scorer.search('constructor').map((item) => item.id)).toEqual(['constructor-doc']);
+    scorer.removeDocument('constructor-doc');
+    expect(scorer.search('constructor')).toEqual([]);
+    expect(scorer.docFreq.constructor).toBeUndefined();
+    expect(scorer.topicDocFreq.constructor).toBeUndefined();
+    scorer.clear();
+    scorer.addDocument('recreated', 'constructor', { tags: ['constructor'] });
+    expect(scorer.search('constructor').map((item) => item.id)).toEqual(['recreated']);
   });
 
   test('should start with 0 documents', () => {
@@ -140,15 +429,6 @@ describe('FieldWeightedScorer', () => {
     scorer.addDocument('doc1', 'swift networking', { type: 'recipe', title: 'Net' });
     const results = scorer.search('swift');
     expect(results[0].meta).toEqual({ type: 'recipe', title: 'Net' });
-  });
-
-  test('clear should reset all state', () => {
-    scorer.addDocument('doc1', 'hello world');
-    scorer.clear();
-    expect(scorer.totalDocs).toBe(0);
-    expect(scorer.documents).toHaveLength(0);
-    expect(scorer.avgLength).toBe(0);
-    expect(Object.keys(scorer.docFreq)).toHaveLength(0);
   });
 });
 
@@ -344,6 +624,34 @@ describe('SearchEngine', () => {
     // Second call should hit cache
     await engine.search('test', { mode: 'keyword' });
     expect(engine.getStats().cacheSize).toBe(1);
+  });
+
+  test('cached searches preserve the ranking of each language context', async () => {
+    await withSearchDatabase(async (runtime) => {
+      const insert = runtime.sqlite.prepare(
+        `INSERT INTO knowledge_entries (id, title, lifecycle, language, createdAt, updatedAt)
+         VALUES (?, 'Logging guidance', 'active', ?, 1000, 1000)`
+      );
+      insert.run('ts', 'typescript');
+      insert.run('py', 'python');
+      const engine = new SearchEngine(runtime.sqlite);
+      const options = { mode: 'weighted', limit: 2 };
+      const typescript = await engine.search('Logging', {
+        ...options,
+        context: { language: 'typescript' },
+      });
+      const python = await engine.search('Logging', {
+        ...options,
+        context: { language: 'python' },
+      });
+      const freshPython = await new SearchEngine(runtime.sqlite).search('Logging', {
+        ...options,
+        context: { language: 'python' },
+      });
+      expect(typescript.items[0].id).toBe('ts');
+      expect(freshPython.items[0].id).toBe('py');
+      expect(python.items.map((item) => item.id)).toEqual(freshPython.items.map((item) => item.id));
+    });
   });
 
   function legacyBoundaryRule() {
@@ -667,6 +975,7 @@ describe('SearchEngine', () => {
 
     const result = await engine.search('swift', { mode: 'semantic' });
     expect(result.mode).toBe('weighted'); // falls back to FieldWeighted
+    expect(result.items.map((item) => item.id)).toEqual(['r1']);
     expect(result.searchMeta).toEqual(
       expect.objectContaining({
         requestedMode: 'semantic',
@@ -1236,18 +1545,31 @@ describe('SearchEngine', () => {
       expect(items[0].sourceRefStatus).toBe('drifted');
     });
 
-    test('_applyRanking: drifted item 相对同分 active item 被降权(active 优先)', async () => {
-      const engine = new SearchEngine(makeMockDb());
-      // 两条几乎同分,只有源锚态不同;降权后 active 应排在 drifted 前。
-      const items = [
-        { id: 'drift', title: 'x', coarseScore: 1, rankerScore: 1, sourceRefStatus: 'drifted' },
-        { id: 'fresh', title: 'x', coarseScore: 1, rankerScore: 1, sourceRefStatus: 'active' },
-      ];
-      const ranked = await engine._applyRanking(items, 'x', {});
-      const drift = ranked.find((r) => r.id === 'drift');
-      const fresh = ranked.find((r) => r.id === 'fresh');
-      // drifted 乘性降权 → 分数严格低于 active。
-      expect(drift.score).toBeLessThan(fresh.score);
+    test('search orders active refs before equally relevant drifted refs before truncating', async () => {
+      await withSearchDatabase(async (runtime) => {
+        const insert = runtime.sqlite.prepare(
+          `INSERT INTO knowledge_entries (id, title, lifecycle, createdAt, updatedAt)
+           VALUES (?, 'Logging guidance', 'active', 1000, 1000)`
+        );
+        insert.run('drift');
+        insert.run('fresh');
+        const refs = createAlembicRepositories(runtime.connection).recipeSourceRefRepository;
+        refs.upsert({
+          recipeId: 'drift',
+          sourcePath: 'src/drift.ts',
+          status: 'drifted',
+          verifiedAt: 1,
+        });
+        refs.upsert({ recipeId: 'fresh', sourcePath: 'src/fresh.ts', verifiedAt: 1 });
+        const engine = new SearchEngine(runtime.sqlite);
+        const result = await engine.search('Logging', { mode: 'weighted', limit: 2 });
+        expect(result.items.find((item) => item.id === 'drift')?.score).toBeLessThan(
+          result.items.find((item) => item.id === 'fresh')!.score
+        );
+        expect(result.items.map((item) => item.id)).toEqual(['fresh', 'drift']);
+        const top = await engine.search('Logging', { mode: 'weighted', limit: 1 });
+        expect(top.items.map((item) => item.id)).toEqual(['fresh']);
+      });
     });
   });
 });

@@ -160,11 +160,13 @@ export interface CanonicalSourceIdentityInput {
   sourcePath: string;
 }
 
-export type ProjectScopeSourceRefResolutionStatus = 'resolved' | 'missing';
+export type ProjectScopeSourceRefResolutionStatus = 'resolved' | 'missing' | 'ambiguous';
 
 export type ProjectScopeSourceRefResolutionReason =
   | 'qualified-path'
   | 'relative-path'
+  | 'absolute-path'
+  | 'ambiguous-path'
   | 'not-found';
 
 export interface ProjectScopeSourceRefResolution {
@@ -178,13 +180,18 @@ export interface ProjectScopeSourceRefIndex {
   byQualifiedPath: ReadonlyMap<string, CanonicalSourceIdentity>;
   byRelativePath: ReadonlyMap<string, CanonicalSourceIdentity>;
   singleFolderKey: string | null;
+  /** 只索引已注册identity的绝对路径，不扩大文件系统访问边界。旧手工index保持兼容。 */
+  byAbsolutePath?: ReadonlyMap<string, CanonicalSourceIdentity>;
+  ambiguousPaths?: ReadonlySet<string>;
 }
 
-export type ProjectScopeSourceRefNormalizationStatus = 'active' | 'missing';
+export type ProjectScopeSourceRefNormalizationStatus = 'active' | 'missing' | 'ambiguous';
 
 export type ProjectScopeSourceRefNormalizationReason =
   | 'qualified-path'
   | 'relative-path'
+  | 'absolute-path'
+  | 'ambiguous-path'
   | 'not-found';
 
 export interface NormalizedProjectScopeSourceRef {
@@ -520,17 +527,41 @@ export function buildProjectScopeSourceRefIndex(
 ): ProjectScopeSourceRefIndex {
   const byQualifiedPath = new Map<string, CanonicalSourceIdentity>();
   const byRelativePath = new Map<string, CanonicalSourceIdentity>();
+  const byAbsolutePath = new Map<string, CanonicalSourceIdentity>();
+  const ambiguousPaths = new Set<string>();
   const folderKeys = new Set<string>();
 
+  const register = (
+    map: Map<string, CanonicalSourceIdentity>,
+    key: string,
+    identity: CanonicalSourceIdentity
+  ) => {
+    if (ambiguousPaths.has(key)) {
+      return;
+    }
+    const existing = map.get(key);
+    if (existing && canonicalSourceIdentityKey(existing) !== canonicalSourceIdentityKey(identity)) {
+      map.delete(key);
+      ambiguousPaths.add(key);
+      return;
+    }
+    map.set(key, identity);
+  };
+
   for (const identity of identities) {
-    byQualifiedPath.set(normalizeComparableSourcePath(identity.qualifiedPath), identity);
+    register(byQualifiedPath, normalizeComparableSourcePath(identity.qualifiedPath), identity);
     byRelativePath.set(normalizeComparableSourcePath(identity.relativePath), identity);
+    if (identity.absolutePath) {
+      register(byAbsolutePath, normalizeComparableSourcePath(identity.absolutePath), identity);
+    }
     folderKeys.add(canonicalSourceIdentityFolderKey(identity));
   }
 
   return {
     byQualifiedPath,
     byRelativePath,
+    byAbsolutePath,
+    ambiguousPaths,
     singleFolderKey: folderKeys.size === 1 ? [...folderKeys][0] : null,
   };
 }
@@ -540,9 +571,16 @@ export function resolveProjectScopeSourceRef(
   index: ProjectScopeSourceRefIndex
 ): ProjectScopeSourceRefResolution {
   const normalized = normalizeComparableSourcePath(sourceRef);
+  if (index.ambiguousPaths?.has(normalized)) {
+    return { identity: null, input: sourceRef, reason: 'ambiguous-path', status: 'ambiguous' };
+  }
   const qualified = index.byQualifiedPath.get(normalized);
   if (qualified) {
     return { identity: qualified, input: sourceRef, reason: 'qualified-path', status: 'resolved' };
+  }
+  const absolute = index.byAbsolutePath?.get(normalized);
+  if (absolute) {
+    return { identity: absolute, input: sourceRef, reason: 'absolute-path', status: 'resolved' };
   }
   if (index.singleFolderKey) {
     const relative = index.byRelativePath.get(normalized);
@@ -567,8 +605,8 @@ export function normalizeProjectScopeSourceRef(
   }
 
   return normalizeRejectedProjectScopeSourceRef(sourceRef, {
-    reason: 'not-found',
-    status: 'missing',
+    reason: resolution.reason === 'ambiguous-path' ? 'ambiguous-path' : 'not-found',
+    status: resolution.status === 'ambiguous' ? 'ambiguous' : 'missing',
   });
 }
 
@@ -866,7 +904,8 @@ function normalizeResolvedProjectScopeSourceRef(
     folderId: identity.folderId,
     folderPath: identity.folderPath,
     input,
-    normalizedRef: identity.qualifiedPath,
+    // 显式绝对路径不能再投影回一个可能有歧义的显示名alias。
+    normalizedRef: reason === 'absolute-path' ? input : identity.qualifiedPath,
     projectScopeId: identity.projectScopeId,
     qualifiedPath: identity.qualifiedPath,
     reason,
@@ -878,7 +917,10 @@ function normalizeResolvedProjectScopeSourceRef(
 function normalizeRejectedProjectScopeSourceRef(
   input: string,
   output: {
-    reason: Exclude<ProjectScopeSourceRefNormalizationReason, 'qualified-path' | 'relative-path'>;
+    reason: Exclude<
+      ProjectScopeSourceRefNormalizationReason,
+      'qualified-path' | 'relative-path' | 'absolute-path'
+    >;
     status: Exclude<ProjectScopeSourceRefNormalizationStatus, 'active'>;
   }
 ): NormalizedProjectScopeSourceRef {
@@ -905,6 +947,15 @@ function canonicalSourceIdentityFolderKey(identity: CanonicalSourceIdentity): st
     normalizeNullableString(identity.projectScopeId) ??
     '__unscoped__'
   );
+}
+
+function canonicalSourceIdentityKey(identity: CanonicalSourceIdentity): string {
+  return JSON.stringify([
+    identity.projectScopeId,
+    canonicalSourceIdentityFolderKey(identity),
+    identity.relativePath,
+    identity.absolutePath,
+  ]);
 }
 
 function cloneRecord(value: Record<string, unknown> | null | undefined): Record<string, unknown> {

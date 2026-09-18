@@ -45,6 +45,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
     throwIfProjectDiscoveryAborted(context);
     this.#projectRoot = projectRoot;
     this.#targets = [];
+    this.#primaryLang = 'unknown';
 
     // 统计语言分布
     const langStats: Record<string, number> = {};

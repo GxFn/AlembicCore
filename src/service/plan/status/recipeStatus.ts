@@ -217,6 +217,29 @@ export function buildCoverage(
   const byModule: Record<string, PlanCoverageBucket & { dimensions: readonly string[] }> = {};
   const byModuleDimension: Record<string, Record<string, PlanCoverageBucket>> = {};
   const uniqueGeneratedRecipes = new Set<string>();
+  const bucketRecipeIds = new WeakMap<
+    PlanCoverageBucket,
+    { generated: Set<string>; stale: Set<string> }
+  >();
+  const countMappingRecipes = (bucket: PlanCoverageBucket, mapping: PlanCodeRecipeMapping) => {
+    const status = mapping.status;
+    if (status !== 'generated' && status !== 'stale') {
+      return;
+    }
+    const seen = bucketRecipeIds.get(bucket) ?? {
+      generated: new Set<string>(),
+      stale: new Set<string>(),
+    };
+    bucketRecipeIds.set(bucket, seen);
+    // source refs 保留完整映射；预算计数的单位是当前 bucket 内的 Recipe，不能重复计每条引用。
+    // 各 bucket 独立计数，同一 Recipe 跨模块/维度时仍可在各自 bucket 中贡献一次。
+    for (const recipeId of mapping.recipeIds) {
+      if (!seen[status].has(recipeId)) {
+        seen[status].add(recipeId);
+        bucket[status] += 1;
+      }
+    }
+  };
 
   for (const dimension of intent.dimensions) {
     byDimension[dimension.dimensionId] = {
@@ -250,11 +273,7 @@ export function buildCoverage(
       const bucket =
         byDimension[dimensionId] ??
         (byDimension[dimensionId] = { planned: 0, generated: 0, stale: 0, missing: 0 });
-      if (mapping.status === 'stale') {
-        bucket.stale += mapping.recipeIds.length;
-      } else if (mapping.status === 'generated') {
-        bucket.generated += mapping.recipeIds.length;
-      }
+      countMappingRecipes(bucket, mapping);
     }
     if (mapping.status === 'generated') {
       for (const recipeId of mapping.recipeIds) {
@@ -271,11 +290,7 @@ export function buildCoverage(
           missing: 0,
           dimensions: mapping.dimensionIds,
         });
-      if (mapping.status === 'stale') {
-        moduleBucket.stale += mapping.recipeIds.length;
-      } else if (mapping.status === 'generated') {
-        moduleBucket.generated += mapping.recipeIds.length;
-      }
+      countMappingRecipes(moduleBucket, mapping);
       const moduleDimensions =
         byModuleDimension[mapping.modulePath] ?? (byModuleDimension[mapping.modulePath] = {});
       for (const dimensionId of mapping.dimensionIds) {
@@ -287,11 +302,7 @@ export function buildCoverage(
             stale: 0,
             missing: 0,
           });
-        if (mapping.status === 'stale') {
-          moduleDimensionBucket.stale += mapping.recipeIds.length;
-        } else if (mapping.status === 'generated') {
-          moduleDimensionBucket.generated += mapping.recipeIds.length;
-        }
+        countMappingRecipes(moduleDimensionBucket, mapping);
       }
     }
   }

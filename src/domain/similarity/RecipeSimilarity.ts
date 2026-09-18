@@ -25,6 +25,7 @@
  */
 
 import { extractRecipeTokens } from '../../shared/recipeTokens.js';
+import { ngramJaccardSimilarity } from '../../shared/similarity.js';
 
 /* ────────────────────── Stop Words ────────────────────── */
 
@@ -262,7 +263,7 @@ export class RecipeSimilarity {
     if (a.length === 0 || b.length === 0) {
       return 0;
     }
-    return RecipeSimilarity.#ngramJaccard(a, b, 3);
+    return ngramJaccardSimilarity(a, b, 3);
   }
 
   /** 维度 4: guardPattern 精确匹配 */
@@ -321,30 +322,6 @@ export class RecipeSimilarity {
       }
     }
     const union = setA.size + setB.size - intersection;
-    return union === 0 ? 0 : intersection / union;
-  }
-
-  static #ngramJaccard(a: string, b: string, n: number): number {
-    const gramsA = new Set<string>();
-    const gramsB = new Set<string>();
-
-    for (let i = 0; i <= a.length - n; i++) {
-      gramsA.add(a.slice(i, i + n));
-    }
-    for (let i = 0; i <= b.length - n; i++) {
-      gramsB.add(b.slice(i, i + n));
-    }
-
-    if (gramsA.size === 0 && gramsB.size === 0) {
-      return 0;
-    }
-    let intersection = 0;
-    for (const g of gramsA) {
-      if (gramsB.has(g)) {
-        intersection++;
-      }
-    }
-    const union = gramsA.size + gramsB.size - intersection;
     return union === 0 ? 0 : intersection / union;
   }
 

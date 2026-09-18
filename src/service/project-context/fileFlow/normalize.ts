@@ -1,6 +1,5 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
 import type {
   FileSummary,
   ProjectContextRef,
@@ -10,6 +9,7 @@ import type {
 } from '../../../domain/project-context/index.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileFlowRelationRef } from '../shared/fileFlow-moduleLayers/index.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import {
   createProjectContextFileRef,
   createProjectContextSourceRangeProjection,
@@ -387,8 +387,10 @@ function findCallerSymbol(
   const qualifiedName = callSite.callerClass
     ? `${callSite.callerClass}.${callSite.callerMethod}`
     : callSite.callerMethod;
-  return symbols.find(
-    (symbol) => symbol.qualifiedName === qualifiedName || symbol.name === callSite.callerMethod
+  // 先解析容器内的完整身份，避免文件里更早出现的同名方法抢占调用方。
+  return (
+    symbols.find((symbol) => symbol.qualifiedName === qualifiedName) ??
+    symbols.find((symbol) => symbol.name === callSite.callerMethod)
   );
 }
 
@@ -486,16 +488,6 @@ function dedupeRelations(relations: readonly RelationSummary[]): RelationSummary
     relations,
     (relation) => relation.ref?.id ?? relation.label ?? relation.kind
   ).sort(compareRelations);
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
 }
 
 function dedupeBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {

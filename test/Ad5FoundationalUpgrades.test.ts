@@ -14,6 +14,7 @@ import {
 } from '../src/infrastructure/database/PreparedStatementCache.js';
 import Logger from '../src/infrastructure/logging/Logger.js';
 import { SignalAggregator } from '../src/infrastructure/signal/SignalAggregator.js';
+import { type Signal, SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { BatchEmbedder } from '../src/infrastructure/vector/BatchEmbedder.js';
 import { CORE_DIAGNOSTIC_CODES } from '../src/shared/DiagnosticCodes.js';
 
@@ -120,23 +121,22 @@ describe('BatchEmbedder provider-aware concurrency (AD5)', () => {
 describe('SignalAggregator ring cap (AD5 backpressure)', () => {
   function makeAggregator() {
     const written: Array<Record<string, unknown>> = [];
-    const handlers: Array<(signal: unknown) => void> = [];
-    const bus = {
-      subscribe: (_pattern: string, handler: (signal: unknown) => void) => {
-        handlers.push(handler);
-      },
-      send: () => {},
-    };
+    const bus = new SignalBus();
     const reportStore = {
       write: async (row: Record<string, unknown>) => {
         written.push(row);
       },
     };
-    const aggregator = new SignalAggregator(bus as never, reportStore as never, {
+    const aggregator = new SignalAggregator(bus, reportStore as never, {
       intervalMs: 60_000,
       windowMs: 300_000,
     });
-    return { aggregator, written, emit: (signal: unknown) => handlers[0](signal) };
+    return {
+      aggregator,
+      written,
+      emit: (signal: Pick<Signal, 'type' | 'value' | 'timestamp'>) =>
+        bus.emit({ source: 'test', target: null, metadata: {}, ...signal }),
+    };
   }
 
   test('caps a hot window at 5000 entries, drops oldest, and reports the drop', async () => {

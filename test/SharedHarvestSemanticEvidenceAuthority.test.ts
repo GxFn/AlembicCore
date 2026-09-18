@@ -91,6 +91,58 @@ afterEach(() => {
 });
 
 describe('shared-harvest semantic evidence authority', () => {
+  it.each([
+    { label: 'string/pass', value: 'false', verdict: 'pass' },
+    { label: 'number/pass', value: 1, verdict: 'pass' },
+    { label: 'string/reject', value: 'false', verdict: 'reject' },
+    { label: 'number/reject', value: 0, verdict: 'reject' },
+  ])('rejects non-boolean evidence support from the V5 host output ($label)', async ({
+    label,
+    value,
+    verdict,
+  }) => {
+    const fixture = await createCrossHarvestFixture();
+    const request = createSharedHarvestSemanticRequest(fixture);
+    const gateway = createCrossHarvestGateway(request, fixture, `support-${label}`, (decision) => ({
+      ...decision,
+      verdict,
+      evidenceFindings: decision.evidenceFindings.map((finding) => ({
+        ...finding,
+        supportsVerdict: value,
+      })),
+    }));
+
+    await expect(gateway.execute(request)).rejects.toThrow(
+      'SEMANTIC_DISPOSITION_REVIEW_RESULT_SEMANTICS_REQUIRED'
+    );
+  });
+
+  it('keeps boolean false evidence support insufficient for a pass but valid on a rejection', async () => {
+    const fixture = await createCrossHarvestFixture();
+    const request = createSharedHarvestSemanticRequest(fixture);
+    const withFalseSupport = (decision: SemanticDispositionReviewDecisionV4) => ({
+      ...decision,
+      evidenceFindings: decision.evidenceFindings.map((finding) => ({
+        ...finding,
+        supportsVerdict: false,
+      })),
+    });
+    const invalidPass = createCrossHarvestGateway(request, fixture, 'false-pass', withFalseSupport);
+    await expect(invalidPass.execute(request)).rejects.toThrow(
+      'SEMANTIC_DISPOSITION_REVIEW_RESULT_SEMANTICS_REQUIRED'
+    );
+
+    const rejection = createCrossHarvestGateway(request, fixture, 'false-reject', (decision) => ({
+      ...withFalseSupport(decision),
+      verdict: 'reject',
+    }));
+    const attestation = await rejection.execute(request);
+    expect(attestation.execution.decision).toMatchObject({
+      verdict: 'reject',
+      evidenceFindings: [{ supportsVerdict: false }],
+    });
+  });
+
   it('binds one physical evidence root across the complete canonical harvest-group set', async () => {
     const fixture = await createCrossHarvestFixture();
     const semanticRequest = createSharedHarvestSemanticRequest(fixture);
@@ -107,6 +159,9 @@ describe('shared-harvest semantic evidence authority', () => {
     expect(attestation.execution.request.evidenceAuthorities).toHaveLength(1);
     expect(attestation.evidenceLoadReceipts).toHaveLength(1);
     expect(gateway.evidenceLoadCount).toBe(1);
+    await expect(gateway.execute(semanticRequest)).rejects.toThrow(
+      'SEMANTIC_DISPOSITION_REVIEW_HOST_EXECUTION_REUSED'
+    );
     expect(authority.harvestGroups).toHaveLength(2);
     expect(
       authority.harvestGroups.map((group) => group.executionReceiptBindings.length).sort()
@@ -226,6 +281,9 @@ describe('shared-harvest semantic evidence authority', () => {
     const gateway = createSharedHarvestGateway(semanticRequest, fixture, 'positive');
 
     const attestation = await gateway.execute(semanticRequest);
+    await expect(gateway.execute(semanticRequest)).rejects.toThrow(
+      'SEMANTIC_DISPOSITION_REVIEW_HOST_EXECUTION_REUSED'
+    );
     const authority = attestation.execution.request.evidenceAuthorities[0]!;
     const serialized = JSON.parse(JSON.stringify(attestation)) as typeof attestation;
 
@@ -996,7 +1054,8 @@ function createSharedHarvestGateway(
 function createCrossHarvestGateway(
   semanticRequest: ReturnType<typeof createSharedHarvestSemanticRequest>,
   fixture: Awaited<ReturnType<typeof createCrossHarvestFixture>>,
-  suffix: string
+  suffix: string,
+  hostOutput?: (decision: SemanticDispositionReviewDecisionV4) => unknown
 ) {
   const { privateKey } = generateKeyPairSync('ed25519');
   let evidenceLoadCount = 0;
@@ -1009,7 +1068,9 @@ function createCrossHarvestGateway(
       invoke: async (call) => ({
         evaluatorRunId: `agent-host-run:cross-harvest-review:${suffix}`,
         invocationId: `agent-host-invocation:cross-harvest-review:${suffix}`,
-        responseOutput: JSON.stringify(passingDecisionV4(call.request)),
+        responseOutput: JSON.stringify(
+          hostOutput ? hostOutput(passingDecisionV4(call.request)) : passingDecisionV4(call.request)
+        ),
         status: 'success',
         toolCallCount: 0,
       }),

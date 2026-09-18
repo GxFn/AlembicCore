@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { ConfigLoader } from '../src/config.js';
@@ -12,6 +15,7 @@ import {
   summarizeProjectRuntimeScopeReadiness,
 } from '../src/daemon/index.js';
 import { EventBus, SignalBus, timerRegistry } from '../src/events.js';
+import { GraphCache } from '../src/infrastructure/cache/index.js';
 import {
   ALEMBIC_MANAGED_GUIDANCE_BEGIN,
   pathGuard,
@@ -22,6 +26,26 @@ import { Logger } from '../src/logging.js';
 import { DEFAULT_FOLDER_NAMES, resolveProjectRoot, WorkspaceResolver } from '../src/workspace.js';
 
 describe('stable foundation entrypoints', () => {
+  it('keeps graph cache reads, writes and invalidation inside its cache directory', () => {
+    const root = mkdtempSync(join(tmpdir(), 'alembic-core-cache-boundary-'));
+    try {
+      const outside = join(root, 'outside.json');
+      writeFileSync(outside, JSON.stringify({ data: 'unrelated content' }));
+      const cache = new GraphCache(root);
+      cache.save('graph', { nodes: 1 });
+      expect(cache.load('graph').data).toEqual({ nodes: 1 });
+      expect(cache.load('../../outside')).toBeNull();
+      cache.save('../../outside', 'overwrite');
+      expect(JSON.parse(readFileSync(outside, 'utf8')).data).toBe('unrelated content');
+      cache.invalidate('../../outside');
+      expect(existsSync(outside)).toBe(true);
+      cache.invalidate('graph');
+      expect(cache.load('graph')).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('exposes logging through the narrow logging entrypoint', () => {
     expect(Logger).toBeDefined();
     expect(Logger.getInstance({ console: false })).toBeDefined();

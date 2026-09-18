@@ -10,7 +10,7 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { computeContentHash } from '../../shared/index.js';
 import type { WriteZone } from '../io/index.js';
 import Logger from '../logging/index.js';
@@ -45,7 +45,7 @@ export class GraphCache {
         ...meta,
         data,
       };
-      const filePath = join(this.#cacheDir, `${key}.json`);
+      const filePath = this.#resolveCacheFile(key);
       const content = JSON.stringify(payload);
 
       if (this.#wz) {
@@ -70,7 +70,7 @@ export class GraphCache {
    */
   load(key: string) {
     try {
-      const filePath = join(this.#cacheDir, `${key}.json`);
+      const filePath = this.#resolveCacheFile(key);
       if (!existsSync(filePath)) {
         return null;
       }
@@ -98,6 +98,7 @@ export class GraphCache {
   /** 删除缓存 */
   invalidate(key: string) {
     try {
+      const filePath = this.#resolveCacheFile(key);
       if (this.#wz) {
         const target = this.#wz.runtime(`cache/${key}.json`);
         if (existsSync(target.absolute)) {
@@ -105,7 +106,6 @@ export class GraphCache {
           this.#logger.debug(`[GraphCache] invalidated: ${key}`);
         }
       } else {
-        const filePath = join(this.#cacheDir, `${key}.json`);
         if (existsSync(filePath)) {
           unlinkSync(filePath);
           this.#logger.debug(`[GraphCache] invalidated: ${key}`);
@@ -156,5 +156,18 @@ export class GraphCache {
   /** 获取缓存目录路径 */
   getCacheDir() {
     return this.#cacheDir;
+  }
+
+  #resolveCacheFile(key: string): string {
+    const filePath = resolve(this.#cacheDir, `${key}.json`);
+    const cacheRelativePath = relative(this.#cacheDir, filePath);
+    if (
+      cacheRelativePath === '..' ||
+      cacheRelativePath.startsWith(`..${sep}`) ||
+      isAbsolute(cacheRelativePath)
+    ) {
+      throw new RangeError('Graph cache key must stay inside its cache directory');
+    }
+    return filePath;
   }
 }

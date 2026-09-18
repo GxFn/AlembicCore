@@ -523,5 +523,8 @@ describe('FieldWeightedScorer incremental', () => {
     expect(scorer.totalDocs).toBe(0);
     expect(scorer.hasDocument('d1')).toBe(false);
     expect(scorer.documents).toHaveLength(0);
+    expect(scorer.avgLength).toBe(0);
+    expect(Object.keys(scorer.docFreq)).toHaveLength(0);
+    expect(scorer.search('react')).toEqual([]);
   });
 });

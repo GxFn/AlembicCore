@@ -58,22 +58,27 @@ function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').replace(/^\.\//, '').trim();
 }
 
-/** prose 里的 path 是否命中 validSourcePaths(容错后缀匹配，兼容 repo-relative 与带前缀两种口径)。 */
-function refIsGrounded(path: string, validSet: ReadonlySet<string>): boolean {
+/** 返回已解析来源的规范路径，防止短路径/带前缀路径把同一来源重复计数。 */
+function resolveGroundedPath(path: string, validSet: ReadonlySet<string>): string | null {
   const normalized = normalizePath(path);
   if (validSet.has(normalized)) {
-    return true;
+    return normalized;
   }
+  let matched: string | null = null;
   for (const valid of validSet) {
     if (
       valid === normalized ||
       valid.endsWith(`/${normalized}`) ||
       normalized.endsWith(`/${valid}`)
     ) {
-      return true;
+      // 多仓同名文件的短路径有歧义；沿用未接地提示，不擅自选择一个证据来源。
+      if (matched !== null) {
+        return null;
+      }
+      matched = valid;
     }
   }
-  return false;
+  return matched;
 }
 
 /** 从一段文本抽取内联 file:line 引用及其接地状态。 */
@@ -85,7 +90,8 @@ function extractRefs(
   for (const match of text.matchAll(PROSE_SOURCE_REF_RE)) {
     const path = normalizePath(match[1] ?? '');
     if (path) {
-      refs.push({ path, grounded: refIsGrounded(path, validSet) });
+      const groundedPath = resolveGroundedPath(path, validSet);
+      refs.push({ path: groundedPath ?? path, grounded: groundedPath !== null });
     }
   }
   return refs;
@@ -132,6 +138,7 @@ function splitSections(markdown: string): Array<{ heading: string; text: string 
  *
  * @param input recipe 的深度内容(markdown + 可选结构化字段)。
  * @param resolved gate 侧已解析成功的证据：validSourcePaths(真实存在的源文件相对路径)。
+ * validRanges 保留兼容输入，其内容是源码正文片段，不是行号坐标，不能用于推断获准行区间。
  * @returns 每个深度维度是否接地覆盖 + 疑似未接地论述 + 已接地文件数。
  */
 export function reviewRecipeDepth(

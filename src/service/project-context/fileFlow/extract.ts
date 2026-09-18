@@ -340,7 +340,8 @@ function maskCommentText(lines: readonly string[]): string[] {
 
 function collectExports(lines: readonly string[]): ExtractedFileFlowExport[] {
   const exports: ExtractedFileFlowExport[] = [];
-  for (const statement of collectLogicalStatements(lines, 'export')) {
+  // 与 import 共用保留行号的注释屏蔽；注释中的文档示例不能产生真实导出关系。
+  for (const statement of collectLogicalStatements(maskCommentText(lines), 'export')) {
     const declaration = statement.text.match(
       /\bexport\s+(?:default\s+)?(?:abstract\s+)?(?:async\s+)?(class|interface|type|enum|function|const|let|var)\s+([A-Za-z_$][\w$]*)/
     );

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
@@ -12,6 +13,7 @@ import {
   buildSourceRevisionVectorV1,
   CERTIFIED_PROJECT_FACTS_CONSUMERS,
   CertifiedProjectFactsConsumerPort,
+  canonicalJsonStringify,
   captureCertifiedProjectFacts,
   captureCertifiedProjectFactsV2,
   createProjectContextConsumerLineageReceipt,
@@ -28,12 +30,14 @@ import {
   hashCanonicalJson,
   NodeProjectContextFoundationHostPorts,
   type ProjectContextFoundationCaptureInput,
+  type ProjectContextFoundationFileDescriptor,
   type ProjectContextFoundationHostPorts,
   type ProjectContextRequestAuditPlan,
   type ProjectContextRequestMatrixV2,
   ProjectFactsLeaseConflictError,
   readCertifiedProjectFactsFrozenPage,
   serializeCertifiedProjectFactsArtifact,
+  toProjectFactsJson,
   validateProjectContextInventoryOwnersV2,
   verifyCertifiedProjectFactsArtifact,
   verifyProjectContextRequestMatrixV2,
@@ -50,6 +54,36 @@ afterEach(async () => {
 });
 
 describe('ProjectContext certified facts foundation', () => {
+  it('preserves prototype-named own keys in canonical JSON without changing prototypes', () => {
+    const input = JSON.parse(
+      '{"z":1,"__proto__":{"hidden":"changed"},"nested":{"__proto__":"leaf","constructor":"kept","prototype":"data"}}'
+    );
+    const normalized = toProjectFactsJson(input) as Record<string, unknown>;
+    expect(Object.getPrototypeOf(normalized)).toBe(Object.prototype);
+    expect(Object.hasOwn(normalized, '__proto__')).toBe(true);
+    expect(normalized.hidden).toBeUndefined();
+    expect(Object.getPrototypeOf(normalized.nested)).toBe(Object.prototype);
+    expect(Object.getOwnPropertyDescriptor(normalized, '__proto__')).toMatchObject({
+      enumerable: true,
+      value: { hidden: 'changed' },
+    });
+    expect(canonicalJsonStringify(input)).toBe(
+      '{"__proto__":{"hidden":"changed"},"nested":{"__proto__":"leaf","constructor":"kept","prototype":"data"},"z":1}'
+    );
+    expect(hashCanonicalJson(input)).not.toBe(
+      hashCanonicalJson({ z: 1, nested: { constructor: 'kept', prototype: 'data' } })
+    );
+  });
+
+  it('keeps ordinary canonical JSON bytes and digests unchanged', () => {
+    const input = { z: 1, ignored: undefined, a: [undefined, -0, { z: 'ok', b: true }] };
+    const expected = '{"a":[null,0,{"b":true,"z":"ok"}],"z":1}';
+    expect(canonicalJsonStringify(input)).toBe(expected);
+    expect(hashCanonicalJson(input)).toBe(
+      `sha256:${createHash('sha256').update(expected).digest('hex')}`
+    );
+  });
+
   it('exposes a stable isolated package subpath without changing live ProjectContext', async () => {
     const packageJson = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'package.json'), 'utf8')
@@ -1252,6 +1286,72 @@ describe('ProjectContext certified facts foundation', () => {
     expect(serialized).toContain('src/index.ts');
   });
 
+  it('preserves real source-slice text bytes while projecting path fields', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-source-text-'));
+    temporaryRoots.push(root);
+    await fs.mkdir(path.join(root, 'src'));
+    const filePath = path.join(root, 'src/sample.ts');
+    const source = `${String.raw`const pattern = /\w+/; const escaped = "\\n";`}\nconst location = ${JSON.stringify(filePath)};`;
+    await fs.writeFile(filePath, source);
+    const result = await new NodeProjectContextFoundationHostPorts().executeRequest({
+      repository: { repoId: 'core', scopeId: 'fixture', relativeRoot: '.', sourceRoot: root },
+      plan: {
+        repoId: 'core',
+        kind: 'source-slice',
+        applicability: 'applicable',
+        scope: { repoId: 'core' },
+        selector: { filePath: 'src/sample.ts', includeText: true, startLine: 1, endLine: 2 },
+      },
+    });
+    const output = result.output as {
+      data: { text: string; file: { filePath: string } };
+      project: { projectRoot: string };
+      refs: Array<{ scope: { projectRoot: string } }>;
+    };
+    expect(result.terminalStatus).toBe('completed');
+    expect(output.data.text).toBe(source);
+    expect(output.data.file.filePath).toBe('src/sample.ts');
+    expect(output.project.projectRoot).toBe('.');
+    expect(output.refs.length).toBeGreaterThan(0);
+    expect(output.refs.every((ref) => ref.scope.projectRoot === '.')).toBe(true);
+  });
+
+  it('preserves own JSON keys and non-path strings in portable projections', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-portable-json-'));
+    temporaryRoots.push(root);
+    const projectContext = {
+      execute: async () => ({
+        contractVersion: 1,
+        queryLevel: 'source-slice',
+        project: { projectRoot: root },
+        refs: [],
+        data: {
+          relativePath: String.raw`src\sample.ts`,
+          description: String.raw`literal \w+ and \n`,
+          metadata: JSON.parse('{"__proto__":{"hidden":"value"},"constructor":"kept"}'),
+        },
+      }),
+    } as never;
+    const result = await new NodeProjectContextFoundationHostPorts(projectContext).executeRequest({
+      repository: { repoId: 'core', scopeId: 'fixture', relativeRoot: '.', sourceRoot: root },
+      plan: {
+        repoId: 'core',
+        kind: 'source-slice',
+        applicability: 'applicable',
+        scope: {},
+        selector: {},
+      },
+    });
+    const data = (result.output as { data: Record<string, unknown> }).data;
+    expect(data.relativePath).toBe('src/sample.ts');
+    expect(data.description).toBe(String.raw`literal \w+ and \n`);
+    expect(Object.getPrototypeOf(data.metadata)).toBe(Object.prototype);
+    expect(Object.hasOwn(data.metadata as object, '__proto__')).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(data.metadata, '__proto__')?.value).toEqual({
+      hidden: 'value',
+    });
+  });
+
   it('classifies declared internal, approved sibling, and external diagnostics explicitly', async () => {
     const approvedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-diagnostics-'));
     temporaryRoots.push(approvedRoot);
@@ -2417,6 +2517,65 @@ describe('ProjectContext certified facts foundation', () => {
     );
     expect(() => verifyProjectContextRequestMatrixV2(planSwap, scope.manifest)).toThrow(
       /plans are not canonically bound/i
+    );
+  });
+
+  it('keeps case-distinct shared owner identities distinct in the request matrix', () => {
+    const fixture = createAuthorityV2Fixture();
+    const scope = fixture.scope();
+    const files: ProjectContextFoundationFileDescriptor[] = [
+      {
+        relativePath: 'src/shared.ts',
+        language: 'typescript',
+        mode: '100644',
+        ownerModuleIds: ['Api', 'api'],
+        ownersV2: ['Api', 'api'].map((ownerModuleId) => ({
+          ownerModuleId,
+          origin: 'host-declared',
+          confidence: 'high',
+          disposition: 'shared',
+          typedReason: 'explicit-shared-owner',
+          evidence: [{ kind: 'host-port-declaration' }],
+        })),
+      },
+    ];
+    const plans = createProjectContextRequestAuditPlansV2({
+      repository: fixture.input.repositories[0]!,
+      projectScopeManifest: scope.manifest,
+      eligibleFiles: files,
+    });
+    const matrix = buildProjectContextRequestMatrixV2(scope.manifest, plans);
+    expect(
+      matrix.rows
+        .filter((row) => row.kind === 'file-symbols')
+        .map((row) => row.ownerSurfaceId)
+        .sort()
+    ).toEqual(['Api', 'api']);
+    expect(new Set(matrix.rows.map((row) => row.rowId)).size).toBe(matrix.rows.length);
+    expect(() => verifyProjectContextRequestMatrixV2(matrix, scope.manifest)).not.toThrow();
+  });
+
+  it('keeps lowercase owner request-matrix bytes compatible', () => {
+    const fixture = createAuthorityV2Fixture();
+    const matrix = buildProjectContextRequestMatrixV2(fixture.scope().manifest, [
+      {
+        authorityVersion: 2,
+        repoId: 'core',
+        kind: 'file-symbols',
+        applicability: 'applicable',
+        selector: { filePath: 'src/index.ts' },
+        scope: { repoId: 'core' },
+        language: 'typescript',
+        parserFamily: 'typescript',
+        ownerSurfaceId: 'module:core',
+      },
+    ]);
+    // 来自修复前同一公开builder的golden；宿主绝对根不进入这些字节或hash。
+    expect(matrix.matrixHash).toBe(
+      'sha256:db61ad9748dd5b12776edf7db7a5a7f4171b225eca8ab3bb835110e74bfb1668'
+    );
+    expect(matrix.receiptHash).toBe(
+      'sha256:e76bddc46c20a79d9fdaa040bf0e206d06f46276659a56c0375e92aaef5fd668'
     );
   });
 

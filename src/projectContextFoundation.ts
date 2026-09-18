@@ -5,11 +5,4 @@
  * projection 会移除 host path，并按 non-circular manifest 顺序生成内容身份。
  */
 
-export type {
-  CertifiedProjectFactsArtifactV1,
-  CertifiedProjectFactsConsumerBindingV1,
-  ProjectContextFoundationCaptureInput,
-  ProjectContextFoundationHostPorts,
-  SourceRevisionVectorV1,
-} from './service/project-context/foundation/contracts.js';
 export * from './service/project-context/foundation/index.js';

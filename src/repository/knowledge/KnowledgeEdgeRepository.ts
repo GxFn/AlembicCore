@@ -639,12 +639,12 @@ export class KnowledgeEdgeRepositoryImpl extends RepositoryBase<
     return rows;
   }
 
-  /** 批量 INSERT OR IGNORE 边 (不更新已存在的行) */
+  /** 批量 INSERT OR IGNORE 边；返回处理条数（含忽略的重复项），不更新已存在的行。 */
   async bulkInsertIgnore(edges: EdgeInsert[]): Promise<number> {
     if (edges.length === 0) {
       return 0;
     }
-    let inserted = 0;
+    let processed = 0;
     const now = unixNow();
     this.transaction((tx) => {
       for (const edge of edges) {
@@ -662,10 +662,10 @@ export class KnowledgeEdgeRepositoryImpl extends RepositoryBase<
           })
           .onConflictDoNothing()
           .run();
-        inserted++;
+        processed++;
       }
     });
-    return inserted;
+    return processed;
   }
 
   /* ─── 内部辅助 ─── */

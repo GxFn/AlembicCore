@@ -22,16 +22,21 @@ import type {
   RecipeSourceRefRepositoryImpl,
 } from '../../repository/sourceref/RecipeSourceRefRepository.js';
 import { computeContentHash } from '../../shared/contentHash.js';
+import { ConflictError } from '../../shared/errors/index.js';
 import {
   buildProjectScopeSourceRefIndex,
   type CanonicalSourceIdentity,
   type ProjectScopeSourceRefIndex,
   resolveProjectScopeSourceRef,
 } from '../../shared/ProjectScope.js';
+import { stripSourceRangeSuffix } from '../../shared/sourceRefPath.js';
 import { classifyRegionDrift } from './driftClassifier.js';
 import { rewriteRecipePaths } from './RecipePathRewriter.js';
 
 const execFileAsync = promisify(execFile);
+
+// 保持现有公开导入入口；共享纯函数下移仅用于满足 repository→shared 层级边界。
+export { stripSourceRangeSuffix } from '../../shared/sourceRefPath.js';
 
 export interface ReconcileReport {
   /** 新插入的 sourceRef 条目 */
@@ -100,6 +105,7 @@ export class SourceRefReconciler {
   #logger = Logger.getInstance();
   #ttlMs: number;
   #sourceRefIndex: ProjectScopeSourceRefIndex | null;
+  #sourceIdentityProvider: (() => readonly CanonicalSourceIdentity[]) | null;
   #gitReader: ((commit: string, relPath: string) => string | null) | null = null;
 
   constructor(
@@ -108,6 +114,8 @@ export class SourceRefReconciler {
     knowledgeRepo: KnowledgeRepositoryImpl,
     options?: {
       sourceIdentities?: readonly CanonicalSourceIdentity[];
+      /** 宿主singleton早于scope初始化时，按每次调用取当前identity快照；不得把provider失败当空scope。 */
+      sourceIdentityProvider?: () => readonly CanonicalSourceIdentity[];
       signalBus?: SignalBus;
       ttlMs?: number;
       /**
@@ -124,6 +132,7 @@ export class SourceRefReconciler {
     this.#signalBus = options?.signalBus ?? null;
     this.#ttlMs = options?.ttlMs ?? DEFAULT_TTL_MS;
     this.#gitReader = options?.gitReader ?? null;
+    this.#sourceIdentityProvider = options?.sourceIdentityProvider ?? null;
     this.#sourceRefIndex = options?.sourceIdentities?.length
       ? buildProjectScopeSourceRefIndex(options.sourceIdentities)
       : null;
@@ -147,6 +156,10 @@ export class SourceRefReconciler {
       failed: 0,
       blockers: [],
     };
+    const sourceRefIndex = this.#captureSourceRefIndex(report);
+    if (sourceRefIndex === undefined) {
+      return report;
+    }
 
     // 确保表可访问
     if (!this.#sourceRefRepo.isAccessible()) {
@@ -172,6 +185,7 @@ export class SourceRefReconciler {
         force,
         now,
         report,
+        sourceRefIndex,
       });
     }
 
@@ -213,6 +227,10 @@ export class SourceRefReconciler {
       failed: 0,
       blockers: [],
     };
+    const sourceRefIndex = this.#captureSourceRefIndex(report);
+    if (sourceRefIndex === undefined) {
+      return report;
+    }
 
     if (!this.#sourceRefRepo.isAccessible()) {
       this.#logger.warn('SourceRefReconciler: recipe_source_refs table not accessible, skipping', {
@@ -240,6 +258,7 @@ export class SourceRefReconciler {
       force: opts?.force ?? true,
       now: Date.now(),
       report,
+      sourceRefIndex,
     });
 
     this.#logger.info('SourceRefReconciler: recipe source refs refreshed', {
@@ -303,6 +322,7 @@ export class SourceRefReconciler {
       force: boolean;
       now: number;
       report: ReconcileReport;
+      sourceRefIndex: ProjectScopeSourceRefIndex | null;
     }
   ): void {
     if (opts.countRecipe) {
@@ -316,6 +336,7 @@ export class SourceRefReconciler {
         force: opts.force,
         now: opts.now,
         report: opts.report,
+        sourceRefIndex: opts.sourceRefIndex,
       });
     }
   }
@@ -337,15 +358,51 @@ export class SourceRefReconciler {
   #reconcileSourceRef(
     recipeId: string,
     sourcePath: string,
-    opts: { baselineCommit: string | null; force: boolean; now: number; report: ReconcileReport }
+    opts: {
+      baselineCommit: string | null;
+      force: boolean;
+      now: number;
+      report: ReconcileReport;
+      sourceRefIndex: ProjectScopeSourceRefIndex | null;
+    }
   ): void {
     const existing = this.#sourceRefRepo.findOne(recipeId, sourcePath);
-    if (existing && !opts.force && opts.now - existing.verifiedAt < this.#ttlMs) {
-      this.#recordSkippedExisting(existing.status, opts.report);
+    let exists: boolean;
+    try {
+      // scope歧义是身份阻塞，不受文件freshness TTL豁免；旧active不能掩盖当前无法唯一定位。
+      if (
+        opts.sourceRefIndex &&
+        sourcePathFilesystemCandidates(sourcePath).some(
+          (candidate) =>
+            resolveProjectScopeSourceRef(candidate, opts.sourceRefIndex!).status === 'ambiguous'
+        )
+      ) {
+        throw new ConflictError('Ambiguous ProjectScope source reference', {
+          reason: 'project-scope-source-ref-ambiguous',
+          sourcePath,
+        });
+      }
+      if (existing && !opts.force && opts.now - existing.verifiedAt < this.#ttlMs) {
+        this.#recordSkippedExisting(existing.status, opts.report);
+        return;
+      }
+      exists = this.#sourcePathExists(sourcePath, opts.sourceRefIndex);
+    } catch (error) {
+      if (
+        !(error instanceof ConflictError) ||
+        error.details.reason !== 'project-scope-source-ref-ambiguous'
+      ) {
+        throw error;
+      }
+      opts.report.failed = (opts.report.failed ?? 0) + 1;
+      opts.report.skipped++;
+      opts.report.blockers?.push(`recipe_source_refs:${recipeId}:ambiguous:${sourcePath}`);
+      this.#logger.warn(
+        'SourceRefReconciler: ambiguous source preserved without freshness mutation',
+        { recipeId, sourcePath, result: 'blocked' }
+      );
       return;
     }
-
-    const exists = this.#sourcePathExists(sourcePath);
     if (existing) {
       this.#updateExistingSourceRef(
         recipeId,
@@ -354,12 +411,13 @@ export class SourceRefReconciler {
         opts.now,
         opts.report,
         existing,
-        opts.baselineCommit
+        opts.baselineCommit,
+        opts.sourceRefIndex
       );
       return;
     }
 
-    this.#insertSourceRef(recipeId, sourcePath, exists, opts.now, opts.report);
+    this.#insertSourceRef(recipeId, sourcePath, exists, opts.now, opts.report, opts.sourceRefIndex);
   }
 
   #recordSkippedExisting(status: string, report: ReconcileReport): void {
@@ -378,9 +436,18 @@ export class SourceRefReconciler {
    * 走 #resolveSourcePath（ProjectScope-aware）+ sourcePathFilesystemCandidates（行号/片段后缀剥离），
    * 供 #sourcePathExists（reconcile/repair）与 #sourceContentFingerprint（指纹读文件）共用，三处口径一致。
    */
-  #resolveExistingSourceFile(sourcePath: string): string | null {
+  #resolveExistingSourceFile(
+    sourcePath: string,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
+  ): string | null {
     for (const candidatePath of sourcePathFilesystemCandidates(sourcePath)) {
-      const resolvedSource = this.#resolveSourcePath(candidatePath);
+      const resolvedSource = this.#resolveSourcePath(candidatePath, sourceRefIndex);
+      if (resolvedSource.status === 'ambiguous') {
+        throw new ConflictError('Ambiguous ProjectScope source reference', {
+          reason: 'project-scope-source-ref-ambiguous',
+          sourcePath,
+        });
+      }
       if (resolvedSource.status === 'resolved' && fs.existsSync(resolvedSource.absolutePath)) {
         return resolvedSource.absolutePath;
       }
@@ -388,8 +455,11 @@ export class SourceRefReconciler {
     return null;
   }
 
-  #sourcePathExists(sourcePath: string): boolean {
-    return this.#resolveExistingSourceFile(sourcePath) !== null;
+  #sourcePathExists(
+    sourcePath: string,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
+  ): boolean {
+    return this.#resolveExistingSourceFile(sourcePath, sourceRefIndex) !== null;
   }
 
   /**
@@ -397,8 +467,11 @@ export class SourceRefReconciler {
    * 复用同一 #resolveExistingSourceFile 出口定位文件，按 sourcePath 的行号后缀截 region。
    * 返回 null 表示文件解析不到或读失败（调用方据此保守续期、不误报 drift）。
    */
-  #sourceContentFingerprint(sourcePath: string): string | null {
-    const absPath = this.#resolveExistingSourceFile(sourcePath);
+  #sourceContentFingerprint(
+    sourcePath: string,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
+  ): string | null {
+    const absPath = this.#resolveExistingSourceFile(sourcePath, sourceRefIndex);
     if (!absPath) {
       return null;
     }
@@ -422,7 +495,8 @@ export class SourceRefReconciler {
     verifiedAt: number,
     report: ReconcileReport,
     existing: RecipeSourceRefEntity,
-    baselineCommit: string | null
+    baselineCommit: string | null,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
   ): void {
     if (!exists) {
       // 文件不存在 → stale；不写 content_fp，保留旧指纹以便文件复活后比对。
@@ -437,7 +511,7 @@ export class SourceRefReconciler {
     }
 
     // 文件存在 → 算当前 region 指纹，比对 content_fp 决定 active 续期 / drifted。
-    const currentFp = this.#sourceContentFingerprint(sourcePath);
+    const currentFp = this.#sourceContentFingerprint(sourcePath, sourceRefIndex);
 
     if (currentFp === null) {
       // 文件在但指纹算不出（读失败等）→ 保守 active 续期，不写指纹、不误报 drift。
@@ -503,7 +577,7 @@ export class SourceRefReconciler {
     });
     // P3 observe-only 精判:有 git 读取器+基线 commit 时,判 drifted 是行号漂移还是内容实变,
     // 只记进 report + 日志,不改 status、不改 sourceRefs(自动修 range 是后续项)。
-    this.#classifyDriftObserveOnly(recipeId, sourcePath, report, baselineCommit);
+    this.#classifyDriftObserveOnly(recipeId, sourcePath, report, baselineCommit, sourceRefIndex);
   }
 
   /**
@@ -514,7 +588,8 @@ export class SourceRefReconciler {
     recipeId: string,
     sourcePath: string,
     report: ReconcileReport,
-    baselineCommit: string | null
+    baselineCommit: string | null,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
   ): void {
     const gitReader = this.#gitReader;
     if (!gitReader || !baselineCommit) {
@@ -523,7 +598,7 @@ export class SourceRefReconciler {
     try {
       const relPath = stripSourceRangeSuffix(sourcePath);
       const oldContent = gitReader(baselineCommit, relPath);
-      const absPath = this.#resolveExistingSourceFile(sourcePath);
+      const absPath = this.#resolveExistingSourceFile(sourcePath, sourceRefIndex);
       if (oldContent === null || !absPath) {
         return;
       }
@@ -565,10 +640,11 @@ export class SourceRefReconciler {
     sourcePath: string,
     exists: boolean,
     verifiedAt: number,
-    report: ReconcileReport
+    report: ReconcileReport,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
   ): void {
     // 新行存在 → 立即算 region 指纹作基线（下次 reconcile 即可检 drift）；不存在 → stale 无指纹。
-    const contentFp = exists ? this.#sourceContentFingerprint(sourcePath) : null;
+    const contentFp = exists ? this.#sourceContentFingerprint(sourcePath, sourceRefIndex) : null;
     this.#sourceRefRepo.upsert({
       recipeId,
       sourcePath,
@@ -617,6 +693,10 @@ export class SourceRefReconciler {
    */
   async repairRenames(): Promise<RepairReport> {
     const report: RepairReport = { renamed: 0, stillStale: 0 };
+    const sourceRefIndex = this.#captureSourceRefIndex();
+    if (sourceRefIndex === undefined) {
+      throw new Error('Source identity snapshot unavailable');
+    }
 
     // 获取所有 stale 条目
     const staleRows = this.#sourceRefRepo.findStale();
@@ -634,7 +714,7 @@ export class SourceRefReconciler {
       if (newPath) {
         // P6：验证 newPath 存在 — 走 #sourcePathExists 同一 ProjectScope-aware resolve 出口，
         // 与 reconcile/fingerprint 口径一致（替换原裸 path.resolve + existsSync）。
-        if (this.#sourcePathExists(newPath)) {
+        if (this.#sourcePathExists(newPath, sourceRefIndex)) {
           this.#sourceRefRepo.upsert({
             recipeId: row.recipeId,
             sourcePath: row.sourcePath,
@@ -774,13 +854,16 @@ export class SourceRefReconciler {
     return renameMap;
   }
 
-  #resolveSourcePath(sourcePath: string): {
+  #resolveSourcePath(
+    sourcePath: string,
+    sourceRefIndex: ProjectScopeSourceRefIndex | null
+  ): {
     absolutePath: string;
     reason: string;
-    status: 'missing' | 'resolved';
+    status: 'missing' | 'resolved' | 'ambiguous';
   } {
-    if (this.#sourceRefIndex) {
-      const resolution = resolveProjectScopeSourceRef(sourcePath, this.#sourceRefIndex);
+    if (sourceRefIndex) {
+      const resolution = resolveProjectScopeSourceRef(sourcePath, sourceRefIndex);
       if (resolution.identity?.absolutePath) {
         return {
           absolutePath: resolution.identity.absolutePath,
@@ -791,7 +874,7 @@ export class SourceRefReconciler {
       return {
         absolutePath: path.resolve(this.#projectRoot, sourcePath),
         reason: resolution.reason,
-        status: 'missing',
+        status: resolution.status === 'ambiguous' ? 'ambiguous' : 'missing',
       };
     }
 
@@ -800,6 +883,31 @@ export class SourceRefReconciler {
       reason: 'legacy-project-root',
       status: 'resolved',
     };
+  }
+
+  #captureSourceRefIndex(report?: ReconcileReport): ProjectScopeSourceRefIndex | null | undefined {
+    if (!this.#sourceIdentityProvider) {
+      return this.#sourceRefIndex;
+    }
+    try {
+      const identities = this.#sourceIdentityProvider();
+      if (!Array.isArray(identities)) {
+        throw new Error('Source identity provider must return an array');
+      }
+      return identities.length ? buildProjectScopeSourceRefIndex(identities) : null;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#logger.error(
+        'SourceRefReconciler: source identity snapshot unavailable; state preserved',
+        { error: message, result: 'blocked' }
+      );
+      if (!report) {
+        throw error;
+      }
+      report.failed = (report.failed ?? 0) + 1;
+      report.blockers?.push(`project_scope_source_identities:provider-failed:${message}`);
+      return undefined;
+    }
   }
 }
 
@@ -850,17 +958,7 @@ export function parseSourceLineRange(sourcePath: string): { start?: number; end?
   return {};
 }
 
-/**
- * P3:剥离 sourcePath 的行区间后缀,得到 repo 相对文件路径(git pathspec 口径)。
- * 与 parseSourceLineRange 配套:`:N`/`:N-M`(:col) 或 `#LN`/`#LN-LM` 后缀被去掉。
- */
-export function stripSourceRangeSuffix(sourcePath: string): string {
-  return sourcePath
-    .replace(/:(\d+)(?:-(\d+))?(?::\d+)?$/, '')
-    .replace(/#L(\d+)(?:-L?(\d+))?$/i, '')
-    .replaceAll('\\', '/');
-}
-
+/** 按现有别名规则投影可能的文件路径，纯后缀处理与仓储共用 shared 实现。 */
 function sourcePathFilesystemCandidates(sourcePath: string): string[] {
   const candidates: string[] = [];
   const enqueue = (candidate: string): void => {

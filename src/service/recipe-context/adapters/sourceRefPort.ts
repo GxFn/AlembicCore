@@ -1,9 +1,14 @@
 // Binds RecipeSourceRefRepository (recipe_source_refs) to RecipeSourceRefPort.
 // The repository is referenced structurally and its reads are synchronous; the
-// port normalizes them to the row shape and synthesizes listAll() from the three
-// status partitions (active ∪ stale ∪ renamed) since the table has no list-all.
+// port prefers the repository's complete read, with status queries retained for
+// older host adapters that do not yet expose findAll().
 
+import Logger from '../../../infrastructure/logging/Logger.js';
 import type { RecipeSourceRefPort, RecipeSourceRefRow } from '../ports.js';
+
+const STATUS_ORDER = new Map(
+  ['active', 'stale', 'renamed', 'drifted'].map((status, i) => [status, i])
+);
 
 interface RepoRow {
   recipeId: string;
@@ -15,6 +20,7 @@ interface RepoRow {
 
 /** The RecipeSourceRefRepository read methods this adapter consumes. */
 export interface SourceRefRepositoryFacade {
+  findAll?(): RepoRow[];
   findByRecipeId(recipeId: string): RepoRow[];
   findBySourcePath(sourcePath: string): RepoRow[];
   findByStatus(status: string): RepoRow[];
@@ -44,9 +50,29 @@ export function sourceRefPortFromRepository(repo: SourceRefRepositoryFacade): Re
       return repo.findByStatus(status).map(toRow);
     },
     listAll(): RecipeSourceRefRow[] {
-      return [...repo.findByStatus('active'), ...repo.findStale(), ...repo.findRenamed()].map(
-        toRow
-      );
+      let rows: RepoRow[];
+      if (repo.findAll) {
+        rows = repo.findAll();
+      } else {
+        // 兼容旧外层端口，同时覆盖内容漂移状态；保留 active/stale/renamed 的既有分组顺序。
+        Logger.getInstance().debug('Recipe source refs use compatibility status queries', {
+          reason: 'repository-findAll-unavailable',
+          statuses: [...STATUS_ORDER.keys()],
+        });
+        rows = [
+          ...repo.findByStatus('active'),
+          ...repo.findStale(),
+          ...repo.findRenamed(),
+          ...repo.findByStatus('drifted'),
+        ];
+      }
+      return rows
+        .map(toRow)
+        .sort(
+          (left, right) =>
+            (STATUS_ORDER.get(left.status) ?? STATUS_ORDER.size) -
+            (STATUS_ORDER.get(right.status) ?? STATUS_ORDER.size)
+        );
     },
   };
 }

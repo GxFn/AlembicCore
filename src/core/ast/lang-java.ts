@@ -329,17 +329,20 @@ function detectJavaPatterns(root: any, lang: any, methods: any, properties: any,
   const patterns: any[] = [];
 
   // Singleton: private constructor + static getInstance
-  const classMethodMap: Record<string, any> = {};
+  // 源代码类型名可与Object原型键重名，内部按不透明名字分组。
+  const classMethodMap = new Map<
+    string,
+    { name: string; isConstructor?: boolean; isClassMethod?: boolean }[]
+  >();
   for (const m of methods) {
     if (m.className) {
-      if (!classMethodMap[m.className]) {
-        classMethodMap[m.className] = [];
-      }
-      classMethodMap[m.className].push(m);
+      const group = classMethodMap.get(m.className) ?? [];
+      group.push(m);
+      classMethodMap.set(m.className, group);
     }
   }
 
-  for (const [cls, methodList] of Object.entries(classMethodMap) as [string, any[]][]) {
+  for (const [cls, methodList] of classMethodMap) {
     const _hasPrivateConstructor = methodList.some((m) => m.isConstructor);
     const hasGetInstance = methodList.some(
       (m) => m.isClassMethod && /^getInstance$|^get$/.test(m.name)

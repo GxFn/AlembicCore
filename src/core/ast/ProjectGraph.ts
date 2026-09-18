@@ -15,6 +15,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import Logger from '../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import { listProjectScopeFolders, type ProjectDescriptor } from '../../shared/ProjectScope.js';
 import { analyzeFile, isAvailable } from '../AstAnalyzer.js';
@@ -518,6 +519,31 @@ export default class ProjectGraph {
 
   /** 构建反向索引 — 协议遵循者列表 */
   #buildReverseIndices() {
+    // 增量删除/改写后，从仍在图中的来源事实重算，不能保留上轮conformers缓存。
+    this.#inheritance.clear();
+    this.#conformance.clear();
+    for (const [name, info] of this.#classes) {
+      if (info.superClass) {
+        this.#inheritance.set(name, info.superClass);
+      }
+      if (info.protocols?.length > 0) {
+        this.#conformance.set(name, new Set(info.protocols));
+      }
+    }
+    for (const [name, categories] of this.#categories) {
+      const protocols = this.#conformance.get(name) ?? new Set();
+      for (const category of categories) {
+        for (const protocol of category.protocols || []) {
+          protocols.add(protocol);
+        }
+      }
+      if (protocols.size > 0) {
+        this.#conformance.set(name, protocols);
+      }
+    }
+    for (const protocol of this.#protocols.values()) {
+      protocol.conformers = [];
+    }
     // 填充 protocol.conformers
     for (const [className, protos] of this.#conformance) {
       for (const protoName of protos) {
@@ -531,16 +557,51 @@ export default class ProjectGraph {
     // 补充 classInfo 中的 methods (从 methodsByClass 合并)
     for (const [className, classInfo] of this.#classes) {
       const allMethods = this.#methodsByClass.get(className) || [];
-      // 只补充 classInfo.methods 中没有的方法
-      const existingNames = new Set(
-        classInfo.methods.map((m: any) => `${m.isClassMethod ? '+' : '-'}${m.name}`)
-      );
+      // classInfo.methods也可能含上次从其他文件补入的方法，必须从存活来源重建。
+      classInfo.methods = [];
+      const existingNames = new Set<string>();
       for (const m of allMethods) {
         const key = `${m.isClassMethod ? '+' : '-'}${m.name}`;
         if (!existingNames.has(key)) {
-          classInfo.methods.push(m);
+          const { filePath, ...method } = m;
+          // 保持原形状：定义所在文件的方法省略冗余filePath，跨文件补入的保留来源。
+          classInfo.methods.push(filePath === classInfo.filePath ? method : m);
           existingNames.add(key);
         }
+      }
+    }
+  }
+
+  /** 只撤销该文件实际贡献的事实；同类的其他Category/实现文件仍然有效。 */
+  #removeFileContributions(relativePath: string) {
+    for (const [name, info] of this.#classes) {
+      if (info.filePath === relativePath) {
+        this.#classes.delete(name);
+      }
+    }
+    for (const [name, info] of this.#protocols) {
+      if (info.filePath === relativePath) {
+        this.#protocols.delete(name);
+      }
+    }
+    for (const [name, categories] of this.#categories) {
+      const remaining = categories.filter(
+        (item: { filePath: string }) => item.filePath !== relativePath
+      );
+      if (remaining.length > 0) {
+        this.#categories.set(name, remaining);
+      } else {
+        this.#categories.delete(name);
+      }
+    }
+    for (const [name, methods] of this.#methodsByClass) {
+      const remaining = methods.filter(
+        (item: { filePath: string }) => item.filePath !== relativePath
+      );
+      if (remaining.length > 0) {
+        this.#methodsByClass.set(name, remaining);
+      } else {
+        this.#methodsByClass.delete(name);
       }
     }
   }
@@ -638,21 +699,7 @@ export default class ProjectGraph {
     // 1. 删除已移除文件的索引
     for (const relPath of deletedPaths) {
       if (this.#files.has(relPath)) {
-        const symbols = this.#files.get(relPath);
-        // 清除该文件贡献的类、协议、Category
-        for (const cls of symbols.classes || []) {
-          this.#classes.delete(cls);
-          this.#inheritance.delete(cls);
-          this.#conformance.delete(cls);
-          this.#methodsByClass.delete(cls);
-        }
-        for (const proto of symbols.protocols || []) {
-          this.#protocols.delete(proto);
-        }
-        for (const catKey of symbols.categories || []) {
-          const className = catKey.split('(')[0];
-          this.#categories.delete(className);
-        }
+        this.#removeFileContributions(relPath);
         this.#files.delete(relPath);
         deleted++;
       }
@@ -671,33 +718,31 @@ export default class ProjectGraph {
         const relativePath = path.relative(this.#projectRoot, filePath);
         const isUpdate = this.#files.has(relativePath);
 
-        // 先清除旧索引（如果是更新）
-        if (isUpdate) {
-          const oldSymbols = this.#files.get(relativePath);
-          for (const cls of oldSymbols.classes || []) {
-            this.#classes.delete(cls);
-            this.#inheritance.delete(cls);
-            this.#conformance.delete(cls);
-            this.#methodsByClass.delete(cls);
-          }
-          for (const proto of oldSymbols.protocols || []) {
-            this.#protocols.delete(proto);
-          }
-          for (const catKey of oldSymbols.categories || []) {
-            const className = catKey.split('(')[0];
-            this.#categories.delete(className);
-          }
-        }
-
         const summary = analyzeFile(content, lang);
         if (!summary) {
+          Logger.getInstance().warn(
+            '[ProjectGraph] parser unavailable; existing file facts retained',
+            {
+              filePath: relativePath,
+              language: lang,
+            }
+          );
           continue;
         }
-
+        if (isUpdate) {
+          this.#removeFileContributions(relativePath);
+        }
         this.#indexFileSummary(relativePath, summary);
         isUpdate ? updated++ : added++;
-      } catch {
-        // 单文件解析失败不阻塞
+      } catch (error) {
+        // 新解析成功前不撤销旧事实；单文件失败保留可读缓存并记录来源。
+        Logger.getInstance().warn(
+          '[ProjectGraph] incremental parse failed; existing file facts retained',
+          {
+            filePath,
+            error: error instanceof Error ? error.message : String(error),
+          }
+        );
       }
     }
 

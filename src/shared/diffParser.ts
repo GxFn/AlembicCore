@@ -58,23 +58,35 @@ export function getFileDiff(
 /**
  * 解析 unified diff 文本，提取变更行。
  *
- * 忽略 @@ 头、文件头（---/+++）、上下文行（无 +/- 前缀的行）。
+ * 根据 @@ 行数识别 hunk 边界，忽略文件头与上下文行。
  */
 export function parseDiffHunks(diffText: string): DiffHunk[] {
   const hunks: DiffHunk[] = [];
   let current: DiffHunk | null = null;
+  let oldRemaining = 0;
+  let newRemaining = 0;
 
   for (const line of diffText.split('\n')) {
-    if (line.startsWith('@@')) {
+    const header = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/.exec(line);
+    if (header) {
       if (current && (current.removedLines.length > 0 || current.addedLines.length > 0)) {
         hunks.push(current);
       }
       current = { removedLines: [], addedLines: [] };
-    } else if (current !== null) {
-      if (line.startsWith('-') && !line.startsWith('---')) {
+      oldRemaining = Number(header[1] ?? 1);
+      newRemaining = Number(header[2] ?? 1);
+    } else if (current !== null && (oldRemaining > 0 || newRemaining > 0)) {
+      // hunk 内的 ---/+++ 可能是 --/++ 源码加上 diff 前缀，不能按文本判作文件头。
+      // 行数耗尽后停止消费，后续文件头不会混入上一段变更。
+      if (line.startsWith('-')) {
         current.removedLines.push(line.slice(1));
-      } else if (line.startsWith('+') && !line.startsWith('+++')) {
+        oldRemaining--;
+      } else if (line.startsWith('+')) {
         current.addedLines.push(line.slice(1));
+        newRemaining--;
+      } else if (line.startsWith(' ')) {
+        oldRemaining--;
+        newRemaining--;
       }
     }
   }

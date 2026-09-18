@@ -37,12 +37,11 @@ The manual path does not publish. It runs:
 ```text
 npm ci
 npm run check
-npm run build
-npm run smoke:public-api
 npm run release:check
 npm pack --dry-run --json
 ```
 
+`npm run check` includes the package build and public-entrypoint smoke test.
 The workflow summary records package name, version, source commit, tarball name,
 entry count, unpacked size, and integrity. The pack preview artifact is the
 handoff evidence for downstream staging windows.

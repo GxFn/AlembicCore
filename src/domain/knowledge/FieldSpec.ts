@@ -326,12 +326,9 @@ export function getSystemInjectedFields() {
 
 /** 生成人类友好的字段说明列表（供拒绝反馈使用） */
 export function getRequiredFieldsDescription() {
-  return V3_FIELD_SPEC.filter((f) => f.level === FieldLevel.REQUIRED).map((f) => {
-    if (f.name.includes('.')) {
-      return `${f.name} (${f.rule})`;
-    }
-    return `${f.name} (${f.rule})`;
-  });
+  return V3_FIELD_SPEC.filter((f) => f.level === FieldLevel.REQUIRED).map(
+    (f) => `${f.name} (${f.rule})`
+  );
 }
 
 /** 根据字段名获取规范定义 */

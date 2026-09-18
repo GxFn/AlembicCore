@@ -433,6 +433,31 @@ function domain(report: ReturnType<DomainSignalDetector['detect']>, id: Architec
 }
 
 describe('architecture intelligence capabilities', () => {
+  it('attributes map cycles to each participating module once', () => {
+    const projectContext = fixtureProjectContext();
+    projectContext.map!.cycles = [
+      {
+        refs: [
+          ref('module', 'module:api'),
+          ref('module', 'module:auth'),
+          ref('module', 'module:api'),
+        ],
+        summary: 'api -> auth -> api',
+      },
+    ];
+    const report = analyzeArchitectureIntelligence({ projectContext });
+    expect(report.complexity.project.cycleCount).toBe(1);
+    expect(report.complexity.modules.find((module) => module.moduleId === 'api')?.cycleCount).toBe(
+      1
+    );
+    expect(report.complexity.modules.find((module) => module.moduleId === 'auth')?.cycleCount).toBe(
+      1
+    );
+    expect(report.complexity.modules.find((module) => module.moduleId === 'ui')?.cycleCount).toBe(
+      0
+    );
+  });
+
   it('grounds domain/style/complexity signals in ProjectContext and shared graph evidence', () => {
     const report = analyzeArchitectureIntelligence(fixtureInput());
 

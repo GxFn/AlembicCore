@@ -312,13 +312,12 @@ function detectGoPatterns(root: any, lang: any, methods: any, properties: any, c
   const patterns: any[] = [];
 
   // 构建 struct → methods 索引
-  const structMethodMap: Record<string, any> = {};
+  const structMethodMap = new Map<string, unknown[]>();
   for (const m of methods) {
     if (m.className) {
-      if (!structMethodMap[m.className]) {
-        structMethodMap[m.className] = [];
-      }
-      structMethodMap[m.className].push(m);
+      const group = structMethodMap.get(m.className) ?? [];
+      group.push(m);
+      structMethodMap.set(m.className, group);
     }
   }
 
@@ -355,12 +354,12 @@ function detectGoPatterns(root: any, lang: any, methods: any, properties: any, c
 
   // Interface satisfaction: struct 的方法集合覆盖某 interface
   // (简化版: 不做完整检查, 只记录 struct-has-methods 的关系)
-  for (const [structName, methodList] of Object.entries(structMethodMap)) {
-    if ((methodList as string[]).length >= 3) {
+  for (const [structName, methodList] of structMethodMap) {
+    if (methodList.length >= 3) {
       patterns.push({
         type: 'struct-methods',
         className: structName,
-        methodCount: (methodList as string[]).length,
+        methodCount: methodList.length,
         confidence: 0.7,
       });
     }

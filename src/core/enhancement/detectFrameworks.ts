@@ -14,6 +14,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import Logger from '../../infrastructure/logging/Logger.js';
 
 /** 单清单读取上限:依赖清单超过此值几乎必为异常产物,跳过防止大文件拖慢 guard 构建。 */
 const MAX_MANIFEST_BYTES = 262_144;
@@ -103,14 +104,25 @@ async function detectNodeEcosystem(
     return;
   }
   manifests.push('package.json');
-  let parsed: Record<string, unknown>;
+  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw) as Record<string, unknown>;
+    parsed = JSON.parse(raw);
   } catch {
     return; // 损坏的 package.json:语言/框架均不猜测。
   }
-  const dependencyNames = collectRecordKeys(parsed.dependencies).concat(
-    collectRecordKeys(parsed.devDependencies)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    // 单个清单的 JSON 根形状错误不能中断后续生态；只记诊断，不猜 JavaScript 项目。
+    Logger.getInstance().warn('[EnhancementFrameworks] skipped invalid package manifest', {
+      projectRoot,
+      manifest: 'package.json',
+      reason: 'expected-object',
+      nextAction: 'repair the manifest; other ecosystem manifests will still be inspected',
+    });
+    return;
+  }
+  const manifest = parsed as Record<string, unknown>;
+  const dependencyNames = collectRecordKeys(manifest.dependencies).concat(
+    collectRecordKeys(manifest.devDependencies)
   );
   languages.add('javascript');
   if (
@@ -173,7 +185,10 @@ async function detectGoEcosystem(
   manifests.push('go.mod');
   languages.add('go');
   const modulePaths: string[] = [];
-  for (const match of goMod.matchAll(/^\s*([a-z0-9.\-/]+\.[a-z]{2,}\/[A-Za-z0-9._\-/]+)\s+v/gm)) {
+  // require 块内和单行 require 共享 module path/version 语义。
+  for (const match of goMod.matchAll(
+    /^\s*(?:require\s+)?([a-z0-9.\-/]+\.[a-z]{2,}\/[A-Za-z0-9._\-/]+)\s+v/gm
+  )) {
     modulePaths.push(match[1]);
   }
   matchDependencyFrameworks(modulePaths, GO_MODULE_FRAMEWORKS, frameworks);

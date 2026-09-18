@@ -78,10 +78,40 @@ export async function loadDimensionCheckpoints(
   return checkpoints;
 }
 
-export async function clearDimensionCheckpoints(dataRoot: string): Promise<void> {
+export async function clearDimensionCheckpoints(
+  dataRoot: string,
+  sessionId?: string
+): Promise<void> {
   try {
     const checkpointDir = path.join(dataRoot, '.asd', 'bootstrap-checkpoint');
     pathGuard.assertSafe(checkpointDir);
+    if (sessionId !== undefined) {
+      // workflow 完成只清理自己的恢复点；无 sessionId 的显式 reset 保留既有全清语义。
+      for (const file of await fs.readdir(checkpointDir, { withFileTypes: true })) {
+        if (!file.isFile() || !file.name.endsWith('.json')) {
+          continue;
+        }
+        const filePath = path.join(checkpointDir, file.name);
+        try {
+          const checkpoint = JSON.parse(
+            await fs.readFile(filePath, 'utf8')
+          ) as DimensionCheckpoint | null;
+          if (checkpoint?.sessionId === sessionId) {
+            await fs.rm(filePath, { force: true });
+          }
+        } catch (error) {
+          logger.warn(
+            '[WorkflowCheckpoint] retained checkpoint with unverified session ownership',
+            {
+              file: file.name,
+              sessionId,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          );
+        }
+      }
+      return;
+    }
     await fs.rm(checkpointDir, { recursive: true, force: true });
   } catch (err: unknown) {
     if ((err as { name?: string })?.name === 'PathGuardError') {

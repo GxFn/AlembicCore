@@ -33,26 +33,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Core 是外层仓库共享底座，先保证类型契约、静态扫描、测试和可打包性。
-      - name: TypeScript check
-        run: npm run build:check
-
-      # The public-api boundary narrowness validation imports compiled dist/
-      # facades, so the package output must exist before that gate runs.
-      - name: Build package output
-        run: npm run build
-
-      - name: Lint
-        run: npm run lint
-
-      - name: Check public API boundary
-        run: npm run lint:public-api-boundary
-
-      - name: Test
-        run: npm test
-
-      - name: Smoke test package entrypoints
-        run: npm run smoke:public-api
+      # 复用本地完整检查；check 内先构建 dist，再执行依赖编译产物的公共入口门禁。
+      # 层依赖、scope、预算和退役符号等规则也必须在普通 PR 中生效。
+      - name: Check, build, and test
+        run: npm run check
 
       - name: Verify release package baseline
         run: npm run release:check

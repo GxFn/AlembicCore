@@ -16,6 +16,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import Logger from '../../infrastructure/logging/Logger.js';
 
 export class ImportPathResolver {
   fileIndex: Map<string, string>;
@@ -126,10 +127,7 @@ export class ImportPathResolver {
     if (pathStr.startsWith('.')) {
       const importerDir = path.dirname(importerFile);
       const resolved = path.normalize(path.join(importerDir, pathStr));
-      if (this.fileIndex.has(resolved)) {
-        return this.fileIndex.get(resolved);
-      }
-      return this.fileIndex.get(resolved) || null;
+      return this.#resolveIndexedFile(resolved);
     }
 
     // 2. tsconfig paths alias 解析
@@ -164,11 +162,33 @@ export class ImportPathResolver {
         const remainder = importPath === prefix ? '' : importPath.slice(prefix.length + 1);
         for (const target of targets) {
           const resolved = remainder ? path.normalize(path.join(target, remainder)) : target;
-          if (this.fileIndex.has(resolved)) {
-            return this.fileIndex.get(resolved) ?? null;
+          const targetFile = this.#resolveIndexedFile(resolved);
+          if (targetFile) {
+            return targetFile;
           }
         }
       }
+    }
+    return null;
+  }
+
+  #resolveIndexedFile(requestedPath: string): string | null {
+    const exact = this.fileIndex.get(requestedPath);
+    if (exact) {
+      return exact;
+    }
+    // NodeNext 源码写输出扩展名 .js；只有真实 .js 不存在时才映射到 TS 源码。
+    // 复用无扩展名索引，保留调用方 allFiles 的既有优先顺序（包括 .ts/.tsx 冲突）。
+    const source = requestedPath.endsWith('.js')
+      ? this.fileIndex.get(requestedPath.slice(0, -3))
+      : undefined;
+    if (source && /\.tsx?$/.test(source)) {
+      Logger.getInstance().debug('Import resolved JavaScript specifier to TypeScript source', {
+        requestedPath,
+        source,
+        reason: 'emitted-javascript-file-absent',
+      });
+      return source;
     }
     return null;
   }

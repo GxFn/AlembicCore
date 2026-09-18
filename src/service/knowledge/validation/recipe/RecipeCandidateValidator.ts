@@ -66,8 +66,24 @@ export class RecipeCandidateValidator {
     const errors: string[] = [];
     const warnings: string[] = [];
 
-    if (!candidate || typeof candidate !== 'object') {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
       return { valid: false, errors: ['候选为空或类型错误'], warnings: [] };
+    }
+
+    // 输入来自候选 JSON；先记录类型错误，语义层只对真实字符串调用字符串方法。
+    // 不将数字/数组强转成可接受文本，良构候选的既有 errors/warnings 顺序保持不变。
+    for (const field of [
+      'title',
+      'trigger',
+      'kind',
+      'category',
+      'language',
+      'knowledgeType',
+      'usageGuide',
+    ]) {
+      if (candidate[field] != null && typeof candidate[field] !== 'string') {
+        errors.push(`字段类型错误: ${field} — 应为 string`);
+      }
     }
 
     // ── V3 必填字段 ──
@@ -80,11 +96,16 @@ export class RecipeCandidateValidator {
 
     // ── content 对象必须包含有效内容 ──
     const content = candidate.content;
-    if (!content || typeof content !== 'object') {
+    if (!content || typeof content !== 'object' || Array.isArray(content)) {
       errors.push('缺少必填字段: content（需为 { pattern, markdown, rationale } 对象）');
     } else {
-      const hasPattern = !!(content.pattern && String(content.pattern).trim());
-      const hasMarkdown = !!(content.markdown && String(content.markdown).trim());
+      for (const field of ['pattern', 'markdown', 'rationale'] as const) {
+        if (content[field] != null && typeof content[field] !== 'string') {
+          errors.push(`字段类型错误: content.${field} — 应为 string`);
+        }
+      }
+      const hasPattern = typeof content.pattern === 'string' && content.pattern.trim();
+      const hasMarkdown = typeof content.markdown === 'string' && content.markdown.trim();
       if (!hasPattern && !hasMarkdown) {
         errors.push('content.pattern 或 content.markdown 至少需要一个非空');
       }
@@ -115,14 +136,18 @@ export class RecipeCandidateValidator {
     }
 
     // ── category 合法性 ──
-    if (candidate.category && !VALID_CATEGORIES.has(candidate.category.toLowerCase())) {
+    if (
+      typeof candidate.category === 'string' &&
+      candidate.category &&
+      !VALID_CATEGORIES.has(candidate.category.toLowerCase())
+    ) {
       warnings.push(
         `category "${candidate.category}" 不在标准列表（View/Service/Tool/Model/Network/Storage/UI/Utility）`
       );
     }
 
     // ── language 合法性 ──
-    if (candidate.language) {
+    if (typeof candidate.language === 'string' && candidate.language) {
       const lang = candidate.language.toLowerCase();
       if (!LanguageService.isKnownLang(lang) && lang !== 'objc' && lang !== 'markdown') {
         warnings.push(`language "${candidate.language}" 不在已知语言列表`);
@@ -145,10 +170,17 @@ export class RecipeCandidateValidator {
     }
 
     // ── 推理依据 (reasoning) 必填 ──
-    if (!candidate.reasoning) {
+    if (
+      !candidate.reasoning ||
+      typeof candidate.reasoning !== 'object' ||
+      Array.isArray(candidate.reasoning)
+    ) {
       errors.push('缺少必填字段: reasoning（需包含 whyStandard + sources + confidence）');
     } else {
-      if (!candidate.reasoning.whyStandard?.trim()) {
+      if (
+        typeof candidate.reasoning.whyStandard !== 'string' ||
+        !candidate.reasoning.whyStandard.trim()
+      ) {
         errors.push('reasoning.whyStandard 不能为空');
       }
       if (!Array.isArray(candidate.reasoning.sources) || candidate.reasoning.sources.length === 0) {

@@ -210,9 +210,12 @@ const JVM: FamilyProfile = {
       regex: /^import\s+(?:static\s+)?([\w.]+)/,
       extract: (m) => {
         const SKIP = new Set(['java', 'javax', 'android', 'androidx', 'kotlin', 'kotlinx']);
-        return m[1]
-          .split('.')
-          .filter((s) => !SKIP.has(s) && s[0] === s[0].toLowerCase() && s.length > 1);
+        return (
+          m[1]
+            .split('.')
+            // 通配 import 会留下末尾空段；先判长度，保留普通包段的既有过滤/顺序。
+            .filter((s) => s.length > 1 && !SKIP.has(s) && s[0] === s[0].toLowerCase())
+        );
       },
     },
   ],

@@ -250,7 +250,8 @@ export class FileDiffSnapshotStore {
     const fileHashes: Record<string, string> = {};
     for (const f of allFiles) {
       const rel = normalizeSnapshotPath(f, projectRoot);
-      fileHashes[rel] = this.#computeContentHash(f.content || this.#readFileContent(f.path));
+      // 显式空内容也是扫描事实；仅缺失 content 时回读磁盘，与 computeDiff 保持同一来源规则。
+      fileHashes[rel] = this.#computeContentHash(f.content ?? this.#readFileContent(f.path));
     }
 
     // 构建维度-文件映射
@@ -417,7 +418,7 @@ export class FileDiffSnapshotStore {
     const newHashes: Record<string, string> = {};
     for (const f of currentFiles) {
       const rel = normalizeSnapshotPath(f, projectRoot);
-      newHashes[rel] = this.#computeContentHash(f.content || '');
+      newHashes[rel] = this.#computeContentHash(f.content ?? this.#readFileContent(f.path));
     }
 
     const reconciled = reconcileSnapshotHashes(snapshot.fileHashes || {}, Object.keys(newHashes));

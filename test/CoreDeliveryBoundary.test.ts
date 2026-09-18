@@ -1,9 +1,8 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-const CORE_ROOT = process.cwd();
-const SRC_ROOT = path.join(CORE_ROOT, 'src');
+import { CORE_ROOT, listFiles, relativeToCore, SRC_ROOT } from './support/source-files.js';
 
 const BANNED_SOURCE_DIRECTORIES = [
   'src/service/delivery',
@@ -43,25 +42,6 @@ const BANNED_IMPORT_PATTERNS = [
   /from\s+['"][^'"]*(?:service\/delivery|repository\/delivery|lib\/tools|#tools|#agent|#codex)[^'"]*['"]/,
   /import\([^)]*['"][^'"]*(?:service\/delivery|repository\/delivery|lib\/tools|#tools|#agent|#codex)[^'"]*['"][^)]*\)/,
 ];
-
-function listFiles(dir: string, result: string[] = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === 'dist') {
-      continue;
-    }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      listFiles(fullPath, result);
-    } else {
-      result.push(fullPath);
-    }
-  }
-  return result;
-}
-
-function relativeToCore(fullPath: string) {
-  return path.relative(CORE_ROOT, fullPath).replaceAll(path.sep, '/');
-}
 
 describe('Core delivery boundary', () => {
   test('does not add delivery, tool, agent, Codex, MCP, or plugin source directories', () => {

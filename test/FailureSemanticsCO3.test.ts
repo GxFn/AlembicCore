@@ -20,8 +20,12 @@ import path from 'node:path';
 import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { EventBus } from '../src/infrastructure/event/EventBus.js';
 import Logger from '../src/infrastructure/logging/Logger.js';
-import { KnowledgeUnitOfWork } from '../src/repository/knowledge/KnowledgeUnitOfWork.js';
+import {
+  FileWriteError,
+  KnowledgeUnitOfWork,
+} from '../src/repository/knowledge/KnowledgeUnitOfWork.js';
 import { RawDbSyncAdapter } from '../src/repository/sync/SyncRepoAdapter.js';
+import { KnowledgeFileWriter } from '../src/service/knowledge/KnowledgeFileWriter.js';
 import { KnowledgeService } from '../src/service/knowledge/KnowledgeService.js';
 import { KnowledgeSyncService } from '../src/service/knowledge/KnowledgeSyncService.js';
 import { findSimilarRecipes } from '../src/service/knowledge/validation/candidate/SimilarityService.js';
@@ -90,10 +94,14 @@ describe('W2 KnowledgeUnitOfWork file/DB divergence', () => {
       removed: [] as string[],
       persist(entry: KnowledgeEntry) {
         this.persisted.push(entry.id);
+        return `recipes/${entry.id}.md`;
       },
-      moveOnLifecycleChange() {},
+      moveOnLifecycleChange(entry: KnowledgeEntry) {
+        return `recipes/${entry.id}.md`;
+      },
       remove(entry: KnowledgeEntry) {
         this.removed.push(entry.id);
+        return true;
       },
     };
   }
@@ -143,6 +151,79 @@ describe('W2 KnowledgeUnitOfWork file/DB divergence', () => {
 
     const result = uow.commit();
     expect(result).toEqual({ dbCommitted: true, fileOpsCompleted: 1 });
+  });
+
+  test.each([
+    'write',
+    'move',
+    'delete',
+  ] as const)('real file-store %s failure sentinel prevents the DB transaction', (type) => {
+    const projectRoot = makeTmpProject('alembic-uow-file-failure-');
+    pathGuard.configure({ projectRoot, knowledgeBaseDir: 'Alembic' });
+    try {
+      const writer = new KnowledgeFileWriter(projectRoot);
+      const transaction = vi.fn((change: (tx: unknown) => void) => change({}));
+      const dbChange = vi.fn();
+      const uow = new KnowledgeUnitOfWork({ transaction } as never, writer);
+      // 写入/迁移缺少标题返回 null；删除真实不存在的文件返回 false。
+      const entry = new KnowledgeEntry({
+        id: 'file-operation-failure',
+        title: type === 'delete' ? 'Missing file' : '',
+      });
+      uow.registerFileOp({ type, entry });
+      uow.registerDbChange(dbChange);
+
+      expect(() => uow.commit()).toThrow(FileWriteError);
+      expect(transaction).not.toHaveBeenCalled();
+      expect(dbChange).not.toHaveBeenCalled();
+    } finally {
+      pathGuard._reset();
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+  test.each([
+    'existing',
+    'new',
+  ] as const)('preserves completed %s file truth when a later file operation fails', (state) => {
+    const projectRoot = makeTmpProject('alembic-uow-partial-truth-');
+    pathGuard.configure({ projectRoot, knowledgeBaseDir: 'Alembic' });
+    try {
+      const writer = new KnowledgeFileWriter(projectRoot);
+      const entry = new KnowledgeEntry({
+        id: 'retained-knowledge',
+        title: 'Retained knowledge',
+        content: { markdown: 'Original truth' },
+      });
+      if (state === 'existing') {
+        expect(writer.persist(entry)).not.toBeNull();
+      }
+      entry.content.markdown = 'Latest durable truth';
+      const transaction = vi.fn((change: (tx: unknown) => void) => change({}));
+      const dbChange = vi.fn();
+      const uow = new KnowledgeUnitOfWork({ transaction } as never, writer);
+      uow.registerFileOp({ type: 'write', entry });
+      uow.registerFileOp({ type: 'write', entry: new KnowledgeEntry({ title: '' }) });
+      uow.registerDbChange(dbChange);
+
+      let failure: unknown;
+      try {
+        uow.commit();
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(FileWriteError);
+      expect(fs.existsSync(path.join(projectRoot, entry.sourceFile!))).toBe(true);
+      expect(fs.readFileSync(path.join(projectRoot, entry.sourceFile!), 'utf8')).toContain(
+        'Latest durable truth'
+      );
+      expect((failure as Error).message).toContain('partial file truth retained');
+      expect((failure as Error).message).toContain('KnowledgeSyncService.sync');
+      expect(transaction).not.toHaveBeenCalled();
+      expect(dbChange).not.toHaveBeenCalled();
+    } finally {
+      pathGuard._reset();
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });
 

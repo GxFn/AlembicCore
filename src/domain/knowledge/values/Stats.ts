@@ -27,6 +27,22 @@ interface StatsProps {
   version?: number;
   // Phase 0: 精度 (仅 kind=rule)
   ruleFalsePositiveRate?: number | null;
+  // 现役生命周期/复核生产者的持久化字段；旧记录缺省时不新增空键。
+  stagingEnteredAt?: number;
+  evolvingStartedAt?: number;
+  evolvingProposalId?: string;
+  decayStartedAt?: number;
+  activeSince?: number;
+  lastActiveAt?: number;
+  deprecatedAt?: number;
+  lastVerifiedAt?: number;
+  primeAdoptions?: number;
+  stagingReview?: {
+    outcome: 'pass' | 'fail';
+    reviewer?: string;
+    notes?: string;
+    reviewedAt: number;
+  };
 }
 
 export class Stats {
@@ -52,6 +68,16 @@ export class Stats {
 
   // Phase 0: 精度 (仅 kind=rule)
   ruleFalsePositiveRate: number | null;
+  stagingEnteredAt?: number;
+  evolvingStartedAt?: number;
+  evolvingProposalId?: string;
+  decayStartedAt?: number;
+  activeSince?: number;
+  lastActiveAt?: number;
+  deprecatedAt?: number;
+  lastVerifiedAt?: number;
+  primeAdoptions?: number;
+  stagingReview?: StatsProps['stagingReview'];
 
   constructor(props: StatsProps = {}) {
     /** 浏览次数 */
@@ -76,6 +102,16 @@ export class Stats {
     this.searchHitsLast30d = props.searchHitsLast30d ?? 0;
     this.version = props.version ?? 1;
     this.ruleFalsePositiveRate = props.ruleFalsePositiveRate ?? null;
+    this.stagingEnteredAt = props.stagingEnteredAt;
+    this.evolvingStartedAt = props.evolvingStartedAt;
+    this.evolvingProposalId = props.evolvingProposalId;
+    this.decayStartedAt = props.decayStartedAt;
+    this.activeSince = props.activeSince;
+    this.lastActiveAt = props.lastActiveAt;
+    this.deprecatedAt = props.deprecatedAt;
+    this.lastVerifiedAt = props.lastVerifiedAt;
+    this.primeAdoptions = props.primeAdoptions;
+    this.stagingReview = props.stagingReview ? { ...props.stagingReview } : undefined;
   }
 
   /** 从任意输入构造 Stats */
@@ -129,6 +165,20 @@ export class Stats {
       searchHitsLast30d: this.searchHitsLast30d,
       version: this.version,
       ruleFalsePositiveRate: this.ruleFalsePositiveRate,
+      ...(this.stagingEnteredAt !== undefined ? { stagingEnteredAt: this.stagingEnteredAt } : {}),
+      ...(this.evolvingStartedAt !== undefined
+        ? { evolvingStartedAt: this.evolvingStartedAt }
+        : {}),
+      ...(this.evolvingProposalId !== undefined
+        ? { evolvingProposalId: this.evolvingProposalId }
+        : {}),
+      ...(this.decayStartedAt !== undefined ? { decayStartedAt: this.decayStartedAt } : {}),
+      ...(this.activeSince !== undefined ? { activeSince: this.activeSince } : {}),
+      ...(this.lastActiveAt !== undefined ? { lastActiveAt: this.lastActiveAt } : {}),
+      ...(this.deprecatedAt !== undefined ? { deprecatedAt: this.deprecatedAt } : {}),
+      ...(this.lastVerifiedAt !== undefined ? { lastVerifiedAt: this.lastVerifiedAt } : {}),
+      ...(this.primeAdoptions !== undefined ? { primeAdoptions: this.primeAdoptions } : {}),
+      ...(this.stagingReview !== undefined ? { stagingReview: { ...this.stagingReview } } : {}),
     };
   }
 

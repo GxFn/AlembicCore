@@ -25,6 +25,34 @@ interface NativeScopeFixture {
 }
 
 describe('ProjectContext PCQ-8 project space', () => {
+  it('reports duplicate display-name source refs as ambiguous while preserving explicit folder IDs', async () => {
+    await withFixture(createWorkspaceFixture(), async (projectRoot) => {
+      const sourceFolders = [
+        { displayName: 'common', id: 'folder-a', repoId: 'repo-a', path: 'RepoA' },
+        { displayName: 'common', id: 'folder-b', repoId: 'repo-b', path: 'RepoB' },
+      ];
+      for (const folders of [sourceFolders, [...sourceFolders].reverse()]) {
+        const envelope = await ProjectContext.execute({
+          kind: 'space',
+          scope: { projectRoot },
+          payload: {
+            sourceFolders: folders,
+            sourceRefs: ['common/src/index.ts', 'folder-b/src/index.ts'],
+          },
+        });
+        expect
+          .soft(envelope.errors ?? [])
+          .toContainEqual(
+            expect.objectContaining({ code: 'ambiguous', path: 'common/src/index.ts' })
+          );
+        const refs = (envelope.data as SpaceContext).nextRefs.filter(
+          (ref) => ref.metadata?.source === 'project-context-space-source-ref'
+        );
+        expect(refs.map((ref) => ref.scope?.filePath)).toEqual(['RepoB/src/index.ts']);
+      }
+    });
+  });
+
   it('returns project identity, repos, source folders, active repo, tree, hotspots, and refs', async () => {
     await withFixture(
       createWorkspaceFixture(),

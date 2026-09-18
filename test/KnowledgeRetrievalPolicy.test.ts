@@ -20,6 +20,53 @@ const FROZEN_QUERIES = [
 ] as const;
 
 describe('KnowledgeRetrievalPolicy', () => {
+  it.each([
+    'dense',
+    'sparse',
+  ] as const)('retains the healthy lane when the %s port throws synchronously', async (failedLane) => {
+    const policy = new KnowledgeRetrievalPolicy(
+      new HybridCandidateRetriever({
+        embedding: {
+          describeCapabilities: vi.fn(),
+          embedDocuments: vi.fn(),
+          embedQuery: async () => [1],
+        },
+        reader: {
+          getById: vi.fn(),
+          getStats: vi.fn(),
+          listIds: vi.fn(),
+          searchVector: () => {
+            if (failedLane === 'dense') {
+              throw new Error('dense offline');
+            }
+            return Promise.resolve([{ item: { id: 'live-recipe' }, score: 0.9 }]);
+          },
+        },
+        sparse: () => {
+          if (failedLane === 'sparse') {
+            throw new Error('sparse offline');
+          }
+          return [{ id: 'live-recipe', score: 8 }];
+        },
+      }),
+      new KnowledgeTruthProjector({
+        findByIds: (ids) => ids.map((id) => ({ id, lifecycle: 'active' })),
+      })
+    );
+
+    const result = await policy.retrieve({ query: 'find recipe', topK: 1 });
+    expect(result.candidates.map((candidate) => candidate.recipeId)).toEqual(['live-recipe']);
+    expect(result.candidates[0]).toMatchObject({
+      denseLaneUsed: failedLane !== 'dense',
+      sparseLaneUsed: failedLane !== 'sparse',
+    });
+    expect(result.diagnostics.fallbackReason).toBe(
+      failedLane === 'dense'
+        ? 'vector-reader-failed:dense offline'
+        : 'sparse-retriever-failed:sparse offline'
+    );
+  });
+
   it('refills when missing dense evidence can reorder a full Top-K projection', async () => {
     const denseOnly = ['dense-one', 'dense-two'];
     const dualLane = ['dual-c', 'dual-d', 'dual-e'];

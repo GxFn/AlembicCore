@@ -27,7 +27,9 @@ import {
   sourceGraphGenerations,
   sourceGraphSymbols,
 } from '../../infrastructure/database/drizzle/schema.js';
-import { RepositoryBase } from '../base/RepositoryBase.js';
+import { type DrizzleTx, RepositoryBase } from '../base/RepositoryBase.js';
+
+type GraphWriteDatabase = DrizzleDB | DrizzleTx;
 
 type GenerationRow = typeof sourceGraphGenerations.$inferSelect;
 type FileRow = typeof sourceGraphFiles.$inferSelect;
@@ -171,59 +173,57 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
         generationId: preparedSnapshot.generationId,
       })
     );
-    const snapshot = await this.createGeneration(preparedSnapshot);
-
-    this.drizzle
-      .delete(sourceGraphEdges)
-      .where(eq(sourceGraphEdges.generationId, snapshot.generationId))
-      .run();
-    this.drizzle
-      .delete(sourceGraphSymbols)
-      .where(eq(sourceGraphSymbols.generationId, snapshot.generationId))
-      .run();
-    this.drizzle
-      .delete(sourceGraphFiles)
-      .where(eq(sourceGraphFiles.generationId, snapshot.generationId))
-      .run();
-
-    for (const file of preparedFiles) {
-      await this.upsertFile(
-        {
-          ...file,
-          generationId: snapshot.generationId,
-          projectRoot: snapshot.projectRoot,
-        },
-        false
-      );
+    try {
+      // Drizzle/SQLite 是同步事务。预备节点后只执行同步私有写入，绝不在事务回调中 await。
+      // generation 元数据、旧图删除、新图写入和统计必须同成同败，否则读者会见到伪 fresh 的半图。
+      return this.transaction((tx) => {
+        this.writeGeneration(preparedSnapshot, tx);
+        // 保留原 createGeneration 的读回门禁；存储层忽略写入也不能宣称持久化成功。
+        this.getRequiredSnapshot(preparedSnapshot.generationId, tx);
+        tx.delete(sourceGraphEdges)
+          .where(eq(sourceGraphEdges.generationId, preparedSnapshot.generationId))
+          .run();
+        tx.delete(sourceGraphSymbols)
+          .where(eq(sourceGraphSymbols.generationId, preparedSnapshot.generationId))
+          .run();
+        tx.delete(sourceGraphFiles)
+          .where(eq(sourceGraphFiles.generationId, preparedSnapshot.generationId))
+          .run();
+        for (const file of preparedFiles) {
+          this.writeFile(file, tx);
+        }
+        for (const symbol of preparedSymbols) {
+          this.writeSymbol(symbol, preparedSnapshot.projectRoot, tx);
+        }
+        for (const edge of preparedEdges) {
+          this.writeEdge(edge, preparedSnapshot.projectRoot, tx);
+        }
+        return (
+          this.refreshGenerationStats(preparedSnapshot.generationId, tx) ??
+          this.getRequiredSnapshot(preparedSnapshot.generationId, tx)
+        );
+      });
+    } catch (error) {
+      this.logger.error('Source graph replacement failed; transaction rolled back', {
+        generationId: preparedSnapshot.generationId,
+        projectRoot: preparedSnapshot.projectRoot,
+        operation: 'replace-generation',
+        result: 'rolled-back',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
-
-    for (const symbol of preparedSymbols) {
-      await this.upsertSymbol(
-        {
-          ...symbol,
-          generationId: snapshot.generationId,
-          projectRoot: snapshot.projectRoot,
-        },
-        false
-      );
-    }
-
-    for (const edge of preparedEdges) {
-      await this.upsertEdge(
-        {
-          ...edge,
-          generationId: snapshot.generationId,
-          projectRoot: snapshot.projectRoot,
-        },
-        false
-      );
-    }
-
-    return (await this.refreshGenerationStats(snapshot.generationId)) ?? snapshot;
   }
 
   async getSnapshot(generationId: string): Promise<SourceGraphSnapshot | null> {
-    const rows = this.drizzle
+    return this.readSnapshot(generationId);
+  }
+
+  private readSnapshot(
+    generationId: string,
+    db: GraphWriteDatabase = this.drizzle
+  ): SourceGraphSnapshot | null {
+    const rows = db
       .select()
       .from(this.table)
       .where(eq(this.table.generationId, generationId))
@@ -260,40 +260,7 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
 
   async upsertFile(input: SourceFileNodeInput, refreshStats = true): Promise<SourceFileNode> {
     const node = createSourceFileNode(input);
-    this.drizzle
-      .insert(sourceGraphFiles)
-      .values({
-        generationId: node.generationId,
-        projectRoot: node.projectRoot,
-        repoRelativePath: node.repoRelativePath,
-        language: node.language,
-        contentHash: node.contentHash,
-        sizeBytes: node.sizeBytes,
-        mtimeMs: node.mtimeMs,
-        indexedAt: node.indexedAt,
-        classification: node.classification,
-        parseStatus: node.parseStatus,
-        parseErrorsJson: JSON.stringify(node.parseErrors),
-        lineCount: node.lineCount,
-        metadataJson: JSON.stringify(node.metadata),
-      })
-      .onConflictDoUpdate({
-        target: [sourceGraphFiles.generationId, sourceGraphFiles.repoRelativePath],
-        set: {
-          projectRoot: node.projectRoot,
-          language: node.language,
-          contentHash: node.contentHash,
-          sizeBytes: node.sizeBytes,
-          mtimeMs: node.mtimeMs,
-          indexedAt: node.indexedAt,
-          classification: node.classification,
-          parseStatus: node.parseStatus,
-          parseErrorsJson: JSON.stringify(node.parseErrors),
-          lineCount: node.lineCount,
-          metadataJson: JSON.stringify(node.metadata),
-        },
-      })
-      .run();
+    this.writeFile(node);
 
     if (refreshStats) {
       await this.refreshGenerationStats(node.generationId);
@@ -308,56 +275,7 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
   ): Promise<SourceSymbolNode> {
     const node = createSourceSymbolNode(input);
     const projectRoot = await this.resolveProjectRoot(node.generationId, input.projectRoot);
-    this.drizzle
-      .insert(sourceGraphSymbols)
-      .values({
-        generationId: node.generationId,
-        projectRoot,
-        symbolId: node.symbolId,
-        displayName: node.displayName,
-        qualifiedName: node.qualifiedName,
-        kind: node.kind,
-        filePath: node.filePath,
-        startLine: node.range.startLine,
-        startColumn: node.range.startColumn,
-        endLine: node.range.endLine,
-        endColumn: node.range.endColumn,
-        selectionStartLine: node.selectionRange?.startLine,
-        selectionStartColumn: node.selectionRange?.startColumn,
-        selectionEndLine: node.selectionRange?.endLine,
-        selectionEndColumn: node.selectionRange?.endColumn,
-        signature: node.signature,
-        containerSymbolId: node.containerSymbolId,
-        exported: node.exported ? 1 : 0,
-        imported: node.imported ? 1 : 0,
-        metadataJson: JSON.stringify(node.metadata),
-        provenanceJson: JSON.stringify(node.provenance),
-      })
-      .onConflictDoUpdate({
-        target: [sourceGraphSymbols.generationId, sourceGraphSymbols.symbolId],
-        set: {
-          projectRoot,
-          displayName: node.displayName,
-          qualifiedName: node.qualifiedName,
-          kind: node.kind,
-          filePath: node.filePath,
-          startLine: node.range.startLine,
-          startColumn: node.range.startColumn,
-          endLine: node.range.endLine,
-          endColumn: node.range.endColumn,
-          selectionStartLine: node.selectionRange?.startLine,
-          selectionStartColumn: node.selectionRange?.startColumn,
-          selectionEndLine: node.selectionRange?.endLine,
-          selectionEndColumn: node.selectionRange?.endColumn,
-          signature: node.signature,
-          containerSymbolId: node.containerSymbolId,
-          exported: node.exported ? 1 : 0,
-          imported: node.imported ? 1 : 0,
-          metadataJson: JSON.stringify(node.metadata),
-          provenanceJson: JSON.stringify(node.provenance),
-        },
-      })
-      .run();
+    this.writeSymbol(node, projectRoot);
 
     if (refreshStats) {
       await this.refreshGenerationStats(node.generationId);
@@ -369,48 +287,7 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
   async upsertEdge(input: SourceGraphEdgeInsert, refreshStats = true): Promise<SourceGraphEdge> {
     const edge = createSourceGraphEdge(input);
     const projectRoot = await this.resolveProjectRoot(edge.generationId, input.projectRoot);
-    this.drizzle
-      .insert(sourceGraphEdges)
-      .values({
-        generationId: edge.generationId,
-        projectRoot,
-        edgeId: edge.edgeId,
-        kind: edge.kind,
-        fromSymbolId: edge.fromSymbolId,
-        toSymbolId: edge.toSymbolId,
-        fromFilePath: edge.fromFilePath,
-        toFilePath: edge.toFilePath,
-        siteFilePath: edge.siteFilePath,
-        siteStartLine: edge.site?.startLine,
-        siteStartColumn: edge.site?.startColumn,
-        siteEndLine: edge.site?.endLine,
-        siteEndColumn: edge.site?.endColumn,
-        provenance: edge.provenance,
-        confidence: edge.confidence,
-        source: edge.source,
-        metadataJson: JSON.stringify(edge.metadata),
-      })
-      .onConflictDoUpdate({
-        target: [sourceGraphEdges.generationId, sourceGraphEdges.edgeId],
-        set: {
-          projectRoot,
-          kind: edge.kind,
-          fromSymbolId: edge.fromSymbolId,
-          toSymbolId: edge.toSymbolId,
-          fromFilePath: edge.fromFilePath,
-          toFilePath: edge.toFilePath,
-          siteFilePath: edge.siteFilePath,
-          siteStartLine: edge.site?.startLine,
-          siteStartColumn: edge.site?.startColumn,
-          siteEndLine: edge.site?.endLine,
-          siteEndColumn: edge.site?.endColumn,
-          provenance: edge.provenance,
-          confidence: edge.confidence,
-          source: edge.source,
-          metadataJson: JSON.stringify(edge.metadata),
-        },
-      })
-      .run();
+    this.writeEdge(edge, projectRoot);
 
     if (refreshStats) {
       await this.refreshGenerationStats(edge.generationId);
@@ -630,7 +507,150 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
     };
   }
 
-  private writeGeneration(snapshot: SourceGraphSnapshot): void {
+  private writeFile(node: SourceFileNode, db: GraphWriteDatabase = this.drizzle): void {
+    db.insert(sourceGraphFiles)
+      .values({
+        generationId: node.generationId,
+        projectRoot: node.projectRoot,
+        repoRelativePath: node.repoRelativePath,
+        language: node.language,
+        contentHash: node.contentHash,
+        sizeBytes: node.sizeBytes,
+        mtimeMs: node.mtimeMs,
+        indexedAt: node.indexedAt,
+        classification: node.classification,
+        parseStatus: node.parseStatus,
+        parseErrorsJson: JSON.stringify(node.parseErrors),
+        lineCount: node.lineCount,
+        metadataJson: JSON.stringify(node.metadata),
+      })
+      .onConflictDoUpdate({
+        target: [sourceGraphFiles.generationId, sourceGraphFiles.repoRelativePath],
+        set: {
+          projectRoot: node.projectRoot,
+          language: node.language,
+          contentHash: node.contentHash,
+          sizeBytes: node.sizeBytes,
+          mtimeMs: node.mtimeMs,
+          indexedAt: node.indexedAt,
+          classification: node.classification,
+          parseStatus: node.parseStatus,
+          parseErrorsJson: JSON.stringify(node.parseErrors),
+          lineCount: node.lineCount,
+          metadataJson: JSON.stringify(node.metadata),
+        },
+      })
+      .run();
+  }
+
+  private writeSymbol(
+    node: SourceSymbolNode,
+    projectRoot: string,
+    db: GraphWriteDatabase = this.drizzle
+  ): void {
+    db.insert(sourceGraphSymbols)
+      .values({
+        generationId: node.generationId,
+        projectRoot,
+        symbolId: node.symbolId,
+        displayName: node.displayName,
+        qualifiedName: node.qualifiedName,
+        kind: node.kind,
+        filePath: node.filePath,
+        startLine: node.range.startLine,
+        startColumn: node.range.startColumn,
+        endLine: node.range.endLine,
+        endColumn: node.range.endColumn,
+        selectionStartLine: node.selectionRange?.startLine,
+        selectionStartColumn: node.selectionRange?.startColumn,
+        selectionEndLine: node.selectionRange?.endLine,
+        selectionEndColumn: node.selectionRange?.endColumn,
+        signature: node.signature,
+        containerSymbolId: node.containerSymbolId,
+        exported: node.exported ? 1 : 0,
+        imported: node.imported ? 1 : 0,
+        metadataJson: JSON.stringify(node.metadata),
+        provenanceJson: JSON.stringify(node.provenance),
+      })
+      .onConflictDoUpdate({
+        target: [sourceGraphSymbols.generationId, sourceGraphSymbols.symbolId],
+        set: {
+          projectRoot,
+          displayName: node.displayName,
+          qualifiedName: node.qualifiedName,
+          kind: node.kind,
+          filePath: node.filePath,
+          startLine: node.range.startLine,
+          startColumn: node.range.startColumn,
+          endLine: node.range.endLine,
+          endColumn: node.range.endColumn,
+          selectionStartLine: node.selectionRange?.startLine,
+          selectionStartColumn: node.selectionRange?.startColumn,
+          selectionEndLine: node.selectionRange?.endLine,
+          selectionEndColumn: node.selectionRange?.endColumn,
+          signature: node.signature,
+          containerSymbolId: node.containerSymbolId,
+          exported: node.exported ? 1 : 0,
+          imported: node.imported ? 1 : 0,
+          metadataJson: JSON.stringify(node.metadata),
+          provenanceJson: JSON.stringify(node.provenance),
+        },
+      })
+      .run();
+  }
+
+  private writeEdge(
+    edge: SourceGraphEdge,
+    projectRoot: string,
+    db: GraphWriteDatabase = this.drizzle
+  ): void {
+    db.insert(sourceGraphEdges)
+      .values({
+        generationId: edge.generationId,
+        projectRoot,
+        edgeId: edge.edgeId,
+        kind: edge.kind,
+        fromSymbolId: edge.fromSymbolId,
+        toSymbolId: edge.toSymbolId,
+        fromFilePath: edge.fromFilePath,
+        toFilePath: edge.toFilePath,
+        siteFilePath: edge.siteFilePath,
+        siteStartLine: edge.site?.startLine,
+        siteStartColumn: edge.site?.startColumn,
+        siteEndLine: edge.site?.endLine,
+        siteEndColumn: edge.site?.endColumn,
+        provenance: edge.provenance,
+        confidence: edge.confidence,
+        source: edge.source,
+        metadataJson: JSON.stringify(edge.metadata),
+      })
+      .onConflictDoUpdate({
+        target: [sourceGraphEdges.generationId, sourceGraphEdges.edgeId],
+        set: {
+          projectRoot,
+          kind: edge.kind,
+          fromSymbolId: edge.fromSymbolId,
+          toSymbolId: edge.toSymbolId,
+          fromFilePath: edge.fromFilePath,
+          toFilePath: edge.toFilePath,
+          siteFilePath: edge.siteFilePath,
+          siteStartLine: edge.site?.startLine,
+          siteStartColumn: edge.site?.startColumn,
+          siteEndLine: edge.site?.endLine,
+          siteEndColumn: edge.site?.endColumn,
+          provenance: edge.provenance,
+          confidence: edge.confidence,
+          source: edge.source,
+          metadataJson: JSON.stringify(edge.metadata),
+        },
+      })
+      .run();
+  }
+
+  private writeGeneration(
+    snapshot: SourceGraphSnapshot,
+    db: GraphWriteDatabase = this.drizzle
+  ): void {
     const values = {
       generationId: snapshot.generationId,
       projectRoot: snapshot.projectRoot,
@@ -657,8 +677,7 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
       metadataJson: JSON.stringify(snapshot.metadata),
     };
 
-    this.drizzle
-      .insert(this.table)
+    db.insert(this.table)
       .values(values)
       .onConflictDoUpdate({
         target: this.table.generationId,
@@ -667,13 +686,16 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
       .run();
   }
 
-  private async refreshGenerationStats(generationId: string): Promise<SourceGraphSnapshot | null> {
-    const snapshot = await this.getSnapshot(generationId);
+  private refreshGenerationStats(
+    generationId: string,
+    db: GraphWriteDatabase = this.drizzle
+  ): SourceGraphSnapshot | null {
+    const snapshot = this.readSnapshot(generationId, db);
     if (!snapshot) {
       return null;
     }
 
-    const fileRows = this.drizzle
+    const fileRows = db
       .select({
         language: sourceGraphFiles.language,
         parseErrorsJson: sourceGraphFiles.parseErrorsJson,
@@ -682,14 +704,14 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
       .where(eq(sourceGraphFiles.generationId, generationId))
       .all();
     const symbolCount = countRows(
-      this.drizzle
+      db
         .select({ cnt: count() })
         .from(sourceGraphSymbols)
         .where(eq(sourceGraphSymbols.generationId, generationId))
         .all()
     );
     const edgeCount = countRows(
-      this.drizzle
+      db
         .select({ cnt: count() })
         .from(sourceGraphEdges)
         .where(eq(sourceGraphEdges.generationId, generationId))
@@ -704,8 +726,7 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
     );
     const now = Date.now();
 
-    this.drizzle
-      .update(this.table)
+    db.update(this.table)
       .set({
         fileCount: fileRows.length,
         symbolCount,
@@ -717,7 +738,7 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
       .where(eq(this.table.generationId, generationId))
       .run();
 
-    return this.getSnapshot(generationId);
+    return this.readSnapshot(generationId, db);
   }
 
   private async resolveProjectRoot(
@@ -731,8 +752,11 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
     return snapshot.projectRoot;
   }
 
-  private async getRequiredSnapshot(generationId: string): Promise<SourceGraphSnapshot> {
-    const snapshot = await this.getSnapshot(generationId);
+  private getRequiredSnapshot(
+    generationId: string,
+    db: GraphWriteDatabase = this.drizzle
+  ): SourceGraphSnapshot {
+    const snapshot = this.readSnapshot(generationId, db);
     if (!snapshot) {
       throw new Error(`Source graph generation not found: ${generationId}`);
     }

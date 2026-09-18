@@ -1,9 +1,14 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-const CORE_ROOT = process.cwd();
-const SRC_ROOT = path.join(CORE_ROOT, 'src');
+import {
+  CORE_ROOT,
+  listFiles,
+  relativeToCore,
+  SRC_ROOT,
+  sourceFilesUnder,
+} from './support/source-files.js';
 
 const BANNED_CODEX_DIRECTORIES = [
   'src/codex',
@@ -77,33 +82,6 @@ const HOST_AGENT_WORKFLOW_DIRS = [
   'src/workflows/knowledge-rescan',
   'src/workflows/project-index',
 ];
-
-function listFiles(dir: string, result: string[] = []) {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === 'dist') {
-      continue;
-    }
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      listFiles(fullPath, result);
-    } else {
-      result.push(fullPath);
-    }
-  }
-  return result;
-}
-
-function relativeToCore(fullPath: string) {
-  return path.relative(CORE_ROOT, fullPath).replaceAll(path.sep, '/');
-}
-
-function sourceFilesUnder(relativeDir: string) {
-  const dir = path.join(CORE_ROOT, relativeDir);
-  if (!existsSync(dir)) {
-    return [];
-  }
-  return listFiles(dir).filter((file) => file.endsWith('.ts'));
-}
 
 describe('Core Codex boundary', () => {
   test('does not add Codex, MCP, plugin, channel, or marketplace source directories', () => {

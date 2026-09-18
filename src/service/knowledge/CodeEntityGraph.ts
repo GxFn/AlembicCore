@@ -544,7 +544,7 @@ export class CodeEntityGraph {
    */
   async getDescendants(entityId: string, entityType: string, maxDepth = 3) {
     const results: { id: string; type: string; depth: number; relation: string }[] = [];
-    const visited = new Set();
+    const visited = new Set([`${entityType}:${entityId}`]);
     const queue = [{ id: entityId, type: entityType, depth: 0 }];
 
     // 类的子类/Category + 协议的遵循者
@@ -560,18 +560,14 @@ export class CodeEntityGraph {
       if (depth >= maxDepth) {
         continue;
       }
-      const key = `${type}:${id}`;
-      if (visited.has(key)) {
-        continue;
-      }
-      visited.add(key);
-
       for (const rel of relations) {
         const children = await this.#edgeRepo.findIncomingByFromTypes(id, type, rel);
 
         for (const child of children) {
           const childKey = `${child.fromType}:${child.fromId}`;
           if (!visited.has(childKey)) {
+            // 首次发现时去重，保留 BFS 的首见顺序和最短深度；出队时去重会重复输出菱形汇合点。
+            visited.add(childKey);
             results.push({
               id: child.fromId,
               type: child.fromType,
@@ -583,6 +579,11 @@ export class CodeEntityGraph {
               type: child.fromType,
               depth: depth + 1,
             });
+          } else {
+            this.log.debug(
+              '[CodeEntityGraph] Descendant already discovered; preserving first path',
+              { entityId, entityType, childKey }
+            );
           }
         }
       }
@@ -662,7 +663,7 @@ export class CodeEntityGraph {
    */
   async getImpactRadius(entityId: string, entityType: string, maxDepth = 3) {
     const impacted: { id: string; type: string; relation: string; depth: number }[] = [];
-    const visited = new Set();
+    const visited = new Set([`${entityType}:${entityId}`]);
     const queue = [{ id: entityId, type: entityType, depth: 0 }];
 
     while (queue.length > 0) {
@@ -675,18 +676,14 @@ export class CodeEntityGraph {
         continue;
       }
 
-      const key = `${type}:${id}`;
-      if (visited.has(key)) {
-        continue;
-      }
-      visited.add(key);
-
       // 找出所有"依赖/引用此实体"的上游
       const dependents = await this.#edgeRepo.findIncoming(id, type);
 
       for (const dep of dependents) {
         const depKey = `${dep.fromType}:${dep.fromId}`;
         if (!visited.has(depKey)) {
+          // 与后代查询一致，节点入队即标记，避免同深度的多条边重复贡献影响节点。
+          visited.add(depKey);
           impacted.push({
             id: dep.fromId,
             type: dep.fromType,
@@ -698,6 +695,11 @@ export class CodeEntityGraph {
             type: dep.fromType,
             depth: depth + 1,
           });
+        } else {
+          this.log.debug(
+            '[CodeEntityGraph] Impact node already discovered; preserving first path',
+            { entityId, entityType, depKey }
+          );
         }
       }
     }

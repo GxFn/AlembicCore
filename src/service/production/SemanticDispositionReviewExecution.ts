@@ -1537,7 +1537,8 @@ const SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V2 = new WeakMap<
 
 interface SemanticDispositionReviewHostAuthorityStateV3 {
   readonly adapter: SemanticDispositionReviewAgentHostAdapterV3;
-  readonly executions: Map<string, SemanticDispositionReviewExecutionV3>;
+  // durable 版本只用 hash 防重放；不保留包含完整 prompt/ledger 的执行大图。V2 仍需回读原记录。
+  readonly executionHashes: Set<string>;
   readonly invocationCoordinates: Set<string>;
   readonly outputHashes: Set<string>;
 }
@@ -1549,7 +1550,7 @@ const SEMANTIC_DISPOSITION_HOST_AUTHORITIES_V3 = new WeakMap<
 
 interface SemanticDispositionReviewHostAuthorityStateV4 {
   readonly adapter: SemanticDispositionReviewAgentHostAdapterV4;
-  readonly executions: Map<string, SemanticDispositionReviewExecutionV4>;
+  readonly executionHashes: Set<string>;
   readonly invocationCoordinates: Set<string>;
   readonly outputHashes: Set<string>;
 }
@@ -1742,7 +1743,7 @@ export function createAgentSemanticDispositionReviewHostGatewayV3(
       reviewerModelLoadReceipt: loadReceipt,
       invoke: (call) => adapter.invoke(call),
     },
-    executions: new Map(),
+    executionHashes: new Set(),
     invocationCoordinates: new Set(),
     outputHashes: new Set(),
   };
@@ -1780,13 +1781,13 @@ async function executeAgentSemanticDispositionReviewV3(
   const execution = buildSemanticDispositionReviewExecutionV3(authority, request, result);
   const coordinate = `${execution.hostExecution.evaluatorRunId}\u0000${execution.hostExecution.invocationId}`;
   if (
-    state.executions.has(execution.executionHash) ||
+    state.executionHashes.has(execution.executionHash) ||
     state.invocationCoordinates.has(coordinate) ||
     state.outputHashes.has(execution.hostExecution.responseOutputHash)
   ) {
     fail('SEMANTIC_DISPOSITION_REVIEW_HOST_EXECUTION_REUSED');
   }
-  state.executions.set(execution.executionHash, execution);
+  state.executionHashes.add(execution.executionHash);
   state.invocationCoordinates.add(coordinate);
   state.outputHashes.add(execution.hostExecution.responseOutputHash);
   return execution;
@@ -1900,7 +1901,7 @@ export function createAgentSemanticDispositionReviewHostGatewayV4(
       reviewerModelLoadReceipt: loadReceipt,
       invoke: (call) => adapter.invoke(call),
     },
-    executions: new Map(),
+    executionHashes: new Set(),
     invocationCoordinates: new Set(),
     outputHashes: new Set(),
   };
@@ -1938,13 +1939,13 @@ async function executeAgentSemanticDispositionReviewV4(
   const execution = buildSemanticDispositionReviewExecutionV4(authority, request, result);
   const coordinate = `${execution.hostExecution.evaluatorRunId}\u0000${execution.hostExecution.invocationId}`;
   if (
-    state.executions.has(execution.executionHash) ||
+    state.executionHashes.has(execution.executionHash) ||
     state.invocationCoordinates.has(coordinate) ||
     state.outputHashes.has(execution.hostExecution.responseOutputHash)
   ) {
     fail('SEMANTIC_DISPOSITION_REVIEW_HOST_EXECUTION_REUSED');
   }
-  state.executions.set(execution.executionHash, execution);
+  state.executionHashes.add(execution.executionHash);
   state.invocationCoordinates.add(coordinate);
   state.outputHashes.add(execution.hostExecution.responseOutputHash);
   return execution;
@@ -3516,6 +3517,8 @@ function decisionFindingsInvalid(
     findings.some(
       (finding) =>
         !finding.finding ||
+        // 模型 JSON 的 "false"/1 不能按 JavaScript 真值变成支持证据；非 pass 也须保留布尔契约。
+        typeof finding.supportsVerdict !== 'boolean' ||
         finding.axisIds.length === 0 ||
         finding.axisIds.some((axisId) => !expectedAxes.includes(axisId))
     )

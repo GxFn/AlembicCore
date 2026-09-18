@@ -392,6 +392,24 @@ describe('dimension planning dynamic signals', () => {
     );
   });
 
+  it('keeps deleted files in an existing module change when changedFiles is supplied', () => {
+    const report = aggregateDynamicPlanningSignals({
+      moduleDelta: {
+        previousModules: [
+          { moduleId: 'core', moduleName: 'Core', files: ['src/kept.ts', 'src/deleted.ts'] },
+        ],
+        currentModules: [{ moduleId: 'core', moduleName: 'Core', files: ['src/kept.ts'] }],
+        changedFiles: ['src/deleted.ts'],
+      },
+    });
+    expect(report.moduleDelta.changed).toEqual([
+      expect.objectContaining({ moduleId: 'core', changedFiles: ['src/deleted.ts'] }),
+    ]);
+    expect(report.planSignals).toContainEqual(
+      expect.objectContaining({ kind: 'changed-module', moduleIds: ['core'] })
+    );
+  });
+
   it('exposes dynamic signal helpers without draft dimension judgment facades', () => {
     const capabilities = createProjectContextCapabilities({
       execute: async () => {

@@ -88,7 +88,6 @@ function loadRecipesFromDisk(recipesDir: string) {
         try {
           const content = fs.readFileSync(full, 'utf8');
           const titleMatch = content.match(/^#\s+(.+)/m);
-          const _fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
           const codeMatch = content.match(/```\w*\n([\s\S]*?)```/);
           const summaryMatch = content.match(/summary[_cn]*:\s*(.+)/i);
           recipes.push({

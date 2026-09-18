@@ -6,9 +6,10 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { detectProjectFrameworks } from '../../src/core/enhancement/detectFrameworks.js';
 import { resolveEnhancementGuardRulesForProject } from '../../src/guard.js';
+import Logger from '../../src/infrastructure/logging/Logger.js';
 
 describe('detectProjectFrameworks(依赖清单→框架集合)', () => {
   it('React+TS 项目:package.json deps → react/nextjs + typescript/javascript', async () => {
@@ -46,6 +47,28 @@ describe('detectProjectFrameworks(依赖清单→框架集合)', () => {
         const detection = await detectProjectFrameworks(root);
         expect(detection.languages).toEqual(['go']);
         expect(detection.frameworks).toEqual(['gin', 'grpc']);
+      }
+    );
+  });
+
+  it('recognizes single-line Go require directives through the project Guard entrypoint', async () => {
+    await withFixture(
+      {
+        'go.mod': [
+          'module example.com/svc',
+          'go 1.22',
+          'require google.golang.org/grpc v1.62.0',
+          'require github.com/gin-gonic/gin v1.9.1 // indirect',
+        ].join('\n'),
+      },
+      async (root) => {
+        const result = await resolveEnhancementGuardRulesForProject(root);
+        expect(result.detection).toEqual({
+          languages: ['go'],
+          frameworks: ['gin', 'grpc'],
+          manifests: ['go.mod'],
+        });
+        expect(result.packIds).toEqual(['go-grpc', 'go-web']);
       }
     );
   });
@@ -108,6 +131,34 @@ describe('detectProjectFrameworks(依赖清单→框架集合)', () => {
       expect(detection.frameworks).toEqual([]);
       expect(detection.languages).toEqual([]);
     });
+  });
+
+  it.each([
+    'null',
+    '[]',
+    '"text"',
+    '7',
+  ])('skips a non-object package manifest %s while preserving other ecosystem evidence', async (invalidPackage) => {
+    const warning = vi.spyOn(Logger.getInstance(), 'warn').mockImplementation(() => {});
+    try {
+      await withFixture(
+        { 'package.json': invalidPackage, 'requirements.txt': 'fastapi==0.110.0\n' },
+        async (root) => {
+          expect(await detectProjectFrameworks(root)).toEqual({
+            frameworks: ['fastapi'],
+            languages: ['python'],
+            manifests: ['package.json', 'requirements.txt'],
+          });
+          expect(warning).toHaveBeenCalledWith(
+            '[EnhancementFrameworks] skipped invalid package manifest',
+            expect.objectContaining({ manifest: 'package.json', reason: 'expected-object' })
+          );
+          expect((await resolveEnhancementGuardRulesForProject(root)).packIds).toEqual(['fastapi']);
+        }
+      );
+    } finally {
+      warning.mockRestore();
+    }
   });
 });
 

@@ -204,11 +204,12 @@ describe('KnowledgeFileWriter', () => {
       expect(md).toContain('_agentNotes: [');
     });
 
-    it('should include content hash', () => {
+    it('should include the canonical hash of the serialized document', () => {
       const entry = makeEntry();
       const md = writer.serialize(entry);
 
       expect(md).toMatch(/_contentHash: [a-f0-9]{16}/);
+      expect(parseKnowledgeMarkdown(md).contentHash).toBe(computeKnowledgeHash(md));
     });
 
     it('should build structured body when no markdown', () => {
@@ -554,6 +555,92 @@ description: "包含冒号：和引号的描述"
       expect(path.basename(result)).toBe('my-pattern.md');
     });
 
+    it('rejects a different entry whose trigger resolves to an existing file', () => {
+      const first = makeEntry({ id: 'collision-a', title: 'First recipe', trigger: '@a.b' });
+      const second = makeEntry({
+        id: 'collision-b',
+        title: 'Second recipe',
+        trigger: '@a:b',
+        sourceFile: null,
+      });
+      const firstPath = writer.persist(first)!;
+      const original = fs.readFileSync(firstPath, 'utf8');
+
+      expect(writer.persist(second)).toBeNull();
+      expect(fs.readFileSync(firstPath, 'utf8')).toBe(original);
+      expect(second.sourceFile).toBeNull();
+    });
+
+    it('keeps both original files when a lifecycle move collides with another entry', () => {
+      const published = makeEntry({ id: 'published-a', trigger: '@a.b' });
+      const staged = makeEntry({
+        id: 'staged-b',
+        trigger: '@a:b',
+        lifecycle: Lifecycle.STAGING,
+        sourceFile: null,
+      });
+      const publishedPath = writer.persist(published)!;
+      const stagedPath = writer.persist(staged)!;
+      const publishedBytes = fs.readFileSync(publishedPath, 'utf8');
+      const stagedBytes = fs.readFileSync(stagedPath, 'utf8');
+      const oldSourceFile = staged.sourceFile;
+      staged.lifecycle = Lifecycle.ACTIVE;
+
+      expect(writer.moveOnLifecycleChange(staged)).toBeNull();
+      expect(fs.readFileSync(publishedPath, 'utf8')).toBe(publishedBytes);
+      expect(fs.readFileSync(stagedPath, 'utf8')).toBe(stagedBytes);
+      expect(staged.sourceFile).toBe(oldSourceFile);
+    });
+
+    it('continues updating the same entry at its existing filename', () => {
+      const entry = makeEntry();
+      const firstPath = writer.persist(entry)!;
+      entry.description = 'Updated description';
+
+      expect(writer.persist(entry)).toBe(firstPath);
+      const updated = parseKnowledgeMarkdown(fs.readFileSync(firstPath, 'utf8'));
+      expect(updated.id).toBe(entry.id);
+      expect(updated.description).toBe('Updated description');
+    });
+
+    it.each([
+      'id :',
+      ' id:',
+    ])('keeps legacy frontmatter key spacing readable for updates and removal: %s', (key) => {
+      const entry = makeEntry();
+      const filePath = writer.persist(entry)!;
+      const withLegacyKey = () => {
+        const content = fs.readFileSync(filePath, 'utf8').replace(/^id:/m, key);
+        fs.writeFileSync(filePath, content);
+        expect(parseKnowledgeMarkdown(content).id).toBe(entry.id);
+      };
+      withLegacyKey();
+      entry.description = 'Updated legacy file';
+      expect(writer.persist(entry)).toBe(filePath);
+      expect(parseKnowledgeMarkdown(fs.readFileSync(filePath, 'utf8')).description).toBe(
+        entry.description
+      );
+      withLegacyKey();
+      expect(writer.remove(entry)).toBe(true);
+      expect(fs.existsSync(filePath)).toBe(false);
+    });
+
+    it('keeps the original file when a cloned wire entry inherits another sourceFile', () => {
+      const original = makeEntry();
+      const originalPath = writer.persist(original)!;
+      const originalBytes = fs.readFileSync(originalPath, 'utf8');
+      const clone = KnowledgeEntry.fromJSON({
+        ...original.toJSON(),
+        id: 'cloned-entry',
+        title: 'Cloned entry',
+        trigger: '@cloned-entry',
+      });
+
+      expect(writer.persist(clone)).not.toBeNull();
+      expect(fs.existsSync(originalPath)).toBe(true);
+      expect(fs.readFileSync(originalPath, 'utf8')).toBe(originalBytes);
+    });
+
     it('should use title slug when no trigger', () => {
       const entry = makeEntry({
         trigger: '',
@@ -575,6 +662,29 @@ description: "包含冒号：和引号的描述"
   /* ─── remove ────────────────────────────── */
 
   describe('remove', () => {
+    it('does not remove a sourceFile owned by a different entry', () => {
+      const owner = makeEntry();
+      const ownerPath = writer.persist(owner)!;
+      const other = KnowledgeEntry.fromJSON({ ...owner.toJSON(), id: 'different-entry' });
+
+      expect(writer.remove(other)).toBe(false);
+      expect(fs.existsSync(ownerPath)).toBe(true);
+    });
+
+    it('matches the full frontmatter id when scanning instead of accepting a prefix', () => {
+      const owner = makeEntry();
+      const ownerPath = writer.persist(owner)!;
+      const prefix = makeEntry({
+        id: 'test-id',
+        title: 'Different file',
+        trigger: '@missing-file',
+        sourceFile: null,
+      });
+
+      expect(writer.remove(prefix)).toBe(false);
+      expect(fs.existsSync(ownerPath)).toBe(true);
+    });
+
     it('should remove persisted file', () => {
       const entry = makeEntry({ lifecycle: Lifecycle.ACTIVE });
       const filePath = writer.persist(entry);

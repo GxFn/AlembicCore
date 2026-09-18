@@ -38,6 +38,7 @@ export class SignalAggregator implements Startable {
   readonly #windows: Map<string, SlidingWindow> = new Map();
   readonly #intervalMs: number;
   readonly #windowMs: number;
+  readonly #unsubscribe: () => void;
   #timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(
@@ -51,9 +52,12 @@ export class SignalAggregator implements Startable {
     this.#windowMs = opts.windowMs ?? 300_000;
 
     // 订阅可聚合的事实型信号
-    signalBus.subscribe('guard|search|usage|lifecycle|forge|decay|quality', (signal) => {
-      this.#record(signal);
-    });
+    this.#unsubscribe = signalBus.subscribe(
+      'guard|search|usage|lifecycle|forge|decay|quality',
+      (signal) => {
+        this.#record(signal);
+      }
+    );
   }
 
   start(): void {
@@ -78,6 +82,9 @@ export class SignalAggregator implements Startable {
 
   dispose(): void {
     this.stop();
+    // dispose 是资源终点；只停定时器会使总线永久持有旧聚合器并继续积累信号。
+    this.#unsubscribe();
+    this.#windows.clear();
   }
 
   /** Flush immediately (shutdown/test seam; same path as the timer flush). */

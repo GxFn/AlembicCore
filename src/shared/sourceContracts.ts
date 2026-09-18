@@ -72,18 +72,7 @@ export function getGatewaySourceUserId(source: GatewaySource): string {
 }
 
 export function getGatewaySourceLabel(source: GatewaySource): string {
-  switch (normalizeGatewaySource(source)) {
-    case 'agent-tool':
-      return 'agent';
-    case 'mcp-external':
-      return 'mcp';
-    case HOST_AGENT_SOURCE:
-      return HOST_AGENT_SOURCE;
-    case ALEMBIC_AGENT_SOURCE:
-      return ALEMBIC_AGENT_SOURCE;
-    case 'batch-import':
-      return 'batch-import';
-  }
+  return getGatewaySourceUserId(source);
 }
 
 export function isLegacyFileChangeEventSource(

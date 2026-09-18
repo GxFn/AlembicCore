@@ -485,18 +485,17 @@ function detectRustPatterns(root: any, lang: any, methods: any, properties: any,
   const patterns: any[] = [];
 
   // 构建 type → methods 索引
-  const typeMethodMap: Record<string, any> = {};
+  const typeMethodMap = new Map<string, { name: string; traitImpl?: string | null }[]>();
   for (const m of methods) {
     if (m.className) {
-      if (!typeMethodMap[m.className]) {
-        typeMethodMap[m.className] = [];
-      }
-      typeMethodMap[m.className].push(m);
+      const group = typeMethodMap.get(m.className) ?? [];
+      group.push(m);
+      typeMethodMap.set(m.className, group);
     }
   }
 
   // Builder pattern: struct 有 builder() 或一系列链式 with_*/set_* 方法
-  for (const [typeName, methodList] of Object.entries(typeMethodMap) as [string, any[]][]) {
+  for (const [typeName, methodList] of typeMethodMap) {
     const hasBuilder = methodList.some((m) => m.name === 'builder' || m.name === 'build');
     const chainMethods = methodList.filter((m) => /^(?:with_|set_|add_)/.test(m.name));
     if (hasBuilder || chainMethods.length >= 3) {
@@ -551,7 +550,7 @@ function detectRustPatterns(root: any, lang: any, methods: any, properties: any,
   }
 
   // Trait impl richness: types with many methods suggest impl-heavy design
-  for (const [typeName, methodList] of Object.entries(typeMethodMap) as [string, any[]][]) {
+  for (const [typeName, methodList] of typeMethodMap) {
     if (methodList.length >= 3) {
       const traitImpls = new Set(methodList.filter((m) => m.traitImpl).map((m) => m.traitImpl));
       patterns.push({

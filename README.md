@@ -21,9 +21,11 @@ published `@alembic/core` registry version.
   field distinguishes *candidates* (submitted, unpublished) from *recipes*
   (published, actionable). Unified candidate validation
   (`validateCandidatesUnified`: batch dedup → V3 structural validation →
-  field/quality/uniqueness checks), advisory quality scoring that is never a
-  gate, and a six-state evolution machine (staging → evolving → active →
-  decaying → deprecated, plus proposal generation and GC sweeps).
+  field/quality/uniqueness checks), quality feedback, and a six-state lifecycle
+  (`pending`, `staging`, `active`, `evolving`, `decaying`, `deprecated`). When a
+  quality scorer is configured, low quality can keep automatic admission in
+  pending; active publication also checks retrieval readiness. Proposals and
+  bounded sweeps maintain existing knowledge.
 - **Guard** — `GuardCheckEngine` checks code against published recipe
   standards using real AST analysis and returns structured verdicts.
 - **Project intelligence** — ProjectContext assembly (space → repo → module →
@@ -70,15 +72,15 @@ bridge.
 | `daemon/` | Job/runtime display and resident-service contracts | shared, types |
 | `src/*.ts` | Root facades — public package entrypoints | any |
 
-`core*` marks the blessed analysis-leaf exception: `service/` and `workflows/`
-may import `core/` directly (e.g. `GuardCheckEngine`, AST chunking) instead of
-going through an adapter layer. Every exception carries a written reason in
-the contract config.
+`core*` marks the analysis-leaf access allowed to `service/` (for example,
+`GuardCheckEngine`). AST chunking has a file-level infrastructure exception.
+Direct `workflows/` → `core/` runtime imports are disallowed by the current
+contract. Every exception carries a written reason in the contract config.
 
 ## Package entrypoints
 
-The package exposes its API through `package.json` `exports` subpaths (65 at
-v0.2.0) — the root facade plus grouped domain, layer, and workflow entries:
+The package exposes its API through the subpaths declared by `package.json`
+`exports`: the root facade plus grouped domain, layer, and workflow entries.
 
 ```ts
 import { applyOutputBudget, DivergenceError } from '@alembic/core';
@@ -99,8 +101,8 @@ consumer repositories are reverse-scanned by
 The root facade (`src/index.ts`) is deliberately narrow: small areas are
 re-exported wholesale, large areas (repositories, types, workflows) export
 named symbols only, to keep same-name DTOs from colliding. Shipped
-compatibility aliases stay public: `HostAgent*` ↔ `IDEAgent*`, `Bootstrap` ↔
-`AppRuntime`.
+compatibility aliases stay public, including `HostAgent*` ↔ `IDEAgent*`.
+The `Bootstrap` ↔ `AppRuntime` alias belongs to the outer Alembic application.
 
 ## Getting started
 
@@ -128,10 +130,10 @@ Consumption:
 `npm run check` runs the blocking gate chain:
 
 ```text
-build:check → lint:public-api-boundary → lint:layer-contract
+build → lint:public-api-boundary → lint:layer-contract
 → lint:consumer-core-imports → lint:scope-resolution → smoke:public-api
 → check:output-budgets → check:space-edges → lint:doctrine → lint:naming
-→ test → lint
+→ test → lint → lint:retired-symbols
 ```
 
 Highlights:

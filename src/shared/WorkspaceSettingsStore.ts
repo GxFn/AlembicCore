@@ -149,8 +149,9 @@ export class WorkspaceSettingsStore {
   }
 
   writeAiConfig(updates: Record<string, string>): WorkspaceAiConfigRead {
-    const settings = this.#readSettings();
-    const secrets = this.#readSecrets();
+    // 两个原文件都必须可读后才能开始写入；宽容读取不能成为覆盖损坏真相的理由。
+    const settings = this.#readSettings('write');
+    const secrets = this.#readSecrets('write');
     settings.version = 1;
     settings.ai = settings.ai || {};
     secrets.version = 1;
@@ -158,6 +159,10 @@ export class WorkspaceSettingsStore {
     secrets.ai.providerKeys = secrets.ai.providerKeys || {};
 
     for (const [key, value] of Object.entries(updates)) {
+      if (!(AI_ENV_KEYS as readonly string[]).includes(key)) {
+        process.stderr.write(`[WorkspaceSettingsStore] ignored unsupported setting key: ${key}\n`);
+        continue;
+      }
       if (!value) {
         continue;
       }
@@ -200,12 +205,12 @@ export class WorkspaceSettingsStore {
     return config;
   }
 
-  #readSettings(): WorkspaceSettingsFile {
-    return readJsonFile(this.settingsPath);
+  #readSettings(mode: 'read' | 'write' = 'read'): WorkspaceSettingsFile {
+    return readJsonFile(this.settingsPath, mode);
   }
 
-  #readSecrets(): WorkspaceSecretsFile {
-    return readJsonFile(this.secretsPath);
+  #readSecrets(mode: 'read' | 'write' = 'read'): WorkspaceSecretsFile {
+    return readJsonFile(this.secretsPath, mode);
   }
 
   #writeJson(filePath: string, value: unknown, mode: number): void {
@@ -268,16 +273,29 @@ export function maskAiEnvConfig(env: Record<string, string>): Record<string, str
   return vars;
 }
 
-function readJsonFile<T extends Record<string, unknown>>(filePath: string): T {
+function readJsonFile<T extends Record<string, unknown>>(
+  filePath: string,
+  mode: 'read' | 'write' = 'read'
+): T {
   try {
     if (!existsSync(filePath)) {
       return {} as T;
     }
     const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as T)
-      : ({} as T);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as T;
+    }
+    throw new TypeError('Workspace configuration must be a JSON object');
   } catch {
+    // 不回显 JSON.parse 的原错误文本，避免把凭据片段写入日志或错误响应。
+    process.stderr.write(
+      `[WorkspaceSettingsStore] unreadable configuration retained (${mode}): ${filePath}\n`
+    );
+    if (mode === 'write') {
+      throw new Error(
+        `Cannot update workspace configuration: existing JSON is unreadable at ${filePath}`
+      );
+    }
     return {} as T;
   }
 }

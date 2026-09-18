@@ -9,14 +9,16 @@
  * - 新增 chunking 配置透传 (strategy, maxChunkTokens, overlapTokens, useAST)
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { extname, join, relative, resolve, sep } from 'node:path';
 import type { EmbeddingPort, LegacyEmbedProvider } from '../../service/vector/EmbeddingPort.js';
 import { computeContentHash } from '../../shared/contentHash.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import { KNOWLEDGE_BASE_DIR } from '../config/Defaults.js';
+import Logger from '../logging/Logger.js';
+import { ensureParser, isASTChunkerAvailable } from './ASTChunker.js';
 import { BatchEmbedder } from './BatchEmbedder.js';
-import { chunk } from './Chunker.js';
+import { chunk, estimateTokens } from './Chunker.js';
 import type { VectorStore } from './VectorStore.js';
 
 /** Chunk enrichment 接口 (可选, 由外层 service adapter 注入) */
@@ -26,6 +28,23 @@ interface ChunkEnricherLike {
     chunks: Array<{ content: string; metadata: Record<string, unknown> }>
   ): Promise<Array<{ content: string; metadata: Record<string, unknown> }>>;
 }
+
+interface IndexedSourceFile {
+  absolutePath: string;
+  relativePath: string;
+  type: string;
+}
+
+interface StoredFileChunk {
+  id: string;
+  content: unknown;
+  vector: unknown;
+  metadata: Record<string, unknown>;
+  owned: boolean;
+}
+
+// 只标记本管线实际生成/核实并重写的块；历史 sourcePath 本身不足以证明删除权限。
+const FILE_INDEXING_PRODUCER = 'file-indexing-pipeline-v1';
 
 const SCANNABLE_EXTENSIONS = new Set([
   '.md',
@@ -49,7 +68,7 @@ const SCANNABLE_EXTENSIONS = new Set([
 export class IndexingPipeline {
   #vectorStore; // VectorStore 实例
   #aiProvider; // AiProvider 实例 (可选, 用于 embedding)
-  #batchEmbedder; // BatchEmbedder 实例 (可选, 自动从 aiProvider 创建)
+  #batchEmbedder: BatchEmbedder | null = null; // 自动从 aiProvider 创建，撤销 provider 时同步清空
   #scanDirs; // 要扫描的目录
   #projectRoot;
   #chunkingOptions; // Chunker v2 透传选项
@@ -109,6 +128,12 @@ export class IndexingPipeline {
         batchSize: 32,
         maxConcurrency: 2,
       });
+    } else {
+      // 撤销 provider 同时撤销捕获旧 provider 的 batcher，后续只建立关键词索引。
+      this.#batchEmbedder = null;
+      Logger.getInstance().debug(
+        '[IndexingPipeline] embedding provider detached; keyword indexing only'
+      );
     }
   }
 
@@ -151,31 +176,112 @@ export class IndexingPipeline {
     }
 
     // 1. 扫描文件
-    const files = this.scan();
+    const scan = this.#scanInputs();
+    const files = scan.files;
+    let cleanupSafe = scan.complete;
+    if (!scan.complete) {
+      stats.errors++;
+    }
     stats.scanned = files.length;
 
     // 2. 增量检测 + 分块 (先收集所有 chunks)
     const existingIds = new Set(await this.#vectorStore.listIds());
-    const allChunks: { id: string; content: string; metadata: Record<string, unknown> }[] = []; // { id, content, metadata }
-    const staleIds: unknown[] = []; // 需要清理的旧 chunk id
+    const existingBySource = new Map<string, StoredFileChunk[]>();
+    for (const id of existingIds) {
+      try {
+        const stored = await this.#vectorStore.getById(id);
+        const metadata = stored?.metadata;
+        if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+          continue;
+        }
+        const fields = metadata as Record<string, unknown>;
+        if (typeof fields.sourcePath !== 'string' || !fields.sourcePath) {
+          continue;
+        }
+        const sourcePath = this.#sourcePath(resolve(this.#projectRoot, fields.sourcePath));
+        const owned = fields.indexingProducer === FILE_INDEXING_PRODUCER;
+        const legacy =
+          fields.indexingProducer === undefined &&
+          Number.isInteger(fields.chunkIndex) &&
+          typeof fields.sourceHash === 'string' &&
+          typeof fields.totalChunks === 'number' &&
+          ['recipe', 'code', 'readme'].includes(String(fields.type)) &&
+          id === `${fields.sourcePath.replace(/\//g, '_')}_${fields.chunkIndex}`;
+        if (!owned && !legacy) {
+          continue;
+        }
+        const group = existingBySource.get(sourcePath) ?? [];
+        group.push({
+          id,
+          content: stored?.content,
+          vector: stored?.vector,
+          metadata: fields,
+          owned,
+        });
+        existingBySource.set(sourcePath, group);
+      } catch (error) {
+        cleanupSafe = false;
+        stats.errors++;
+        this.#logReadFailure('stored-chunk', id, error);
+      }
+    }
+    const allChunks: {
+      id: string;
+      content: string;
+      metadata: Record<string, unknown>;
+      preservedVector?: number[];
+    }[] = [];
+    const staleIds = new Set<string>();
 
     for (const file of files) {
       try {
         const content = readFileSync(file.absolutePath, 'utf-8');
         const hash = this.hashContent(content);
-        const baseId = relative(this.#projectRoot, file.absolutePath).replace(/\//g, '_');
+        const existing = existingBySource.get(file.relativePath) ?? [];
+        const owned = existing.filter((item) => item.owned);
+        const totalChunks = owned[0]?.metadata.totalChunks;
 
         // 增量检测：hash 未变时跳过
-        if (!force) {
-          const existing = await this.#vectorStore.getById(`${baseId}_0`);
-          if ((existing?.metadata as Record<string, unknown> | undefined)?.sourceHash === hash) {
-            stats.skipped++;
-            continue;
-          }
+        if (
+          !force &&
+          typeof totalChunks === 'number' &&
+          totalChunks > 0 &&
+          owned.length === totalChunks &&
+          new Set(owned.map((item) => item.metadata.chunkIndex)).size === totalChunks &&
+          owned.every(
+            (item) =>
+              item.metadata.sourceHash === hash &&
+              item.metadata.totalChunks === totalChunks &&
+              Number.isInteger(item.metadata.chunkIndex) &&
+              Number(item.metadata.chunkIndex) >= 0 &&
+              Number(item.metadata.chunkIndex) < totalChunks
+          )
+        ) {
+          stats.skipped++;
+          continue;
         }
 
         // 分块 (使用 Chunker v2 - 支持 AST 策略)
         const language = this.#detectLanguage(file.absolutePath);
+        if (
+          this.#chunkingOptions.useAST &&
+          (this.#chunkingOptions.strategy === 'ast' ||
+            (this.#chunkingOptions.strategy === 'auto' &&
+              file.type === 'code' &&
+              estimateTokens(content) > this.#chunkingOptions.maxChunkTokens))
+        ) {
+          const ready = await ensureParser();
+          if (!ready || !isASTChunkerAvailable(language)) {
+            Logger.getInstance().debug(
+              '[IndexingPipeline] AST unavailable; using configured fallback',
+              {
+                sourcePath: file.relativePath,
+                language,
+                strategy: this.#chunkingOptions.strategy,
+              }
+            );
+          }
+        }
         const chunks = chunk(
           content,
           {
@@ -188,26 +294,75 @@ export class IndexingPipeline {
         );
         stats.chunked += chunks.length;
 
-        // 收集 chunks
+        // 旧ID按实际sourcePath绑定继续使用；新块使用无损路径编码，避免 a/b 与 a_b 折叠。
+        const fileChunks: typeof allChunks = [];
         for (let i = 0; i < chunks.length; i++) {
-          allChunks.push({
-            id: `${baseId}_${i}`,
+          const previous = existing.find((item) => item.metadata.chunkIndex === i);
+          const id =
+            previous?.id ??
+            `file_chunk_${Buffer.from(file.relativePath, 'utf8').toString('base64url')}_${i}`;
+          if (!previous && existingIds.has(id)) {
+            throw new Error(`pipeline-id-owned-by-another-source:${id}`);
+          }
+          fileChunks.push({
+            id,
             content: chunks[i].content,
-            metadata: { ...chunks[i].metadata, chunkIndex: i },
+            metadata: {
+              ...chunks[i].metadata,
+              chunkIndex: i,
+              indexingProducer: FILE_INDEXING_PRODUCER,
+            },
+            // 核实旧块内容后原位迁移marker，无provider时也不丢已有同内容embedding。
+            ...(!force &&
+            !this.#contextualEnricher &&
+            previous?.content === chunks[i].content &&
+            previous.metadata.sourceHash === hash &&
+            Array.isArray(previous.vector)
+              ? { preservedVector: previous.vector as number[] }
+              : {}),
           });
         }
+        allChunks.push(...fileChunks);
 
         // 标记需要清理的旧 chunk
-        for (const existId of existingIds) {
-          if ((existId as string).startsWith(`${baseId}_`)) {
-            const idx = Number.parseInt((existId as string).split('_').pop()!, 10);
-            if (idx >= chunks.length) {
-              staleIds.push(existId);
-            }
+        const selectedIds = new Set(fileChunks.map((item) => item.id));
+        for (const item of owned) {
+          if (!selectedIds.has(item.id)) {
+            staleIds.add(item.id);
           }
         }
-      } catch (_error: unknown) {
+      } catch (error: unknown) {
+        cleanupSafe = false;
         stats.errors++;
+        this.#logReadFailure('source-file', file.relativePath, error);
+      }
+    }
+
+    // 扫描未返回不代表文件已删除。确认ENOENT且仍在本次扫描范围后才授权清理。
+    const scannedPaths = new Set(files.map((file) => file.relativePath));
+    for (const [sourcePath, stored] of existingBySource) {
+      if (scannedPaths.has(sourcePath) || !this.#isWithinScanScope(sourcePath)) {
+        continue;
+      }
+      try {
+        lstatSync(resolve(this.#projectRoot, sourcePath));
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          cleanupSafe = false;
+          stats.errors++;
+          this.#logReadFailure('deleted-source-check', sourcePath, error);
+          continue;
+        }
+        for (const item of stored) {
+          if (item.owned) {
+            staleIds.add(item.id);
+          } else {
+            Logger.getInstance().debug(
+              '[IndexingPipeline] deleted legacy chunk retained; producer unproven',
+              { id: item.id, sourcePath }
+            );
+          }
+        }
       }
     }
 
@@ -247,10 +402,20 @@ export class IndexingPipeline {
           // 回写 enriched 内容
           for (let j = 0; j < enrichedChunks.length; j++) {
             const originalIndex = group[j].index;
+            const sourceMetadata = allChunks[originalIndex].metadata;
             allChunks[originalIndex] = {
               ...allChunks[originalIndex],
               content: enrichedChunks[j].content,
-              metadata: { ...allChunks[originalIndex].metadata, ...enrichedChunks[j].metadata },
+              // Enricher只扩展内容语义，来源/删除权限仍由本次真实扫描决定。
+              metadata: {
+                ...sourceMetadata,
+                ...enrichedChunks[j].metadata,
+                sourcePath: sourceMetadata.sourcePath,
+                sourceHash: sourceMetadata.sourceHash,
+                chunkIndex: sourceMetadata.chunkIndex,
+                totalChunks: sourceMetadata.totalChunks,
+                indexingProducer: FILE_INDEXING_PRODUCER,
+              },
             };
             if (enrichedChunks[j].metadata.contextEnriched) {
               stats.enriched++;
@@ -264,18 +429,26 @@ export class IndexingPipeline {
     }
 
     // 3. 批量 embed (使用 BatchEmbedder)
-    let vectorMap = new Map(); // id → vector
+    const vectorMap = new Map(
+      allChunks
+        .filter((item) => item.preservedVector !== undefined)
+        .map((item) => [item.id, item.preservedVector!] as const)
+    );
+    const toEmbed = allChunks.filter((item) => item.preservedVector === undefined);
 
-    if (this.#batchEmbedder && allChunks.length > 0) {
+    if (this.#batchEmbedder && toEmbed.length > 0) {
       try {
-        vectorMap = await this.#batchEmbedder.embedAll(
-          allChunks.map((c) => ({ id: c.id, content: c.content })),
+        const embedded = await this.#batchEmbedder.embedAll(
+          toEmbed.map((c) => ({ id: c.id, content: c.content })),
           (embedded: number, total: number) => {
             stats.embedded = embedded;
             onProgress?.({ phase: 'embed', embedded, total });
           }
         );
-        stats.embedded = vectorMap.size;
+        for (const [id, vector] of embedded) {
+          vectorMap.set(id, vector);
+        }
+        stats.embedded = embedded.size;
       } catch {
         // embed 全部失败, 继续写入 (无向量)
       }
@@ -296,14 +469,20 @@ export class IndexingPipeline {
     }
 
     // 5. 清理旧 chunks
-    if (!dryRun) {
+    if (!dryRun && cleanupSafe) {
       for (const staleId of staleIds) {
         try {
-          await this.#vectorStore.remove(staleId as string);
-        } catch {
-          /* skip cleanup errors */
+          await this.#vectorStore.remove(staleId);
+        } catch (error) {
+          stats.errors++;
+          this.#logReadFailure('stale-chunk-remove', staleId, error);
         }
       }
+    } else if (!dryRun && !cleanupSafe) {
+      Logger.getInstance().warn('[IndexingPipeline] cleanup skipped after incomplete scan/read', {
+        staleCandidates: staleIds.size,
+        errors: stats.errors,
+      });
     }
 
     return stats;
@@ -314,27 +493,42 @@ export class IndexingPipeline {
    * @returns >}
    */
   scan() {
-    const files: { absolutePath: string; relativePath: string; type: string }[] = [];
+    return this.#scanInputs().files;
+  }
+
+  #scanInputs(): { files: IndexedSourceFile[]; complete: boolean } {
+    const files: IndexedSourceFile[] = [];
+    let complete = true;
 
     for (const dir of this.#scanDirs) {
       const absDir = join(this.#projectRoot, dir);
-      if (!existsSync(absDir)) {
-        continue;
+      try {
+        // ENOENT是确定缺失；权限错误、坏目录等不能被existsSync折叠为“已删除”。
+        statSync(absDir);
+        if (!this.#walkDir(absDir, files)) {
+          complete = false;
+        }
+      } catch (error: unknown) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+          complete = false;
+          this.#logReadFailure('scan-root', absDir, error);
+        }
       }
-      this.#walkDir(absDir, files);
     }
 
     // 也扫描根目录的 README
     const readmePath = join(this.#projectRoot, 'README.md');
-    if (existsSync(readmePath)) {
-      files.push({
-        absolutePath: readmePath,
-        relativePath: 'README.md',
-        type: 'readme',
-      });
+    try {
+      if (statSync(readmePath).isFile()) {
+        files.push({ absolutePath: readmePath, relativePath: 'README.md', type: 'readme' });
+      }
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        complete = false;
+        this.#logReadFailure('readme', readmePath, error);
+      }
     }
-
-    return files;
+    return { files, complete };
   }
 
   /** 计算内容 hash */
@@ -342,10 +536,8 @@ export class IndexingPipeline {
     return computeContentHash(content);
   }
 
-  #walkDir(
-    dir: string,
-    files: Array<{ absolutePath: string; relativePath: string; type: string }>
-  ) {
+  #walkDir(dir: string, files: IndexedSourceFile[]): boolean {
+    let complete = true;
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
@@ -354,21 +546,56 @@ export class IndexingPipeline {
           if (entry.name.startsWith('.') || entry.name === 'node_modules') {
             continue;
           }
-          this.#walkDir(fullPath, files);
+          if (!this.#walkDir(fullPath, files)) {
+            complete = false;
+          }
         } else if (entry.isFile()) {
           const ext = extname(entry.name).toLowerCase();
           if (SCANNABLE_EXTENSIONS.has(ext)) {
             files.push({
               absolutePath: fullPath,
-              relativePath: relative(this.#projectRoot, fullPath),
+              relativePath: this.#sourcePath(fullPath),
               type: ext === '.md' || ext === '.markdown' ? 'recipe' : 'code',
             });
           }
         }
       }
-    } catch {
-      /* skip unreadable dirs */
+    } catch (error) {
+      complete = false;
+      this.#logReadFailure('scan-directory', dir, error);
     }
+    return complete;
+  }
+
+  #sourcePath(absolutePath: string): string {
+    // 只规范本平台路径分隔符；POSIX文件名中的反斜杠仍是合法字节。
+    return relative(this.#projectRoot, absolutePath).split(sep).join('/');
+  }
+
+  #isWithinScanScope(sourcePath: string): boolean {
+    const absolute = resolve(this.#projectRoot, sourcePath);
+    if (absolute === resolve(this.#projectRoot, 'README.md')) {
+      return true;
+    }
+    return this.#scanDirs.some((dir) => {
+      const root = resolve(this.#projectRoot, dir);
+      if (!absolute.startsWith(`${root}${sep}`)) {
+        return false;
+      }
+      const directories = relative(root, absolute).split(sep).slice(0, -1);
+      return directories.every((part) => !part.startsWith('.') && part !== 'node_modules');
+    });
+  }
+
+  #logReadFailure(stage: string, sourcePath: string, error: unknown) {
+    Logger.getInstance().warn(
+      '[IndexingPipeline] IO/processing failed; retaining existing chunks',
+      {
+        stage,
+        sourcePath,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    );
   }
 
   #detectLanguage(filePath: string) {

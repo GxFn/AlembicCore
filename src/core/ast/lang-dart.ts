@@ -521,22 +521,23 @@ function detectDartPatterns(root: any, lang: any, methods: any, properties: any,
   const patterns: any[] = [];
 
   // 构建 class → methods/properties 索引
-  const classMethodMap: Record<string, any> = {};
-  const classPropMap: Record<string, any> = {};
+  const classMethodMap = new Map<string, { name: string; kind?: string }[]>();
+  const classPropMap = new Map<
+    string,
+    { isStatic?: boolean; isFinal?: boolean; isConst?: boolean }[]
+  >();
   for (const m of methods) {
     if (m.className) {
-      if (!classMethodMap[m.className]) {
-        classMethodMap[m.className] = [];
-      }
-      classMethodMap[m.className].push(m);
+      const group = classMethodMap.get(m.className) ?? [];
+      group.push(m);
+      classMethodMap.set(m.className, group);
     }
   }
   for (const p of properties) {
     if (p.className) {
-      if (!classPropMap[p.className]) {
-        classPropMap[p.className] = [];
-      }
-      classPropMap[p.className].push(p);
+      const group = classPropMap.get(p.className) ?? [];
+      group.push(p);
+      classPropMap.set(p.className, group);
     }
   }
 
@@ -597,8 +598,8 @@ function detectDartPatterns(root: any, lang: any, methods: any, properties: any,
     }
 
     // Singleton pattern — private constructor + static instance
-    const classMethods = classMethodMap[cls.name] || [];
-    const classProps = classPropMap[cls.name] || [];
+    const classMethods = classMethodMap.get(cls.name) ?? [];
+    const classProps = classPropMap.get(cls.name) ?? [];
     const hasPrivateConstructor = classMethods.some(
       (m: any) => m.kind === 'constructor' && m.name.startsWith('_')
     );

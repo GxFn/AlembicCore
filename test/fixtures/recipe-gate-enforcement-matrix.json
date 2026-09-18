@@ -236,6 +236,13 @@
     "_runs": "always — RecipeProductionGateway.create -> UnifiedValidator.validate (host-agent + in-process)",
     "_note": "Stage-3 blocking errors are Chinese message strings (not reject codes); pass = errors.length===0. Keyed by stable rule id; the round-trip asserts the entry count equals the live errors.push count, never a hardcoded literal.",
     "rules": {
+      "STAGE3_OPTIONAL_FIELD_TYPE_INVALID": {
+        "stage": 3,
+        "alwaysOrConditional": "always",
+        "sourceLine": 122,
+        "paths": ["host-agent", "in-process"],
+        "rule": "provided non-REQUIRED V3_FIELD_SPEC field, not skipped via systemInjectedFields, has the wrong declared type; missing optional values remain allowed"
+      },
       "STAGE3_MISSING_REQUIRED_FIELD": {
         "stage": 3,
         "alwaysOrConditional": "always",

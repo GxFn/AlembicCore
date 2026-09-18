@@ -6,9 +6,23 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { LanguageProfiles } from '../src/shared/LanguageProfiles.js';
 import LanguageService from '../src/shared/LanguageService.js';
 
 const TMP = join(tmpdir(), 'asd-langdetect-test');
+
+it.each([
+  ['import com.example.api.Service;', ['com', 'example', 'api', 'com']],
+  ['import com.example.api.*;', ['com', 'example', 'api', 'com']],
+  ['import com.example.api.*', ['com', 'example', 'api', 'com']],
+  ['import java.util.*;', ['util', 'java']],
+])('extracts JVM package candidates for %s', (line, expected) => {
+  const candidates = LanguageProfiles.importPatterns.flatMap((pattern) => {
+    const match = pattern.regex.exec(line as string);
+    return match ? pattern.extract(match) : [];
+  });
+  expect(candidates).toEqual(expected);
+});
 
 beforeAll(() => {
   mkdirSync(TMP, { recursive: true });

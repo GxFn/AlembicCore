@@ -1,5 +1,11 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { analyzeFile, isAvailable } from '../src/core/AstAnalyzer.js';
+import {
+  ensureGrammars,
+  inferLanguagesFromStats,
+  reloadPlugins,
+} from '../src/core/ast/ensureGrammars.js';
 import {
   analyzeSourceFile,
   CORE_GRAMMAR_RESOURCE_FILES,
@@ -20,16 +26,20 @@ describe('retired project intelligence public entrypoint', () => {
   it('routes language, grammar resource, and file-level AST contracts through generic core/shared routes', async () => {
     const resources = listCoreGrammarResources();
     const grammarResult = await ensureProjectGrammarResources({ ts: 1, py: 1, swift: 1 });
-    const summary = analyzeSourceFile(
-      `
+    const source = `
         export class UserService {
           findUser(id: string) {
             return id;
           }
         }
-      `,
-      'typescript'
-    );
+      `;
+    const summary = analyzeSourceFile(source, 'typescript');
+
+    // 合并旧AstGrammar测试的独有legacy入口门禁；不能以函数存在代替真实WASM可用与解析。
+    const languages = inferLanguagesFromStats({ ts: 1, py: 1, swift: 1 });
+    const legacyResult = await ensureGrammars(languages);
+    await reloadPlugins();
+    const legacySummary = analyzeFile(source, 'typescript');
 
     expect(LanguageService.inferLang('src/app.ts')).toBe('typescript');
     expect(resources).toHaveLength(CORE_GRAMMAR_RESOURCE_FILES.length);
@@ -40,7 +50,12 @@ describe('retired project intelligence public entrypoint', () => {
     );
     expect(grammarResult.reloaded).toBe(true);
     expect(isParserReady).toBeInstanceOf(Function);
+    expect(languages).toEqual(expect.arrayContaining(['typescript', 'python', 'swift']));
+    expect(legacyResult.failed).toEqual([]);
+    expect(legacyResult.alreadyAvailable).toEqual(expect.arrayContaining(languages));
+    expect(isAvailable()).toBe(true);
     expect(summary?.classes.some((item) => item.name === 'UserService')).toBe(true);
+    expect(legacySummary?.classes.some((item) => item.name === 'UserService')).toBe(true);
   });
 
   it('keeps discovery parser contracts on core/discovery instead of the retired facade', () => {

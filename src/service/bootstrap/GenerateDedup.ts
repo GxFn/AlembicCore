@@ -11,6 +11,8 @@
  *   title 0.2 + clause 0.3 + code 0.3 + guard 0.2
  */
 
+import { ngramJaccardSimilarity } from '../../shared/similarity.js';
+
 /* ────────────────────── Types ────────────────────── */
 
 export interface CandidateSummary {
@@ -55,11 +57,12 @@ export class GenerateDedup {
         best = {
           existingId: existing.id,
           existingTitle: existing.title,
-          similarity: Math.round(sim * 100) / 100,
+          similarity: sim,
         };
       }
     }
-    return best;
+    // 排序只比较原始分数；两位小数是返回展示契约，提前舍入会让次优候选覆盖最优项。
+    return best ? { ...best, similarity: Math.round(best.similarity * 100) / 100 } : null;
   }
 
   /** 批量检查（返回所有匹配到重复的条目） */
@@ -166,27 +169,5 @@ function codeSimilarity(codeA: string, codeB: string): number {
   if (a.length === 0 || b.length === 0) {
     return 0;
   }
-  return ngramJaccard(a, b, 3);
-}
-
-function ngramJaccard(a: string, b: string, n: number): number {
-  const gramsA = new Set<string>();
-  const gramsB = new Set<string>();
-  for (let i = 0; i <= a.length - n; i++) {
-    gramsA.add(a.slice(i, i + n));
-  }
-  for (let i = 0; i <= b.length - n; i++) {
-    gramsB.add(b.slice(i, i + n));
-  }
-  if (gramsA.size === 0 && gramsB.size === 0) {
-    return 0;
-  }
-  let intersection = 0;
-  for (const g of gramsA) {
-    if (gramsB.has(g)) {
-      intersection++;
-    }
-  }
-  const union = gramsA.size + gramsB.size - intersection;
-  return union === 0 ? 0 : intersection / union;
+  return ngramJaccardSimilarity(a, b, 3);
 }

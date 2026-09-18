@@ -68,6 +68,23 @@ export function jaccardSimilarity(a: Set<string>, b: Set<string>) {
 }
 
 /**
+ * 内部字符 n-gram Jaccard；调用方保留各自的文本预处理和权重。
+ * 不复用 tokenizeForSimilarity：它会小写化并丢标点，改变原有代码结构相似度。
+ * 此符号不经 shared 公共门面导出，避免扩大稳定 API。
+ */
+export function ngramJaccardSimilarity(a: string, b: string, n: number): number {
+  const gramsA = new Set<string>();
+  const gramsB = new Set<string>();
+  for (let i = 0; i <= a.length - n; i++) {
+    gramsA.add(a.slice(i, i + n));
+  }
+  for (let i = 0; i <= b.length - n; i++) {
+    gramsB.add(b.slice(i, i + n));
+  }
+  return jaccardSimilarity(gramsA, gramsB);
+}
+
+/**
  * 余弦相似度 — 向量点积 / (||a|| * ||b||)
  *
  * @param a 向量 A

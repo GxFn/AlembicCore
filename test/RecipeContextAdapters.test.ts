@@ -118,9 +118,10 @@ describe('RecipeContext over a real recipe_source_refs database', () => {
     fs.rmSync(tmpDir, { force: true, recursive: true });
   });
 
-  it('surfaces real stale / renamed diagnostics through a detail read', async () => {
+  it('surfaces real stale / renamed / drifted diagnostics through a detail read', async () => {
     repo.upsert({ recipeId: 'r1', sourcePath: 'src/a.ts', verifiedAt: 1 });
     repo.upsert({ recipeId: 'r1', sourcePath: 'old/b.ts', status: 'stale', verifiedAt: 1 });
+    repo.upsert({ recipeId: 'r1', sourcePath: 'src/drift.ts', status: 'drifted', verifiedAt: 1 });
     repo.upsert({
       newPath: 'new/c.ts',
       recipeId: 'r1',
@@ -136,15 +137,20 @@ describe('RecipeContext over a real recipe_source_refs database', () => {
 
     const envelope = await service.execute({ kind: 'detail', payload: { ref: 'r1' } });
     const data = envelope.data as { sourceRefs: unknown[] };
-    expect(data.sourceRefs).toHaveLength(3);
+    expect(data.sourceRefs).toHaveLength(4);
     const codes = (envelope.errors ?? []).map((error) => error.code);
     expect(codes).toContain('stale-ref');
     expect(codes).toContain('renamed');
+    expect(envelope.errors?.find((error) => error.path === 'src/drift.ts')).toMatchObject({
+      code: 'stale-ref',
+      message: expect.stringContaining('content changed'),
+    });
   });
 
-  it('runs a real batch source-refs query by path prefix', async () => {
+  it.each([true, false])('keeps drifted refs in wide reads (findAll=%s)', async (hasFindAll) => {
     repo.upsert({ recipeId: 'r1', sourcePath: 'src/a.ts', verifiedAt: 1 });
     repo.upsert({ recipeId: 'r1', sourcePath: 'old/b.ts', status: 'stale', verifiedAt: 1 });
+    repo.upsert({ recipeId: 'r1', sourcePath: 'old/drift.ts', status: 'drifted', verifiedAt: 1 });
     repo.upsert({
       newPath: 'new/c.ts',
       recipeId: 'r1',
@@ -155,14 +161,33 @@ describe('RecipeContext over a real recipe_source_refs database', () => {
 
     const service = createRecipeContextServiceFromCore({
       knowledge: knowledgeServiceWith([makeEntry('r1')]),
-      sourceRefRepository: repo,
+      // 旧 structural adapter 仍只暴露分状态查询；两个分支均从真实 SQLite 读取。
+      sourceRefRepository: hasFindAll
+        ? repo
+        : {
+            findByRecipeId: repo.findByRecipeId.bind(repo),
+            findBySourcePath: repo.findBySourcePath.bind(repo),
+            findByStatus: repo.findByStatus.bind(repo),
+            findStale: repo.findStale.bind(repo),
+            findRenamed: repo.findRenamed.bind(repo),
+          },
     });
 
     const envelope = await service.execute({
       kind: 'source-refs',
       payload: { pathPrefix: 'old/' },
     });
-    expect((envelope.data as { refs: unknown[] }).refs).toHaveLength(2);
+    const refs = (envelope.data as { refs: Array<{ sourcePath: string }> }).refs;
+    expect(refs.map((ref) => ref.sourcePath)).toEqual(['old/b.ts', 'old/c.ts', 'old/drift.ts']);
+    const exact = await service.execute({
+      kind: 'source-refs',
+      payload: { sourcePath: 'old/drift.ts' },
+    });
+    expect((exact.data as { refs: unknown[] }).refs).toHaveLength(1);
+    expect(envelope.errors?.find((error) => error.path === 'old/drift.ts')).toMatchObject({
+      code: 'stale-ref',
+      message: expect.stringContaining('content changed'),
+    });
   });
 });
 

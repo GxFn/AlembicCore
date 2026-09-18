@@ -174,10 +174,11 @@ describe('RecipeAuthoringSpec guidance == gate parity (A.6 #1/#2/#3/#7 + D-A)', 
     expect([...new Set(gateRules(1).flatMap((r) => r.rejectCodes))].sort()).toEqual(
       [...matrixCodes[1]].sort()
     );
-    // the layered matrix counts stay frozen so the layered-not-duplicated matrix can never reopen
+    // 固定各层清单；2026-09审查补齐一条非必填字段类型拒绝，原Stage3常量/语料不变。
     expect(matrixCodes[1].size).toBe(8);
     expect(matrixCodes[2].size).toBe(19);
-    expect(matrixCodes[3].size).toBe(11);
+    expect(matrixCodes[3].size).toBe(12);
+    expect(matrixCodes[3].has('STAGE3_OPTIONAL_FIELD_TYPE_INVALID')).toBe(true);
   });
 
   it('D-A: the gate exposes NO confidence-floor predicate; guidance claims no hard floor', () => {

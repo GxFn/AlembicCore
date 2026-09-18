@@ -7,9 +7,10 @@
  * 主要消费者：SourceRefReconciler
  */
 
-import { and, eq, inArray, isNotNull, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { recipeSourceRefs } from '../../infrastructure/database/drizzle/schema.js';
+import { stripSourceRangeSuffix } from '../../shared/sourceRefPath.js';
 
 /* ═══ 类型定义 ═══ */
 
@@ -59,11 +60,29 @@ export class RecipeSourceRefRepositoryImpl {
 
   /** 按源文件路径查询所有关联的引用 */
   findBySourcePath(sourcePath: string): RecipeSourceRefEntity[] {
-    return this.#drizzle
+    // 显式行范围查询保持旧的精确 ref 语义；裸文件查询同时覆盖该文件的有界引用。
+    if (stripSourceRangeSuffix(sourcePath) !== sourcePath) {
+      return this.#drizzle
+        .select()
+        .from(recipeSourceRefs)
+        .where(eq(recipeSourceRefs.sourcePath, sourcePath))
+        .all() as RecipeSourceRefEntity[];
+    }
+    const escaped = sourcePath.replace(/[%_\\]/g, (character) => `\\${character}`);
+    const rows = this.#drizzle
       .select()
       .from(recipeSourceRefs)
-      .where(eq(recipeSourceRefs.sourcePath, sourcePath))
+      .where(
+        or(
+          eq(recipeSourceRefs.sourcePath, sourcePath),
+          sql`${recipeSourceRefs.sourcePath} LIKE ${`${escaped}:%`} ESCAPE '\\'`,
+          sql`${recipeSourceRefs.sourcePath} LIKE ${`${escaped}#L%`} ESCAPE '\\'`
+        )
+      )
       .all() as RecipeSourceRefEntity[];
+    // SQLite LIKE 默认不区分大小写；最终精确文件身份检查防止 Api.ts 与 api.ts 跨绑，
+    // 也排除带相同前缀却并非合法范围后缀的其他文件。原 sourcePath 与返回顺序均保留。
+    return rows.filter((ref) => stripSourceRangeSuffix(ref.sourcePath) === sourcePath);
   }
 
   /** 按状态查询 */

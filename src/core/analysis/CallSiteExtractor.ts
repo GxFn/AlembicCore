@@ -126,9 +126,10 @@ function _collectTSScopes(root: TreeSitterNode) {
                 (c: TreeSitterNode) => c.type === 'arrow_function' || c.type === 'function'
               );
               if (nameNode && valueNode) {
-                const body = valueNode.namedChildren.find(
-                  (c: TreeSitterNode) => c.type === 'statement_block'
-                );
+                // Arrow 的 body 可以是块或表达式，不能只接受 statement_block 而漏掉 foo()。
+                const body =
+                  valueNode.childForFieldName('body') ??
+                  valueNode.namedChildren.find((c: TreeSitterNode) => c.type === 'statement_block');
                 if (body) {
                   scopes.push({ body, className, methodName: nameNode.text });
                 }

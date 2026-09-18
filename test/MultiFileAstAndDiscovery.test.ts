@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { analyzeFile, analyzeProject, isAvailable } from '../src/core/AstAnalyzer.js';
+import { CallGraphAnalyzer } from '../src/core/analysis/CallGraphAnalyzer.js';
+import { ImportPathResolver } from '../src/core/analysis/ImportPathResolver.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
+import ProjectGraph from '../src/core/ast/ProjectGraph.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from '../src/core/discovery/index.js';
 
 beforeAll(async () => {
@@ -23,6 +26,159 @@ beforeAll(async () => {
 });
 
 describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/GoSupport)', () => {
+  it('keeps Python module paths and aliases for comma-separated and aliased imports', () => {
+    const result = analyzeFile(
+      'import os as operating, sys, xml.sax\nfrom os import path as p, sep\n',
+      'python'
+    );
+    expect(result?.imports).toMatchObject([
+      { path: 'os', symbols: ['*'], alias: 'operating', kind: 'namespace' },
+      { path: 'sys', symbols: ['*'], alias: 'sys', kind: 'namespace' },
+      { path: 'xml.sax', symbols: ['*'], alias: 'xml', kind: 'namespace' },
+      { path: 'os', symbols: ['path'], alias: 'p', kind: 'named' },
+      { path: 'os', symbols: ['sep'], alias: null, kind: 'named' },
+    ]);
+    expect(analyzeFile('from os import path, sep\n', 'python')?.imports).toMatchObject([
+      { path: 'os', symbols: ['path', 'sep'], alias: null, kind: 'named' },
+    ]);
+  });
+
+  it.each(
+    [
+      {
+        language: 'python',
+        source: (name: string) =>
+          `class ${name}:\n    def __enter__(self):\n        return self\n    def __exit__(self, *args):\n        pass\n`,
+      },
+      {
+        language: 'java',
+        source: (name: string) => `class ${name} { static ${name} getInstance() { return null; } }`,
+      },
+      {
+        language: 'go',
+        source: (name: string) =>
+          `package sample\ntype ${name} struct {}\nfunc (x ${name}) Read() {}\nfunc (x ${name}) Write() {}\nfunc (x ${name}) Close() {}`,
+      },
+      {
+        language: 'rust',
+        source: (name: string) => `struct ${name}; impl ${name} { fn build(&self) {} }`,
+      },
+      {
+        language: 'dart',
+        source: (name: string) => `class ${name} extends StatelessWidget { void run() {} }`,
+      },
+    ].flatMap((fixture) =>
+      ['constructor', '__proto__', 'toString'].map((name) => ({ ...fixture, name }))
+    )
+  )('analyzes the legal $language type name $name without changing ordinary patterns', ({
+    language,
+    source,
+    name,
+  }) => {
+    const content = source(name);
+    const result = analyzeFile(content, language);
+    const ordinary = analyzeFile(source('PlainSample'), language);
+    expect(result?.classes).toContainEqual(expect.objectContaining({ name }));
+    expect(
+      result?.patterns.map((pattern) => ({
+        ...pattern,
+        className: pattern.className === name ? 'PlainSample' : pattern.className,
+      }))
+    ).toEqual(ordinary?.patterns);
+    const project = analyzeProject([{ name: 'module', relativePath: 'module', content }], language);
+    expect(project?.projectMetrics.avgMethodsPerClass).toBe(result?.methods.length);
+  });
+
+  it('rebuilds ProjectGraph conformance after deletion and keeps facts when parsing is unavailable', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'project-graph-relations-'));
+    try {
+      writeFileSync(join(root, 'P.swift'), 'protocol P { func work() }');
+      writeFileSync(join(root, 'A.swift'), 'class A: P { func work() {} }');
+      writeFileSync(join(root, 'B.swift'), 'class B: P { func work() {} }');
+      const graph = await ProjectGraph.build(root, { extensions: ['.swift'] });
+      expect(graph.getProtocolInfo('P').conformers).toEqual(['A', 'B']);
+      rmSync(join(root, 'A.swift'));
+      await graph.incrementalUpdate([], ['A.swift']);
+      expect(graph.getProtocolInfo('P').conformers).toEqual(['B']);
+      await graph.incrementalUpdate([join(root, 'B.swift')], [], {
+        extensionToLang: { '.swift': 'not-a-registered-language' },
+      });
+      expect(graph.getClassInfo('B')).not.toBeNull();
+      expect(graph.getProtocolInfo('P').conformers).toEqual(['B']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('removes only the changed ProjectGraph file contributions to shared categories and methods', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'project-graph-sources-'));
+    try {
+      writeFileSync(join(root, 'FooOne.h'), '@interface Foo (One)\n- (void)one;\n@end');
+      writeFileSync(join(root, 'FooTwo.h'), '@interface Foo (Two)\n- (void)two;\n@end');
+      writeFileSync(join(root, 'Foo.m'), '@implementation Foo\n- (void)oldMethod {}\n@end');
+      const graph = await ProjectGraph.build(root, { extensions: ['.h', '.m'] });
+      rmSync(join(root, 'FooOne.h'));
+      await graph.incrementalUpdate([], ['FooOne.h']);
+      expect(graph.getCategoryExtensions('Foo').map((item) => item.categoryName)).toEqual(['Two']);
+      writeFileSync(join(root, 'Foo.m'), '@implementation Foo\n- (void)newMethod {}\n@end');
+      await graph.incrementalUpdate([join(root, 'Foo.m')]);
+      expect(
+        graph
+          .getClassMethods('Foo')
+          .map((item) => item.name)
+          .sort()
+      ).toEqual(['newMethod', 'two']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['typescript', 'javascript'])('keeps expression-arrow call sites for %s', (language) => {
+    const block = analyzeFile('export const run = () => { return helper(); };', language);
+    const expression = analyzeFile('export const run = () => helper();', language);
+    expect(block?.callSites).toContainEqual(
+      expect.objectContaining({ callee: 'helper', callerMethod: 'run' })
+    );
+    expect(expression?.callSites).toEqual(block?.callSites);
+  });
+
+  it('resolves NodeNext JavaScript specifiers to TypeScript without overriding real JavaScript', async () => {
+    const summary = analyzeProject(
+      [
+        {
+          content: "import { helper } from './util.js'; export function run() { return helper(); }",
+          name: 'main.ts',
+          relativePath: 'src/main.ts',
+        },
+        {
+          content: 'export function helper() { return 1; }',
+          name: 'util.ts',
+          relativePath: 'src/util.ts',
+        },
+        {
+          // 同名函数使全局唯一匹配无法掩盖 import 解析失败。
+          content: 'export function helper() { return 2; }',
+          name: 'other.ts',
+          relativePath: 'src/other.ts',
+        },
+      ],
+      'typescript'
+    );
+    const result = await new CallGraphAnalyzer('/project').analyze(summary);
+    expect(result.callEdges).toContainEqual(
+      expect.objectContaining({
+        caller: 'src/main.ts::run',
+        callee: 'src/util.ts::helper',
+        resolveMethod: 'direct',
+      })
+    );
+    const sourceFirst = new ImportPathResolver('/project', ['src/util.tsx', 'src/util.ts']);
+    expect(sourceFirst.resolve('./util.js', 'src/main.ts')).toBe('src/util.tsx');
+    const withJavaScript = new ImportPathResolver('/project', ['src/util.ts', 'src/util.js']);
+    expect(withJavaScript.resolve('./util.js', 'src/main.ts')).toBe('src/util.js');
+    expect(withJavaScript.resolve('./util', 'src/main.ts')).toBe('src/util.ts');
+  });
+
   it('aggregates classes, cross-file inheritance, and metrics across TypeScript files', () => {
     expect(isAvailable()).toBe(true);
 
@@ -58,6 +214,24 @@ describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/G
     expect(result.projectMetrics.totalMethods).toBe(3);
     expect(result.fileSummaries).toHaveLength(2);
     expect(typeof result.patternStats).toBe('object');
+  });
+
+  it('prioritizes root-relative source directories when call analysis is sampled', async () => {
+    const files = Array.from({ length: 500 }, (_, i) => ({
+      content: 'function helper() {} export function run() { helper(); }',
+      name: `fixture-${i}.ts`,
+      relativePath: `test/fixture-${i}.ts`,
+    }));
+    files.push({
+      content: 'function critical() {} export function run() { critical(); }',
+      name: 'critical.ts',
+      relativePath: 'src/critical.ts',
+    });
+    const summary = analyzeProject(files, 'typescript');
+    const result = await new CallGraphAnalyzer('/project').analyze(summary);
+    expect(result.stats.tier).toBe('sampled');
+    expect(result.stats.filesProcessed).toBe(500);
+    expect(result.callEdges.some((edge) => edge.file === 'src/critical.ts')).toBe(true);
   });
 
   it('aggregates structs and interfaces across Go files', () => {
@@ -188,6 +362,122 @@ describe('built-in project discoverers (RIC-4b — was RealProjectDiscovery/Boot
       language: 'typescript',
     },
   ];
+
+  it('resets the fallback language when a discoverer instance loads another project', async () => {
+    resetDiscovererRegistry();
+    const generic = getDiscovererRegistry()
+      .getAll()
+      .find((item) => item.id === 'generic')!;
+    await generic.load(makeProject('typed-project', { 'main.ts': 'export class Main {}' }));
+    expect((await generic.listTargets())[0].language).toBe('typescript');
+    await generic.load(makeProject('empty-project', {}));
+    expect((await generic.listTargets())[0].language).toBe('unknown');
+  });
+
+  it.each([
+    "include ':a', ':b', ':c'",
+    'include(":a", ":b", ":c")',
+  ])('keeps every JVM module declared by %s', async (settings) => {
+    resetDiscovererRegistry();
+    const root = makeProject('jvm-three', {
+      'build.gradle': 'plugins { id "java" }',
+      'settings.gradle': settings,
+      'a/build.gradle': '',
+      'b/build.gradle': '',
+      'c/build.gradle': '',
+    });
+    const discoverer = await getDiscovererRegistry().detect(root);
+    await discoverer.load(root);
+    expect((await discoverer.listTargets()).map((target) => target.name)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('reads standard SPM test sources and projects literal target dependencies', async () => {
+    resetDiscovererRegistry();
+    const root = makeProject('spm-standard', {
+      'Package.swift':
+        'import PackageDescription\nlet package = Package(name: "Demo", targets: [.target(name: "Core"), .target(name: "App", dependencies: ["Core", .product(name: "Remote", package: "RemotePackage"), makeDependency("ghost-first", "ghost-middle", "ghost-last")]), .testTarget(name: "AppTests", dependencies: ["App"])])',
+      'Sources/Core/A.swift': 'class A {}',
+      'Sources/App/B.swift': 'class B {}',
+      'Tests/AppTests/T.swift': 'class T {}',
+    });
+    const discoverer = await getDiscovererRegistry().detect(root);
+    await discoverer.load(root);
+    const testTarget = (await discoverer.listTargets()).find(
+      (target) => target.name === 'AppTests'
+    )!;
+    expect((await discoverer.getTargetFiles(testTarget)).map((file) => file.name)).toEqual([
+      'T.swift',
+    ]);
+    const dependencies = (await discoverer.getDependencyGraph()).edges.filter(
+      (edge) => edge.type === 'depends_on'
+    );
+    expect(dependencies).toEqual([
+      { from: 'App', to: 'Core', type: 'depends_on' },
+      { from: 'App', to: 'Remote', type: 'depends_on' },
+      { from: 'AppTests', to: 'App', type: 'depends_on' },
+    ]);
+  });
+
+  it.each([
+    {
+      system: 'bazel',
+      target: 'app',
+      source: 'app.cc',
+      files: {
+        'MODULE.bazel': '',
+        'BUILD.bazel':
+          'cc_library(\n name = "core",\n srcs = ["core.cc"],\n)\ncc_binary(\n name = "app",\n srcs = ["app.cc"],\n deps = [":core", "//missing:unknown"],\n)',
+        'core.cc': 'void f() {}',
+        'app.cc': 'int main() {}',
+      },
+      edges: [{ from: 'app', to: 'core', type: 'depends_on' }],
+    },
+    {
+      system: 'gradle-convention',
+      target: ':app',
+      source: 'App.kt',
+      files: {
+        'build-logic/convention/marker.txt': '',
+        'settings.gradle.kts': 'include(":app", ":core")',
+        'app/build.gradle.kts':
+          'dependencies { implementation(project(":core")); implementation(project(":missing")) }',
+        'app/App.kt': 'class App',
+        'core/build.gradle.kts': '',
+      },
+      edges: [{ from: ':app', to: ':core', type: 'depends_on', configuration: 'implementation' }],
+    },
+    {
+      system: 'cmake',
+      target: 'app',
+      source: 'app.cc',
+      files: {
+        'CMakeLists.txt':
+          'project(Demo)\nadd_library(core STATIC core.cc)\nadd_library(extra STATIC extra.cc)\nadd_executable(app app.cc)\ntarget_link_libraries(app PUBLIC core)\ntarget_link_libraries(app PRIVATE extra)\ntarget_link_libraries(core PRIVATE missing)',
+        'core.cc': '',
+        'extra.cc': '',
+        'app.cc': 'int main() {}',
+      },
+      edges: [
+        { from: 'app', to: 'core', type: 'depends_on', scope: 'PUBLIC' },
+        { from: 'app', to: 'extra', type: 'depends_on', scope: 'PRIVATE' },
+      ],
+    },
+  ])('projects declared $system source paths and known dependencies through the real loader', async (fixture) => {
+    resetDiscovererRegistry();
+    const root = makeProject(fixture.system, fixture.files);
+    const discoverer = getDiscovererRegistry()
+      .getAll()
+      .find((item) => item.id === 'customConfig')!;
+    expect((await discoverer.detect(root)).match).toBe(true);
+    await discoverer.load(root);
+    const target = (await discoverer.listTargets()).find((item) => item.name === fixture.target)!;
+    expect((await discoverer.getTargetFiles(target)).map((file) => file.name)).toContain(
+      fixture.source
+    );
+    expect((await discoverer.getDependencyGraph()).edges).toEqual(fixture.edges);
+    await discoverer.load(makeProject(`${fixture.system}-empty`, {}));
+    expect((await discoverer.getDependencyGraph()).edges).toEqual([]);
+  });
 
   for (const testCase of cases) {
     it(`detects, enumerates, and graphs a ${testCase.id} project`, async () => {

@@ -32,6 +32,7 @@ import {
   type SourceSection,
   type SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
+import Logger from '../../infrastructure/logging/Logger.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
 
 export interface SourceGraphQueryTarget {
@@ -115,6 +116,7 @@ interface SourceGraphQueryContext {
   fileByPath: Map<string, SourceFileNode>;
   symbolById: Map<string, SourceSymbolNode>;
   options: NormalizedRankingOptions;
+  sectionBudget: SectionBudget;
 }
 
 interface QueryTerms {
@@ -428,6 +430,8 @@ export class SourceGraphQueryService {
 
   private async createContext(input: SourceGraphRankingOptions): Promise<SourceGraphQueryContext> {
     const options = normalizeRankingOptions(input);
+    // 同一查询的符号召回与文本召回复用总预算，不能各自重新获得一份额度。
+    const sectionBudget = new SectionBudget(options.sourceSectionLineBudget);
     const snapshot = await this.resolveSnapshot(input);
     const projectRoot = snapshot?.projectRoot ?? input.projectRoot?.trim() ?? 'unknown';
     const repoId = snapshot?.repoId ?? input.repoId?.trim();
@@ -462,6 +466,7 @@ export class SourceGraphQueryService {
         fileByPath: new Map(),
         symbolById: new Map(),
         options,
+        sectionBudget,
       };
     }
 
@@ -484,6 +489,7 @@ export class SourceGraphQueryService {
       fileByPath: new Map(files.map((file) => [file.repoRelativePath, file])),
       symbolById: new Map(symbols.map((symbol) => [symbol.symbolId, symbol])),
       options,
+      sectionBudget,
     };
   }
 
@@ -696,7 +702,7 @@ export class SourceGraphQueryService {
     context: SourceGraphQueryContext,
     plans: SectionPlan[]
   ): Promise<SourceSection[]> {
-    const budget = new SectionBudget(context.options.sourceSectionLineBudget);
+    const budget = context.sectionBudget;
     const sections: SourceSection[] = [];
     for (const plan of plans) {
       const file = context.fileByPath.get(plan.filePath);
@@ -1058,7 +1064,19 @@ async function readProjectFileLines(
     return [];
   }
   try {
-    const content = await fs.readFile(absolutePath, 'utf8');
+    // 索引完成后文件也可能被换成符号链接；查询时仍需验证真实路径边界。
+    const rootRealpath = await fs.realpath(projectRoot);
+    const fileRealpath = await fs.realpath(absolutePath);
+    const relative = path.relative(rootRealpath, fileRealpath);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      Logger.getInstance().warn('Source graph text read refused outside project scope', {
+        projectRoot,
+        repoRelativePath,
+        fileRealpath,
+      });
+      return [];
+    }
+    const content = await fs.readFile(fileRealpath, 'utf8');
     return content.split(/\r\n|\n|\r/);
   } catch {
     return [];

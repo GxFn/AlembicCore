@@ -1,5 +1,4 @@
 import path from 'node:path';
-
 import type {
   FileFlowContext,
   FileSummary,
@@ -17,6 +16,7 @@ import {
   createProjectContextModuleLayerRef,
   resolveProjectContextModuleSeed,
 } from '../shared/moduleLayers-module/index.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import type { ModuleLayersRequestPayload } from './contracts.js';
 
 interface FileFlowFacts {
@@ -452,16 +452,6 @@ function dedupeRelations(relations: readonly RelationSummary[]): RelationSummary
     relations,
     (relation) => relation.ref?.id ?? relation.label ?? relation.kind
   ).sort(compareRelations);
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
 }
 
 function dedupeBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {

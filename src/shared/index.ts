@@ -74,7 +74,13 @@ export * from './recipeTokens.js';
 export * from './resolveProjectRoot.js';
 export * from './schemas/index.js';
 export * from './shutdown.js';
-export * from './similarity.js';
+// 保持既有四个公共符号；字符 n-gram 复用内核只供 Core 内部调用。
+export {
+  cosineSimilarity,
+  jaccardSimilarity,
+  textSimilarity,
+  tokenizeForSimilarity,
+} from './similarity.js';
 export * from './sourceContracts.js';
 export * from './TimerRegistry.js';
 export * from './testMode.js';

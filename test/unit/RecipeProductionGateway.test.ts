@@ -169,6 +169,35 @@ describe('RecipeProductionGateway', () => {
   });
 
   describe('create — validation', () => {
+    it.each([
+      ['title', { title: 123 }],
+      ['trigger', { trigger: 123 }],
+      ['language', { language: { name: 'swift' } }],
+      ['category', { category: ['Network'] }],
+      ['coreCode', { coreCode: 123 }],
+      ['content.markdown', { content: { ...makeItem().content, markdown: ['invalid'] } }],
+      ['content.pattern', { content: { ...makeItem().content, pattern: 123 } }],
+      ['reasoning.whyStandard', { reasoning: { ...makeItem().reasoning, whyStandard: 123 } }],
+    ] as const)('错误类型 %s 返回单条拒绝，后续合法候选仍能创建', async (_field, overrides) => {
+      const deps = makeDeps();
+      const gateway = new RecipeProductionGateway(deps);
+      // 模拟 JSON 边界的未知输入；事实生产方是实际 UnifiedValidator，不替换其行为。
+      const malformed = { ...makeItem(), ...overrides } as unknown as CreateRecipeItem;
+
+      const result = await gateway.create({
+        source: 'mcp-external',
+        items: [malformed, makeItem()],
+        options: { skipConsolidation: true },
+      });
+
+      expect(result.rejected).toHaveLength(1);
+      expect(result.rejected[0]).toMatchObject({ index: 0, reason: 'validation_failed' });
+      expect(result.rejected[0].errors.length).toBeGreaterThan(0);
+      expect(result.created).toHaveLength(1);
+      expect(result.created[0].index).toBe(1);
+      expect(deps.knowledgeService.create).toHaveBeenCalledOnce();
+    });
+
     it('应通过验证并创建有效 Recipe', async () => {
       const deps = makeDeps();
       const gateway = new RecipeProductionGateway(deps);

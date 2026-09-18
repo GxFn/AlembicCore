@@ -87,7 +87,19 @@ export async function persistWorkflowResult({
     totalToolCalls,
   });
 
-  await clearDimensionCheckpoints(dataRoot);
+  // 只有快照与报告都已落盘，检查点才不再是唯一恢复依据。失败/跳过时保留它们，
+  // 外层仍通过原有 snapshot.status / report 返回值决定重试，不把完成进度丢掉。
+  if (snapshot.status === 'saved' && report !== null) {
+    await clearDimensionCheckpoints(dataRoot, sessionId);
+  } else {
+    logger.warn('[WorkflowPersistence] retained checkpoints because results are not durable', {
+      sessionId,
+      snapshotStatus: snapshot.status,
+      snapshotReason: snapshot.reason,
+      reportSaved: report !== null,
+      recovery: 'retry workflow result persistence before clearing dimension checkpoints',
+    });
+  }
 
   return {
     totalTimeMs,

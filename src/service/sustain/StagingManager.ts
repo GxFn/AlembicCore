@@ -14,9 +14,11 @@
 
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
+import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import { unixNow } from '../../shared/utils/common.js';
 import type { TransitionRequest, TransitionResult } from '../../types/evolution.js';
+import { persistKnowledgeUpdate } from '../knowledge/persistKnowledgeUpdate.js';
 
 /* ────────────────────── Types ────────────────────── */
 
@@ -59,6 +61,7 @@ export interface LifecycleTransitionExecutor {
 export interface StagingManagerOptions {
   signalBus?: SignalBus;
   lifecycle?: LifecycleTransitionExecutor;
+  fileStore?: KnowledgeFileStore;
 }
 
 /* ────────────────────── Class ────────────────────── */
@@ -67,12 +70,14 @@ export class StagingManager {
   #knowledgeRepo: KnowledgeRepositoryImpl;
   #signalBus: SignalBus | null;
   #lifecycle: LifecycleTransitionExecutor | null;
+  #fileStore: KnowledgeFileStore | null;
   #logger = Logger.getInstance();
 
   constructor(knowledgeRepo: KnowledgeRepositoryImpl, options: StagingManagerOptions = {}) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#signalBus = options.signalBus ?? null;
     this.#lifecycle = options.lifecycle ?? null;
+    this.#fileStore = options.fileStore ?? null;
   }
 
   /**
@@ -94,10 +99,16 @@ export class StagingManager {
       return false;
     }
 
-    await this.#knowledgeRepo.update(entryId, {
-      lifecycle: 'staging',
-      stagingDeadline: deadline,
-    } as unknown as Record<string, unknown>);
+    await persistKnowledgeUpdate(
+      this.#knowledgeRepo,
+      this.#fileStore,
+      entryId,
+      {
+        lifecycle: 'staging',
+        stagingDeadline: deadline,
+      },
+      'staging-enter'
+    );
 
     if (this.#signalBus) {
       this.#signalBus.send('lifecycle', 'StagingManager.enter', confidence, {
@@ -195,7 +206,7 @@ export class StagingManager {
    * staging 复核结论登记（2026-07-06 复核期落地，observe-first）：grace 窗口从
    * "等待期"升级为"复核期"——AI/人工把"断言 vs 源码"复核结论写回，checkAndPromote
    * 按三态消费：fail=到期回滚 pending（不晋级）；pass/缺失=现状晋级（向后兼容，
-   * 复核是增强不是阻断）。结论落 stats.stagingReview（json_set 原子）。
+   * 复核是增强不是阻断）。结论落 stats.stagingReview，文件优先后再更新 DB，供同步重建。
    */
   async recordReview(
     entryId: string,
@@ -208,12 +219,23 @@ export class StagingManager {
       );
       return false;
     }
-    this.#knowledgeRepo.setStagingReviewSync(entryId, {
-      outcome: review.outcome,
-      ...(review.reviewer ? { reviewer: review.reviewer } : {}),
-      ...(review.notes ? { notes: review.notes.slice(0, 500) } : {}),
-      reviewedAt: Date.now(),
-    });
+    await persistKnowledgeUpdate(
+      this.#knowledgeRepo,
+      this.#fileStore,
+      entryId,
+      {
+        stats: {
+          ...entry.stats.toJSON(),
+          stagingReview: {
+            outcome: review.outcome,
+            ...(review.reviewer ? { reviewer: review.reviewer } : {}),
+            ...(review.notes ? { notes: review.notes.slice(0, 500) } : {}),
+            reviewedAt: Date.now(),
+          },
+        },
+      },
+      'staging-review'
+    );
     if (this.#signalBus) {
       this.#signalBus.send('lifecycle', 'StagingManager.recordReview', 0.8, {
         target: entryId,
@@ -272,10 +294,16 @@ export class StagingManager {
       return false;
     }
 
-    await this.#knowledgeRepo.update(entryId, {
-      lifecycle: 'pending',
-      stagingDeadline: null,
-    } as unknown as Record<string, unknown>);
+    await persistKnowledgeUpdate(
+      this.#knowledgeRepo,
+      this.#fileStore,
+      entryId,
+      {
+        lifecycle: 'pending',
+        stagingDeadline: null,
+      },
+      'staging-rollback'
+    );
 
     if (this.#signalBus) {
       this.#signalBus.send('lifecycle', 'StagingManager.rollback', 0.8, {
@@ -335,11 +363,17 @@ export class StagingManager {
     }
 
     const nowS = unixNow();
-    await this.#knowledgeRepo.update(entry.id, {
-      publishedAt: nowS,
-      publishedBy: 'StagingManager',
-      stagingDeadline: null,
-    } as unknown as Record<string, unknown>);
+    await persistKnowledgeUpdate(
+      this.#knowledgeRepo,
+      this.#fileStore,
+      entry.id,
+      {
+        publishedAt: nowS,
+        publishedBy: 'StagingManager',
+        stagingDeadline: null,
+      },
+      'staging-publish-metadata'
+    );
 
     return true;
   }

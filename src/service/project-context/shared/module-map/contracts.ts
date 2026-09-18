@@ -10,6 +10,7 @@ import type {
   ProjectContextScope,
   RelationSummary,
 } from '../../../../domain/project-context/index.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../refs.js';
 
 export interface ProjectContextModuleMapModule {
   module: ModuleSummary;
@@ -328,30 +329,6 @@ function createFileFlowScope(input: {
 
 function createProjectContextFileFlowRefId(input: { filePath: string; repoId?: string }): string {
   return `file-flow:${encodeRefPart(input.repoId ?? 'root')}:${encodeRefPart(input.filePath)}`;
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
-}
-
-function dedupeBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
-  const seen = new Set<string>();
-  const result: T[] = [];
-  for (const item of items) {
-    const key = keyOf(item);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    result.push(item);
-  }
-  return result;
 }
 
 function compareRollups(

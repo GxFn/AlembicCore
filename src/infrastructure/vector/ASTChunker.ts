@@ -28,10 +28,13 @@ interface ASTNode {
 }
 
 // AST 相关的延迟加载 (避免 import 时强制初始化 parser)
+type ParseToTree = (
+  content: string,
+  langId: string
+) => { rootNode: ASTNode; tree: { delete(): void } } | null;
+
 let _astReady = false;
-let _parseToTree:
-  | ((content: string, langId: string) => { rootNode: ASTNode; tree: { delete(): void } } | null)
-  | null = null;
+let _parseToTree: ParseToTree | null = null;
 let _isAvailable: (() => boolean) | null = null;
 let _supportedLanguages: (() => string[]) | null = null;
 
@@ -396,7 +399,6 @@ function splitByLines(
   const chunks: Array<{ content: string; metadata: Record<string, unknown> }> = [];
   let current: string[] = [];
   let currentTokens = 0;
-  const _maxChars = maxChunkTokens * 4;
 
   for (const line of lines) {
     const lineTokens = estimateTokens(line);

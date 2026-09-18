@@ -24,8 +24,7 @@
     },
     {
       "includes": [
-        "src/core/discovery/**",
-        "src/service/panorama/**"
+        "src/core/discovery/**"
       ],
       "linter": {
         "rules": {

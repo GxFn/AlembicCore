@@ -2335,7 +2335,29 @@ export function createPrivateCorpusRevisionCheckpointV1(
   assertPrivateCorpusRevisionHandleV1(handle);
   handle.assertRuntime(runtime);
   assertPrivateCorpusRevisionExpectedContextV1(handle.initReceipt, expectedCurrentContext);
-  runtime.sqlite.pragma('wal_checkpoint(FULL)');
+  const checkpoint = (
+    runtime.sqlite.pragma('wal_checkpoint(FULL)') as Array<{
+      busy: number;
+      log: number;
+      checkpointed: number;
+    }>
+  )[0];
+  // SQLite 遇到旧读事务时返回 busy 而非抛错；此时主 DB 文件尚不含已提交 WAL 页，不能签发其 hash。
+  // 非 WAL 模式会返回 log=checkpointed=-1，仍保留该正常路径。
+  if (!checkpoint || checkpoint.busy !== 0 || checkpoint.log !== checkpoint.checkpointed) {
+    const code = 'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE';
+    process.stderr.write(
+      `[Alembic] ${code} ${JSON.stringify({
+        runId: expectedCurrentContext.runId,
+        revisionId: expectedCurrentContext.revisionId,
+        busy: checkpoint?.busy ?? null,
+        logPages: checkpoint?.log ?? null,
+        checkpointedPages: checkpoint?.checkpointed ?? null,
+        nextAction: 'release active read transactions and retry checkpoint before sealing',
+      })}\n`
+    );
+    throw new Error(code);
+  }
   if (runtime.sqlite.pragma('integrity_check', { simple: true }) !== 'ok') {
     throw new Error('PRIVATE_CORPUS_REVISION_SQLITE_INTEGRITY_FAILED');
   }

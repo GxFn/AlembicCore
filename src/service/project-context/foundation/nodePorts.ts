@@ -49,6 +49,19 @@ const VOLATILE_SEMANTIC_KEYS = new Set([
   'pid',
   'processId',
 ]);
+const PORTABLE_PATH_KEYS = new Set([
+  'absolutePath',
+  'activeFile',
+  'filePath',
+  'modulePath',
+  'path',
+  'projectRoot',
+  'realpath',
+  'relativePath',
+  'repoRoot',
+  'sourceFolder',
+  'sourceRoot',
+]);
 const PARSER_REQUEST_KINDS = new Set(['anchor-range', 'file-flow', 'file-symbols']);
 
 export interface NodeProjectContextFoundationPortableRoot {
@@ -841,7 +854,7 @@ function classifyProjectContextDiagnostic(
           retryable: error.retryable,
           severity: error.severity,
           typedReason: 'dependency-crosses-an-approved-sibling-repository-boundary',
-          ...(error.path ? { path: portableString(error.path, portableRoots) } : {}),
+          ...(error.path ? { path: portableString(error.path, portableRoots, true) } : {}),
           relatedRepoId: entry.repoId,
         },
         resolution: createDependencyResolution({
@@ -874,7 +887,7 @@ function classifyProjectContextDiagnostic(
         retryable: error.retryable,
         severity: error.severity,
         typedReason: 'dependency-is-outside-certified-repository-ownership',
-        ...(error.path ? { path: portableString(error.path, portableRoots) } : {}),
+        ...(error.path ? { path: portableString(error.path, portableRoots, true) } : {}),
       },
       resolution: {
         classification: 'expected-external',
@@ -925,7 +938,7 @@ function classifyProjectContextDiagnostic(
             : classification === 'advisory'
               ? 'project-context-warning-retained-for-review'
               : 'project-context-error-invalidates-certified-readiness',
-      ...(error.path ? { path: portableString(error.path, portableRoots) } : {}),
+      ...(error.path ? { path: portableString(error.path, portableRoots, true) } : {}),
       ...(sibling ? { relatedRepoId: sibling } : {}),
     },
   };
@@ -1493,10 +1506,13 @@ function portableProjectContextJson(
     return toProjectFactsJson(value);
   }
   if (typeof value === 'string') {
-    return portableString(value, portableRoots);
+    // source-slice 的 text 是原始源码，不是路径：正则、转义串及源码内路径字面量均须原样保留。
+    return key === 'text'
+      ? value
+      : portableString(value, portableRoots, PORTABLE_PATH_KEYS.has(key ?? ''));
   }
   if (Array.isArray(value)) {
-    return value.map((entry) => portableProjectContextJson(entry, portableRoots));
+    return value.map((entry) => portableProjectContextJson(entry, portableRoots, key));
   }
   if (value && typeof value === 'object') {
     const result: Record<string, ProjectFactsJson> = {};
@@ -1506,14 +1522,24 @@ function portableProjectContextJson(
       if (entry === undefined || VOLATILE_SEMANTIC_KEYS.has(entryKey)) {
         continue;
       }
-      result[entryKey] = portableProjectContextJson(entry, portableRoots, entryKey);
+      // 与 canonical JSON 一样，把 __proto__ 等合法键写成自有数据属性。
+      Object.defineProperty(result, entryKey, {
+        value: portableProjectContextJson(entry, portableRoots, entryKey),
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     }
     return result;
   }
   throw new TypeError(`ProjectContext response key ${key ?? '<root>'} is not JSON serializable.`);
 }
 
-function portableString(value: string, portableRoots: ResolvedPortableRoot[]): string {
+function portableString(
+  value: string,
+  portableRoots: ResolvedPortableRoot[],
+  pathField = false
+): string {
   const normalizedValue = value.replace(/\\/g, '/');
   for (const portableRoot of portableRoots) {
     if (normalizedValue === portableRoot.root) {
@@ -1528,16 +1554,8 @@ function portableString(value: string, portableRoots: ResolvedPortableRoot[]): s
         : `portable:${portableRoot.portableId}:${relativePath}`;
     }
   }
-  return portableRoots.reduce(
-    (result, portableRoot) =>
-      portableRoot.root === '/'
-        ? result
-        : result.replaceAll(
-            portableRoot.root,
-            portableRoot.current ? '.' : `portable:${portableRoot.portableId}`
-          ),
-    normalizedValue
-  );
+  // 只规范路径字段或上面已匹配的完整路径值；不再对自由文本全局替换斜杠/主机根片段。
+  return pathField ? normalizedValue : value;
 }
 
 function collectSourceRanges(

@@ -317,32 +317,38 @@ function buildExecutionTiers(activeDimensions: DimensionDef[]): ExecutionPlanTie
     'agent-guidelines 应综合前序所有维度的发现。',
   ];
 
-  const plan = tiers
-    .map((tierDimIds, index) => {
-      const filteredDims = tierDimIds.filter((id) => activeDimIds.has(id));
-      if (filteredDims.length === 0) {
-        return null;
-      }
-      return {
-        tier: index + 1,
-        label: tierLabels[index] || `Tier ${index + 1}`,
-        dimensions: filteredDims,
-        note: tierNotes[index] || '',
-      };
-    })
-    .filter((tier): tier is ExecutionPlanTier => tier !== null);
+  const plan = tiers.map((tierDimIds, index) => {
+    const filteredDims = tierDimIds.filter((id) => activeDimIds.has(id));
+    return {
+      tier: index + 1,
+      label: tierLabels[index] || `Tier ${index + 1}`,
+      dimensions: filteredDims,
+      note: tierNotes[index] || '',
+    };
+  });
 
   const scheduledIds = new Set(tiers.flat());
   const unscheduled = activeDimensions.filter((dimension) => !scheduledIds.has(dimension.id));
-  if (unscheduled.length > 0 && plan.length > 0) {
-    for (const dimension of unscheduled) {
-      const hint = typeof dimension.tierHint === 'number' ? dimension.tierHint : 1;
-      const targetIdx = Math.max(0, Math.min(hint - 1, plan.length - 1));
-      plan[targetIdx]?.dimensions.push(dimension.id);
+  for (const dimension of unscheduled) {
+    const hint = dimension.tierHint;
+    const tier = typeof hint === 'number' && Number.isInteger(hint) && hint >= 1 ? hint : 1;
+    // 先按真实 tier 号分桶，再去掉空层；只选自定义维度也不能丢失执行任务。
+    const existing = plan.find((entry) => entry.tier === tier);
+    if (existing) {
+      existing.dimensions.push(dimension.id);
+    } else {
+      plan.push({
+        tier,
+        label: tierLabels[tier - 1] || `Tier ${tier}`,
+        dimensions: [dimension.id],
+        note: tierNotes[tier - 1] || '',
+      });
     }
   }
 
-  return plan;
+  return plan
+    .filter((tier) => tier.dimensions.length > 0)
+    .sort((left, right) => left.tier - right.tier);
 }
 
 function buildWorkflowInstruction({

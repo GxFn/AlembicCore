@@ -22,6 +22,16 @@ import {
 } from '../src/core/discovery/parsers/StarlarkParser.js';
 import { parseMelosProject } from '../src/core/discovery/parsers/YamlConfigParser.js';
 
+it('accumulates repeated CMake target_link_libraries declarations in source order', () => {
+  const project = parseCMakeProject(
+    'project(Demo)\nadd_library(core STATIC core.cc)\ntarget_link_libraries(core PUBLIC first)\ntarget_link_libraries(core PRIVATE second)'
+  );
+  expect(project.targets[0].linkDependencies).toEqual([
+    { target: 'first', scope: 'PUBLIC' },
+    { target: 'second', scope: 'PRIVATE' },
+  ]);
+});
+
 // ═══ StarlarkParser ═══════════════════════════════════
 
 describe('StarlarkParser — parseStarlarkBuildFile', () => {
@@ -631,7 +641,7 @@ describe('CustomConfigDiscoverer — Bazel load & targets', () => {
   let root: string;
   let projDir: string;
 
-  beforeAll(async () => {
+  beforeAll(() => {
     root = join(tmpdir(), `asd-bazel-load-test-${Date.now()}`);
     projDir = join(root, 'bazel-full');
     mkdirSync(join(projDir, 'lib', 'network'), { recursive: true });
@@ -660,10 +670,6 @@ swift_library(
 )
 `
     );
-
-    const d = new CustomConfigDiscoverer();
-    await d.detect(projDir);
-    await d.load(projDir);
   });
 
   afterAll(() => {

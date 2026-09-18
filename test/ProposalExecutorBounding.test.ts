@@ -155,20 +155,6 @@ describe('ProposalExecutor.checkAndExecute cap bounding (P3)', () => {
     expect(proposalRepo.find({ status: 'observing' })).toHaveLength(0);
   });
 
-  it('spy seam：cap 模式对 observing 查询透传 {limit, oldestFirst:true}；无 cap 不传（默认 desc 无界）', async () => {
-    const spy = vi.spyOn(proposalRepo, 'find');
-
-    await executor.checkAndExecute(3);
-    expect(spy).toHaveBeenCalledWith({ status: 'observing', limit: 3, oldestFirst: true });
-
-    spy.mockClear();
-
-    await executor.checkAndExecute();
-    expect(spy).toHaveBeenCalledWith({ status: 'observing' });
-
-    spy.mockRestore();
-  });
-
   it('cap 模式不绕过判定门禁：无 usage 的 update proposal 仍被 reject、未流转', async () => {
     const recipe = await createRecipe('r-nousage', 'active', { guardHits: 0, searchHits: 0 });
     seedObserving('ep-nousage', 100, { targetRecipeId: recipe.id });

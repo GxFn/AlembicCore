@@ -236,6 +236,8 @@ function inferLanguage(filePath: string): string | undefined {
   switch (path.extname(filePath).toLowerCase()) {
     case '.ts':
     case '.tsx':
+    case '.mts':
+    case '.cts':
       return 'typescript';
     case '.js':
     case '.jsx':

@@ -91,17 +91,7 @@ export class LifecycleEventRepository {
       .limit(limit)
       .all();
 
-    return rows.map((r) => ({
-      id: r.id,
-      recipeId: r.recipeId,
-      fromState: r.fromState,
-      toState: r.toState,
-      trigger: r.trigger as TransitionEvent['trigger'],
-      operatorId: r.operatorId,
-      evidence: r.evidenceJson ? safeJsonParse(r.evidenceJson, null) : null,
-      proposalId: r.proposalId ?? null,
-      createdAt: r.createdAt,
-    }));
+    return rows.map((row) => this.#mapRow(row));
   }
 
   /** 统计指定时间之后的事件数量 */

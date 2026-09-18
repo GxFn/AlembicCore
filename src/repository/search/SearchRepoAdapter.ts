@@ -123,13 +123,16 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   }
 
   findUpdatedSinceSync(sinceIso: string) {
+    // DB 使用 Unix 秒；ISO 字符串直接比较不会命中。包含边界秒，由索引幂等覆盖，
+    // 避免上次构建之后、同一秒内的新建/修改/弃用被永久遗漏。
+    const sinceEpoch = Math.floor(new Date(sinceIso).getTime() / 1000);
     return prepareCached<SearchStatement>(
       this.#db,
       `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
                 content, lifecycle, tags, trigger, difficulty, quality, stats,
                 ${this.#retrievalSelect}, updatedAt, createdAt
-         FROM knowledge_entries WHERE updatedAt > ?`
-    ).all(sinceIso);
+         FROM knowledge_entries WHERE updatedAt >= ?`
+    ).all(sinceEpoch);
   }
 }
 

@@ -1,81 +1,88 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { ProjectRegistry } from '../src/shared/ProjectRegistry.js';
 import {
+  AI_ENV_KEYS,
   collectAiEnv,
   maskAiEnvConfig,
   WorkspaceSettingsStore,
 } from '../src/shared/WorkspaceSettingsStore.js';
 
-const ORIGINAL_ALEMBIC_HOME = process.env.ALEMBIC_HOME;
-const ORIGINAL_PROJECT_DIR = process.env.ALEMBIC_PROJECT_DIR;
-const ORIGINAL_PROVIDER = process.env.ALEMBIC_AI_PROVIDER;
-const ORIGINAL_GOOGLE_KEY = process.env.ALEMBIC_GOOGLE_API_KEY;
-const ORIGINAL_OPENAI_KEY = process.env.ALEMBIC_OPENAI_API_KEY;
-const ORIGINAL_LEGACY_EMBED_PROVIDER = process.env.ALEMBIC_EMBED_PROVIDER;
-const ORIGINAL_LEGACY_EMBED_MODEL = process.env.ALEMBIC_EMBED_MODEL;
-const ORIGINAL_LEGACY_EMBED_BASE_URL = process.env.ALEMBIC_EMBED_BASE_URL;
-const ORIGINAL_LEGACY_EMBED_KEY = process.env.ALEMBIC_EMBED_API_KEY;
+const originalEnvironment = new Map(
+  ['ALEMBIC_HOME', 'ALEMBIC_PROJECT_DIR', ...AI_ENV_KEYS].map((key) => [key, process.env[key]])
+);
+const temporaryRoots: string[] = [];
+
+function createTemporaryRoot(prefix: string): string {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  temporaryRoots.push(root);
+  return root;
+}
 
 function useTempAlembicHome(): void {
-  process.env.ALEMBIC_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-settings-home-'));
+  process.env.ALEMBIC_HOME = createTemporaryRoot('alembic-settings-home-');
 }
 
 function makeProjectRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-settings-project-'));
+  return createTemporaryRoot('alembic-settings-project-');
 }
 
+beforeEach(() => {
+  // 测试只使用显式夹具配置，避免继承或泄露运行测试者的真实凭据。
+  for (const key of AI_ENV_KEYS) {
+    delete process.env[key];
+  }
+});
+
 afterEach(() => {
-  if (ORIGINAL_ALEMBIC_HOME === undefined) {
-    delete process.env.ALEMBIC_HOME;
-  } else {
-    process.env.ALEMBIC_HOME = ORIGINAL_ALEMBIC_HOME;
+  for (const [key, value] of originalEnvironment) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
   }
-  if (ORIGINAL_PROJECT_DIR === undefined) {
-    delete process.env.ALEMBIC_PROJECT_DIR;
-  } else {
-    process.env.ALEMBIC_PROJECT_DIR = ORIGINAL_PROJECT_DIR;
-  }
-  if (ORIGINAL_PROVIDER === undefined) {
-    delete process.env.ALEMBIC_AI_PROVIDER;
-  } else {
-    process.env.ALEMBIC_AI_PROVIDER = ORIGINAL_PROVIDER;
-  }
-  if (ORIGINAL_GOOGLE_KEY === undefined) {
-    delete process.env.ALEMBIC_GOOGLE_API_KEY;
-  } else {
-    process.env.ALEMBIC_GOOGLE_API_KEY = ORIGINAL_GOOGLE_KEY;
-  }
-  if (ORIGINAL_OPENAI_KEY === undefined) {
-    delete process.env.ALEMBIC_OPENAI_API_KEY;
-  } else {
-    process.env.ALEMBIC_OPENAI_API_KEY = ORIGINAL_OPENAI_KEY;
-  }
-  if (ORIGINAL_LEGACY_EMBED_PROVIDER === undefined) {
-    delete process.env.ALEMBIC_EMBED_PROVIDER;
-  } else {
-    process.env.ALEMBIC_EMBED_PROVIDER = ORIGINAL_LEGACY_EMBED_PROVIDER;
-  }
-  if (ORIGINAL_LEGACY_EMBED_MODEL === undefined) {
-    delete process.env.ALEMBIC_EMBED_MODEL;
-  } else {
-    process.env.ALEMBIC_EMBED_MODEL = ORIGINAL_LEGACY_EMBED_MODEL;
-  }
-  if (ORIGINAL_LEGACY_EMBED_BASE_URL === undefined) {
-    delete process.env.ALEMBIC_EMBED_BASE_URL;
-  } else {
-    process.env.ALEMBIC_EMBED_BASE_URL = ORIGINAL_LEGACY_EMBED_BASE_URL;
-  }
-  if (ORIGINAL_LEGACY_EMBED_KEY === undefined) {
-    delete process.env.ALEMBIC_EMBED_API_KEY;
-  } else {
-    process.env.ALEMBIC_EMBED_API_KEY = ORIGINAL_LEGACY_EMBED_KEY;
+  for (const root of temporaryRoots.splice(0)) {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 
 describe('WorkspaceSettingsStore', () => {
+  test.each([
+    'settingsPath',
+    'secretsPath',
+  ] as const)('does not overwrite unreadable %s during an unrelated update', (field) => {
+    useTempAlembicHome();
+    const store = WorkspaceSettingsStore.fromProject(makeProjectRoot());
+    store.writeAiConfig({
+      ALEMBIC_AI_PROVIDER: 'google',
+      ALEMBIC_GOOGLE_API_KEY: 'fixture-only-key',
+    });
+    fs.writeFileSync(store[field], '{ invalid json');
+    const before = [store.settingsPath, store.secretsPath].map((file) =>
+      fs.readFileSync(file, 'utf8')
+    );
+    expect(() => store.readAiConfig()).not.toThrow();
+    expect(() => store.writeAiConfig({ ALEMBIC_AI_MODEL: 'new-model' })).toThrow(
+      'Cannot update workspace configuration'
+    );
+    expect(
+      [store.settingsPath, store.secretsPath].map((file) => fs.readFileSync(file, 'utf8'))
+    ).toEqual(before);
+  });
+
+  test('ignores unknown config keys even when they name inherited object members', () => {
+    useTempAlembicHome();
+    const store = WorkspaceSettingsStore.fromProject(makeProjectRoot());
+    store.writeAiConfig(
+      JSON.parse('{"constructor":"ignored","__proto__":"ignored","toString":"ignored"}')
+    );
+    expect(JSON.parse(fs.readFileSync(store.settingsPath, 'utf8')).ai).toEqual({});
+    expect(fs.existsSync(store.secretsPath)).toBe(false);
+  });
+
   test('stores non-secret AI settings separately from credentials in the ghost data root', () => {
     useTempAlembicHome();
     const projectRoot = makeProjectRoot();

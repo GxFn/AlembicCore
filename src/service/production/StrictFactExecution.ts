@@ -1657,7 +1657,7 @@ function assertStrictFactExecutionAuthorities(input: StrictFactScheduleExecution
     new Set(subjectRefs).size !== subjectRefs.length,
     input.subjectBindings.some((binding) => invalidSubjectBinding(input, binding)),
     new Set(witnessKeys).size !== witnessKeys.length,
-    input.witnessBindings.some(invalidWitnessBinding),
+    input.witnessBindings.some((binding) => invalidWitnessBinding(input, binding)),
     input.registry.schemaVersion !== 1,
     !witnessAuthority,
     witnessAuthority?.sourceArtifactId !== input.artifact.artifactId,
@@ -1693,10 +1693,35 @@ function invalidSubjectBinding(
   }
 }
 
-function invalidWitnessBinding(binding: StrictFactDirectWitnessBindingV1): boolean {
+function invalidWitnessBinding(
+  input: StrictFactScheduleExecutionInputV1,
+  binding: StrictFactDirectWitnessBindingV1
+): boolean {
   try {
+    const authority = STRICT_FACT_WITNESS_AUTHORITIES.get(input.witnessAuthority);
+    if (!authority) {
+      return true;
+    }
     const { bindingHash, ...semantic } = binding;
-    return hashCanonicalJson(semantic) !== bindingHash;
+    if (hashCanonicalJson(semantic) !== bindingHash) {
+      return true;
+    }
+    if (binding.evidenceLedgerSnapshotHash !== authority.evidenceLedgerSnapshotHash) {
+      // 已登记 resolver 只解析自己的 snapshot；不匹配时保留原有逐文件
+      // FACT_WITNESS_AUTHORITY_UNRESOLVED 失败回执和完整分母，不改成输入层异常。
+      return false;
+    }
+    // self hash 只能说明字段自洽：调用方可把另一文件的合法 entry 重绑后重新计算它。
+    // 重放既有工厂，以当前 frozen artifact 和已登记 ledger 复核 path/blob/range/ref 的完整关系。
+    const rebuilt = createStrictFactDirectWitnessBindingV1({
+      artifact: input.artifact,
+      repoId: binding.repoId,
+      relativePath: binding.relativePath,
+      evidenceEntry: binding.evidenceEntry,
+      evidenceLedgerSnapshot: authority.evidenceLedgerSnapshot,
+      projectContextRef: binding.projectContextRef,
+    });
+    return rebuilt.bindingHash !== bindingHash;
   } catch {
     return true;
   }

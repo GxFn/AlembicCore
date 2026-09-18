@@ -23,6 +23,7 @@ import type {
   SourceGraphFreshnessReport,
   SourceGraphIndexBuildResult,
 } from '../../domain/source-graph/SourceGraphContracts.js';
+import Logger from '../../infrastructure/logging/Logger.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
 import {
   listProjectScopeFolders,
@@ -182,7 +183,32 @@ export class SourceGraphIndexer {
     );
     const changedSet = new Set(changedFiles);
     const deletedSet = new Set(deletedFiles);
-    const impacted = new Set([...changedSet, ...deletedSet]);
+    const basePaths = new Set(baseFiles.map((file) => file.repoRelativePath));
+    const addedFiles = changedFiles.filter((filePath) => !basePaths.has(filePath));
+    // import 边属于来源文件：只改目标内容不使边失效。文件集合变化则可能改变相对路径
+    // 解析（目标消失/恢复或同名入口优先级变化），需要重新解析未修改的 JS/TS 来源文件。
+    const reparsedFiles =
+      addedFiles.length > 0 || deletedFiles.length > 0
+        ? inventory
+            .filter(
+              (file) =>
+                PARSABLE_EXTENSIONS.has(file.extension) &&
+                !changedSet.has(file.repoRelativePath) &&
+                !deletedSet.has(file.repoRelativePath)
+            )
+            .map((file) => file.repoRelativePath)
+        : [];
+    const indexedFiles = new Set([...changedFiles, ...reparsedFiles]);
+    const impacted = new Set([...indexedFiles, ...deletedSet]);
+    if (reparsedFiles.length > 0) {
+      Logger.getInstance().info('Source graph re-resolves imports after file inventory changed', {
+        baseGenerationId: baseSnapshot.generationId,
+        addedFiles,
+        deletedFiles,
+        reparsedFiles,
+        reason: 'relative-import-targets-changed',
+      });
+    }
     const preservedFiles = baseFiles
       .filter(
         (file) => !impacted.has(file.repoRelativePath) && currentByPath.has(file.repoRelativePath)
@@ -192,9 +218,21 @@ export class SourceGraphIndexer {
       .filter((symbol) => !impacted.has(symbol.filePath))
       .map((symbol) => ({ ...symbol, generationId: input.generationId ?? '' }));
     const preservedEdges = (await this.repository.listEdges(baseSnapshot.generationId))
-      .filter((edge) => !edgeTouchesFiles(edge, impacted))
+      .filter((edge) => {
+        // 只有文件级 import 在目标内容变化后仍成立；符号边可能指向已删除/改名的声明，
+        // 沿用旧失效规则，不能随 import 修复一起保留到新的 fresh generation。
+        if (edge.kind !== 'imports' || edge.toSymbolId !== undefined) {
+          return !edgeTouchesFiles(edge, impacted);
+        }
+        return (
+          !edgeTouchesFiles(edge, deletedSet) &&
+          !(edge.fromFilePath && indexedFiles.has(edge.fromFilePath)) &&
+          !(edge.siteFilePath && indexedFiles.has(edge.siteFilePath))
+        );
+      })
       .map((edge) => ({ ...edge, generationId: input.generationId ?? '' }));
-    const changedInventory = changedFiles
+    const changedInventory = [...indexedFiles]
+      .sort()
       .map((repoPath) => currentByPath.get(repoPath))
       .filter((file): file is InventoryFile => file !== undefined);
 
@@ -464,8 +502,17 @@ async function walkDirectory(
   let entries: Dirent[];
   try {
     entries = await fs.readdir(directory, { withFileTypes: true });
-  } catch {
-    return;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return;
+    }
+    // 不完整清单不能被解释成“文件已删除”，否则增量索引会发布空的新一代事实。
+    Logger.getInstance().error('Source graph inventory failed; previous generation retained', {
+      directory,
+      projectRoot: options.projectRoot,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     const absolutePath = path.join(directory, entry.name);

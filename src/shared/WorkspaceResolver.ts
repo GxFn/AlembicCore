@@ -284,7 +284,8 @@ export class WorkspaceResolver {
 
   /** 记忆嵌入: .asd/context/memory_embeddings.json */
   get memoryEmbeddingsPath(): string {
-    return path.join(this.runtimeDir, 'context', 'memory_embeddings.json');
+    // 跟随同一 context 目录覆盖，避免元数据和嵌入文件分到两个位置。
+    return path.join(this.contextDir, 'memory_embeddings.json');
   }
 
   /** Skills 迁移目录: .asd/skills */

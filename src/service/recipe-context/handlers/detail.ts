@@ -9,17 +9,12 @@ import type {
   RecipeSourceRefView,
 } from '../../../domain/recipe-context/index.js';
 import type { RecipeContextHandler } from '../interface/contracts.js';
-import {
-  invalidPayloadDiagnostic,
-  notFoundDiagnostic,
-  renamedRefDiagnostic,
-  staleRefDiagnostic,
-} from '../interface/diagnostics.js';
+import { invalidPayloadDiagnostic, notFoundDiagnostic } from '../interface/diagnostics.js';
 import { normalizeRecipeRef, relationRef, sourceRefRef } from '../interface/refs.js';
 import { createUnavailableRecipeContextData } from '../interface/response.js';
 import type { RecipeContextDeps } from '../ports.js';
 import { readBoolean, readNumber, readString } from './payload.js';
-import { buildContentPreview, failureResult } from './shared.js';
+import { buildContentPreview, failureResult, sourceRefDiagnostics } from './shared.js';
 
 export function makeDetailHandler(deps: RecipeContextDeps): RecipeContextHandler {
   return async (request) => {
@@ -54,11 +49,7 @@ export function makeDetailHandler(deps: RecipeContextDeps): RecipeContextHandler
       for (const row of rows) {
         const ref = sourceRefRef(row.recipeId, row.sourcePath);
         refs.push(ref);
-        if (row.status === 'stale') {
-          errors.push(staleRefDiagnostic(row.recipeId, row.sourcePath, ref));
-        } else if (row.status === 'renamed') {
-          errors.push(renamedRefDiagnostic(row.recipeId, row.sourcePath, row.newPath, ref));
-        }
+        errors.push(...sourceRefDiagnostics(row, ref));
         sourceRefs.push({
           newPath: row.newPath ?? null,
           recipeId: row.recipeId,

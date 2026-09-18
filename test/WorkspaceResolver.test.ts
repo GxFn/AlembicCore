@@ -10,6 +10,7 @@ import {
 } from '../src/shared/ProjectRegistry.js';
 import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 import WorkspaceResolver from '../src/shared/WorkspaceResolver.js';
+import { WorkspaceResolver as PublicWorkspaceResolver } from '../src/workspace.js';
 
 const ORIGINAL_ALEMBIC_HOME = process.env.ALEMBIC_HOME;
 
@@ -258,6 +259,22 @@ describe('WorkspaceResolver', () => {
     expect(resolver.recipesDir).toBe(path.join(projectRoot, 'Knowledge', 'patterns'));
     expect(resolver.skillsDir).toBe(path.join(projectRoot, 'Knowledge', 'agent-skills'));
     expect(resolver.wikiDir).toBe(path.join(projectRoot, 'Knowledge', 'docs'));
+  });
+
+  test('keeps memory embeddings under the configured context directory through the public resolver', () => {
+    const projectRoot = path.join(os.tmpdir(), 'alembic-context-folders');
+    const resolver = new PublicWorkspaceResolver({
+      projectRoot,
+      folderNames: { project: { runtime: '.runtime', context: 'custom-context' } },
+    });
+
+    expect(resolver.contextDir).toBe(path.join(projectRoot, '.runtime', 'custom-context'));
+    expect(resolver.memoryEmbeddingsPath).toBe(
+      path.join(resolver.contextDir, 'memory_embeddings.json')
+    );
+    expect(new PublicWorkspaceResolver({ projectRoot }).memoryEmbeddingsPath).toBe(
+      path.join(projectRoot, '.asd', 'context', 'memory_embeddings.json')
+    );
   });
 
   test('projects multi-root ProjectScope facts while keeping projectRoot as the current folder', () => {

@@ -1,7 +1,6 @@
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-
 import type {
   HotspotSummary,
   PathSummary,
@@ -24,6 +23,7 @@ import {
 } from '../../../shared/ProjectScope.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import {
   createProjectContextRepoSpaceMetadata,
   createProjectContextRepoSpacePathRef,
@@ -638,9 +638,23 @@ async function normalizeSourceRefs(input: {
   for (const sourceRef of input.sourceRefs ?? []) {
     throwIfProjectContextAborted(input);
     const normalized = normalizeRelativePath(sourceRef.replace(/^\.\//, ''));
-    const qualified = resolveQualifiedSourceRef(normalized, input.space.folders);
-    if (qualified) {
-      refs.push(createSourceRef(qualified.folder, qualified.relativePath, input.space.projectRoot));
+    const qualified = resolveQualifiedSourceRefs(normalized, input.space.folders);
+    if (qualified.length === 1) {
+      refs.push(
+        createSourceRef(qualified[0].folder, qualified[0].relativePath, input.space.projectRoot)
+      );
+      continue;
+    }
+    if (qualified.length > 1) {
+      // displayName可重复；同名alias不能按输入顺序绑定首个repo。显式唯一folderId仍照常解析。
+      errors.push(
+        createQueryError({
+          code: 'ambiguous',
+          path: sourceRef,
+          retryable: false,
+          message: `space sourceRef matches multiple folder identities; use a unique folderId or repoId: ${sourceRef}`,
+        })
+      );
       continue;
     }
 
@@ -674,27 +688,30 @@ async function normalizeSourceRefs(input: {
   return { errors, refs: dedupeRefs(refs) };
 }
 
-function resolveQualifiedSourceRef(
+function resolveQualifiedSourceRefs(
   sourceRef: string,
   folders: readonly SpaceFolder[]
-): { folder: SpaceFolder; relativePath: string } | undefined {
+): { folder: SpaceFolder; relativePath: string }[] {
+  const matches: { folder: SpaceFolder; relativePath: string }[] = [];
   for (const folder of folders.filter((candidate) => !candidate.missing)) {
     const prefixes = [folder.displayName, folder.repoId, folder.folderId]
       .filter(Boolean)
       .map((value) => normalizeRelativePath(value));
     for (const prefix of prefixes) {
       if (sourceRef === prefix) {
-        return { folder, relativePath: '.' };
+        matches.push({ folder, relativePath: '.' });
+        break;
       }
       if (sourceRef.startsWith(`${prefix}/`)) {
-        return {
+        matches.push({
           folder,
           relativePath: normalizeRelativePath(sourceRef.slice(prefix.length + 1)),
-        };
+        });
+        break;
       }
     }
   }
-  return undefined;
+  return matches;
 }
 
 function createSourceRef(
@@ -988,16 +1005,6 @@ function isProjectContextRef(value: unknown): value is ProjectContextRef {
 
 function isRecord(value: unknown): value is Record<string, ProjectContextJson | unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
 }
 
 function dedupeErrors(errors: readonly ProjectContextQueryError[]): ProjectContextQueryError[] {

@@ -70,6 +70,30 @@ describe('KnowledgeRescanIntent analysis options', () => {
     });
   });
 
+  it.each([
+    0.5,
+    '0.5',
+  ])('uses defaults when positive input %j cannot yield a positive integer', (value) => {
+    for (const createIntent of [
+      createHostAgentKnowledgeRescanIntent,
+      createInternalKnowledgeRescanIntent,
+    ]) {
+      expect(
+        createIntent({ maxFiles: value, contentMaxLines: value }).projectAnalysis
+      ).toMatchObject({
+        maxFiles: DEFAULT_KNOWLEDGE_RESCAN_MAX_FILES,
+        contentMaxLines: DEFAULT_KNOWLEDGE_RESCAN_CONTENT_MAX_LINES,
+      });
+    }
+  });
+
+  it('preserves flooring of valid fractional limits', () => {
+    expect(
+      createHostAgentKnowledgeRescanIntent({ maxFiles: 1.9, contentMaxLines: '125.9' })
+        .projectAnalysis
+    ).toMatchObject({ maxFiles: 1, contentMaxLines: 125 });
+  });
+
   it('clamps oversized analysis limits at the Core contract boundary', () => {
     const intent = createHostAgentKnowledgeRescanIntent({
       maxFiles: 999_999,

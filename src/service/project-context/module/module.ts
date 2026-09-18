@@ -15,6 +15,7 @@ import type { ProjectContextHandler, ProjectContextHandlerResult } from '../inte
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { moduleLayersProjectContextHandler } from '../moduleLayers/index.js';
 import { resolveProjectContextModuleSeed } from '../shared/moduleLayers-module/index.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import type { ModuleRequestPayload } from './contracts.js';
 
 export const moduleProjectContextHandler: ProjectContextHandler = async (
@@ -233,16 +234,6 @@ function dedupeRelations(relations: readonly RelationSummary[]): RelationSummary
     relations,
     (relation) => relation.ref?.id ?? relation.label ?? relation.kind
   ).sort(compareRelations);
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
 }
 
 function dedupeErrors(errors: readonly ProjectContextQueryError[]): ProjectContextQueryError[] {

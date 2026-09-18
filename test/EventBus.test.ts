@@ -48,6 +48,19 @@ describe('Integration: EventBus', () => {
   });
 
   describe('Asynchronous emitAsync', () => {
+    test('honors once listeners and binds their receiver to the event bus', async () => {
+      const calls: Array<{ receiver: EventBus; value: number }> = [];
+      bus.once('once:async', async function (this: EventBus, value: number) {
+        calls.push({ receiver: this, value });
+      });
+
+      await bus.emitAsync('once:async', 1);
+      await bus.emitAsync('once:async', 2);
+
+      expect(calls).toEqual([{ receiver: bus, value: 1 }]);
+      expect(bus.listenerCount('once:async')).toBe(0);
+    });
+
     test('should await all async listeners', async () => {
       const order: number[] = [];
 

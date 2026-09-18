@@ -12,11 +12,7 @@ import type {
   RecipeSourceRefView,
 } from '../../../domain/recipe-context/index.js';
 import type { RecipeContextHandler } from '../interface/contracts.js';
-import {
-  renamedRefDiagnostic,
-  staleRefDiagnostic,
-  unresolvedDiagnostic,
-} from '../interface/diagnostics.js';
+import { unresolvedDiagnostic } from '../interface/diagnostics.js';
 import { sourceRefRef } from '../interface/refs.js';
 import type { RecipeContextDeps, RecipeSourceRefRow } from '../ports.js';
 import { readLineRange, readString, readStringArray } from './payload.js';
@@ -25,6 +21,7 @@ import {
   dedupeSourceRefRows,
   groupSourceRefsByRecipe,
   pathInModule,
+  sourceRefDiagnostics,
 } from './shared.js';
 
 export function makeSourceRefsHandler(deps: RecipeContextDeps): RecipeContextHandler {
@@ -76,11 +73,7 @@ export function makeSourceRefsHandler(deps: RecipeContextDeps): RecipeContextHan
     const views: RecipeSourceRefView[] = rows.map((row) => {
       const ref = sourceRefRef(row.recipeId, row.sourcePath);
       refs.push(ref);
-      if (row.status === 'stale') {
-        errors.push(staleRefDiagnostic(row.recipeId, row.sourcePath, ref));
-      } else if (row.status === 'renamed') {
-        errors.push(renamedRefDiagnostic(row.recipeId, row.sourcePath, row.newPath, ref));
-      }
+      errors.push(...sourceRefDiagnostics(row, ref));
       return {
         newPath: row.newPath ?? null,
         recipeId: row.recipeId,

@@ -26,7 +26,15 @@ export function toProjectFactsJson(value: unknown): ProjectFactsJson {
     for (const key of Object.keys(value as Record<string, unknown>).sort()) {
       const entry = (value as Record<string, unknown>)[key];
       if (entry !== undefined) {
-        result[key] = toProjectFactsJson(entry);
+        // JSON 允许 __proto__ 作为普通键；直接赋值会触发 Object.prototype setter，
+        // 导致该值从规范字节/hash消失且污染返回对象原型。以自有数据属性保留全部键，
+        // 同时保留普通对象原型、原排序与普通输入的序列化字节。
+        Object.defineProperty(result, key, {
+          value: toProjectFactsJson(entry),
+          enumerable: true,
+          configurable: true,
+          writable: true,
+        });
       }
     }
     return result;

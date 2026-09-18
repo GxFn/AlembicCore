@@ -7,9 +7,8 @@
  *  - spy seam：cap 模式把剩余预算作为 limit 透传给查询，无 cap 透传 undefined，staging 从不被查询。
  *  - 无 cap 仍无界。
  *
- * 说明：当前 checkTimeouts 的「卡死时长」实际走 #getRecipeAge = now(ms) - updatedAt（Stats 值对象
- * 固定 schema、不保留 evolvingStartedAt 等临时 meta 键，故 enteredAt 恒为 undefined）。本测试以回填
- * ms 级 updatedAt 确定性构造卡死时长；这是现状行为，P2 仅加 cap 有界、不改「何时迁移」语义。
+ * 时间兼容：真实仓储默认持久化 Unix 秒；旧导入仍可能是毫秒。
+ * 两种格式都必须保留完整观察期。历史 cap 用例继续用毫秒，新增回归走真实默认秒级写入。
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -75,6 +74,85 @@ describe('LifecycleStateMachine.checkTimeouts cap bounding (P2)', () => {
       process.env.ALEMBIC_QUIET = oldQuiet;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('真实仓储刚写入的秒级时间戳不会让中间态立即超时', async () => {
+    const states = ['pending', 'evolving', 'decaying'];
+    const entries = states.map(
+      (state) =>
+        new KnowledgeEntry({
+          title: `Fresh ${state}`,
+          lifecycle: state,
+          content: { markdown: 'A newly persisted recipe must retain its observation window.' },
+        })
+    );
+    for (const entry of entries) {
+      await knowledgeRepo.create(entry);
+    }
+
+    const result = await lifecycle.checkTimeouts();
+
+    expect(result.checked).toBe(3);
+    expect(result.timedOut).toEqual([]);
+    for (const entry of entries) {
+      expect((await knowledgeRepo.findById(entry.id))?.lifecycle).toBe(entry.lifecycle);
+      expect(eventRepo.getHistory(entry.id)).toEqual([]);
+    }
+    expect((await lifecycle.getHealth()).intermediateStates).toMatchObject({
+      stuckPending: { count: 0 },
+      stuckEvolving: { count: 0 },
+      stuckDecaying: { count: 0 },
+    });
+  });
+
+  it('keeps legacy DB-only adapters that return plain JSON stats compatible', async () => {
+    const entry = new KnowledgeEntry({
+      title: 'Legacy stats adapter',
+      lifecycle: 'active',
+      content: { markdown: 'A plain DTO read still writes through the real repository.' },
+      stats: { views: 17 },
+    });
+    await knowledgeRepo.create(entry);
+    const legacyAdapter = {
+      findById: async (id: string) => (await knowledgeRepo.findById(id))?.toJSON() ?? null,
+      update: knowledgeRepo.update.bind(knowledgeRepo),
+    };
+    const machine = new LifecycleStateMachine(
+      legacyAdapter as unknown as KnowledgeRepositoryImpl,
+      eventRepo,
+      new SignalBus(),
+      new ProposalRepository(connection.getDrizzle())
+    );
+    expect(
+      (
+        await machine.transition({
+          recipeId: entry.id,
+          targetState: 'decaying',
+          trigger: 'decay-detection',
+        })
+      ).success
+    ).toBe(true);
+    expect(await knowledgeRepo.findById(entry.id)).toMatchObject({
+      lifecycle: 'decaying',
+      stats: { views: 17, lastActiveAt: expect.any(Number), decayStartedAt: expect.any(Number) },
+    });
+    expect(eventRepo.getHistory(entry.id)).toHaveLength(1);
+  });
+
+  it('正常秒级时间戳超过观察期后仍按 7/30 天规则迁移', async () => {
+    const entry = new KnowledgeEntry({
+      title: 'Expired seconds timestamp',
+      lifecycle: 'pending',
+      updatedAt: Math.floor((Date.now() - 31 * DAY) / 1000),
+      content: { markdown: 'Expired pending recipe.' },
+    });
+    await knowledgeRepo.create(entry);
+
+    const result = await lifecycle.checkTimeouts();
+
+    expect(result.timedOut.map((item) => item.recipeId)).toEqual([entry.id]);
+    expect(result.timedOut[0].age).toBeGreaterThan(30 * DAY);
+    expect(result.timedOut[0].age).toBeLessThan(32 * DAY);
   });
 
   it('无 cap：evolving>7d→active、pending/decaying>30d→deprecated、staging 不被触碰、记 transition 事件', async () => {

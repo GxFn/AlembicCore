@@ -8,7 +8,7 @@
  *   ④ 关联 Recipe 已 deprecated → 建议检查引用是否过时
  */
 
-import type { KnowledgeEntry } from '../../domain/knowledge/index.js';
+import { type KnowledgeEntry, Relations } from '../../domain/knowledge/index.js';
 import { Lifecycle, PUBLISHED_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { ReportStore } from '../../infrastructure/report/ReportStore.js';
@@ -40,7 +40,6 @@ const LOW_AUTHORITY_PERCENTILE = 0.25;
 
 export class EnhancementSuggester {
   #knowledgeRepo: KnowledgeRepositoryImpl;
-  #signalBus: SignalBus | null;
   #reportStore: ReportStore | null;
   #logger = Logger.getInstance();
 
@@ -49,7 +48,6 @@ export class EnhancementSuggester {
     options: { signalBus?: SignalBus; reportStore?: ReportStore } = {}
   ) {
     this.#knowledgeRepo = knowledgeRepo;
-    this.#signalBus = options.signalBus ?? null;
     this.#reportStore = options.reportStore ?? null;
   }
 
@@ -187,17 +185,12 @@ export class EnhancementSuggester {
     const suggestions: EnhancementSuggestion[] = [];
 
     for (const entry of entries) {
-      const relations = (entry.relations ?? {}) as unknown as Record<string, unknown>;
-
-      const relatedIds: string[] = [];
-      for (const [bucket, ids] of Object.entries(relations)) {
-        if (bucket === 'deprecated_by') {
-          continue; // 自身的 deprecated_by 不算
-        }
-        if (Array.isArray(ids)) {
-          relatedIds.push(...ids);
-        }
-      }
+      // Repository 返回 Relations 值对象；通过其规范视图读取 target，同时兼容旧分桶输入。
+      // 直接枚举实例只能看到 _b，且桶内元素是 RelationEntry，不是 recipe ID 字符串。
+      const relatedIds = Relations.from(entry.relations)
+        .toFlatArray()
+        .filter((relation) => relation.type !== 'deprecated_by' && relation.target)
+        .map((relation) => relation.target);
 
       if (relatedIds.length === 0) {
         continue;

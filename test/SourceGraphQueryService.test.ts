@@ -57,6 +57,46 @@ describe('SourceGraphQueryService', () => {
     });
   });
 
+  it('shares one source-line budget across symbol ranking and text recall', async () => {
+    const service = await buildFixtureGraph();
+    const result = await service.searchSourceGraph({
+      generationId: 'gen-query',
+      query: 'AppController',
+      limit: 5,
+      sourceSectionLineBudget: 1,
+      maxSectionLines: 1,
+      contextLines: 0,
+    });
+    expect(result.symbols[0]?.displayName).toBe('AppController');
+    expect(result.sourceSections.length).toBeGreaterThan(0);
+    expect(
+      result.sourceSections.reduce(
+        (total, section) => total + section.endLine - section.startLine + 1,
+        0
+      )
+    ).toBeLessThanOrEqual(1);
+  });
+
+  it('does not read outside source scope when an indexed file is replaced by a symlink', async () => {
+    const service = await buildFixtureGraph();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-outside-source-'));
+    try {
+      const externalFile = path.join(outside, 'external.ts');
+      fs.writeFileSync(externalFile, 'outside-source-only-content\n');
+      fs.unlinkSync(path.join(tmpDir, 'src/app.ts'));
+      fs.symlinkSync(externalFile, path.join(tmpDir, 'src/app.ts'));
+      const result = await service.getSourceGraphNode({
+        generationId: 'gen-query',
+        nodeId: 'src/app.ts#AppController',
+        includeText: true,
+      });
+      expect(result.sourceSections).toHaveLength(1);
+      expect(result.sourceSections[0].text).toBeUndefined();
+    } finally {
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
   it('supports path and text recall with explicit low-confidence and ambiguity diagnostics', async () => {
     const service = await buildFixtureGraph();
 

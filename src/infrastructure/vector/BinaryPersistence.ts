@@ -197,18 +197,10 @@ export class BinaryPersistence {
     totalSize += graphSectionSize;
 
     // Metadata section
-    const metadataObj: Record<string, unknown> = {};
-    if (metadata) {
-      for (const [key, value] of metadata) {
-        metadataObj[key] = value;
-      }
-    }
-    const contentsObj: Record<string, unknown> = {};
-    if (contents) {
-      for (const [key, value] of contents) {
-        contentsObj[key] = value;
-      }
-    }
+    // ID 是不透明字符串；fromEntries 创建自有数据属性，__proto__ 也必须原样落盘。
+    // 普通键沿用 Map 插入顺序及既有 JSON 形状，不改变 ASVEC v1 格式。
+    const metadataObj: Record<string, unknown> = Object.fromEntries(metadata ?? []);
+    const contentsObj: Record<string, unknown> = Object.fromEntries(contents ?? []);
     const metaJson = JSON.stringify({ metadata: metadataObj, contents: contentsObj });
     const metaBytes = Buffer.from(metaJson, 'utf-8');
     totalSize += 4 + metaBytes.length; // metadataLen + JSON

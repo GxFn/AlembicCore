@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   FileSymbolContext,
+  ModuleContext,
   ProjectContextUnavailableData,
   SourceSliceContext,
 } from '../src/domain/project-context/index.js';
@@ -12,6 +13,37 @@ import { ProjectContext } from '../src/project-context.js';
 import { computeContentHash } from '../src/shared/contentHash.js';
 
 describe('ProjectContext PCQ-2 file-symbols', () => {
+  it.each([
+    'mts',
+    'cts',
+  ])('keeps NodeNext .%s source files in module and symbol queries', async (extension) => {
+    const filePath = `src/example.${extension}`;
+    await withFixture(
+      { [filePath]: 'export function run(): number { return 1; }' },
+      async (projectRoot) => {
+        const symbols = await ProjectContext.execute({
+          kind: 'file-symbols',
+          payload: { filePath },
+          scope: { projectRoot },
+        });
+        expect(symbols.errors).toBeUndefined();
+        expect((symbols.data as FileSymbolContext).file.language).toBe('typescript');
+        expect((symbols.data as FileSymbolContext).symbols.map((symbol) => symbol.name)).toEqual([
+          'run',
+        ]);
+        const module = await ProjectContext.execute({
+          kind: 'module',
+          payload: { modulePath: 'src' },
+          scope: { projectRoot },
+        });
+        expect(module.errors).toBeUndefined();
+        expect((module.data as ModuleContext).ownedFiles.map((file) => file.filePath)).toEqual([
+          filePath,
+        ]);
+      }
+    );
+  });
+
   it('returns ordered TypeScript symbols, naming, refs, and source-slice drill-down', async () => {
     const source = [
       'export interface ServicePort {',

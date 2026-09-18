@@ -12,7 +12,7 @@ exports.
 
 | Term | Meaning | Primary types |
 | --- | --- | --- |
-| **Candidate** | A submitted-but-not-yet-published unit of knowledge. Lives in `candidates/`, lifecycle `candidate`. Subject to validation (`validateCandidatesUnified`) and dedup. | `KnowledgeEntry` (lifecycle=candidate), `RecipeCandidate` (validator input shape) |
+| **Candidate** | A submitted-but-not-yet-published unit of knowledge. Lives in `candidates/`, lifecycle `pending` or `staging`. Subject to validation (`validateCandidatesUnified`) and dedup. | `KnowledgeEntry` (pending/staging), `RecipeCandidate` (validator input shape) |
 | **Recipe** | A PUBLISHED, actionable knowledge unit. Lives in `recipes/`, lifecycle active/deprecated. What consumers search and inject. | `KnowledgeEntry` (lifecycle=active), recipe repositories |
 | **Knowledge entry** | The umbrella entity for both of the above: one `KnowledgeEntry` aggregate whose `lifecycle` field decides candidate vs recipe. "Entry" is the storage/domain word; "candidate"/"recipe" are lifecycle stages of it. | `KnowledgeEntry` |
 
@@ -70,6 +70,8 @@ is public; owner: AlembicCore window, trigger: CKG1 area rebuild).
 
 - **Validate** — deterministic pass/fail with reasons (`UnifiedValidator`,
   `RecipeCandidateValidator`, unified entry `validateCandidatesUnified`).
-- **Score** — advisory quality measurement, never a gate in Core
-  (`QualityScorer`); enforcement belongs to CKG3.
+- **Score** — quality measurement (`QualityScorer`). Scoring itself does not
+  publish or reject a candidate. `ConfidenceRouter` may keep a high-confidence
+  candidate in pending when its configured scorer reports low quality; active
+  publication separately requires retrieval readiness.
 - **Aggregate** — batch dedup before validation (`aggregateCandidates`).

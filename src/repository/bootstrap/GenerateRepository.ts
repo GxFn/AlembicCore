@@ -98,28 +98,7 @@ export class GenerateRepositoryImpl extends RepositoryBase<
   }
 
   async create(data: GenerateSnapshotInsert): Promise<GenerateSnapshotEntity> {
-    this.drizzle
-      .insert(this.table)
-      .values({
-        id: data.id,
-        sessionId: data.sessionId ?? null,
-        projectRoot: data.projectRoot,
-        createdAt: data.createdAt,
-        durationMs: data.durationMs ?? 0,
-        fileCount: data.fileCount ?? 0,
-        dimensionCount: data.dimensionCount ?? 0,
-        candidateCount: data.candidateCount ?? 0,
-        primaryLang: data.primaryLang ?? null,
-        fileHashes: JSON.stringify(data.fileHashes),
-        dimensionMeta: JSON.stringify(data.dimensionMeta),
-        episodicData: data.episodicData ? JSON.stringify(data.episodicData) : null,
-        isIncremental: data.isIncremental ? 1 : 0,
-        parentId: data.parentId ?? null,
-        changedFiles: JSON.stringify(data.changedFiles ?? []),
-        affectedDims: JSON.stringify(data.affectedDims ?? []),
-        status: data.status ?? 'complete',
-      })
-      .run();
+    this.drizzle.insert(this.table).values(snapshotToRow(data)).run();
 
     const created = await this.findById(data.id);
     if (!created) {
@@ -161,13 +140,13 @@ export class GenerateRepositoryImpl extends RepositoryBase<
 
   /* ─── 维度-文件关联 ─── */
 
-  /** 批量插入维度-文件关联 (INSERT OR IGNORE) */
+  /** 批量插入维度-文件关联；兼容返回处理条数（含被 IGNORE 的重复项）。 */
   async saveDimFiles(entries: DimFileInsert[]): Promise<number> {
     if (entries.length === 0) {
       return 0;
     }
 
-    let inserted = 0;
+    let processed = 0;
     this.transaction((tx) => {
       for (const entry of entries) {
         tx.insert(generateDimFiles)
@@ -179,11 +158,11 @@ export class GenerateRepositoryImpl extends RepositoryBase<
           })
           .onConflictDoNothing()
           .run();
-        inserted++;
+        processed++;
       }
     });
 
-    return inserted;
+    return processed;
   }
 
   /** 获取快照的维度-文件关联 */
@@ -202,14 +181,14 @@ export class GenerateRepositoryImpl extends RepositoryBase<
   /** 获取快照中每个维度引用的文件集合 */
   async getDimFileMap(snapshotId: string): Promise<Record<string, Set<string>>> {
     const entries = await this.getDimFiles(snapshotId);
-    const map: Record<string, Set<string>> = {};
+    // 维度 id 是数据，不应命中 Object.prototype 的同名成员。
+    const map = new Map<string, Set<string>>();
     for (const row of entries) {
-      if (!map[row.dimId]) {
-        map[row.dimId] = new Set();
-      }
-      map[row.dimId].add(row.filePath);
+      const files = map.get(row.dimId) ?? new Set<string>();
+      files.add(row.filePath);
+      map.set(row.dimId, files);
     }
-    return map;
+    return Object.fromEntries(map);
   }
 
   /* ─── 容量控制 ─── */
@@ -238,14 +217,12 @@ export class GenerateRepositoryImpl extends RepositoryBase<
 
   /** 清除项目的所有快照 */
   async clearProject(projectRoot: string): Promise<number> {
-    const snapshots = await this.listByProject(projectRoot, 9999);
-    let deleted = 0;
-    for (const snap of snapshots) {
-      if (await this.delete(snap.id)) {
-        deleted++;
-      }
-    }
-    return deleted;
+    // 清理是完整项目操作，不受列表分页上限约束；关联维度文件沿既有 FK cascade 清理。
+    const result = this.drizzle
+      .delete(this.table)
+      .where(eq(this.table.projectRoot, projectRoot))
+      .run();
+    return result.changes;
   }
 
   /* ─── 事务保存 ─── */
@@ -260,27 +237,7 @@ export class GenerateRepositoryImpl extends RepositoryBase<
   ): Promise<GenerateSnapshotEntity> {
     this.transaction((tx) => {
       // 主记录
-      tx.insert(this.table)
-        .values({
-          id: snapshot.id,
-          sessionId: snapshot.sessionId ?? null,
-          projectRoot: snapshot.projectRoot,
-          createdAt: snapshot.createdAt,
-          durationMs: snapshot.durationMs ?? 0,
-          fileCount: snapshot.fileCount ?? 0,
-          dimensionCount: snapshot.dimensionCount ?? 0,
-          candidateCount: snapshot.candidateCount ?? 0,
-          primaryLang: snapshot.primaryLang ?? null,
-          fileHashes: JSON.stringify(snapshot.fileHashes),
-          dimensionMeta: JSON.stringify(snapshot.dimensionMeta),
-          episodicData: snapshot.episodicData ? JSON.stringify(snapshot.episodicData) : null,
-          isIncremental: snapshot.isIncremental ? 1 : 0,
-          parentId: snapshot.parentId ?? null,
-          changedFiles: JSON.stringify(snapshot.changedFiles ?? []),
-          affectedDims: JSON.stringify(snapshot.affectedDims ?? []),
-          status: snapshot.status ?? 'complete',
-        })
-        .run();
+      tx.insert(this.table).values(snapshotToRow(snapshot)).run();
 
       // 维度-文件关联
       for (const df of dimFiles) {
@@ -368,4 +325,27 @@ function safeParseJSON<T>(str: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+/** 两条保存入口复用同一持久化映射，避免可选字段/默认值随入口分叉。 */
+function snapshotToRow(snapshot: GenerateSnapshotInsert): typeof generateSnapshots.$inferInsert {
+  return {
+    id: snapshot.id,
+    sessionId: snapshot.sessionId ?? null,
+    projectRoot: snapshot.projectRoot,
+    createdAt: snapshot.createdAt,
+    durationMs: snapshot.durationMs ?? 0,
+    fileCount: snapshot.fileCount ?? 0,
+    dimensionCount: snapshot.dimensionCount ?? 0,
+    candidateCount: snapshot.candidateCount ?? 0,
+    primaryLang: snapshot.primaryLang ?? null,
+    fileHashes: JSON.stringify(snapshot.fileHashes),
+    dimensionMeta: JSON.stringify(snapshot.dimensionMeta),
+    episodicData: snapshot.episodicData ? JSON.stringify(snapshot.episodicData) : null,
+    isIncremental: snapshot.isIncremental ? 1 : 0,
+    parentId: snapshot.parentId ?? null,
+    changedFiles: JSON.stringify(snapshot.changedFiles ?? []),
+    affectedDims: JSON.stringify(snapshot.affectedDims ?? []),
+    status: snapshot.status ?? 'complete',
+  };
 }

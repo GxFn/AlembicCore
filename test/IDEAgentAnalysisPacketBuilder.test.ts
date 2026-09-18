@@ -543,6 +543,67 @@ describe('HostAgentAnalysisPacketBuilder', () => {
     expect(JSON.stringify(briefing)).not.toContain('PROJECT_CONTEXT_SOURCE_BODY_SHOULD_NOT_LEAK');
   });
 
+  it('preserves ProjectContext panorama layers, hotspots, and cycles in the public briefing', () => {
+    const projectContext = buildProjectContextPresenterInput(makeProjectContextEnvelopes());
+    projectContext.map!.cycles = [
+      {
+        refs: [projectContext.map!.modules[0].ref!, projectContext.map!.layers[0].ref!],
+        summary: 'service-domain cycle',
+      },
+    ];
+    const briefing = buildProjectContextMissionBriefing({
+      projectContext,
+      activeDimensions: dimensions,
+      session: { toJSON: () => ({ id: 'panorama-session' }) },
+    });
+
+    expect(briefing.panorama).toEqual({
+      layers: [{ level: 1, name: 'Domain', modules: ['service'] }],
+      couplingHotspots: [{ module: 'service', fanIn: 5, fanOut: 0 }],
+      cyclicDependencies: [{ cycle: ['service', 'Domain'], severity: 'service-domain cycle' }],
+      knowledgeGaps: [],
+    });
+  });
+
+  it('keeps legacy raw panorama projection compatible with normalized snapshot input', () => {
+    const layers = [{ level: 1, name: 'Domain', modules: ['service'] }];
+    const couplingHotspots = [{ module: 'service', fanIn: 12, fanOut: 2 }];
+    const cyclicDependencies = [{ cycle: ['service', 'storage'], severity: 'warning' }];
+    const build = (panoramaResult: Record<string, unknown>) =>
+      buildMissionBriefing({
+        projectMeta: { primaryLanguage: 'typescript' },
+        activeDimensions: dimensions,
+        session: { toJSON: () => ({ id: 'panorama-session' }) },
+        panoramaResult,
+      }).panorama;
+
+    const legacy = build({
+      layers: { levels: layers },
+      modules: new Map([['service', { name: 'service', fanIn: 12, fanOut: 2 }]]),
+      cycles: cyclicDependencies,
+    });
+    expect(legacy).toEqual({ layers, couplingHotspots, cyclicDependencies, knowledgeGaps: [] });
+    expect(build({ layers, couplingHotspots, cyclicDependencies })).toEqual(legacy);
+  });
+
+  it('uses repository language totals without adding overlapping sampled files', () => {
+    const projectContext = buildProjectContextPresenterInput(makeProjectContextEnvelopes());
+    projectContext.files.push(
+      { filePath: 'scripts/one.py', language: 'python' },
+      { filePath: 'scripts/two.py', language: 'python' }
+    );
+    const build = () =>
+      buildProjectContextMissionBriefing({
+        projectContext,
+        activeDimensions: dimensions,
+        session: { toJSON: () => ({ id: 'language-session' }) },
+      });
+
+    expect(build().languageStats).toEqual({ python: 2, typescript: 2 });
+    projectContext.repo = undefined;
+    expect(build().languageStats).toEqual({ python: 2, typescript: 1 });
+  });
+
   it('builds ProjectContext target file counts from module owned files before anchor refs', () => {
     const session = new GenerateSession({
       projectRoot: '/fixture/bilidili',

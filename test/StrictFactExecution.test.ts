@@ -50,6 +50,50 @@ afterEach(() => {
 });
 
 describe('strict frozen-fact execution', () => {
+  it('rejects a rehashed witness rebound to another file in the same registered ledger snapshot', async () => {
+    const artifact = await createStrictArtifact();
+    const family = factFamily();
+    const bindings = witnessBindings(artifact);
+    const [source, target] = bindings;
+    const { bindingHash: _bindingHash, ...targetSemantic } = target!;
+    const reboundSemantic = {
+      ...targetSemantic,
+      evidenceEntryId: source!.evidenceEntryId,
+      evidenceSessionId: source!.evidenceSessionId,
+      evidenceContentHash: source!.evidenceContentHash,
+      evidenceEntryHash: source!.evidenceEntryHash,
+      evidenceEntry: source!.evidenceEntry,
+      evidenceLedgerSnapshotHash: source!.evidenceLedgerSnapshotHash,
+    };
+    const rebound = { ...reboundSemantic, bindingHash: hashCanonicalJson(reboundSemantic) };
+    const input = {
+      artifact,
+      planningFacts: planningFacts(artifact),
+      catalog: buildFactQueryCatalogSnapshot([family]),
+      schedule: scheduleFor(family),
+      subjectBindings: subjectBindings(artifact),
+      witnessBindings: bindings,
+      witnessAuthority: witnessAuthority(artifact),
+      registry: createStrictFactBackendRegistryV1([
+        createAstFactQueryBackendV1({ family, queryPack: AST_QUERY_PACK }),
+      ]),
+    };
+
+    await expect(
+      executeStrictFactScheduleV1({ ...input, witnessBindings: [source!, rebound] })
+    ).rejects.toThrow('STRICT_FACT_EXECUTION_AUTHORITY_DRIFT');
+
+    const valid = await executeStrictFactScheduleV1(input);
+    expect(valid.manifest.verdict).toBe('passed');
+    expect(
+      valid.facts.find((fact) => fact.canonicalSubjectRef === target!.projectContextRefId)
+        ?.witnesses[0]
+    ).toMatchObject({
+      evidenceEntryId: target!.evidenceEntryId,
+      anchor: { relativePath: target!.relativePath },
+    });
+  });
+
   it('accepts direct witnesses only when full-file and declared range content match frozen bytes', async () => {
     const artifact = await createStrictArtifact([
       {

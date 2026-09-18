@@ -112,6 +112,42 @@ describe('reviewRecipeDepth (C4) — 只认接地深度', () => {
     expect(result.groundedFileCount).toBe(1);
   });
 
+  it('同一已解析文件的短路径和完整路径只计一个来源', () => {
+    const result = reviewRecipeDepth(
+      {
+        markdown: '## 设计意图\n因为显式注册更可靠，见 foo.ts:10 和 lib/foo.ts:20。',
+      },
+      {
+        validSourcePaths: ['lib/foo.ts'],
+        // validRanges 是 resolver 的源码正文片段，不是 file:line 坐标。
+        validRanges: ['register(service);'],
+      }
+    );
+    expect(result.grounded).toContain('designIntent');
+    expect(result.groundedFileCount).toBe(1);
+    expect(result.missing).toContain('multiSourceCorroboration');
+  });
+
+  it('歧义短路径不能替两个已解析的不同文件选择来源', () => {
+    const resolved = { validSourcePaths: ['one/lib/foo.ts', 'two/lib/foo.ts'] };
+    const ambiguous = reviewRecipeDepth(
+      { markdown: '## 设计意图\n因为容器控制初始化，见 lib/foo.ts:10。' },
+      resolved
+    );
+    expect(ambiguous.groundedFileCount).toBe(0);
+    expect(ambiguous.groundedSignalCount).toBe(0);
+    expect(ambiguous.missing).toContain('designIntent');
+
+    const exact = reviewRecipeDepth(
+      {
+        markdown: '## 设计意图\n因为两侧约束一致，见 one/lib/foo.ts:10 和 two/lib/foo.ts:20。',
+      },
+      resolved
+    );
+    expect(exact.groundedFileCount).toBe(2);
+    expect(exact.grounded).toContain('multiSourceCorroboration');
+  });
+
   it('结构化字段：boundaries[] 挂真实 ref 也算该维度接地', () => {
     const result = reviewRecipeDepth(
       { markdown: '## 无关标题\n正文', boundaries: ['仅在事务内有效 lib/foo.ts:12'] },

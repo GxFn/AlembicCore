@@ -184,16 +184,19 @@ export class HybridCandidateRetriever {
       knownIndexSize,
       collect: async (window) => {
         request.signal?.throwIfAborted();
+        // 合同允许同步 sparse port；将调用本身放进 Promise，保证同步抛错也只降级该检索通道。
         const [denseResult, sparseResult] = await Promise.allSettled([
           queryVector && this.#reader
-            ? this.#reader.searchVector(queryVector, {
-                filter: request.candidateFilter,
-                topK: window,
-              })
+            ? Promise.resolve().then(() =>
+                this.#reader!.searchVector(queryVector, {
+                  filter: request.candidateFilter,
+                  topK: window,
+                })
+              )
             : Promise.resolve([]),
           this.#sparse
-            ? Promise.resolve(
-                this.#sparse(request.query, {
+            ? Promise.resolve().then(() =>
+                this.#sparse!(request.query, {
                   filter: request.filter,
                   limit: window,
                   signal: request.signal,

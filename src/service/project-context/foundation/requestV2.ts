@@ -180,7 +180,7 @@ export function buildRequestEnvelopeIndexRowV2(
     canonicalScopeHash,
     language: normalizeNullableToken(plan.language),
     parserFamily: normalizeNullableToken(plan.parserFamily),
-    ownerSurfaceId: normalizeNullableToken(plan.ownerSurfaceId),
+    ownerSurfaceId: normalizeOwnerSurfaceId(plan.ownerSurfaceId),
   };
   return {
     rowId: hashCanonicalJson(identity),
@@ -426,7 +426,7 @@ function normalizePlan(
       ? { parserFamily: requireOptionalToken(plan.parserFamily, 'parserFamily') }
       : {}),
     ...(plan.ownerSurfaceId
-      ? { ownerSurfaceId: requireOptionalToken(plan.ownerSurfaceId, 'ownerSurfaceId') }
+      ? { ownerSurfaceId: normalizeOwnerSurfaceId(plan.ownerSurfaceId)! }
       : {}),
   };
 }
@@ -534,6 +534,18 @@ function compareRows(
 
 function normalizeNullableToken(value: string | undefined): string | null {
   return value ? (requireOptionalToken(value, 'request identity') ?? null) : null;
+}
+
+function normalizeOwnerSurfaceId(value: string | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  // owner 是上游已经接受的不透明身份，不是language/parser token；大小写不同不能合并。
+  const normalized = value.trim();
+  if (!normalized || normalized !== value) {
+    throw new TypeError('ownerSurfaceId must be a canonical non-empty identifier.');
+  }
+  return normalized;
 }
 
 function requireOptionalToken(value: string | undefined, fieldName: string): string | undefined {

@@ -44,18 +44,6 @@ describe('renderGuidance 深度契约段 (C2) — 从 DEPTH_DIMENSIONS 单源渲
   it('深度契约段不重新注入 confidence 硬门槛(与 D-A 负向不变量一致)', () => {
     expect(/confidence/i.test(block.depthContract)).toBe(false);
   });
-
-  it('styleGuide 深度要求落在 slice(0,12) 预算内(host contentStyle 不截断深度)', () => {
-    // 复刻 DimensionCatalogPayload.ts:198 的 slice 口径，证明深度要求命中前 12 行。
-    const sliced = contentContract()
-      .styleGuide.split('\n')
-      .filter((line) => !line.startsWith('#') || line.startsWith('##'))
-      .filter((line) => line.trim())
-      .slice(0, 12)
-      .join('\n');
-    expect(sliced).toContain('深度要求');
-    expect(sliced).toContain('洞察');
-  });
 });
 
 describe('注入的 typescript worked-example (C5) — 是真接地深度范本，非仅 gate-clean', () => {

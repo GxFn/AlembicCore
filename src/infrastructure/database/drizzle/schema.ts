@@ -4,7 +4,7 @@
  * 所有表定义从 active migrations 忠实翻译。
  * DB 列名与 migration 保持一致；实体映射由 repository 层处理。
  *
- * 表清单 (19 个业务表 + schema_migrations):
+ * 表与增量字段来源（业务表 + schema_migrations）:
  *   001: knowledge_entries, knowledge_edges, guard_violations, audit_logs,
  *        sessions, token_usage, semantic_memories, bootstrap_snapshots,
  *        bootstrap_dim_files, code_entities
@@ -16,6 +16,8 @@
  *   010: source_graph_generations, source_graph_files,
  *        source_graph_symbols, source_graph_edges
  *   013: git_diff_checkpoints
+ *   015/016: coverage_ledger, deep_mining_rounds (+ rescan_id)
+ *   017: knowledge_entries.usageGuide/retrievalProfile
  *   内部: schema_migrations
  *
  * 注: Task 系统为纯内存 + JSONL 信号架构，不使用数据库表。

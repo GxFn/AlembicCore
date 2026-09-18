@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -17,6 +20,52 @@ import {
 } from '../src/daemon/index.js';
 
 describe('JobDisplaySnapshot shared contract', () => {
+  it.each([
+    {
+      value: ['known', undefined],
+      wire: ['known', null],
+      checksum: 'c087627378aea4a7799b246b6c382d5113b1d838638abc4642c100e1f320a42a',
+    },
+    {
+      value: Array(2),
+      wire: [null, null],
+      checksum: 'fd1965794c895c375dabec59534d7bf7753a4fbdaee54b72be8fd5d117817a93',
+    },
+    { value: { kept: 'known', omitted: undefined }, wire: { kept: 'known' } },
+  ])('preserves checksum after a real JSON write/read of optional values %#', ({
+    value,
+    wire,
+    checksum,
+  }) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-display-checksum-'));
+    try {
+      const eventFor = (data: unknown) =>
+        createJobProcessEvent({
+          createdAt: '2026-06-04T00:00:01.000Z',
+          id: 'event-optional',
+          jobId: 'bootstrap_1',
+          kind: 'workflow',
+          sequence: 1,
+          title: 'Optional event data',
+          metadata: { data },
+        });
+      const snapshot = createSnapshot({ events: [eventFor(value)] });
+      // 同一JSON wire必须与原来合法JSON值的canonical hash一致，不能只让重算过程自洽。
+      expect(snapshot.snapshot.checksum).toBe(
+        createSnapshot({ events: [eventFor(wire)] }).snapshot.checksum
+      );
+      if (checksum) {
+        expect(snapshot.snapshot.checksum).toBe(checksum);
+      }
+      const snapshotPath = path.join(root, 'snapshot.json');
+      fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
+      const restored = JSON.parse(fs.readFileSync(snapshotPath, 'utf8')) as JobDisplaySnapshot;
+      expect(validateJobDisplaySnapshot(restored).valid).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('creates a restart-safe serializable snapshot with deterministic checksum', () => {
     const event = createJobProcessEvent({
       artifactRefs: [

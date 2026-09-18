@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3';
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, like, ne, or, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gte, inArray, isNotNull, like, ne, or, sql } from 'drizzle-orm';
 import type { Logger as WinstonLogger } from 'winston';
 import { inferKind, KnowledgeEntry } from '../../domain/knowledge/index.js';
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
@@ -277,9 +277,11 @@ export class KnowledgeRepositoryImpl {
     }
 
     if (_tagLike) {
-      conditions.push(`tags LIKE ?`);
-      const escaped = _tagLike.replace(/[%_\\]/g, (ch: string) => `\\${ch}`);
-      params.push(`%"${escaped}"%`);
+      // 先按 JSON 字符串编码标签，再转义 LIKE 元字符；SQL 必须声明相同的转义符。
+      // 保持既有大小写/分页语义，但下划线、百分号、引号和反斜杠都按标签字面量匹配。
+      conditions.push(`tags LIKE ? ESCAPE '\\'`);
+      const escaped = JSON.stringify(_tagLike).replace(/[%_\\]/g, (ch: string) => `\\${ch}`);
+      params.push(`%${escaped}%`);
     }
 
     if (_search) {
@@ -1173,6 +1175,8 @@ export class KnowledgeRepositoryImpl {
 
   /* ═══════════════════════════════════════════════════════
    *  SearchEngine 用同步方法
+   *  scope / dimensionId / tags 是过滤事实，四个投影须与 raw adapter 保持一致；
+   *  若建索引或增量刷新时先丢字段，后续 hard filter 会把真实命中误删。
    * ═══════════════════════════════════════════════════════ */
 
   /** 查询所有非 deprecated 条目（buildIndex 用） */
@@ -1183,6 +1187,8 @@ export class KnowledgeRepositoryImpl {
         title: knowledgeEntries.title,
         description: knowledgeEntries.description,
         language: knowledgeEntries.language,
+        dimensionId: knowledgeEntries.dimensionId,
+        scope: knowledgeEntries.scope,
         category: knowledgeEntries.category,
         knowledgeType: knowledgeEntries.knowledgeType,
         kind: knowledgeEntries.kind,
@@ -1218,11 +1224,14 @@ export class KnowledgeRepositoryImpl {
         title: knowledgeEntries.title,
         description: knowledgeEntries.description,
         language: knowledgeEntries.language,
+        dimensionId: knowledgeEntries.dimensionId,
+        scope: knowledgeEntries.scope,
         category: knowledgeEntries.category,
         knowledgeType: knowledgeEntries.knowledgeType,
         kind: knowledgeEntries.kind,
         lifecycle: knowledgeEntries.lifecycle,
         content: knowledgeEntries.content,
+        tags: knowledgeEntries.tags,
         trigger: knowledgeEntries.trigger,
         headers: knowledgeEntries.headers,
         moduleName: knowledgeEntries.moduleName,
@@ -1258,6 +1267,8 @@ export class KnowledgeRepositoryImpl {
         moduleName: knowledgeEntries.moduleName,
         tags: knowledgeEntries.tags,
         language: knowledgeEntries.language,
+        dimensionId: knowledgeEntries.dimensionId,
+        scope: knowledgeEntries.scope,
         category: knowledgeEntries.category,
         updatedAt: knowledgeEntries.updatedAt,
         createdAt: knowledgeEntries.createdAt,
@@ -1278,6 +1289,7 @@ export class KnowledgeRepositoryImpl {
 
   /** 查询指定时间之后更新的条目（refreshIndex 用） */
   findUpdatedSinceSync(sinceIso: string) {
+    // 与 raw SearchRepoAdapter 同口径：秒精度水位必须包含边界秒，索引更新按 id 幂等。
     const sinceEpoch = Math.floor(new Date(sinceIso).getTime() / 1000);
     return this.#drizzle
       .select({
@@ -1285,6 +1297,8 @@ export class KnowledgeRepositoryImpl {
         title: knowledgeEntries.title,
         description: knowledgeEntries.description,
         language: knowledgeEntries.language,
+        dimensionId: knowledgeEntries.dimensionId,
+        scope: knowledgeEntries.scope,
         category: knowledgeEntries.category,
         knowledgeType: knowledgeEntries.knowledgeType,
         kind: knowledgeEntries.kind,
@@ -1308,7 +1322,7 @@ export class KnowledgeRepositoryImpl {
         createdAt: knowledgeEntries.createdAt,
       })
       .from(knowledgeEntries)
-      .where(gt(knowledgeEntries.updatedAt, sinceEpoch))
+      .where(gte(knowledgeEntries.updatedAt, sinceEpoch))
       .all();
   }
 }

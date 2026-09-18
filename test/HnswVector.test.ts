@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -364,6 +365,33 @@ describe('BinaryPersistence', () => {
     expect(loaded.indexData.nodes[0].id).toBe('doc1');
     expect(loaded.metadata.get('doc1')).toEqual({ type: 'recipe', language: 'swift' });
     expect(loaded.contents.get('doc2')).toBe('Foo bar');
+    expect(fs.readFileSync(filePath).toString('utf8')).toEqual(
+      expect.stringContaining(
+        '{"metadata":{"doc1":{"type":"recipe","language":"swift"},"doc2":{"type":"code","language":"python"}},"contents":{"doc1":"Hello world","doc2":"Foo bar"}}'
+      )
+    );
+  });
+
+  it.each([
+    'save',
+    'saveAsync',
+  ])('preserves opaque __proto__ IDs through %s and load', async (method) => {
+    const index = new HnswIndex({ M: 4 });
+    index.addPoint('__proto__', [1, 0]);
+    const metadata = new Map([
+      ['__proto__', { title: '合法 ID' }],
+      ['constructor', { title: 'constructor ID' }],
+    ]);
+    const contents = new Map([
+      ['__proto__', 'content for opaque ID'],
+      ['constructor', 'constructor content'],
+    ]);
+    const filePath = path.join(tmpDir, 'own-key.asvec');
+    await BinaryPersistence[method](filePath, { index, quantizer: null, metadata, contents });
+    const restored = BinaryPersistence.load(filePath);
+    expect(restored.indexData.nodes[0].id).toBe('__proto__');
+    expect(restored.metadata).toEqual(metadata);
+    expect(restored.contents).toEqual(contents);
   });
 
   it('should encode and decode with quantizer', () => {
@@ -572,6 +600,53 @@ describe('HnswVectorAdapter', () => {
     expect(stats.hasVectors).toBe(1); // only v1 has non-empty vector
   });
 
+  it.each([
+    'upsert',
+    'batchUpsert',
+    'replay',
+  ])('removes the old ANN vector when %s replaces an item with an empty vector', async (mode) => {
+    store = new HnswVectorAdapter(tmpDir, { M: 4, flushIntervalMs: 60000 });
+    store.initSync();
+    await store.upsert({ id: 'a', content: 'old embedding', vector: [1, 0] });
+    await store.flush();
+    const replacement = {
+      id: 'a',
+      content: 'keyword only',
+      vector: [],
+      metadata: { stage: 'new' },
+    };
+    if (mode === 'replay') {
+      store.destroy();
+      const op = JSON.stringify({
+        t: WAL_OP.UPSERT,
+        id: 'a',
+        c: replacement.content,
+        v: [],
+        m: replacement.metadata,
+      });
+      fs.writeFileSync(
+        path.join(tmpDir, '.asd/context/index/vector_index.wal'),
+        `${op}\t${crc32(op)}\n`
+      );
+      store = new HnswVectorAdapter(tmpDir, { M: 4 });
+      await store.init();
+    } else if (mode === 'batchUpsert') {
+      await store.batchUpsert([replacement]);
+    } else {
+      await store.upsert(replacement);
+    }
+
+    expect(await store.getById('a')).toMatchObject(replacement);
+    expect(await store.searchVector([1, 0], { topK: 5 })).toEqual([]);
+    expect(await store.getStats()).toMatchObject({ count: 1, hasVectors: 0 });
+    await store.flush();
+    store.destroy();
+    store = new HnswVectorAdapter(tmpDir, { M: 4 });
+    store.initSync();
+    expect(await store.getById('a')).toMatchObject(replacement);
+    expect(await store.searchVector([1, 0], { topK: 5 })).toEqual([]);
+  });
+
   it('should persist and reload via flush + initSync', async () => {
     store = new HnswVectorAdapter(tmpDir, { M: 4, efConstruct: 32, efSearch: 32 });
     store.initSync();
@@ -593,6 +668,81 @@ describe('HnswVectorAdapter', () => {
 
     const results = await store.searchVector([1, 0, 0], { topK: 1 });
     expect(results[0].item.id).toBe('doc-1');
+  });
+
+  it.each([
+    'automatic',
+    'explicit',
+    'destroy',
+  ])('persists writes made during a non-WAL snapshot with %s flush', async (mode) => {
+    const seedIndex = new HnswIndex({ M: 4 });
+    seedIndex.addPoint('obsolete', [1, 0]);
+    BinaryPersistence.save(path.join(tmpDir, '.asd/context/index/vector_index.asvec'), {
+      index: seedIndex,
+      quantizer: null,
+      metadata: new Map([['obsolete', {}]]),
+      contents: new Map([['obsolete', 'remove during the next write']]),
+    });
+    store = new HnswVectorAdapter(tmpDir, {
+      M: 4,
+      walEnabled: false,
+      flushIntervalMs: 10,
+      flushBatchSize: 1,
+    });
+    store.initSync();
+    const releaseFirst = Promise.withResolvers<void>();
+    let writes = 0;
+    let firstSaved = false;
+    const delayedWrite = vi
+      .spyOn(BinaryPersistence, 'saveAsync')
+      .mockImplementation(async (filePath, data) => {
+        // 使用真实ASVEC编码并捕获本次快照，延迟的是编码后的文件写入阶段。
+        const snapshot = BinaryPersistence.encode(data);
+        writes++;
+        const first = writes === 1;
+        if (first) {
+          await releaseFirst.promise;
+        }
+        fs.writeFileSync(filePath, snapshot);
+        if (first) {
+          firstSaved = true;
+        }
+      });
+    try {
+      await store.upsert({ id: 'a', content: 'first snapshot', vector: [1, 0] });
+      await store.upsert({ id: 'b', content: 'arrived during write', vector: [0, 1] });
+      await store.remove('obsolete');
+      const explicitFlush = mode === 'explicit' ? store.flush() : null;
+      if (mode === 'destroy') {
+        store.destroy();
+      }
+      releaseFirst.resolve();
+      await vi.waitFor(() => expect(firstSaved).toBe(true));
+      if (mode === 'explicit') {
+        await explicitFlush;
+      } else if (mode === 'automatic') {
+        await vi.waitFor(() => {
+          const saved = BinaryPersistence.load(
+            path.join(tmpDir, '.asd/context/index/vector_index.asvec')
+          );
+          expect([...saved.metadata.keys()].sort()).toEqual(['a', 'b']);
+        });
+      }
+      const reopened = new HnswVectorAdapter(tmpDir, { M: 4, walEnabled: false });
+      try {
+        reopened.initSync();
+        expect(await reopened.getById('b')).toMatchObject({
+          content: 'arrived during write',
+          vector: [0, 1],
+        });
+        expect(await reopened.getById('obsolete')).toBeNull();
+      } finally {
+        reopened.destroy();
+      }
+    } finally {
+      releaseFirst.resolve();
+      delayedWrite.mockRestore();
+    }
   });
 
   it('should support filter in searchVector', async () => {
@@ -1142,6 +1292,195 @@ describe('IndexingPipeline v2', () => {
     expect(pipeline).toBeDefined();
   });
 
+  it('initializes AST chunking from the pipeline configuration without an external parser call', async () => {
+    const source = Array.from(
+      { length: 12 },
+      (_, index) => `export function item${index}() { return ${index}; }`
+    ).join('\n');
+    fs.writeFileSync(path.join(tmpDir, 'recipes', 'module.ts'), source);
+    const store = new _JsonVectorAdapter(tmpDir);
+    store.initSync();
+    const pipeline = new IndexingPipeline({
+      vectorStore: store,
+      projectRoot: tmpDir,
+      scanDirs: ['recipes'],
+      chunking: { strategy: 'auto', maxChunkTokens: 32, useAST: true },
+    });
+    await pipeline.run();
+    const readCodeChunks = async () =>
+      (await Promise.all((await store.listIds()).map((id) => store.getById(id)))).filter(
+        (item) => item.metadata.sourcePath === 'recipes/module.ts'
+      );
+    expect((await readCodeChunks()).map((item) => item.metadata.chunkStrategy)).toEqual(
+      Array(12).fill('ast')
+    );
+    const missingId = (await readCodeChunks())[5].id;
+    await store.remove(missingId);
+    await pipeline.run();
+    expect(await store.getById(missingId)).not.toBeNull();
+    expect(await readCodeChunks()).toHaveLength(12);
+    const withoutAST = new IndexingPipeline({
+      vectorStore: store,
+      projectRoot: tmpDir,
+      scanDirs: ['recipes'],
+      chunking: { strategy: 'auto', maxChunkTokens: 32, useAST: false },
+    });
+    await withoutAST.run({ force: true });
+    expect((await readCodeChunks()).every((item) => item.metadata.chunkStrategy !== 'ast')).toBe(
+      true
+    );
+  });
+
+  it('repairs colliding legacy path IDs while retaining their existing sourcePath binding', async () => {
+    fs.rmSync(path.join(tmpDir, 'recipes', 'test.md'));
+    fs.mkdirSync(path.join(tmpDir, 'recipes', 'a'));
+    const content = '# Shared\nSame bytes in distinct files';
+    fs.writeFileSync(path.join(tmpDir, 'recipes', 'a', 'b.md'), content);
+    fs.writeFileSync(path.join(tmpDir, 'recipes', 'a_b.md'), content);
+    const store = new _JsonVectorAdapter(tmpDir);
+    store.initSync();
+    const pipeline = new IndexingPipeline({
+      vectorStore: store,
+      projectRoot: tmpDir,
+      scanDirs: ['recipes'],
+    });
+    const legacyId = 'recipes_a_b.md_0';
+    await store.upsert({
+      id: legacyId,
+      content,
+      vector: [1, 0],
+      metadata: {
+        type: 'recipe',
+        sourcePath: 'recipes/a_b.md',
+        sourceHash: pipeline.hashContent(content),
+        chunkIndex: 0,
+        totalChunks: 1,
+      },
+    });
+    await pipeline.run();
+    const ids = await store.listIds();
+    const items = await Promise.all(ids.map((id) => store.getById(id)));
+    expect(items.map((item) => item.metadata.sourcePath).sort()).toEqual([
+      'recipes/a/b.md',
+      'recipes/a_b.md',
+    ]);
+    expect(await store.getById(legacyId)).toMatchObject({
+      vector: [1, 0],
+      metadata: { sourcePath: 'recipes/a_b.md' },
+    });
+    const second = await pipeline.run();
+    expect(second).toMatchObject({ skipped: 2, upserted: 0 });
+    expect(await store.listIds()).toEqual(ids);
+  });
+
+  it('persists pipeline ownership and removes only confirmed deleted owned chunks', async () => {
+    let store = new HnswVectorAdapter(tmpDir, { M: 4, flushIntervalMs: 60000 });
+    store.initSync();
+    const createPipeline = () =>
+      new IndexingPipeline({
+        vectorStore: store,
+        projectRoot: tmpDir,
+        scanDirs: ['recipes'],
+        chunking: { useAST: false },
+      });
+    try {
+      await createPipeline().run();
+      const [ownedId] = await store.listIds();
+      expect((await store.getById(ownedId)).metadata.indexingProducer).toBe(
+        'file-indexing-pipeline-v1'
+      );
+      const walPath = path.join(tmpDir, '.asd/context/index/vector_index.wal');
+      const walEntry = JSON.parse(fs.readFileSync(walPath, 'utf8').trim().split('\t')[0]);
+      expect(walEntry.m.indexingProducer).toBe('file-indexing-pipeline-v1');
+      await store.flush();
+      store.destroy();
+      store = new HnswVectorAdapter(tmpDir, { M: 4, flushIntervalMs: 60000 });
+      store.initSync();
+      expect((await store.getById(ownedId)).metadata.indexingProducer).toBe(
+        'file-indexing-pipeline-v1'
+      );
+      await store.upsert({
+        id: 'foreign-vector',
+        content: 'other producer',
+        vector: [],
+        metadata: { sourcePath: 'recipes/test.md', indexingProducer: 'other-producer' },
+      });
+      await store.upsert({
+        id: 'previous-scan-scope',
+        content: 'outside current scan scope',
+        vector: [],
+        metadata: {
+          sourcePath: 'previous/file.md',
+          indexingProducer: 'file-indexing-pipeline-v1',
+          chunkIndex: 0,
+          totalChunks: 1,
+        },
+      });
+      await store.upsert({
+        id: 'recipes_old.md_0',
+        content: 'legacy without ownership',
+        vector: [],
+        metadata: {
+          type: 'recipe',
+          sourcePath: 'recipes/old.md',
+          sourceHash: 'old',
+          chunkIndex: 0,
+          totalChunks: 1,
+        },
+      });
+      fs.rmSync(path.join(tmpDir, 'recipes', 'test.md'));
+      await createPipeline().run();
+      expect(await store.getById(ownedId)).toBeNull();
+      expect((await store.listIds()).sort()).toEqual([
+        'foreign-vector',
+        'previous-scan-scope',
+        'recipes_old.md_0',
+      ]);
+    } finally {
+      await store.flush();
+      store.destroy();
+    }
+  });
+
+  it('retains owned chunks when a scan or source read fails instead of inferring deletion', async () => {
+    const store = new _JsonVectorAdapter(tmpDir);
+    store.initSync();
+    const pipeline = new IndexingPipeline({
+      vectorStore: store,
+      projectRoot: tmpDir,
+      scanDirs: ['recipes', 'blocked'],
+      chunking: { useAST: false },
+    });
+    await pipeline.run();
+    const [ownedId] = await store.listIds();
+    fs.rmSync(path.join(tmpDir, 'recipes', 'test.md'));
+    fs.writeFileSync(path.join(tmpDir, 'blocked'), 'configured directory became a file');
+    expect((await pipeline.run()).errors).toBeGreaterThan(0);
+    expect(await store.getById(ownedId)).not.toBeNull();
+    fs.rmSync(path.join(tmpDir, 'blocked'));
+
+    const unreadable = path.join(tmpDir, 'recipes', 'unreadable.md');
+    fs.writeFileSync(unreadable, '# Present but temporarily unreadable');
+    const readFile = fs.readFileSync;
+    const fault = vi.spyOn(fs, 'readFileSync').mockImplementation((file, ...args) => {
+      if (file === unreadable) {
+        throw Object.assign(new Error('read denied'), { code: 'EACCES' });
+      }
+      return readFile(file, ...args);
+    });
+    // Node内建模块的ESM具名导入需要同步到受控IO故障，其他路径继续真实读取。
+    syncBuiltinESMExports();
+    try {
+      expect((await pipeline.run()).errors).toBeGreaterThan(0);
+      expect(await store.getById(ownedId)).not.toBeNull();
+    } finally {
+      fault.mockRestore();
+      syncBuiltinESMExports();
+    }
+    await pipeline.run();
+    expect(await store.getById(ownedId)).toBeNull();
+  });
+
   it('should scan files and chunk without embed', async () => {
     // Use a mock vector store
     const store = new Map();
@@ -1204,6 +1543,42 @@ describe('IndexingPipeline v2', () => {
     // Verify vectors were stored
     for (const [, item] of store) {
       expect(item.vector).toEqual([0.1, 0.2, 0.3]);
+    }
+  });
+
+  it('detaches the previous embedder when setAiProvider receives null', async () => {
+    let embedCalls = 0;
+    const provider = {
+      embed: async (texts: string[]) => {
+        embedCalls++;
+        return texts.map(() => [1, 0]);
+      },
+    };
+    const store = new HnswVectorAdapter(tmpDir, { M: 4, flushIntervalMs: 60000 });
+    store.initSync();
+    const pipeline = new IndexingPipeline({
+      vectorStore: store,
+      aiProvider: provider,
+      projectRoot: tmpDir,
+      scanDirs: ['recipes'],
+      chunking: { useAST: false },
+    });
+    try {
+      expect((await pipeline.run()).embedded).toBe(1);
+      expect(embedCalls).toBe(1);
+      pipeline.setAiProvider(null);
+      expect((await pipeline.run({ force: true })).embedded).toBe(0);
+      expect(embedCalls).toBe(1);
+      const [id] = await store.listIds();
+      expect((await store.getById(id)).vector).toEqual([]);
+      expect(await store.searchVector([1, 0])).toEqual([]);
+
+      pipeline.setAiProvider(provider);
+      expect((await pipeline.run({ force: true })).embedded).toBe(1);
+      expect(embedCalls).toBe(2);
+    } finally {
+      await store.flush();
+      store.destroy();
     }
   });
 
@@ -1580,7 +1955,7 @@ describe('AsyncPersistence', () => {
     wal.destroy();
   });
 
-  it('recover should replay valid WAL entries', () => {
+  it('recover should replay valid WAL entries and retain them until a snapshot succeeds', async () => {
     const indexPath = path.join(tmpDir, 'test.asvec');
     const replayed = [];
 
@@ -1609,7 +1984,10 @@ describe('AsyncPersistence', () => {
     expect(replayed[0].id).toBe('doc1');
     expect(replayed[1].t).toBe(WAL_OP.REMOVE);
 
-    // WAL file should be cleaned up after recovery
+    // 重放成功仅说明内存恢复；主快照持久化前不得确认 WAL。
+    expect(fs.existsSync(walPath)).toBe(true);
+    expect(wal.pendingCount).toBe(2);
+    await wal.flush();
     expect(fs.existsSync(walPath)).toBe(false);
 
     wal.destroy();
@@ -1679,6 +2057,117 @@ describe('AsyncPersistence', () => {
     wal.destroy();
   });
 
+  it('retains and schedules WAL entries appended while a snapshot is being written', async () => {
+    const indexPath = path.join(tmpDir, 'test.asvec');
+    const snapshotPath = path.join(tmpDir, 'snapshot.json');
+    const firstWrite = Promise.withResolvers<void>();
+    const secondWrite = Promise.withResolvers<void>();
+    const state = ['a'];
+    let writes = 0;
+    const wal = new AsyncPersistence({
+      indexPath,
+      flushIntervalMs: 10,
+      flushBatchSize: 1,
+      onReplay: () => {},
+      onPersist: async () => {
+        // 序列化先于异步写入；后来的 append 不属于这次已编码的快照。
+        const snapshot = [...state];
+        writes++;
+        await (writes === 1 ? firstWrite.promise : secondWrite.promise);
+        fs.writeFileSync(snapshotPath, JSON.stringify(snapshot));
+      },
+    });
+    try {
+      wal.appendWal({ t: WAL_OP.UPSERT, id: 'a' });
+      state.push('b');
+      wal.appendWal({ t: WAL_OP.UPSERT, id: 'b' });
+      firstWrite.resolve();
+      await vi.waitFor(() => expect(writes > 1 || !wal.isFlushing).toBe(true));
+      expect(JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))).toEqual(['a']);
+      expect(fs.existsSync(wal.walPath)).toBe(true);
+      const retained = fs.readFileSync(wal.walPath, 'utf8').trim().split('\n');
+      expect(retained).toHaveLength(1);
+      const [json, checksum] = retained[0].split('\t');
+      expect(JSON.parse(json).id).toBe('b');
+      expect(checksum).toBe(crc32(json));
+
+      // 不靠额外 append 唤醒：当前批完成后必须继续调度下一批。
+      await vi.waitFor(() => expect(writes).toBe(2));
+      secondWrite.resolve();
+      await wal.flush();
+      expect(JSON.parse(fs.readFileSync(snapshotPath, 'utf8'))).toEqual(['a', 'b']);
+      expect(wal.pendingCount).toBe(0);
+      expect(fs.existsSync(wal.walPath)).toBe(false);
+    } finally {
+      firstWrite.resolve();
+      secondWrite.resolve();
+      await wal.flush();
+      wal.destroy();
+    }
+  });
+
+  it('waits for an in-flight snapshot when a second caller flushes', async () => {
+    const write = Promise.withResolvers<void>();
+    const snapshotPath = path.join(tmpDir, 'snapshot.json');
+    const wal = new AsyncPersistence({
+      indexPath: path.join(tmpDir, 'test.asvec'),
+      flushIntervalMs: 60000,
+      flushBatchSize: 1000,
+      onReplay: () => {},
+      onPersist: async () => {
+        await write.promise;
+        fs.writeFileSync(snapshotPath, 'saved');
+      },
+    });
+    wal.appendWal({ t: WAL_OP.UPSERT, id: 'a' });
+    const first = wal.flush();
+    let secondFinished = false;
+    const second = wal.flush().then(() => {
+      secondFinished = true;
+    });
+    try {
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(secondFinished).toBe(false);
+      write.resolve();
+      await Promise.all([first, second]);
+      expect(fs.readFileSync(snapshotPath, 'utf8')).toBe('saved');
+      expect(fs.existsSync(wal.walPath)).toBe(false);
+    } finally {
+      write.resolve();
+      await Promise.all([first, second]);
+      wal.destroy();
+    }
+  });
+
+  it('retries a failed background snapshot without losing the batch or rejecting the timer', async () => {
+    const snapshotPath = path.join(tmpDir, 'snapshot.json');
+    let attempts = 0;
+    const wal = new AsyncPersistence({
+      indexPath: path.join(tmpDir, 'test.asvec'),
+      flushIntervalMs: 10,
+      flushBatchSize: 1,
+      onReplay: () => {},
+      onPersist: async () => {
+        attempts++;
+        if (attempts === 1) {
+          throw new Error('transient snapshot failure');
+        }
+        fs.writeFileSync(snapshotPath, 'retried');
+      },
+    });
+    try {
+      wal.appendWal({ t: WAL_OP.UPSERT, id: 'a' });
+      await vi.waitFor(() => expect(fs.existsSync(snapshotPath)).toBe(true));
+      await wal.flush();
+      expect(attempts).toBe(2);
+      expect(wal.pendingCount).toBe(0);
+      expect(fs.existsSync(wal.walPath)).toBe(false);
+    } finally {
+      wal.destroy();
+    }
+  });
+
   it('should not create WAL entries when disabled', () => {
     const indexPath = path.join(tmpDir, 'test.asvec');
     const wal = new AsyncPersistence({
@@ -1708,6 +2197,77 @@ describe('HnswVectorAdapter WAL integration', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('rejects flush and retains WAL when the HNSW snapshot cannot be written', async () => {
+    const store = new HnswVectorAdapter(tmpDir, {
+      M: 4,
+      flushIntervalMs: 60000,
+      flushBatchSize: 10000,
+    });
+    store.initSync();
+    const indexPath = path.join(tmpDir, '.asd/context/index/vector_index.asvec');
+    const walPath = indexPath.replace('.asvec', '.wal');
+    // 用真实文件系统故障验证公开 flush 的失败语义，不替换序列化器。
+    fs.mkdirSync(indexPath);
+    try {
+      await store.upsert({ id: 'accepted', content: 'durable after retry', vector: [1, 0] });
+      const journal = fs.readFileSync(walPath, 'utf8');
+      await expect(store.flush()).rejects.toMatchObject({ code: 'EISDIR' });
+      expect(fs.readFileSync(walPath, 'utf8')).toBe(journal);
+
+      fs.rmdirSync(indexPath);
+      await store.flush();
+      expect(fs.existsSync(walPath)).toBe(false);
+      const reopened = new HnswVectorAdapter(tmpDir, { M: 4 });
+      try {
+        reopened.initSync();
+        expect(await reopened.getById('accepted')).toMatchObject({
+          content: 'durable after retry',
+          vector: [1, 0],
+        });
+      } finally {
+        reopened.destroy();
+      }
+    } finally {
+      if (fs.existsSync(indexPath) && fs.statSync(indexPath).isDirectory()) {
+        fs.rmdirSync(indexPath);
+      }
+      store.destroy();
+    }
+  });
+
+  it('retains recovered WAL when the first startup snapshot fails', async () => {
+    const indexDir = path.join(tmpDir, '.asd/context/index');
+    const indexPath = path.join(indexDir, 'vector_index.asvec');
+    const walPath = path.join(indexDir, 'vector_index.wal');
+    fs.mkdirSync(indexPath, { recursive: true });
+    const op = JSON.stringify({ t: WAL_OP.UPSERT, id: 'recovered', c: 'from WAL', v: [1, 0] });
+    const journal = `${op}\t${crc32(op)}\n`;
+    fs.writeFileSync(walPath, journal);
+    const store = new HnswVectorAdapter(tmpDir, { M: 4, flushIntervalMs: 60000 });
+    try {
+      await expect(store.init()).rejects.toMatchObject({ code: 'EISDIR' });
+      expect(fs.readFileSync(walPath, 'utf8')).toBe(journal);
+      fs.rmdirSync(indexPath);
+      await store.flush();
+      expect(fs.existsSync(walPath)).toBe(false);
+      const reopened = new HnswVectorAdapter(tmpDir, { M: 4 });
+      try {
+        reopened.initSync();
+        expect(await reopened.getById('recovered')).toMatchObject({
+          content: 'from WAL',
+          vector: [1, 0],
+        });
+      } finally {
+        reopened.destroy();
+      }
+    } finally {
+      if (fs.existsSync(indexPath) && fs.statSync(indexPath).isDirectory()) {
+        fs.rmdirSync(indexPath);
+      }
+      store.destroy();
+    }
   });
 
   it('should create WAL file when walEnabled=true', async () => {

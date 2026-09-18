@@ -126,11 +126,6 @@ interface AstPatternRecord {
   [key: string]: unknown;
 }
 
-// biome-ignore lint/correctness/noUnusedVariables: 完整复制迁移保留调用点记录结构，后续阶段可能恢复调用链分析。
-interface AstCallSiteRecord {
-  [key: string]: unknown;
-}
-
 interface AstReferenceRecord {
   [key: string]: unknown;
 }
@@ -756,68 +751,7 @@ function _renderInheritanceTree(edges: InheritanceEdge[]) {
 // 内部实现 — 代码质量指标
 // ──────────────────────────────────────────────────────────────────
 
-function _estimateComplexity(node: TreeSitterNode) {
-  let complexity = 1;
-  const BRANCH_TYPES = new Set([
-    'if_statement',
-    'for_statement',
-    'for_in_statement',
-    'while_statement',
-    'switch_statement',
-    'case_statement',
-    'catch_clause',
-    'conditional_expression',
-    'ternary_expression',
-    'guard_statement',
-    // ObjC specific
-    'for_in_expression',
-  ]);
-
-  function walk(n: TreeSitterNode) {
-    if (BRANCH_TYPES.has(n.type)) {
-      complexity++;
-    }
-    // && / || 也增加复杂度
-    if (n.type === 'binary_expression') {
-      const op = n.children?.find(
-        (c: TreeSitterNode) =>
-          c.type === '&&' || c.type === '||' || c.text === '&&' || c.text === '||'
-      );
-      if (op) {
-        complexity++;
-      }
-    }
-    for (let i = 0; i < n.namedChildCount; i++) {
-      walk(n.namedChild(i)!);
-    }
-  }
-
-  walk(node);
-  return complexity;
-}
-
-function _maxNesting(node: TreeSitterNode, depth: number) {
-  const NESTING_TYPES = new Set([
-    'if_statement',
-    'for_statement',
-    'for_in_statement',
-    'while_statement',
-    'switch_statement',
-  ]);
-
-  let max = depth;
-  const nextDepth = NESTING_TYPES.has(node.type) ? depth + 1 : depth;
-
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const childMax = _maxNesting(node.namedChild(i)!, nextDepth);
-    if (childMax > max) {
-      max = childMax;
-    }
-  }
-
-  return max;
-}
-
+// 复杂度/嵌套由各语言插件随方法记录产出；这里只聚合，不维护第二套未调用的遍历算法。
 function _computeMetrics(root: TreeSitterNode, lang: string, methods: AstMethodRecord[]) {
   const defs = methods.filter((m) => m.kind === 'definition');
   const totalBodyLines = defs.reduce((sum: number, m) => sum + (m.bodyLines || 0), 0);
@@ -836,16 +770,13 @@ function _aggregateMetrics(fileSummaries: AstFileSummary[]): AggregatedMetrics {
   const allMethods = fileSummaries.flatMap((f) => f.methods.filter((m) => m.kind === 'definition'));
   const allClasses = fileSummaries.flatMap((f) => f.classes);
 
-  const methodsByClass: Record<string, number> = {};
+  const methodsByClass = new Map<string, number>();
   for (const m of allMethods) {
     if (m.className) {
-      if (!methodsByClass[m.className]) {
-        methodsByClass[m.className] = 0;
-      }
-      methodsByClass[m.className]++;
+      methodsByClass.set(m.className, (methodsByClass.get(m.className) ?? 0) + 1);
     }
   }
-  const classCounts = Object.values(methodsByClass);
+  const classCounts = [...methodsByClass.values()];
 
   return {
     totalMethods: allMethods.length,
@@ -909,7 +840,6 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
   if (!parser) {
     return [];
   }
-
   const tree = parser.parse(source);
   if (!tree) {
     return [];
@@ -924,6 +854,7 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
       if (
         [
           'class_declaration',
+          'class_definition',
           'struct_declaration',
           'class_interface',
           'class_implementation',
@@ -937,10 +868,10 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
         'call_expression',
         'message_expression',
         'function_call_expression',
+        'method_invocation',
       ].includes(node.type);
       if (isCallLike) {
-        const nodeText = node.text || '';
-        if (nodeText.includes(targetCallee)) {
+        if (readDirectCalleeNames(node).some((name) => matchesCallTarget(name, targetCallee))) {
           results.push({
             line: node.startPosition.row + 1,
             snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
@@ -949,18 +880,13 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
         }
       }
 
-      // 对 Swift，也检查 member_access + call 的组合，如 URLSession.shared.data(...)
-      if (node.type === 'navigation_expression' || node.type === 'member_expression') {
-        const nodeText = node.text || '';
-        if (nodeText.includes(targetCallee)) {
-          // 只有当父节点是 call 时才算
-          const parent = node.parent;
-          if (parent && ['call_expression', 'function_call_expression'].includes(parent.type)) {
-            // 已在 call_expression 中处理，跳过避免重复
-          } else {
+      if (lang === 'dart') {
+        // Dart 把 callee 与调用参数表示为兄弟 selector，不能按正文包含关系推断。
+        for (const call of readDartDirectCalls(node)) {
+          if (call.names.some((name) => matchesCallTarget(name, targetCallee))) {
             results.push({
-              line: node.startPosition.row + 1,
-              snippet: lines[node.startPosition.row]?.trim().slice(0, 120) || '',
+              line: call.node.startPosition.row + 1,
+              snippet: lines[call.node.startPosition.row]?.trim().slice(0, 120) || '',
               enclosingClass: currentClass,
             });
           }
@@ -977,6 +903,160 @@ function findCallExpressions(source: string, lang: string, targetCallee: string)
   } finally {
     tree.delete();
   }
+}
+
+function readDirectCalleeNames(node: TreeSitterNode): string[] {
+  if (node.type === 'method_invocation') {
+    const method = readDirectCallableName(node.childForFieldName('name'));
+    const receiver = readDirectCallableName(node.childForFieldName('object'));
+    return method ? (receiver ? [method, `${receiver}.${method}`] : [method]) : [];
+  }
+  if (node.type === 'message_expression') {
+    const method = node.childForFieldName('method');
+    if (!method) {
+      return [];
+    }
+    // ObjC selector 的参数名/值不是方法名；只读取 method 后紧邻冒号的 selector 段。
+    const parts = node.children.filter(
+      (child) =>
+        child.type === 'identifier' &&
+        child.startIndex >= method.startIndex &&
+        child.nextSibling?.type === ':'
+    );
+    const selector =
+      parts.length > 0 ? `${parts.map((part) => part.text).join(':')}:` : method.text;
+    const names = [selector, method.text];
+    const receiver = readDirectCallableName(node.childForFieldName('receiver'));
+    return receiver ? [...names, ...names.map((name) => `${receiver}.${name}`)] : names;
+  }
+  // TS/JS/Go/Rust 使用 function 字段；Swift/Kotlin 的第一个命名子节点是 callee。
+  const callable = unwrapDirectCallableNode(
+    node.childForFieldName('function') ?? node.namedChild(0)
+  );
+  const name = readDirectCallableName(callable);
+  if (name) {
+    return [name, name.split(/\.|::/).at(-1)!];
+  }
+  // 接收者可以是动态表达式，但callee节点上的selector仍是确切方法名。
+  // 这里只读语法字段，不从接收者调用的参数正文猜测目标API。
+  const suffix =
+    callable?.childForFieldName('suffix') ??
+    callable?.namedChildren.find((child) => child.type === 'navigation_suffix');
+  let selector =
+    callable?.childForFieldName('property') ??
+    callable?.childForFieldName('field') ??
+    suffix?.childForFieldName('suffix') ??
+    suffix?.namedChildren.find((child) => child.type === 'simple_identifier') ??
+    null;
+  if (callable?.type === 'subscript_expression') {
+    const index = callable.childForFieldName('index');
+    selector =
+      index?.type === 'string' &&
+      index.namedChildCount === 1 &&
+      index.namedChild(0)?.type === 'string_fragment'
+        ? index.namedChild(0)
+        : null;
+  }
+  const member = selector?.text ?? '';
+  if (!/^[\p{ID_Start}_$][\p{ID_Continue}$]*$/u.test(member)) {
+    return [];
+  }
+  const receiver = readDirectCallableName(
+    callable?.childForFieldName('object') ??
+      callable?.childForFieldName('operand') ??
+      callable?.childForFieldName('value') ??
+      callable?.childForFieldName('target') ??
+      callable?.namedChild(0) ??
+      null
+  );
+  return receiver ? [member, `${receiver}.${member}`] : [member];
+}
+
+function readDartDirectCalls(node: TreeSitterNode) {
+  const calls: { node: TreeSitterNode; names: string[] }[] = [];
+  let callee: string | null = null;
+  let start: TreeSitterNode | null = null;
+  for (const child of node.namedChildren) {
+    if (child.type === 'cascade_selector' && node.type === 'cascade_section') {
+      const method = child.namedChild(0);
+      const name = method?.type === 'identifier' ? readDirectCallableName(method) : null;
+      const siblings = node.parent?.namedChildren ?? [];
+      // 只给单一明确 receiver 添加限定名，复杂表达式保留实际 selector 的方法名。
+      const receiver =
+        siblings.findIndex((item) => item.type === 'cascade_section') === 1
+          ? readDirectCallableName(siblings[0])
+          : null;
+      callee = name ? (receiver ? `${receiver}.${name}` : name) : null;
+      start = method ?? null;
+      continue;
+    }
+    if (['identifier', 'type_identifier', 'this', 'super'].includes(child.type)) {
+      callee = readDirectCallableName(child);
+      start = child;
+      continue;
+    }
+    if (
+      ![
+        'selector',
+        'argument_part',
+        'unconditional_assignable_selector',
+        'conditional_assignable_selector',
+      ].includes(child.type)
+    ) {
+      callee = null;
+      start = null;
+      continue;
+    }
+    const part = child.type === 'selector' ? child.namedChild(0) : child;
+    if (part?.type === 'argument_part') {
+      if (callee && start && part.namedChildren.some((item) => item.type === 'arguments')) {
+        calls.push({ node: start, names: [callee, callee.split('.').at(-1)!] });
+      }
+      // 调用结果后的 .method 只保留其方法名，不虚构动态 receiver 的限定路径。
+      callee = null;
+      start = null;
+    } else if (
+      part &&
+      ['unconditional_assignable_selector', 'conditional_assignable_selector'].includes(part.type)
+    ) {
+      const member = part.namedChild(0);
+      const name = member?.type === 'identifier' ? readDirectCallableName(member) : null;
+      callee = name ? (callee ? `${callee}.${name}` : name) : null;
+      start ??= member;
+    } else {
+      callee = null;
+      start = null;
+    }
+  }
+  return calls;
+}
+
+function unwrapDirectCallableNode(node: TreeSitterNode | null): TreeSitterNode | null {
+  // Rust泛型调用的function字段保留实际callee，类型实参不属于调用名。
+  while (node) {
+    if (node.type === 'parenthesized_expression' && node.namedChildCount === 1) {
+      node = node.namedChild(0);
+    } else if (node.type === 'generic_function') {
+      node = node.childForFieldName('function');
+    } else {
+      break;
+    }
+  }
+  return node;
+}
+function readDirectCallableName(node: TreeSitterNode | null): string | null {
+  node = unwrapDirectCallableNode(node);
+  const name = node?.text.replace(/\s+/g, '').replace(/\?\./g, '.') ?? '';
+  // 限定为标识符/限定名。getFactory("target")() 这类动态callee不从参数正文推断API名。
+  return /^[\p{ID_Start}_$][\p{ID_Continue}$]*(?:(?:\.|::)[\p{ID_Start}_$][\p{ID_Continue}$]*)*$/u.test(
+    name
+  )
+    ? name
+    : null;
+}
+
+function matchesCallTarget(name: string, target: string): boolean {
+  return name === target || name.startsWith(`${target}.`) || name.startsWith(`${target}::`);
 }
 
 /**

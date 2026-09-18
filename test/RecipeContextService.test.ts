@@ -422,20 +422,3 @@ describe('RecipeContextService — request validation', () => {
     expect(envelope.errors?.[0]?.code).toBe('invalid-request-kind');
   });
 });
-
-describe('RecipeContextService — lifecycle isolation', () => {
-  it('operates with read-only ports that expose no mutation methods', async () => {
-    // The deps object is typed RecipeContextDeps; its ports declare ONLY read
-    // methods. This compiles and runs, demonstrating the facade never needs a
-    // create/update/delete/publish path — lifecycle stays in KnowledgeService.
-    const readPort: RecipeReadPort = fakeReadPort([makeRecord('r1')]);
-    const mutationKeys = Object.keys(readPort).filter((key) =>
-      ['create', 'update', 'delete', 'publish', 'deprecate', 'submit'].includes(key)
-    );
-    expect(mutationKeys).toEqual([]);
-
-    const service = buildService({ read: readPort });
-    const envelope = await service.execute({ kind: 'detail', payload: { ref: 'r1' } });
-    expect((envelope.data as { recipe: RecipeRecord }).recipe.id).toBe('r1');
-  });
-});

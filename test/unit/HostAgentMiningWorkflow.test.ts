@@ -139,6 +139,50 @@ describe('host-agent mining workflow core', () => {
     );
   });
 
+  test.each([
+    {
+      name: 'custom-only dimensions',
+      activeDimensions: [
+        { id: 'custom-late', tierHint: 4 },
+        { id: 'custom-early', tierHint: 2 },
+        { id: 'custom-default' },
+      ],
+      expected: [
+        { tier: 1, dimensions: ['custom-default'] },
+        { tier: 2, dimensions: ['custom-early'] },
+        { tier: 4, dimensions: ['custom-late'] },
+      ],
+    },
+    {
+      name: 'mixed fixed and custom dimensions',
+      activeDimensions: [
+        { id: 'agent-guidelines' },
+        { id: 'custom-four', tierHint: 4 },
+        { id: 'architecture' },
+        { id: 'custom-architecture', tierHint: 1 },
+      ],
+      expected: [
+        { tier: 1, dimensions: ['architecture', 'custom-architecture'] },
+        { tier: 4, dimensions: ['custom-four'] },
+        { tier: 5, dimensions: ['agent-guidelines'] },
+      ],
+    },
+  ])('schedules every public briefing task for $name using its actual tier', ({
+    activeDimensions,
+    expected,
+  }) => {
+    const briefing = buildMissionBriefing({
+      projectMeta: { primaryLanguage: 'typescript' },
+      activeDimensions,
+      session: { toJSON: () => ({ id: 'custom-tier-session' }) },
+    });
+    const tiers = briefing.executionPlan.tiers as Array<{ tier: number; dimensions: string[] }>;
+    expect(tiers.map(({ tier, dimensions }) => ({ tier, dimensions }))).toEqual(expected);
+    expect(tiers.flatMap((tier) => tier.dimensions).sort()).toEqual(
+      briefing.dimensions.map((dimension) => dimension.id).sort()
+    );
+  });
+
   test('projects Codex-visible submission instructions to the real MCP tool name', () => {
     const coldStart = presentHostAgentColdStartResponse({
       cleanupResult: { deletedFiles: 0, clearedTables: [], errors: [] },

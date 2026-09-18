@@ -15,9 +15,18 @@
  * @module infrastructure/vector/AsyncPersistence
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, relative } from 'node:path';
 import type { WriteZone } from '../io/WriteZone.js';
+import Logger from '../logging/Logger.js';
 
 // ── WAL 操作类型 ──
 export const WAL_OP = Object.freeze({
@@ -60,10 +69,12 @@ export class AsyncPersistence {
   #indexPath;
   /** WAL 文件路径 (.wal) */
   #walPath;
-  /** 待刷盘操作队列 */
-  #pendingOps: Record<string, unknown>[] = [];
+  /** 保留追加时的原始 WAL 字节，避免调用方后来修改 op 影响未确认批次。 */
+  #pendingOps: string[] = [];
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
-  #flushing = false;
+  #flushPromise: Promise<void> | null = null;
+  #destroyed = false;
+  #recovered = false;
   /** flush 间隔 (ms) */
   #flushIntervalMs;
   /** 触发立即 flush 的操作数 */
@@ -124,7 +135,7 @@ export class AsyncPersistence {
 
   /** 是否正在刷盘 */
   get isFlushing() {
-    return this.#flushing;
+    return this.#flushPromise !== null;
   }
 
   /**
@@ -143,8 +154,19 @@ export class AsyncPersistence {
       return;
     }
 
-    this.#pendingOps.push(op);
-    this.#writeWalEntry(op);
+    let entry = '';
+    try {
+      const json = JSON.stringify(op);
+      entry = `${json}\t${crc32(json)}\n`;
+    } catch (error) {
+      // 保留一次完整快照请求；无法序列化的输入不能伪造可重放 WAL。
+      Logger.getInstance().warn('[AsyncPersistence] WAL serialization failed; snapshot required', {
+        indexPath: this.#indexPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    this.#pendingOps.push(entry);
+    this.#writeWalEntry(entry);
     this.#scheduleFlush();
   }
 
@@ -152,31 +174,35 @@ export class AsyncPersistence {
    * 将单条 WAL 条目追加到磁盘 WAL 文件
    * 格式: JSON\tCRC32_HEX\n
    */
-  #writeWalEntry(op: Record<string, unknown>) {
+  #writeWalEntry(entry: string) {
+    if (!entry) {
+      return;
+    }
     try {
-      const json = JSON.stringify(op);
-      const checksum = crc32(json);
-      const entry = `${json}\t${checksum}\n`;
       if (this.#wz) {
         const rel = relative(this.#wz.dataRoot, this.#walPath);
         this.#wz.appendFile(this.#wz.data(rel), entry);
       } else {
         appendFileSync(this.#walPath, entry, 'utf-8');
       }
-    } catch {
+    } catch (error) {
       // 写入失败非致命: 操作已在内存队列, flush 时会写入完整文件
+      Logger.getInstance().warn('[AsyncPersistence] WAL append failed; snapshot required', {
+        indexPath: this.#indexPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   /** 调度 flush (debounced) */
-  #scheduleFlush() {
-    if (this.#flushing) {
+  #scheduleFlush(afterFailure = false) {
+    if (this.#destroyed || this.#flushPromise || this.#pendingOps.length === 0) {
       return;
     }
 
     // 积累够多操作时立即 flush
-    if (this.#pendingOps.length >= this.#flushBatchSize) {
-      this.#doFlush();
+    if (!afterFailure && this.#pendingOps.length >= this.#flushBatchSize) {
+      this.#flushInBackground();
       return;
     }
 
@@ -186,48 +212,85 @@ export class AsyncPersistence {
     }
     this.#flushTimer = setTimeout(() => {
       this.#flushTimer = null;
-      this.#doFlush();
+      this.#flushInBackground();
     }, this.#flushIntervalMs);
     if (this.#flushTimer?.unref) {
       this.#flushTimer.unref();
     }
   }
 
-  /** 执行 flush: 写入完整 .asvec + 清理 WAL */
-  async #doFlush() {
-    if (this.#flushing) {
-      return;
+  /** 定时器没有调用方接收错误；保留 WAL，并记录可手动重试的失败。 */
+  #flushInBackground() {
+    void this.#doFlush().catch((error: unknown) => {
+      Logger.getInstance().warn('[AsyncPersistence] background flush failed; WAL retained', {
+        indexPath: this.#indexPath,
+        pendingCount: this.#pendingOps.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  /** 执行一个批次；并发 flush 共享同一 Promise，不能提前报告落盘完成。 */
+  #doFlush(): Promise<void> {
+    if (this.#flushPromise) {
+      return this.#flushPromise;
     }
     if (this.#pendingOps.length === 0) {
+      return Promise.resolve();
+    }
+    this.#cancelTimer();
+    const ops = this.#pendingOps.splice(0);
+    let failed = false;
+    this.#flushPromise = this.#persistBatch()
+      .catch((error: unknown) => {
+        // 原批次仍排在 await 期间追加的新操作之前，保持重放顺序。
+        this.#pendingOps.unshift(...ops);
+        failed = true;
+        throw error;
+      })
+      .finally(() => {
+        this.#flushPromise = null;
+        // 失败按间隔重试，避免满批时立即递归重试；新追加批次也不能搁置。
+        this.#scheduleFlush(failed);
+      });
+    return this.#flushPromise;
+  }
+
+  async #persistBatch() {
+    await this.#onPersist();
+    // 只确认本次快照开始前取出的批次。同步替换期间不会交错新的 append。
+    if (this.#pendingOps.length === 0) {
+      this.#clearWal();
       return;
     }
-
-    this.#flushing = true;
-    const ops = this.#pendingOps.splice(0);
-
-    try {
-      // 调用外部 persist 回调写入完整 .asvec
-      await this.#onPersist();
-
-      // 成功后清理 WAL 文件
-      this.#clearWal();
-    } catch {
-      // persist 失败: WAL 文件保留, 下次启动时可以 replay
-      // 将 ops 放回队列头部
-      this.#pendingOps.unshift(...ops);
-    } finally {
-      this.#flushing = false;
+    const remaining = this.#pendingOps.join('');
+    const temporaryPath = `${this.#walPath}.tmp`;
+    if (this.#wz) {
+      const temporary = this.#wz.data(relative(this.#wz.dataRoot, temporaryPath));
+      const target = this.#wz.data(relative(this.#wz.dataRoot, this.#walPath));
+      this.#wz.writeFile(temporary, remaining);
+      this.#wz.rename(temporary, target);
+    } else {
+      writeFileSync(temporaryPath, remaining, 'utf8');
+      renameSync(temporaryPath, this.#walPath);
     }
   }
 
   /** 手动触发 flush (用于关闭/测试) */
   async flush() {
-    // 取消待执行的定时器
+    this.#cancelTimer();
+    // 当前快照写入期间可能追加新批次；关闭方必须等这些批次也完成。
+    while (this.#flushPromise || this.#pendingOps.length > 0) {
+      await this.#doFlush();
+    }
+    this.#cancelTimer();
+  }
+
+  #cancelTimer() {
     if (this.#flushTimer) {
       clearTimeout(this.#flushTimer);
       this.#flushTimer = null;
     }
-    await this.#doFlush();
   }
 
   /**
@@ -237,7 +300,7 @@ export class AsyncPersistence {
    * @returns }
    */
   recover() {
-    if (!this.#enabled) {
+    if (!this.#enabled || this.#recovered) {
       return { replayed: 0, skipped: 0 };
     }
     if (!existsSync(this.#walPath)) {
@@ -272,18 +335,32 @@ export class AsyncPersistence {
         try {
           const op = JSON.parse(json);
           this.#onReplay(op);
+          this.#pendingOps.push(`${line}\n`);
           replayed++;
         } catch {
           skipped++;
         }
       }
 
-      // replay 完成后清理 WAL
+      this.#recovered = true;
+      // 重放仅恢复内存；成功写入完整快照后才可确认这些记录。
       if (replayed > 0 || skipped > 0) {
-        this.#clearWal();
+        Logger.getInstance().info(
+          '[AsyncPersistence] WAL replayed; awaiting snapshot confirmation',
+          {
+            indexPath: this.#indexPath,
+            replayed,
+            skipped,
+          }
+        );
+        this.#scheduleFlush(true);
       }
-    } catch {
+    } catch (error) {
       // WAL 文件读取失败, 跳过恢复
+      Logger.getInstance().warn('[AsyncPersistence] WAL recovery read failed; journal retained', {
+        indexPath: this.#indexPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
 
     return { replayed, skipped };
@@ -298,17 +375,19 @@ export class AsyncPersistence {
       } else if (existsSync(this.#walPath)) {
         unlinkSync(this.#walPath);
       }
-    } catch {
-      // 删除失败非致命
+    } catch (error) {
+      // 快照已保存；旧 WAL 留存最多导致幂等重放，不能误报为主快照失败。
+      Logger.getInstance().warn('[AsyncPersistence] confirmed WAL cleanup failed', {
+        indexPath: this.#indexPath,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   /** 销毁: 清理定时器 */
   destroy() {
-    if (this.#flushTimer) {
-      clearTimeout(this.#flushTimer);
-      this.#flushTimer = null;
-    }
+    this.#destroyed = true;
+    this.#cancelTimer();
   }
 
   /**
@@ -316,10 +395,7 @@ export class AsyncPersistence {
    * 注意: 只清理定时器, 不执行实际 persist (由调用方负责)
    */
   destroySync() {
-    if (this.#flushTimer) {
-      clearTimeout(this.#flushTimer);
-      this.#flushTimer = null;
-    }
+    this.destroy();
   }
 }
 

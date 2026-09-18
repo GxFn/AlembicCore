@@ -5,6 +5,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import Logger from '../../../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../../../shared/LanguageService.js';
 
 interface CodeBlock {
@@ -35,11 +36,12 @@ interface ExtractOpts {
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
-const _SNIPPET_HEADING_RE = /^##\s+(?:Snippet|Code|代码)/im;
 const USAGE_HEADING_RE = /^##\s+(?:Usage\s*Guide|用法|使用指南)/im;
 const FENCED_CODE_RE = /```(\w*)\n([\s\S]*?)```/;
 
 export class RecipeParser {
+  readonly #logger = Logger.getInstance();
+
   /**
    * 检查文本是否为完整 Recipe MD
    * 需包含: frontmatter + 代码块 + Usage Guide
@@ -118,8 +120,12 @@ export class RecipeParser {
     if (!text) {
       return [];
     }
-    const segments = text.split(/\n---\n/).filter((s: string) => s.trim().length > 0);
-    return segments.map((s: string) => this.parse(s)).filter((r): r is ParsedRecipe => r !== null);
+    // YAML 的关闭标记、围栏内的分隔线和正文水平线都不是 Recipe 边界。
+    // 先识别文档，再筛选真正的 Markdown，原始源码才能进入提取兜底而不丢失 code。
+    return splitRecipeDocuments(text)
+      .filter((segment) => FRONTMATTER_RE.test(segment) || FENCED_CODE_RE.test(segment))
+      .map((segment) => this.parse(segment))
+      .filter((recipe): recipe is ParsedRecipe => recipe !== null);
   }
 
   /** 解析 frontmatter YAML */
@@ -181,22 +187,25 @@ export class RecipeParser {
     const ext = path.extname(fullPath).toLowerCase();
     const language = LanguageService.langFromExt(ext);
 
-    // 尝试解析为完整 Recipe Markdown
-    if (this.isCompleteRecipe(content)) {
-      const parsed = this.parse(content);
-      if (parsed) {
-        return { items: [parsed], isMarked: false };
-      }
-    }
-
-    // 尝试多段解析
-    const allRecipes = this.parseAll(content);
+    // 已知源码中的注释/字符串也可含 Markdown 围栏，不能因此丢掉源码主体。
+    // 显式 frontmatter 仍表达 Recipe 文档意图；其余文档沿用单篇/多篇分段协议。
+    const preserveSourceFile =
+      LanguageService.isSourceExt(ext) &&
+      // 只统一文档标记检测的换行；源码 fallback 仍返回未经改写的原始 content。
+      !FRONTMATTER_RE.test(content.trim().replace(/\r\n/g, '\n'));
+    const allRecipes = preserveSourceFile ? [] : this.parseAll(content);
     if (allRecipes.length > 0) {
       return { items: allRecipes, isMarked: false };
     }
 
     // 回退: 将整个文件内容作为代码片段
     const title = path.basename(fullPath, ext);
+    this.#logger.debug('[RecipeParser] Using complete file content for extraction', {
+      source: fullPath,
+      language,
+      bytes: Buffer.byteLength(content, 'utf8'),
+      reason: preserveSourceFile ? 'source-file-boundary' : 'no-recipe-markdown',
+    });
     return {
       items: [
         {
@@ -224,18 +233,10 @@ export class RecipeParser {
       throw new Error('文本内容为空');
     }
 
-    // 尝试完整 Recipe 解析
-    if (this.isCompleteRecipe(text)) {
-      const parsed = this.parse(text);
-      if (parsed) {
-        return parsed;
-      }
-    }
-
-    // 尝试批量解析
+    // 保留单篇完整 Markdown 的对象返回契约；多篇即使首篇完整也返回独立条目数组。
     const all = this.parseAll(text);
     if (all.length > 0) {
-      return all;
+      return all.length === 1 && this.isCompleteRecipe(text) ? all[0] : all;
     }
 
     throw new Error('文本不是有效的 Recipe Markdown 格式');
@@ -254,7 +255,10 @@ export class RecipeParser {
       const result = await this.parseFromText(text, opts);
       return result;
     } catch {
-      /* 继续兜底逻辑 */
+      this.#logger.debug('[RecipeParser] Using snippet fallback after Recipe Markdown rejection', {
+        language,
+        bytes: Buffer.byteLength(text, 'utf8'),
+      });
     }
 
     // 提取代码块
@@ -307,4 +311,73 @@ export class RecipeParser {
       .replace(/(^_|_$)/g, '')
       .slice(0, 30);
   }
+}
+
+function splitRecipeDocuments(text: string): string[] {
+  const documents: string[] = [];
+  const lines = text.split(/\r?\n/);
+  let current: string[] = [];
+  let inFrontmatter = false;
+  let fence: string | null = null;
+  const flush = () => {
+    const document = current.join('\n').trim();
+    if (document) {
+      documents.push(document);
+    }
+    current = [];
+  };
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    const delimiter = line.trim() === '---';
+    const fenceMatch = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fence) {
+      current.push(line);
+      if (
+        fenceMatch &&
+        fenceMatch[1][0] === fence[0] &&
+        fenceMatch[1].length >= fence.length &&
+        line.slice(fenceMatch[0].length).trim() === ''
+      ) {
+        fence = null;
+      }
+      continue;
+    }
+    if (inFrontmatter) {
+      current.push(line);
+      if (delimiter) {
+        inFrontmatter = false;
+      }
+      continue;
+    }
+    if (fenceMatch) {
+      fence = fenceMatch[1];
+      current.push(line);
+      continue;
+    }
+    if (delimiter) {
+      let nextIndex = index + 1;
+      while (nextIndex < lines.length && !lines[nextIndex].trim()) {
+        nextIndex++;
+      }
+      const next = lines[nextIndex]?.trim() ?? '';
+      const nextIsYaml = /^[A-Za-z_][\w-]*\s*:/.test(next);
+      if (current.every((candidate) => !candidate.trim())) {
+        current = [line];
+        inFrontmatter = true;
+        continue;
+      }
+      if (nextIsYaml || next === '---' || /^#\s+\S/.test(next) || /^`{3,}/.test(next)) {
+        flush();
+        if (nextIsYaml) {
+          current.push(line);
+          inFrontmatter = true;
+        }
+        continue;
+      }
+    }
+    current.push(line);
+  }
+  flush();
+  return documents;
 }

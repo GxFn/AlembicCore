@@ -737,6 +737,20 @@ export class GuardCheckEngine {
 
           for (const g of guards) {
             const ruleType = (g.type as string) || 'regex';
+            // Constraints 的持久格式使用 snake_case；兼容旧 adapter 的 camelCase 数据。
+            const astQuery = g.astQuery ?? g.ast_query;
+            if ((!g.astQuery && g.ast_query) || (!g.fixSuggestion && g.fix_suggestion)) {
+              this.logger.debug('Guard reads persisted constraint field names', {
+                entryId: r.id,
+                ruleId: g.id || r.id,
+                astField: g.astQuery ? 'astQuery' : g.ast_query ? 'ast_query' : undefined,
+                fixField: g.fixSuggestion
+                  ? 'fixSuggestion'
+                  : g.fix_suggestion
+                    ? 'fix_suggestion'
+                    : undefined,
+              });
+            }
             const lang = r.language as string | undefined;
             const isDecaying = (r as Record<string, unknown>).lifecycle === 'decaying';
             const rawSeverity = (g.severity || 'warning') as string;
@@ -748,14 +762,14 @@ export class GuardCheckEngine {
               severity: isDecaying && rawSeverity === 'error' ? 'warning' : rawSeverity,
               dimension: (r.scope || 'file') as string,
               source: 'database',
-              fixSuggestion: (g.fixSuggestion || null) as string | null,
+              fixSuggestion: (g.fixSuggestion || g.fix_suggestion || null) as string | null,
             };
 
-            if (ruleType === 'ast' && g.astQuery) {
+            if (ruleType === 'ast' && astQuery) {
               astRules.push({
                 ...base,
                 type: 'ast',
-                astQuery: g.astQuery as GuardRule['astQuery'],
+                astQuery: astQuery as GuardRule['astQuery'],
               });
             } else if (g.pattern) {
               regexRules.push({ ...base, type: 'regex', pattern: g.pattern as string });
@@ -808,15 +822,16 @@ export class GuardCheckEngine {
       }
     }
 
-    // 按语言过滤（标准化比较：objc == objectivec == objective-c）
+    // AST 和正则共享同一适用性筛选，不能在 disabled/language 过滤后重新加入缓存规则。
+    rules.push(...(this._astRulesCache ?? []));
+
+    // 按规范语言比较（objc/objective-c、ts/typescript 等别名走同一路径）。
     if (language) {
-      const langNorm = LanguageService.toGuardLangId(language);
+      const langNorm = LanguageService.normalize(language);
       rules = rules.filter(
         (r) =>
           !r.languages?.length ||
-          r.languages.includes(language) ||
-          r.languages.includes(langNorm) ||
-          r.languages.some((l: string) => LanguageService.toGuardLangId(l) === langNorm)
+          r.languages.some((ruleLanguage) => LanguageService.normalize(ruleLanguage) === langNorm)
       );
     }
 
@@ -825,17 +840,6 @@ export class GuardCheckEngine {
     if (Array.isArray(disabledRules) && disabledRules.length > 0) {
       const disabledSet = new Set(disabledRules);
       rules = rules.filter((r) => !disabledSet.has(r.id || r.name));
-    }
-
-    // 合并 AST 规则（供外部调用者使用，如 GuardFeedbackLoop.查找 fixSuggestion）
-    if (this._astRulesCache?.length) {
-      let astRules = this._astRulesCache;
-      if (language) {
-        astRules = astRules.filter(
-          (r: GuardRule) => !r.languages?.length || r.languages.includes(language)
-        );
-      }
-      rules.push(...astRules);
     }
 
     return rules;
@@ -987,7 +991,7 @@ export class GuardCheckEngine {
     );
 
     // AST 语义规则检查（Layer 1: 3 查询函数）
-    violations.push(...this._runAstRuleChecks(code, language));
+    violations.push(...this._runAstRuleChecks(code, language, rules));
 
     // AST Layer 2: analyzeFile() 深层检查（复杂度、类膨胀、深嵌套）
     violations.push(...this._runAstLayer2Checks(code, language, filePath));
@@ -1014,21 +1018,14 @@ export class GuardCheckEngine {
    * @param language 语言标识
    * @returns violations
    */
-  _runAstRuleChecks(code: string, language: string) {
-    // AST 语言标准化 — 通过 LanguageService 判断是否为已知编程语言
-    const astLang = LanguageService.isKnownLang(language)
-      ? language
-      : language === 'objc'
-        ? 'objectivec'
-        : language;
+  _runAstRuleChecks(code: string, language: string, rules = this.getRules(language)) {
+    const astLang = LanguageService.normalize(language);
     if (!LanguageService.isKnownLang(astLang)) {
       return [];
     }
 
-    // 获取缓存中的 AST 规则
-    const astRules = (this._astRulesCache || []).filter(
-      (r: GuardRule) => !r.languages?.length || r.languages.includes(language)
-    );
+    // 这里只消费已通过 scope/path/test/disabled/language 筛选的规则，不能回读原始缓存。
+    const astRules = rules.filter((rule) => rule.type === 'ast');
     if (astRules.length === 0) {
       return [];
     }
@@ -1078,6 +1075,7 @@ export class GuardCheckEngine {
     }
 
     const violations: GuardViolation[] = [];
+    let failedChecks = 0;
 
     for (const rule of astRules) {
       const { astQuery } = rule;
@@ -1166,12 +1164,27 @@ export class GuardCheckEngine {
             this.logger.debug(`Unknown AST query type: ${astQuery.queryType}`);
         }
       } catch (err: unknown) {
-        this.logger.debug(`AST rule ${rule.id} check failed: ${(err as Error).message}`);
+        failedChecks++;
+        const detail = err instanceof Error ? err.message : String(err);
+        const reason =
+          err &&
+          typeof err === 'object' &&
+          'code' in err &&
+          err.code === 'AST_CALL_QUERY_UNAVAILABLE'
+            ? 'lang_unsupported'
+            : 'ast_unavailable';
+        this.logger.debug(`AST rule ${rule.id} check failed: ${detail}`);
+        this._uncertaintyCollector.recordSkip('ast', reason, detail, { ruleId: rule.id });
+        this._uncertaintyCollector.addUncertain(rule.id, rule.message, 'ast', reason, detail);
       }
     }
 
     // AST 层统计
-    this._uncertaintyCollector.recordLayerStats('ast', astRules.length, astRules.length);
+    this._uncertaintyCollector.recordLayerStats(
+      'ast',
+      astRules.length,
+      astRules.length - failedChecks
+    );
 
     return violations;
   }

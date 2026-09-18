@@ -21,16 +21,24 @@ function _walkPyNode(node: any, ctx: any, parentClassName: any) {
 
     switch (child.type) {
       case 'import_statement': {
-        const modNode = child.namedChildren.find((c: any) => c.type === 'dotted_name');
-        if (modNode) {
-          // import mod / import mod as alias
-          const aliasNode = child.namedChildren.find((c: any) => c.type === 'aliased_import');
+        // 每个name都是独立模块；aliased_import把路径和alias包在同一个节点里。
+        for (const imported of child.namedChildren) {
+          const modNode =
+            imported.type === 'aliased_import'
+              ? imported.childForFieldName('name')
+              : imported.type === 'dotted_name'
+                ? imported
+                : null;
+          if (!modNode) {
+            continue;
+          }
           const alias =
-            aliasNode?.namedChildren?.find((c: any) => c.type === 'identifier')?.text || null;
+            imported.type === 'aliased_import' ? imported.childForFieldName('alias')?.text : null;
           ctx.imports.push(
             new ImportRecord(modNode.text, {
               symbols: ['*'],
-              alias: alias || modNode.text.split('.').pop(),
+              // import a.b把a绑定到当前作用域；显式as才改为指定本地名字。
+              alias: alias || modNode.text.split('.')[0],
               kind: 'namespace',
             })
           );
@@ -39,33 +47,51 @@ function _walkPyNode(node: any, ctx: any, parentClassName: any) {
       }
 
       case 'import_from_statement': {
-        const modNode = child.namedChildren.find(
-          (c: any) => c.type === 'dotted_name' || c.type === 'relative_import'
-        );
+        const modNode =
+          child.childForFieldName('module_name') ??
+          child.namedChildren.find(
+            (c: any) => c.type === 'dotted_name' || c.type === 'relative_import'
+          );
         if (modNode) {
           const importPath = modNode.text;
           // from mod import A, B, C
-          const importedNames: any | '*'[] = [];
+          const importedNames: string[] = [];
+          const initialImportCount = ctx.imports.length;
+          const flushNames = () => {
+            if (importedNames.length > 0) {
+              ctx.imports.push(
+                new ImportRecord(importPath, {
+                  symbols: [...importedNames],
+                  kind: importedNames.includes('*') ? 'namespace' : 'named',
+                })
+              );
+              importedNames.length = 0;
+            }
+          };
           for (const c of child.namedChildren) {
-            if (c.type === 'dotted_name' && c !== modNode) {
+            if (c.type === 'dotted_name' && c.id !== modNode.id) {
               importedNames.push(c.text);
             } else if (c.type === 'aliased_import') {
-              const nameNode = c.namedChildren.find(
-                (n: any) => n.type === 'dotted_name' || n.type === 'identifier'
-              );
+              const nameNode = c.childForFieldName('name');
               if (nameNode) {
-                importedNames.push(nameNode.text);
+                // 单一alias字段只绑定当前符号，不能扩散到同语句其他导入。
+                flushNames();
+                ctx.imports.push(
+                  new ImportRecord(importPath, {
+                    symbols: [nameNode.text],
+                    alias: c.childForFieldName('alias')?.text ?? null,
+                    kind: 'named',
+                  })
+                );
               }
             } else if (c.type === 'wildcard_import') {
               importedNames.push('*');
             }
           }
-          ctx.imports.push(
-            new ImportRecord(importPath, {
-              symbols: importedNames.length > 0 ? importedNames : [],
-              kind: importedNames.includes('*') ? 'namespace' : 'named',
-            })
-          );
+          flushNames();
+          if (ctx.imports.length === initialImportCount) {
+            ctx.imports.push(new ImportRecord(importPath, { symbols: [], kind: 'named' }));
+          }
         }
         break;
       }
@@ -280,16 +306,16 @@ function detectPyPatterns(root: any, lang: any, methods: any, properties: any, c
   }
 
   // Context Manager: __enter__ + __exit__
-  const classMethodMap: Record<string, any> = {};
+  // 类名是源代码标识符，constructor/__proto__等合法名字不能命中Object原型。
+  const classMethodMap = new Map<string, string[]>();
   for (const m of methods) {
     if (m.className) {
-      if (!classMethodMap[m.className]) {
-        classMethodMap[m.className] = [];
-      }
-      classMethodMap[m.className].push(m.name);
+      const names = classMethodMap.get(m.className) ?? [];
+      names.push(m.name);
+      classMethodMap.set(m.className, names);
     }
   }
-  for (const [cls, methodNames] of Object.entries(classMethodMap)) {
+  for (const [cls, methodNames] of classMethodMap) {
     if (
       (methodNames as string[]).includes('__enter__') &&
       (methodNames as string[]).includes('__exit__')

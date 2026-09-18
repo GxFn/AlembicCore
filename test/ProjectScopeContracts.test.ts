@@ -20,6 +20,45 @@ import {
   resolveProjectScopeSourceRef,
   summarizeProjectScopeDescriptor,
 } from '../src/shared/index.js';
+
+it('retains exact identities while reporting a colliding qualified source path as ambiguous', () => {
+  const identity = (folderId: string, folderPath: string, sourcePath = 'lib/index.ts') =>
+    createCanonicalSourceIdentity({
+      folderDisplayName: 'common',
+      folderId,
+      folderPath,
+      projectRoot: '/workspace',
+      projectScopeId: 'scope',
+      sourcePath,
+    });
+  const first = identity('folder-apps', '/workspace/apps/common');
+  const second = identity('folder-tools', '/workspace/tools/common');
+  const unique = identity('folder-tools', '/workspace/tools/common', 'lib/unique.ts');
+  for (const identities of [
+    [first, second, unique, first],
+    [second, first, unique],
+  ]) {
+    const index = buildProjectScopeSourceRefIndex(identities);
+    expect(resolveProjectScopeSourceRef('common/lib/index.ts', index)).toMatchObject({
+      status: 'ambiguous',
+      reason: 'ambiguous-path',
+      identity: null,
+    });
+    expect(resolveProjectScopeSourceRef('common/lib/unique.ts', index).identity).toEqual(unique);
+    expect(resolveProjectScopeSourceRef(first.absolutePath!, index).identity).toEqual(first);
+    expect(normalizeProjectScopeSourceRef(first.absolutePath!, index).normalizedRef).toBe(
+      first.absolutePath
+    );
+    expect(resolveProjectScopeSourceRef('/unregistered/index.ts', index).status).toBe('missing');
+  }
+  expect(
+    resolveProjectScopeSourceRef(
+      'common/lib/index.ts',
+      buildProjectScopeSourceRefIndex([first, first])
+    ).identity
+  ).toEqual(first);
+});
+
 import { auditRecipesForRescan } from '../src/workflows/surfaces/planning/knowledge/KnowledgeRescanPlanner.js';
 
 describe('ProjectScope multi-root contracts', () => {

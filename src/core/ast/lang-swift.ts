@@ -459,20 +459,6 @@ function detectSwiftPatterns(root: any, _lang: any, methods: any, properties: an
 
 // ── 工具函数 ──
 
-function _findIdentifier(node: any) {
-  for (let i = 0; i < node.namedChildCount; i++) {
-    const child = node.namedChild(i);
-    if (
-      child.type === 'identifier' ||
-      child.type === 'simple_identifier' ||
-      child.type === 'type_identifier'
-    ) {
-      return child.text;
-    }
-  }
-  return null;
-}
-
 function _estimateComplexity(node: any) {
   let complexity = 1;
   const BRANCH_TYPES = new Set([

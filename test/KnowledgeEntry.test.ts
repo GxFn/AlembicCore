@@ -1,5 +1,4 @@
 import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
-import { inferKind, isValidTransition } from '../src/domain/knowledge/Lifecycle.js';
 import { Constraints } from '../src/domain/knowledge/values/Constraints.js';
 import { Content } from '../src/domain/knowledge/values/Content.js';
 import { Quality } from '../src/domain/knowledge/values/Quality.js';
@@ -214,29 +213,6 @@ describe('Stats value object', () => {
  *  Lifecycle 状态机测试
  * ════════════════════════════════════════════ */
 
-describe('Lifecycle', () => {
-  test('inferKind maps correctly', () => {
-    expect(inferKind('code-standard')).toBe('rule');
-    expect(inferKind('code-pattern')).toBe('pattern');
-    expect(inferKind('code-relation')).toBe('fact');
-    expect(inferKind('unknown')).toBe('pattern');
-  });
-
-  test('valid transitions (3-state model)', () => {
-    expect(isValidTransition('pending', 'active')).toBe(true);
-    expect(isValidTransition('pending', 'deprecated')).toBe(true);
-    expect(isValidTransition('active', 'deprecated')).toBe(true);
-    expect(isValidTransition('deprecated', 'pending')).toBe(true);
-  });
-
-  test('invalid transitions (3-state model)', () => {
-    expect(isValidTransition('pending', 'pending')).toBe(false);
-    expect(isValidTransition('active', 'pending')).toBe(false);
-    expect(isValidTransition('deprecated', 'active')).toBe(false);
-    expect(isValidTransition('deprecated', 'deprecated')).toBe(false);
-  });
-});
-
 /* ════════════════════════════════════════════
  *  KnowledgeEntry 实体测试
  * ════════════════════════════════════════════ */
@@ -258,6 +234,21 @@ describe('KnowledgeEntry', () => {
   }
 
   describe('construction', () => {
+    test('keeps raw defaults and normalizes invalid lifecycle input', () => {
+      const empty = new KnowledgeEntry();
+      expect(empty).toMatchObject({
+        title: '',
+        lifecycle: 'pending',
+        knowledgeType: 'code-pattern',
+        kind: 'pattern',
+        complexity: 'intermediate',
+        tags: [],
+      });
+      expect(empty.createdAt).toBeGreaterThan(0);
+      expect(empty.updatedAt).toBeGreaterThanOrEqual(empty.createdAt);
+      expect(new KnowledgeEntry({ lifecycle: 'bogus' }).lifecycle).toBe('pending');
+    });
+
     test('creates with defaults', () => {
       const e = makeEntry();
       expect(e.id).toBeDefined();
@@ -271,9 +262,13 @@ describe('KnowledgeEntry', () => {
       expect(e.stats).toBeInstanceOf(Stats);
     });
 
-    test('infers kind from knowledgeType', () => {
-      const e = makeEntry({ knowledgeType: 'code-standard' });
-      expect(e.kind).toBe('rule');
+    test.each([
+      ['code-standard', 'rule'],
+      ['boundary-constraint', 'rule'],
+      ['code-relation', 'fact'],
+      ['architecture', 'pattern'],
+    ])('infers %s knowledge as %s', (knowledgeType, kind) => {
+      expect(makeEntry({ knowledgeType }).kind).toBe(kind);
     });
 
     test('isValid checks title + content', () => {
@@ -402,6 +397,7 @@ describe('KnowledgeEntry', () => {
   describe('serialization', () => {
     test('toJSON → fromJSON round-trip preserves all fields', () => {
       const original = makeEntry({
+        id: 'test-id-1',
         trigger: '@singleton',
         description: '单例模式描述',
         tags: ['pattern', 'architecture'],
@@ -417,6 +413,9 @@ describe('KnowledgeEntry', () => {
         moduleName: 'FoundationKit',
         includeHeaders: true,
         source: 'bootstrap',
+        sourceFile: 'src/auth.ts',
+        createdBy: 'insight-agent',
+        lifecycleHistory: [{ from: 'pending', to: 'active', at: 1000 }],
       });
 
       const json = original.toJSON();
@@ -441,6 +440,11 @@ describe('KnowledgeEntry', () => {
       expect(restored.headers).toEqual(['#import <Foundation/Foundation.h>']);
       expect(restored.moduleName).toBe('FoundationKit');
       expect(restored.includeHeaders).toBe(true);
+      expect(restored.id).toBe('test-id-1');
+      expect(restored.source).toBe('bootstrap');
+      expect(restored.sourceFile).toBe('src/auth.ts');
+      expect(restored.createdBy).toBe('insight-agent');
+      expect(restored.lifecycleHistory).toEqual(original.lifecycleHistory);
     });
 
     test('fromJSON handles empty/null input', () => {

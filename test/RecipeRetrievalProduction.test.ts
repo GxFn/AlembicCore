@@ -905,7 +905,12 @@ describe('Recipe retrieval profile persistence and active transition', () => {
     });
     expect((await repository.findById(invalid.id))?.lifecycle).toBe('pending');
 
-    const validSource = recipeSource({ id: 'pending-valid', title: 'Valid retrieval profile' });
+    // 两条独立知识使用不同文件标识；本测试验证 readiness，不能依赖覆盖前一条的真相文件。
+    const validSource = recipeSource({
+      id: 'pending-valid',
+      title: 'Valid retrieval profile',
+      trigger: '@valid-retrieval-profile',
+    });
     const valid = await service.create(
       { ...validSource, retrievalProfile: nativeProfile(validSource) },
       { userId: 'producer' }

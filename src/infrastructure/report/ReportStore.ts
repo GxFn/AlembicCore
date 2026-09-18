@@ -140,10 +140,10 @@ export class ReportStore {
       for (const file of files) {
         const entries = this.#readJsonl(path.join(catDir, file));
         for (const e of entries) {
-          if (opts.from && e.timestamp < opts.from) {
+          if (opts.from !== undefined && e.timestamp < opts.from) {
             continue;
           }
-          if (opts.to && e.timestamp > opts.to) {
+          if (opts.to !== undefined && e.timestamp > opts.to) {
             continue;
           }
           count++;

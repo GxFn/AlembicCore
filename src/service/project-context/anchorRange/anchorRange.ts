@@ -22,6 +22,7 @@ import type {
   ProjectContextHandlerResult,
 } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import { sourceSliceProjectContextHandler } from '../sourceSlice/index.js';
 import type {
   AnchorRangePayloadAnchor,
@@ -597,16 +598,6 @@ function dedupeRelations(relations: readonly RelationSummary[]): RelationSummary
     relations,
     (relation) => relation.ref?.id ?? relation.label ?? relation.kind
   ).sort(compareRelations);
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
 }
 
 function dedupeBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {

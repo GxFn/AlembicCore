@@ -1,7 +1,18 @@
 import { v4 as uuidv4 } from 'uuid';
+import { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';
+import { isSqliteBusyError } from '../../infrastructure/database/DatabaseConnection.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
+import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
+import { FileWriteError } from '../../repository/knowledge/KnowledgeUnitOfWork.js';
+import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
+import {
+  ConflictError,
+  DivergenceError,
+  NotFoundError,
+  ValidationError,
+} from '../../shared/errors/index.js';
 import { unixNow } from '../../shared/utils/common.js';
+import { persistKnowledgeUpdate } from '../knowledge/persistKnowledgeUpdate.js';
 
 interface KnowledgeRepositoryLike {
   create(entry: unknown): Promise<{ id: string; title?: string }>;
@@ -36,6 +47,7 @@ interface AuditLoggerLike {
 }
 
 interface GuardCheckEngineLike {
+  clearCache?(): void;
   checkCode(
     code: string,
     language: string,
@@ -61,7 +73,7 @@ interface CreateRuleData {
   note?: string;
   sourceReason?: string;
   type?: string;
-  astQuery?: { queryType: string };
+  astQuery?: { queryType: string; params?: Record<string, string> };
   fixSuggestion?: string;
 }
 
@@ -76,6 +88,7 @@ interface ActionContext {
  * 具体 pattern 存在 constraints.guards[] 里
  */
 export class GuardService {
+  #fileStore: KnowledgeFileStore | null;
   _engine: GuardCheckEngineLike | null;
   auditLogger: AuditLoggerLike;
   gateway: unknown;
@@ -84,18 +97,20 @@ export class GuardService {
   /**
    * @param [deps] 可选依赖注入
    * @param [deps.guardCheckEngine] 核心引擎实例
+   * @param [deps.fileStore] 正式宿主的文件真相写入器；省略时保留旧 DB-only 行为并诊断
    */
   constructor(
     knowledgeRepository: KnowledgeRepositoryLike,
     auditLogger: AuditLoggerLike,
     gateway: unknown,
-    deps: { guardCheckEngine?: GuardCheckEngineLike } = {}
+    deps: { guardCheckEngine?: GuardCheckEngineLike; fileStore?: KnowledgeFileStore } = {}
   ) {
     this.knowledgeRepository = knowledgeRepository;
     this.auditLogger = auditLogger;
     this.gateway = gateway;
     this.logger = Logger.getInstance();
     this._engine = deps.guardCheckEngine || null;
+    this.#fileStore = deps.fileStore ?? null;
   }
 
   /** 创建新规则 → 创建一个 kind=rule, knowledgeType=boundary-constraint 的 KnowledgeEntry */
@@ -103,7 +118,6 @@ export class GuardService {
     try {
       this._validateCreateInput(data);
 
-      const { KnowledgeEntry } = await import('../../domain/knowledge/KnowledgeEntry.js');
       const entry = KnowledgeEntry.fromJSON({
         id: uuidv4(),
         title: data.name,
@@ -113,7 +127,12 @@ export class GuardService {
         kind: 'rule',
         knowledgeType: 'boundary-constraint',
         content: {
-          pattern: data.pattern || '',
+          // AST 约束本身就是规则正文；不能要求冗余 regex 或虚构占位代码才能入库。
+          ...(data.type === 'ast'
+            ? {
+                markdown: `${data.description}\n\n\`\`\`json\n${JSON.stringify(data.astQuery, null, 2)}\n\`\`\``,
+              }
+            : { pattern: data.pattern || '' }),
           rationale: data.note || data.sourceReason || '',
         },
         constraints: {
@@ -126,8 +145,8 @@ export class GuardService {
               severity: data.severity || 'warning',
               message: data.description || '',
               type: data.type || 'regex',
-              ...(data.astQuery ? { astQuery: data.astQuery } : {}),
-              ...(data.fixSuggestion ? { fixSuggestion: data.fixSuggestion } : {}),
+              ...(data.astQuery ? { ast_query: data.astQuery } : {}),
+              ...(data.fixSuggestion ? { fix_suggestion: data.fixSuggestion } : {}),
             },
           ],
         },
@@ -136,7 +155,8 @@ export class GuardService {
         createdBy: context.userId,
       });
 
-      const created = await this.knowledgeRepository.create(entry);
+      const created = await this.#createEntry(entry);
+      this._engine?.clearCache?.();
 
       await this.auditLogger.log({
         action: 'create_guard_rule',
@@ -167,7 +187,7 @@ export class GuardService {
         });
       }
 
-      await this.knowledgeRepository.update(ruleId, { lifecycle: 'active' });
+      await this.#updateEntry(ruleId, { lifecycle: 'active' }, 'guard.enable');
 
       await this.auditLogger.log({
         action: 'enable_guard_rule',
@@ -202,10 +222,14 @@ export class GuardService {
         throw new ValidationError('Disable reason is required');
       }
 
-      await this.knowledgeRepository.update(ruleId, {
-        lifecycle: 'deprecated',
-        rejectionReason: reason,
-      });
+      await this.#updateEntry(
+        ruleId,
+        {
+          lifecycle: 'deprecated',
+          rejectionReason: reason,
+        },
+        'guard.disable'
+      );
 
       await this.auditLogger.log({
         action: 'disable_guard_rule',
@@ -221,6 +245,91 @@ export class GuardService {
       this.logger.error('Error disabling guard rule', { ruleId, error: (error as Error).message });
       throw error;
     }
+  }
+
+  /** 旧构造保留 DB-only；宿主注入 writer 后，新规则先写文件，DB 失败显式报告可修复分歧。 */
+  async #createEntry(entry: KnowledgeEntry) {
+    if (!this.#fileStore) {
+      this.logger.warn('Guard creation uses legacy DB-only persistence: fileStore not configured', {
+        entryId: entry.id,
+        operation: 'guard.create',
+      });
+      return this.knowledgeRepository.create(entry);
+    }
+    try {
+      if (this.#fileStore.persist(entry) === null) {
+        throw new Error('Knowledge file store returned null');
+      }
+    } catch (error) {
+      this.logger.error('Guard creation aborted before DB insert: file persistence failed', {
+        entryId: entry.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new FileWriteError(`Knowledge file write failed during guard.create: ${entry.id}`, {
+        cause: error,
+      });
+    }
+    try {
+      const created = await this.knowledgeRepository.create(entry);
+      if (created?.id !== entry.id) {
+        throw new Error(
+          `KNOWLEDGE_CREATE_READBACK_MISMATCH: expected=${entry.id}, actual=${created?.id ?? 'missing'}`
+        );
+      }
+      return created;
+    } catch (error) {
+      const details = {
+        code: CORE_DIAGNOSTIC_CODES.knowledgeFileDbDivergence,
+        entryIds: [entry.id],
+        fileOpsCompleted: 1,
+        operation: 'guard.create',
+        reconcileVia: 'KnowledgeSyncService.sync',
+        sqliteBusy: isSqliteBusyError(error),
+      };
+      this.logger.error('Guard creation left file/DB divergence', {
+        ...details,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw new DivergenceError(
+        'Guard file persisted but DB insert failed — run knowledge sync to rebuild DB truth',
+        details,
+        { cause: error }
+      );
+    }
+  }
+
+  async #updateEntry(id: string, updates: Record<string, unknown>, operation: string) {
+    // 旧结构化 repository 可返回 void；只有启用 file-first 的新路径要求完整实体读回。
+    // 不能把旧接口的局部 DTO 伪装成 KnowledgeEntry，否则会覆盖未读出的知识字段。
+    await persistKnowledgeUpdate(
+      {
+        findById: async (entryId) => {
+          const entry = await this.knowledgeRepository.findById(entryId);
+          if (entry === null || entry instanceof KnowledgeEntry) {
+            return entry;
+          }
+          throw new ValidationError(
+            'Guard file-first mutation requires a complete KnowledgeEntry',
+            {
+              entryId,
+              operation,
+            }
+          );
+        },
+        update: async (entryId, data) => {
+          const saved = await this.knowledgeRepository.update(
+            entryId,
+            data instanceof KnowledgeEntry ? data.toJSON() : data
+          );
+          return saved instanceof KnowledgeEntry ? saved : null;
+        },
+      },
+      this.#fileStore,
+      id,
+      updates,
+      operation
+    );
+    this._engine?.clearCache?.();
   }
 
   /**
@@ -293,6 +402,13 @@ export class GuardService {
     for (const entry of guardEntries) {
       const guards = entry.constraints?.guards || [];
       for (const guard of guards) {
+        if (!guard.pattern) {
+          // DB-only 降级没有 AST 执行器；缺失 regex 不能被 RegExp(undefined) 当作空匹配。
+          this.logger.debug('DB-only Guard skipped rule without a regex pattern', {
+            entryId: entry.id,
+          });
+          continue;
+        }
         try {
           const regex = new RegExp(guard.pattern, 'gm');
           const codeMatches = [...code.matchAll(regex)];
@@ -305,7 +421,7 @@ export class GuardService {
               matches: codeMatches.map((m) => ({
                 match: m[0],
                 index: m.index,
-                line: code.substring(0, m.index).split('\\n').length,
+                line: code.substring(0, m.index).split('\n').length,
               })),
               matchCount: codeMatches.length,
             });

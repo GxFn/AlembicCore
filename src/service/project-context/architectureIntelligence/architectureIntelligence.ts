@@ -315,8 +315,7 @@ export class ArchitectureStyleClassifier {
     const map = facts.presenter.map;
     const repo = facts.presenter.repo;
     const edgeMetrics = collectModuleEdgeMetrics(facts);
-    const moduleCount =
-      map?.modules.length ?? facts.modules.length ?? facts.graph.modules?.length ?? 0;
+    const moduleCount = map?.modules.length ?? facts.modules.length;
     const edgeCount = map?.dependencySummary.edgeCount ?? edgeMetrics.edgeCount;
     const cycleCount = map?.cycles.length ?? 0;
     const layerCount = map?.layers.length ?? 0;
@@ -481,6 +480,20 @@ export class ComplexityAnalyzer {
     const facts = normalizeFacts(input);
     const edgeMetrics = collectModuleEdgeMetrics(facts);
     const cycleCounts = new Map<string, number>();
+    const moduleIdsByRef = new Map(
+      facts.modules.flatMap((module) => (module.ref ? [[module.ref.id, module.id] as const] : []))
+    );
+    // 项目 map 已提供有来源的环成员；同一环重复出现的模块引用只计一次。
+    for (const cycle of facts.presenter.map?.cycles ?? []) {
+      const members = new Set(
+        cycle.refs
+          .map((ref) => moduleIdsByRef.get(ref.id))
+          .filter((id): id is string => id !== undefined)
+      );
+      for (const moduleId of members) {
+        cycleCounts.set(moduleId, (cycleCounts.get(moduleId) ?? 0) + 1);
+      }
+    }
     const hotspotScores = collectHotspotScores(facts.presenter.map);
     const moduleMetrics = facts.modules.map((module): ModuleComplexityMetric => {
       const fileCount =

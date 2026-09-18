@@ -408,6 +408,8 @@ function isSupportedModuleFile(filePath: string): boolean {
   return [
     '.ts',
     '.tsx',
+    '.mts',
+    '.cts',
     '.js',
     '.jsx',
     '.mjs',

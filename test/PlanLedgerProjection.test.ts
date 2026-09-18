@@ -39,6 +39,84 @@ describe('Recipe status projection from stateless Plan intent', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('counts each recipe once per coverage bucket when its real records reference many source files', async () => {
+    const repositories = createAlembicRepositories(runtime.connection);
+    const modulePaths = ['Sources/BiliDiliApp', 'Packages/Shared'];
+    const intent: PlanIntent = {
+      ...completeBilidiliPlanIntent(),
+      dimensions: [
+        {
+          dimensionId: 'architecture',
+          priority: 1,
+          rationale: 'Shared architecture',
+          targetRecipes: 3,
+        },
+      ],
+      moduleBindings: modulePaths.map((modulePath) => ({
+        modulePath,
+        dimensions: ['architecture'],
+        targetRecipes: 3,
+        priority: 1,
+      })),
+    };
+    for (const [id, lifecycle] of [
+      ['current', 'active'],
+      ['stale', 'decaying'],
+    ] as const) {
+      await repositories.knowledgeRepository.create(
+        new KnowledgeEntry({
+          id,
+          title: `${id} architecture recipe`,
+          lifecycle,
+          dimensionId: 'architecture',
+          category: 'architecture',
+          content: {
+            pattern: 'struct SharedBoundary {}',
+            rationale: 'One recipe can reference multiple files.',
+          },
+        })
+      );
+      for (const sourcePath of [
+        `${modulePaths[0]}/${id}-a.swift`,
+        `${modulePaths[0]}/${id}-b.swift`,
+        `${modulePaths[0]}/${id}-c.swift`,
+        `${modulePaths[1]}/${id}-shared.swift`,
+      ]) {
+        repositories.recipeSourceRefRepository.upsert({
+          recipeId: id,
+          sourcePath,
+          status: 'active',
+          verifiedAt: 1,
+        });
+      }
+    }
+
+    const state = await projectPlanGenerationState({ intent, repositories });
+
+    expect(state.codeRecipeMapping).toHaveLength(8);
+    expect(state.coverage.generated).toBe(1);
+    expect(state.coverage.byDimension.architecture).toEqual({
+      planned: 3,
+      generated: 1,
+      stale: 1,
+      missing: 2,
+    });
+    for (const modulePath of modulePaths) {
+      expect(state.coverage.byModule[modulePath]).toMatchObject({
+        planned: 3,
+        generated: 1,
+        stale: 1,
+        missing: 2,
+      });
+      expect(state.coverage.byModuleDimension[modulePath].architecture).toEqual({
+        planned: 3,
+        generated: 1,
+        stale: 1,
+        missing: 2,
+      });
+    }
+  });
+
   it('projects generation state from existing recipe records without plan persistence', async () => {
     const repositories = createAlembicRepositories(runtime.connection);
     const signature = computeProjectContextSignature({

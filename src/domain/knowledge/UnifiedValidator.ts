@@ -73,6 +73,10 @@ export class UnifiedValidator {
     const errors: string[] = [];
     const warnings: string[] = [];
 
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+      return { pass: false, errors: ['候选为空或类型错误'], warnings };
+    }
+
     const systemInjected = new Set(options.systemInjectedFields || []);
 
     // ── Layer 1: 字段完整性 (基于 V3_FIELD_SPEC) ──
@@ -112,6 +116,13 @@ export class UnifiedValidator {
       const value = this.#getNestedValue(candidate, name);
       const missing = this.#isMissing(value, field);
 
+      // 可选字段允许缺省/空字符串，但已提供的错误类型仍须结构化拒绝。
+      // 必填字段保留既有缺失诊断，避免改变正常候选和历史错误文本的契约。
+      if (level !== FieldLevel.REQUIRED && this.#hasInvalidType(value, field.type)) {
+        errors.push(`字段类型错误: ${name} — 应为 ${field.type}`);
+        continue;
+      }
+
       if (!missing) {
         continue;
       }
@@ -146,7 +157,11 @@ export class UnifiedValidator {
     }
 
     // trigger 格式校验
-    if (candidate.trigger && !(candidate.trigger as string).startsWith('@')) {
+    if (
+      typeof candidate.trigger === 'string' &&
+      candidate.trigger &&
+      !candidate.trigger.startsWith('@')
+    ) {
       warnings.push(`trigger "${candidate.trigger}" 应以 @ 开头`);
     }
 
@@ -162,7 +177,7 @@ export class UnifiedValidator {
     }
 
     // language 校验
-    const lang = (candidate.language as string | undefined)?.toLowerCase();
+    const lang = this.#stringValue(candidate.language).toLowerCase();
     if (lang && !LanguageService.isKnownLang(lang) && lang !== 'objc' && lang !== 'markdown') {
       warnings.push(
         `language "${candidate.language}" — 请使用标准语言标识 (swift/typescript/python/java/kotlin 等)`
@@ -173,8 +188,7 @@ export class UnifiedValidator {
   // ── Layer 2: 内容质量启发式 ──────────────────────────────
 
   #checkContentQuality(candidate: Record<string, unknown>, errors: string[], warnings: string[]) {
-    const markdown =
-      ((candidate.content as Record<string, unknown> | undefined)?.markdown as string) || '';
+    const markdown = this.#stringValue(this.#getNestedValue(candidate, 'content.markdown'));
 
     // markdown ≥ markdownFloor 字符（下限来自 gate-rules 表，渲染值与原 200 一致）
     if (markdown && markdown.length > 0 && markdown.length < STAGE3_FIELD_POLICY.markdownFloor) {
@@ -216,7 +230,7 @@ export class UnifiedValidator {
 
     // coreCode 语法完整性
     {
-      const coreCode = ((candidate.coreCode as string) || '').trim();
+      const coreCode = this.#stringValue(candidate.coreCode).trim();
       if (coreCode) {
         const firstChar = coreCode[0];
         if (STAGE3_FIELD_POLICY.incompleteCoreCodeFirstChars.has(firstChar)) {
@@ -228,7 +242,7 @@ export class UnifiedValidator {
     }
 
     // 通用知识检测（正则来自 gate-rules 表，保留 i 标志）
-    const title = (candidate.title as string) || '';
+    const title = this.#stringValue(candidate.title);
     if (STAGE3_FIELD_POLICY.genericTitleRe.test(title.trim())) {
       errors.push(`标题过于通用: "${title}" — 请加上项目特定的上下文`);
     }
@@ -259,19 +273,17 @@ export class UnifiedValidator {
   // ── Layer 3: 去重 ────────────────────────────────────────
 
   #checkUniqueness(candidate: Record<string, unknown>, errors: string[]) {
-    const title = ((candidate.title as string) || '').toLowerCase().trim();
+    const title = this.#stringValue(candidate.title).toLowerCase().trim();
     if (title && this.#titles.has(title)) {
       errors.push(`标题重复: "${candidate.title}"`);
     }
 
-    const trigger = ((candidate.trigger as string) || '').toLowerCase().trim();
+    const trigger = this.#stringValue(candidate.trigger).toLowerCase().trim();
     if (trigger && this.#triggers.has(trigger)) {
       errors.push(`trigger 重复: "${candidate.trigger}"`);
     }
 
-    const pattern = (
-      ((candidate.content as Record<string, unknown> | undefined)?.pattern as string) || ''
-    ).trim();
+    const pattern = this.#stringValue(this.#getNestedValue(candidate, 'content.pattern')).trim();
     if (pattern.length >= STAGE3_FIELD_POLICY.patternFloor) {
       const fp = codeFingerprint(pattern);
       if (fp.length >= STAGE3_FIELD_POLICY.codeFingerprintFloor && this.#codeFingerprints.has(fp)) {
@@ -311,10 +323,28 @@ export class UnifiedValidator {
 
   // ── 工具函数 ─────────────────────────────────────────────
 
-  /**
-   * 获取嵌套字段值
-   * @param path 如 'content.markdown' 或 'reasoning.sources'
-   */
+  #stringValue(value: unknown): string {
+    // 字段层已记录错误；语义/去重层只检查真实字符串，不让单条坏 JSON 中断整批。
+    return typeof value === 'string' ? value : '';
+  }
+
+  #hasInvalidType(value: unknown, type: string | undefined): boolean {
+    if (value === undefined || value === null) {
+      return false;
+    }
+    if (type === 'string') {
+      return typeof value !== 'string';
+    }
+    if (type === 'array') {
+      return !Array.isArray(value);
+    }
+    if (type === 'object') {
+      return typeof value !== 'object' || Array.isArray(value);
+    }
+    return false;
+  }
+
+  /** 获取嵌套字段值，如 content.markdown 或 reasoning.sources。 */
   #getNestedValue(obj: Record<string, unknown>, path: string): unknown {
     const parts = path.split('.');
     let current: unknown = obj;

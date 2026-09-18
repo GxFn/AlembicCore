@@ -1,5 +1,4 @@
 import path from 'node:path';
-
 import type {
   DependencyCycleSummary,
   DependencySummary,
@@ -34,6 +33,7 @@ import {
   type ProjectContextModuleDependencyRollup,
   type ProjectContextModuleMapModule,
 } from '../shared/module-map/index.js';
+import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import type { MapRequestPayload } from './contracts.js';
 
 export const mapProjectContextHandler: ProjectContextHandler = async (
@@ -756,16 +756,6 @@ function dedupeModules(
   modules: readonly ProjectContextModuleMapModule[]
 ): ProjectContextModuleMapModule[] {
   return dedupeBy(modules, (moduleRecord) => moduleRecord.module.id).sort(compareModuleRecords);
-}
-
-function dedupeRefs(refs: readonly (ProjectContextRef | undefined)[]): ProjectContextRef[] {
-  return dedupeBy(
-    refs.filter((ref): ref is ProjectContextRef => ref !== undefined),
-    (ref) => ref.id
-  ).sort((left, right) => {
-    const kindOrder = left.kind.localeCompare(right.kind);
-    return kindOrder || left.id.localeCompare(right.id);
-  });
 }
 
 function dedupeErrors(errors: readonly ProjectContextQueryError[]): ProjectContextQueryError[] {

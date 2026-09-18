@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -24,6 +24,8 @@ import {
   GenerateSession,
   HostAgentSubmissionTracker,
   loadDimensionCheckpoints,
+  MiningSessionStore,
+  persistWorkflowResult,
   runHostAgentDimensionCompletionWorkflow,
   saveDimensionCheckpoint,
 } from '../src/host-agent-workflows.js';
@@ -190,6 +192,74 @@ describe('stable host-agent workflow entrypoint', () => {
 
       await clearDimensionCheckpoints(dataRoot);
       expect(await loadDimensionCheckpoints(dataRoot)).toEqual(new Map());
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    'snapshot-failed',
+    'snapshot-skipped',
+    'report-failed',
+    'saved',
+  ] as const)('cleans recovery checkpoints only after durable results: %s', async (outcome) => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-workflow-persistence-'));
+    try {
+      await saveDimensionCheckpoint(dataRoot, 'session-1', 'architecture', {
+        candidateCount: 1,
+        analysisText: 'Completed work requiring a durable recovery point',
+      });
+      await saveDimensionCheckpoint(dataRoot, 'another-session', 'quality', {
+        candidateCount: 1,
+        analysisText: 'Independent work sharing the configured data root',
+      });
+      if (outcome === 'report-failed') {
+        await mkdir(join(dataRoot, '.asd', 'bootstrap-report.json'));
+      }
+      const result = await persistWorkflowResult({
+        ctx: {
+          container: {
+            get: (name) => (name === 'database' && outcome !== 'snapshot-skipped' ? {} : null),
+          },
+        },
+        dataRoot,
+        projectRoot: dataRoot,
+        projectInfo: { name: 'fixture', fileCount: 0, lang: 'typescript' },
+        sessionId: 'session-1',
+        allFiles: [],
+        sessionStore: new MiningSessionStore(),
+        dimensionStats: {},
+        candidateResults: { created: 1, failed: 0, errors: [] },
+        skillResults: { created: 0, failed: 0 },
+        consolidationResult: null,
+        skippedDims: [],
+        incrementalSkippedDims: [],
+        enableParallel: false,
+        concurrency: 1,
+        startedAtMs: Date.now(),
+        createFileDiffPlanner: () => ({
+          saveSnapshot: () => {
+            if (outcome === 'snapshot-failed') {
+              throw new Error('snapshot persistence failed');
+            }
+            return 'snapshot-1';
+          },
+        }),
+      });
+      expect(result.snapshot.status).toBe(
+        outcome === 'snapshot-failed'
+          ? 'failed'
+          : outcome === 'snapshot-skipped'
+            ? 'skipped'
+            : 'saved'
+      );
+      expect(result.report === null).toBe(outcome === 'report-failed');
+      expect((await loadDimensionCheckpoints(dataRoot)).has('architecture')).toBe(
+        outcome !== 'saved'
+      );
+      expect((await loadDimensionCheckpoints(dataRoot)).get('quality')?.sessionId).toBe(
+        'another-session'
+      );
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
     }

@@ -20,6 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Logger from '../../infrastructure/logging/Logger.js';
+import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type { RecipeSourceRefRepositoryImpl } from '../../repository/sourceref/RecipeSourceRefRepository.js';
 import type {
@@ -28,6 +29,7 @@ import type {
   RecipeContentSnapshot,
   StructuredPatch,
 } from '../../types/evolution.js';
+import { persistKnowledgeUpdate } from '../knowledge/persistKnowledgeUpdate.js';
 import {
   computeSourceRegionFingerprint,
   parseSourceLineRange,
@@ -47,6 +49,7 @@ interface RecipeRow {
   content: string;
   sourceRefs: string;
   headers: string;
+  reasoning: Record<string, unknown>;
 }
 
 /** Proposal evidence 中携带 suggestedChanges 的项 */
@@ -77,6 +80,7 @@ const PATCHABLE_FIELDS = new Set([
 export class ContentPatcher {
   readonly #knowledgeRepo: KnowledgeRepositoryImpl;
   readonly #sourceRefRepo: RecipeSourceRefRepositoryImpl;
+  readonly #fileStore: KnowledgeFileStore | null;
   readonly #logger = Logger.getInstance();
   /**
    * P-B(2026-07-11 落锚 parity):update 提案执行后 #persistRecipe 重建 refs,
@@ -89,11 +93,12 @@ export class ContentPatcher {
   constructor(
     knowledgeRepo: KnowledgeRepositoryImpl,
     sourceRefRepo: RecipeSourceRefRepositoryImpl,
-    options: { projectRoot?: string } = {}
+    options: { projectRoot?: string; fileStore?: KnowledgeFileStore } = {}
   ) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#sourceRefRepo = sourceRefRepo;
     this.#projectRoot = options.projectRoot ?? null;
+    this.#fileStore = options.fileStore ?? null;
   }
 
   /**
@@ -144,7 +149,7 @@ export class ContentPatcher {
     }
 
     // 6. 持久化
-    await this.#persistRecipe(recipe);
+    await this.#persistRecipe(recipe, fieldsPatched.includes('sourceRefs'));
 
     // 7. 创建 after 快照
     const afterSnapshot = this.#createSnapshot(recipe);
@@ -397,9 +402,12 @@ export class ContentPatcher {
     if (!entry) {
       return null;
     }
-    // 从 recipe_source_refs 表读取关联的源引用路径
+    // 非空 reasoning.sources 优先；旧记录可能只有桥表，保留可用于显式引用补丁的视图。
+    // 该视图不能在正文补丁中自动覆盖 canonical reasoning（空数组也可能是显式清空）。
     const refs = this.#sourceRefRepo.findByRecipeId(entry.id);
-    const sourcePaths = refs.map((r) => r.sourcePath);
+    const sourcePaths = entry.reasoning?.sources?.length
+      ? entry.reasoning.sources
+      : refs.map((r) => r.sourcePath);
 
     return {
       id: entry.id,
@@ -411,23 +419,49 @@ export class ContentPatcher {
       content: JSON.stringify(entry.content || {}),
       sourceRefs: JSON.stringify(sourcePaths),
       headers: JSON.stringify(entry.headers || []),
+      reasoning: entry.reasoning?.toJSON?.() ?? { ...entry.reasoning },
     };
   }
 
-  async #persistRecipe(recipe: RecipeRow): Promise<void> {
-    await this.#knowledgeRepo.update(recipe.id, {
-      coreCode: recipe.coreCode,
-      doClause: recipe.doClause,
-      dontClause: recipe.dontClause,
-      whenClause: recipe.whenClause,
-      content: safeJsonParse(recipe.content, {}),
-      headers: safeJsonParse(recipe.headers, []),
-    });
+  async #persistRecipe(recipe: RecipeRow, sourceRefsPatched: boolean): Promise<void> {
+    const newPaths = safeJsonParse<string[]>(recipe.sourceRefs, []);
+    await persistKnowledgeUpdate(
+      this.#knowledgeRepo,
+      this.#fileStore,
+      recipe.id,
+      {
+        coreCode: recipe.coreCode,
+        doClause: recipe.doClause,
+        dontClause: recipe.dontClause,
+        whenClause: recipe.whenClause,
+        content: safeJsonParse(recipe.content, {}),
+        headers: safeJsonParse(recipe.headers, []),
+        reasoning: sourceRefsPatched
+          ? { ...recipe.reasoning, sources: newPaths }
+          : recipe.reasoning,
+      },
+      'content-patch'
+    );
+
+    if (
+      !sourceRefsPatched &&
+      newPaths.length > 0 &&
+      (!Array.isArray(recipe.reasoning.sources) || recipe.reasoning.sources.length === 0)
+    ) {
+      // 归一化后的 sources:[] 无法区分旧字段缺失与主动清空。
+      // 正文变更既不能删旧桥表，也不能据桥表复活 canonical 来源；显式 sourceRefs 补丁再对齐。
+      this.#logger.warn('ContentPatcher retained legacy source refs after content-only patch', {
+        recipeId: recipe.id,
+        legacyRefCount: newPaths.length,
+        canonicalSourceCount: 0,
+        nextAction: 'apply an explicit sourceRefs patch to reconcile source ownership',
+      });
+      return;
+    }
 
     // 同步 sourceRefs 到 recipe_source_refs 表(P-B:带 region 指纹落锚,
     // 让刚更新的知识立即可被漂移检测覆盖)。
-    const newPaths = safeJsonParse<string[]>(recipe.sourceRefs, []);
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
     this.#sourceRefRepo.deleteByRecipeId(recipe.id);
     for (const sourcePath of newPaths) {
       const contentFp = this.#sourceRefFingerprint(sourcePath);

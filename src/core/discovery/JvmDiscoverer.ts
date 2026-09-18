@@ -193,20 +193,12 @@ export class JvmDiscoverer extends ProjectDiscoverer {
         const content = readFileSync(settingsPath, 'utf8');
         // include ':app', ':lib:core', ...
         const includeMatches = content.matchAll(
-          /include\s*\(?[\s]*['"]([^'"]+)['"](?:\s*,\s*['"]([^'"]+)['"])*/g
+          /include\s*\(?\s*((?:['"][^'"]+['"](?:\s*,\s*)?)+)/g
         );
         for (const m of includeMatches) {
-          for (let i = 1; i < m.length; i++) {
-            if (m[i]) {
-              modules.push(m[i].replace(/^:/, ''));
-            }
-          }
-        }
-        // include(":app")
-        const includeKtsMatches = content.matchAll(/include\s*\(\s*["']([^"']+)["']\s*\)/g);
-        for (const m of includeKtsMatches) {
-          if (m[1]) {
-            modules.push(m[1].replace(/^:/, ''));
+          // 重复捕获组只留下末项，先取整个字面量列表再逐项读取。
+          for (const entry of m[1].matchAll(/['"]([^'"]+)['"]/g)) {
+            modules.push(entry[1].replace(/^:/, ''));
           }
         }
       } catch {

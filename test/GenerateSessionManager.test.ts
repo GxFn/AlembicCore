@@ -326,6 +326,91 @@ describe('GenerateSessionManager durable lease lifecycle', () => {
     }
   });
 
+  it.each([
+    'lease-conflict',
+    'other-project',
+  ] as const)('keeps the live session attached after %s reloads the store', async (reloadReason) => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-session-reload-'));
+    try {
+      const projectRoot = join(dataRoot, 'repo');
+      const manager = new GenerateSessionManager({ dataRoot });
+      const session = manager.createSession({ projectRoot, dimensions });
+
+      if (reloadReason === 'lease-conflict') {
+        expect(() => manager.createSession({ projectRoot, dimensions })).toThrow(
+          GenerateSessionLeaseError
+        );
+      } else {
+        manager.createSession({ projectRoot: join(dataRoot, 'other'), dimensions });
+      }
+
+      session.markDimensionComplete('architecture', {
+        analysisText: 'Architecture progress recorded after the store was reloaded.',
+        referencedFiles: ['src/service.ts'],
+        keyFindings: ['The active session retains its persistence binding'],
+      });
+
+      expect(manager.getSession(session.id)).toBe(session);
+      const restored = new GenerateSessionManager({ dataRoot }).getSession(session.id);
+      expect(restored?.getProgress().completedDimIds).toEqual(['architecture']);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unknown completion dimensions without releasing the project lease', () => {
+    const manager = new GenerateSessionManager();
+    const session = manager.createSession({
+      projectRoot: '/tmp/session-dimension-check',
+      dimensions,
+    });
+    expect(() =>
+      session.markDimensionComplete('unknown', { analysisText: 'Invalid dimension' })
+    ).toThrow('Unknown dimensionId');
+    expect(session.getProgress()).toMatchObject({
+      completed: 0,
+      remainingDimIds: ['architecture', 'quality'],
+    });
+    expect(session.isComplete).toBe(false);
+    expect(() => manager.createSession({ projectRoot: session.projectRoot, dimensions })).toThrow(
+      GenerateSessionLeaseError
+    );
+  });
+
+  it('refreshes the live object from another manager before persisting later progress', async () => {
+    const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-session-external-update-'));
+    try {
+      const manager = new GenerateSessionManager({ dataRoot });
+      const session = manager.createSession({ projectRoot: join(dataRoot, 'repo'), dimensions });
+      const other = new GenerateSessionManager({ dataRoot }).getSession(session.id)!;
+      other.markDimensionComplete('architecture', { analysisText: 'Saved by the other manager' });
+      manager.createSession({ projectRoot: join(dataRoot, 'other-repo'), dimensions });
+      session.markDimensionComplete('quality', { analysisText: 'Saved by the original caller' });
+
+      expect(manager.getSession(session.id)).toBe(session);
+      const restored = new GenerateSessionManager({ dataRoot }).getSession(session.id)!;
+      expect(restored.getProgress().completedDimIds).toEqual(['architecture', 'quality']);
+      expect(restored.isComplete).toBe(true);
+    } finally {
+      await rm(dataRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('does not count unknown restored completions toward the declared dimensions', () => {
+    const manager = new GenerateSessionManager();
+    const session = manager.createSession({
+      projectRoot: '/tmp/session-restored-dimension-check',
+      dimensions: [dimensions[0]],
+      completedDimensions: { unknown: { analysisText: 'Old invalid completion', completedAt: 1 } },
+    });
+    expect(session.isComplete).toBe(false);
+    expect(session.getProgress()).toMatchObject({
+      completed: 0,
+      completedDimIds: [],
+      remainingDimIds: ['architecture'],
+    });
+  });
+
   it('allows a new same-project session after expiry or explicit release', async () => {
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-expiry-'));
     try {

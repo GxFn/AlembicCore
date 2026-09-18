@@ -31,6 +31,99 @@ describe('SourceGraphRepository', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('does not report an ignored generation insertion as a persisted empty graph', async () => {
+    const repo = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    runtime.connection
+      .getDb()
+      .exec(`CREATE TRIGGER ignore_generation BEFORE INSERT ON source_graph_generations
+      BEGIN SELECT RAISE(IGNORE); END;`);
+
+    await expect(
+      new SourceGraphService(repo).replaceSnapshot({
+        snapshot: {
+          generationId: 'ignored-generation',
+          projectRoot: tmpDir,
+          status: 'indexed',
+        },
+      })
+    ).rejects.toThrow('Source graph generation not found: ignored-generation');
+    expect(await repo.getSnapshot('ignored-generation')).toBeNull();
+  });
+
+  it.each([
+    'second-file',
+    'stats-refresh',
+  ] as const)('retains the complete previous generation when replacement fails at %s', async (fault) => {
+    const repo = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const service = new SourceGraphService(repo);
+    const snapshot = {
+      generationId: 'atomic-replace',
+      projectRoot: tmpDir,
+      status: 'indexed' as const,
+      indexedAt: 100,
+      metadata: { version: 'original' },
+    };
+    const file = (repoRelativePath: string) => ({
+      generationId: snapshot.generationId,
+      projectRoot: tmpDir,
+      repoRelativePath,
+      language: 'typescript',
+      contentHash: 'original',
+      sizeBytes: 50,
+      mtimeMs: 1,
+      indexedAt: 100,
+      classification: 'source' as const,
+      parseStatus: 'parsed' as const,
+    });
+    const symbol = {
+      generationId: snapshot.generationId,
+      symbolId: 'original-symbol',
+      displayName: 'Original',
+      kind: 'function',
+      filePath: 'src/original.ts',
+      range: { startLine: 1, startColumn: 0, endLine: 2, endColumn: 1 },
+    };
+    const edge = {
+      generationId: snapshot.generationId,
+      edgeId: 'original-edge',
+      kind: 'calls',
+      fromSymbolId: symbol.symbolId,
+      toSymbolId: symbol.symbolId,
+    };
+    const originalSnapshot = await service.replaceSnapshot({
+      snapshot,
+      files: [file('src/original.ts')],
+      symbols: [symbol],
+      edges: [edge],
+    });
+    const originalFiles = await repo.listFiles(snapshot.generationId);
+    const originalSymbols = await repo.listSymbols(snapshot.generationId);
+    const originalEdges = await repo.listEdges(snapshot.generationId);
+    runtime.connection.getDb().exec(
+      fault === 'second-file'
+        ? `CREATE TRIGGER reject_replacement BEFORE INSERT ON source_graph_files
+           WHEN NEW.repo_relative_path = 'src/second.ts'
+           BEGIN SELECT RAISE(ABORT, 'replacement fault'); END;`
+        : `CREATE TRIGGER reject_stats BEFORE UPDATE ON source_graph_generations
+           WHEN NEW.file_count = 2
+           BEGIN SELECT RAISE(ABORT, 'replacement fault'); END;`
+    );
+
+    await expect(
+      service.replaceSnapshot({
+        snapshot: { ...snapshot, indexedAt: 200, metadata: { version: 'replacement' } },
+        files: [file('src/first.ts'), file('src/second.ts')],
+        symbols: [],
+        edges: [],
+      })
+    ).rejects.toThrow('replacement fault');
+
+    expect(await repo.getSnapshot(snapshot.generationId)).toEqual(originalSnapshot);
+    expect(await repo.listFiles(snapshot.generationId)).toEqual(originalFiles);
+    expect(await repo.listSymbols(snapshot.generationId)).toEqual(originalSymbols);
+    expect(await repo.listEdges(snapshot.generationId)).toEqual(originalEdges);
+  });
+
   it('stores, queries, rebuilds, and clears dedicated source graph generations', async () => {
     const repositories = createAlembicRepositories(runtime.connection);
     const sourceGraphRepository = repositories.sourceGraphRepository;

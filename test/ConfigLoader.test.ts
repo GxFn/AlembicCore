@@ -51,4 +51,29 @@ describe('ConfigLoader', () => {
 
     expect(() => ConfigLoader.get('this.does.not.exist')).toThrow('Config key not found');
   });
+
+  test.each([
+    '__proto__.reviewProbe',
+    'constructor.prototype.reviewProbe',
+  ])('rejects prototype-writing config path %s', (key) => {
+    ConfigLoader.config = {};
+    try {
+      expect(() => ConfigLoader.set(key, 'polluted')).toThrow('Unsafe config key');
+      expect(({} as Record<string, unknown>).reviewProbe).toBeUndefined();
+    } finally {
+      delete (Object.prototype as Record<string, unknown>).reviewProbe;
+    }
+  });
+
+  test('rejects prototype-bearing JSON merge keys without changing object prototypes', () => {
+    const source = JSON.parse('{"__proto__":{"reviewProbe":"polluted"}}');
+    expect(() => ConfigLoader._deepMerge({}, source)).toThrow('Unsafe config key');
+    expect(({} as Record<string, unknown>).reviewProbe).toBeUndefined();
+  });
+
+  test('does not report inherited object members as configuration', () => {
+    ConfigLoader.config = {};
+    expect(ConfigLoader.has('toString')).toBe(false);
+    expect(() => ConfigLoader.get('constructor')).toThrow('Config key not found');
+  });
 });

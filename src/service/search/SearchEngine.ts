@@ -302,12 +302,19 @@ export class SearchEngine {
       };
     }
 
-    // 带 sessionHistory 的上下文搜索不缓存（个性化结果）
-    const hasSessionContext = (context?.sessionHistory?.length ?? 0) > 0;
+    // language/intent/category/tags 等也会影响排序；上下文契约允许扩展字段，
+    // 因此有上下文的请求统一绕过共享缓存，避免新排序信号遗漏在缓存键之外。
+    const hasRankingContext = context != null && Object.keys(context).length > 0;
     const filterCacheKey = this.#metadataFilterCacheKey(metadataFilters);
-    const cacheKey = hasSessionContext
+    const cacheKey = hasRankingContext
       ? null
       : `${query}:${type}:${limit}:${mode}:${shouldRank ? 'r' : ''}:${options.groupByKind ? 'g' : ''}:${filterCacheKey}`;
+    if (hasRankingContext) {
+      this.logger.debug('Search cache bypassed for ranking context', {
+        contextKeys: Object.keys(context),
+        mode,
+      });
+    }
     if (cacheKey) {
       const cached = this._getCache(cacheKey);
       if (cached) {
@@ -560,18 +567,21 @@ export class SearchEngine {
     if ((context?.sessionHistory?.length ?? 0) > 0) {
       ranked = contextBoost(ranked as SearchItem[], context) as SearchResultItem[];
     }
-    return ranked.map((r: SearchResultItem) => {
-      const baseScore = r.contextScore || r.rankerScore || r.coarseScore || r.recallScore || 0;
-      // G-C P1:源锚漂移降权(active 优先)。漂移≠错误(可能只是行号动了),故只降级
-      // 消费而不排除——乘性小惩罚保持相对序,仅在同分附近让 active 上浮。透出交现场判断。
-      const score =
-        r.sourceRefStatus === 'drifted' ? baseScore * DRIFTED_SOURCE_REF_SCORE_FACTOR : baseScore;
-      return {
-        ...r,
-        recallScore: r.recallScore || 0,
-        score,
-      };
-    });
+    // 降权必须作用于最终返回顺序，随后 search() 的 limit 才不会保留低分漂移项。
+    return ranked
+      .map((r: SearchResultItem) => {
+        const baseScore = r.contextScore || r.rankerScore || r.coarseScore || r.recallScore || 0;
+        // G-C P1:源锚漂移降权(active 优先)。漂移≠错误(可能只是行号动了),故只降级
+        // 消费而不排除——乘性小惩罚保持相对序,仅在同分附近让 active 上浮。透出交现场判断。
+        const score =
+          r.sourceRefStatus === 'drifted' ? baseScore * DRIFTED_SOURCE_REF_SCORE_FACTOR : baseScore;
+        return {
+          ...r,
+          recallScore: r.recallScore || 0,
+          score,
+        };
+      })
+      .sort((left, right) => right.score - left.score);
   }
 
   /**
@@ -714,13 +724,7 @@ export class SearchEngine {
     let results = this.scorer.search(query, limit * 2);
 
     if (type !== 'all') {
-      // All types now map to 'recipe' since everything is unified
-      results = results.filter((r: ScorerResult) => {
-        if (type === 'rule') {
-          return (r.meta as Record<string, unknown>).knowledgeType === 'boundary-constraint';
-        }
-        return (r.meta as Record<string, unknown>).type === 'recipe';
-      });
+      results = results.filter((r: ScorerResult) => this.#matchesTypeFilter(r.meta, type));
     }
     results = results.filter((r) =>
       this.#matchesMetadataRecord(r.meta as Record<string, unknown>, filters)
@@ -879,12 +883,7 @@ export class SearchEngine {
           }
           results = projection.items;
           if (type !== 'all') {
-            results = results.filter((r: SearchResultItem) => {
-              if (type === 'rule') {
-                return r.kind === 'rule';
-              }
-              return r.type === 'recipe';
-            });
+            results = results.filter((r: SearchResultItem) => this.#matchesTypeFilter(r, type));
           }
           results = this.#applyMetadataFilters(results, filters);
           results = results.slice(0, limit);
@@ -987,12 +986,7 @@ export class SearchEngine {
             }
             results = projection.items;
             if (type !== 'all') {
-              results = results.filter((r: SearchResultItem) => {
-                if (type === 'rule') {
-                  return r.kind === 'rule';
-                }
-                return r.type === 'recipe';
-              });
+              results = results.filter((r: SearchResultItem) => this.#matchesTypeFilter(r, type));
             }
             results = this.#applyMetadataFilters(results, filters);
             results = results.slice(0, limit);
@@ -1441,7 +1435,7 @@ export class SearchEngine {
    *
    * 策略:
    *  1. 如果尚未构建索引 → 全量 buildIndex()
-   *  2. 否则只加载 updatedAt > lastIndexTime 的条目 + 已删除(deprecated)条目
+   *  2. 否则加载 updatedAt >= lastIndexTime 所在秒的条目（含 deprecated，按 id 幂等）
    *     - 新增/更新 → scorer.updateDocument()
    *     - 已删除    → scorer.removeDocument()
    *  3. 清空缓存以确保搜索结果刷新
@@ -1632,7 +1626,13 @@ export class SearchEngine {
       // 2026-07-06 真机定案：type:'all' 被当真实条件传进向量道，而向量 metadata
       // 没有 type 字段 → 全部候选被灭、语义检索恒 0。哨兵进 filter 一律剔除。
       if (key === 'type') {
-        values = values.filter((value) => value !== 'all');
+        // recipe/solution/knowledge 都是 V3 统一知识集合的旧入口别名，不是物理 type 值。
+        // 数组按 OR 解释，任一全集别名已覆盖其余项；不能删掉别名后错误缩窄成仅 rule。
+        values = values.some(
+          (value) => value === 'recipe' || value === 'solution' || value === 'knowledge'
+        )
+          ? []
+          : values.filter((value) => value !== 'all');
       }
       if (values.length > 0) {
         filters[key] = values;

@@ -4,7 +4,7 @@
  * 与旧 BaseRepository 的区别：
  * - 构造器接收 DrizzleDB 而非 raw Database
  * - 子类应使用 Drizzle 类型安全 API 实现 CRUD
- * - 保留 rawQuery() 作为复杂查询逃生舱
+ * - 复杂查询通过 Drizzle 的 sql 模板和 all()/get() 执行
  * - 无 _assertSafeColumn() —— Drizzle 自带列类型约束
  */
 

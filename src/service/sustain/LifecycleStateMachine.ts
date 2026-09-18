@@ -1,19 +1,18 @@
 /**
- * LifecycleStateMachine — 唯一生命周期权威
+ * LifecycleStateMachine — 自动演化链路的生命周期入口
  *
- * 所有 Recipe lifecycle 变更必须且只能通过本类的 transition() 方法执行。
- * 替代旧的 RecipeLifecycleSupervisor（可选增强层 → 必需权威）。
+ * 演化触发方通过 transition() 统一检查状态、持久化并记录事件。
+ * 人工 KnowledgeService 操作仍共享同一实体转换表和文件优先边界。
  *
  * 核心职责:
  *   1. Guard 前置检查（合法状态转移验证）
- *   2. Exit Action（离开旧状态的副作用）
- *   3. DB 更新（lifecycle 字段）
- *   4. Entry Action（进入新状态的副作用）
- *   5. 记录 TransitionEvent（不可变审计日志）
- *   6. 发射 lifecycle Signal（集中信号源）
+ *   2. 合并离开/进入状态的元数据
+ *   3. Markdown 真相写入后更新 DB（旧独立调用方可显式观察 DB-only 兼容诊断）
+ *   4. 记录 TransitionEvent（不可变审计日志）
+ *   5. 发射 lifecycle Signal（集中信号源）
  *
  * 设计原则:
- *   - 所有依赖必需（non-nullable），消除 `?? null` 分支
+ *   - 正式宿主注入 fileStore；无 fileStore 的旧构造方式保持兼容并发出诊断
  *   - Guard 拒绝 = 操作失败，调用者不应 fallback 到 updateLifecycle()
  *   - lifecycle signal 仅从此处发射，服务层不直接操作 SignalBus
  *
@@ -26,6 +25,7 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { SignalBus } from '../../infrastructure/signal/SignalBus.js';
 import type { LifecycleEventRepository } from '../../repository/evolution/LifecycleEventRepository.js';
 import type { ProposalRepository } from '../../repository/evolution/ProposalRepository.js';
+import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import type {
   LifecycleHealthSummary,
@@ -35,6 +35,7 @@ import type {
   TransitionRequest,
   TransitionResult,
 } from '../../types/evolution.js';
+import { persistKnowledgeUpdate } from '../knowledge/persistKnowledgeUpdate.js';
 import {
   evaluateRecipeRetrievalReadiness,
   type RetrievalReadinessReport,
@@ -80,6 +81,7 @@ export class LifecycleStateMachine {
   readonly #eventRepo: LifecycleEventRepository;
   readonly #signalBus: SignalBus;
   readonly #proposalRepo: ProposalRepository;
+  readonly #fileStore: KnowledgeFileStore | null;
   readonly #logger = Logger.getInstance();
   readonly #retrievalReadinessEvaluator: (
     entry: NonNullable<Awaited<ReturnType<KnowledgeRepositoryImpl['findById']>>>
@@ -92,13 +94,15 @@ export class LifecycleStateMachine {
     proposalRepo: ProposalRepository,
     retrievalReadinessEvaluator: (
       entry: NonNullable<Awaited<ReturnType<KnowledgeRepositoryImpl['findById']>>>
-    ) => RetrievalReadinessReport = evaluateRecipeRetrievalReadiness
+    ) => RetrievalReadinessReport = evaluateRecipeRetrievalReadiness,
+    options: { fileStore?: KnowledgeFileStore } = {}
   ) {
     this.#knowledgeRepo = knowledgeRepo;
     this.#eventRepo = eventRepo;
     this.#signalBus = signalBus;
     this.#proposalRepo = proposalRepo;
     this.#retrievalReadinessEvaluator = retrievalReadinessEvaluator;
+    this.#fileStore = options.fileStore ?? null;
   }
 
   /* ═══════════════════ Core Transition ═══════════════════ */
@@ -109,11 +113,10 @@ export class LifecycleStateMachine {
    * 流程:
    *   1. 读取当前 lifecycle
    *   2. Guard: isValidTransition(from, to)
-   *   3. Exit Action
-   *   4. DB 更新
-   *   5. Entry Action
-   *   6. 记录 TransitionEvent
-   *   7. 发射 lifecycle signal
+   *   3. 合并退出/进入状态元数据
+   *   4. 文件优先写入 lifecycle 与元数据
+   *   5. 记录 TransitionEvent
+   *   6. 发射 lifecycle signal
    *
    * Guard 拒绝 → 返回 { success: false }
    * 调用者不应 fallback 到 updateLifecycle()
@@ -165,15 +168,44 @@ export class LifecycleStateMachine {
       }
     }
 
-    // 3. Exit Action
-    await this.#executeExitAction(recipeId, fromState);
-
-    // 4. 更新 lifecycle
+    // 离开/进入状态的元数据与 lifecycle 一起写入，文件失败前不留下局部 DB 更新。
     const now = Date.now();
-    await this.#knowledgeRepo.updateLifecycle(recipeId, targetState);
-
-    // 5. Entry Action
-    await this.#executeEntryAction(recipeId, targetState, now, proposalId);
+    // 旧 DB-only adapter 返回普通 JSON，正式仓储返回 Stats；两种读取面都保留。
+    const hasStatsSerializer = typeof current.stats?.toJSON === 'function';
+    const stats: Record<string, unknown> = {
+      ...(hasStatsSerializer ? current.stats.toJSON() : (current.stats ?? {})),
+    };
+    if (!hasStatsSerializer) {
+      this.#logger.debug('LifecycleStateMachine: using legacy plain stats', {
+        recipeId,
+        fromState,
+      });
+    }
+    if (fromState === 'active') {
+      stats.lastActiveAt = now;
+    }
+    const metaKey = ENTRY_META_KEYS[targetState];
+    if (metaKey) {
+      stats[metaKey] = now;
+    }
+    if (targetState === 'evolving' && proposalId) {
+      stats.evolvingProposalId = proposalId;
+    }
+    if (targetState === 'active') {
+      delete stats.evolvingStartedAt;
+      delete stats.evolvingProposalId;
+      delete stats.decayStartedAt;
+    }
+    if (targetState === 'deprecated') {
+      stats.deprecatedAt = now;
+    }
+    await persistKnowledgeUpdate(
+      this.#knowledgeRepo,
+      this.#fileStore,
+      recipeId,
+      { lifecycle: targetState, stats },
+      'lifecycle-transition'
+    );
 
     // 6. 记录 TransitionEvent
     const event = this.#recordEvent({
@@ -236,7 +268,7 @@ export class LifecycleStateMachine {
         const entryKey = ENTRY_META_KEYS[state];
         const enteredAt = (entryKey ? stats[entryKey] : null) as number | null;
 
-        const stateAge = enteredAt ? now - enteredAt : await this.#getRecipeAge(entry.id, now);
+        const stateAge = enteredAt ? now - enteredAt : this.#getRecipeAge(entry, now);
         if (stateAge > timeoutMs) {
           const transitionResult = await this.transition({
             recipeId: entry.id,
@@ -290,47 +322,6 @@ export class LifecycleStateMachine {
     const proposalMetrics = this.#getProposalMetrics();
 
     return { stateDistribution, intermediateStates, recentTransitions, proposalMetrics };
-  }
-
-  /* ═══════════════════ Entry/Exit Actions ═══════════════════ */
-
-  async #executeEntryAction(
-    recipeId: string,
-    state: string,
-    now: number,
-    proposalId?: string | null
-  ): Promise<void> {
-    const metaKey = ENTRY_META_KEYS[state];
-    if (!metaKey) {
-      return;
-    }
-
-    const entry = await this.#knowledgeRepo.findById(recipeId);
-    const stats = (entry?.stats ?? {}) as unknown as Record<string, unknown>;
-    stats[metaKey] = now;
-
-    if (state === 'evolving' && proposalId) {
-      stats.evolvingProposalId = proposalId;
-    }
-    if (state === 'active') {
-      delete stats.evolvingStartedAt;
-      delete stats.evolvingProposalId;
-      delete stats.decayStartedAt;
-    }
-    if (state === 'deprecated') {
-      stats.deprecatedAt = now;
-    }
-
-    await this.#knowledgeRepo.update(recipeId, { stats } as unknown as Record<string, unknown>);
-  }
-
-  async #executeExitAction(recipeId: string, state: string): Promise<void> {
-    if (state === 'active') {
-      const entry = await this.#knowledgeRepo.findById(recipeId);
-      const stats = (entry?.stats ?? {}) as unknown as Record<string, unknown>;
-      stats.lastActiveAt = Date.now();
-      await this.#knowledgeRepo.update(recipeId, { stats } as unknown as Record<string, unknown>);
-    }
   }
 
   /* ═══════════════════ Event Recording ═══════════════════ */
@@ -418,7 +409,7 @@ export class LifecycleStateMachine {
         const stats = (entry.stats ?? {}) as unknown as Record<string, unknown>;
         const metaKey = ENTRY_META_KEYS[state];
         const enteredAt = (metaKey ? stats[metaKey] : null) as number | null;
-        const age = enteredAt ? now - enteredAt : now - (entry.updatedAt || now);
+        const age = enteredAt ? now - enteredAt : this.#getRecipeAge(entry, now);
 
         if (age > thresholdMs) {
           stuckCount++;
@@ -491,9 +482,22 @@ export class LifecycleStateMachine {
     }
   }
 
-  async #getRecipeAge(recipeId: string, now: number): Promise<number> {
-    const entry = await this.#knowledgeRepo.findById(recipeId);
-    return entry ? now - (entry.updatedAt || now) : 0;
+  #getRecipeAge(entry: { id: string; updatedAt: number }, now: number): number {
+    if (!entry.updatedAt) {
+      return 0;
+    }
+    // KnowledgeEntry / repository 的持久化时间是 Unix 秒；旧导入数据也可能是毫秒。
+    // 只在读取观察时长时统一量纲，保留历史存储值，避免新条目被当成存活了数十年。
+    const updatedAt = entry.updatedAt;
+    const updatedAtMs = updatedAt < 1e12 ? updatedAt * 1000 : updatedAt;
+    if (updatedAt >= 1e12) {
+      this.#logger.debug('LifecycleStateMachine: using legacy millisecond updatedAt', {
+        recipeId: entry.id,
+        updatedAt,
+        ageMs: now - updatedAtMs,
+      });
+    }
+    return now - updatedAtMs;
   }
 
   /* ═══════════════════ Signal ═══════════════════ */

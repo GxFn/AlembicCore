@@ -1,7 +1,13 @@
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { DIMENSION_REGISTRY } from '../src/domain/dimension/index.js';
+import { buildProjectContextPresenterInput } from '../src/domain/project-context/index.js';
 import {
   buildDimensionEvidenceDensity,
+  buildPlanFactsProjection,
+  buildProjectInfoTree,
   type PlanProjectContextAnalysis,
 } from '../src/service/plan/facts/projectInfoTree.js';
 import type { DimensionDef } from '../src/types/ProjectSnapshot.js';
@@ -163,5 +169,63 @@ describe('BaseDimension adapter keeps layer and matchTopics', () => {
       expect(base.matchTopics).toEqual([...unified.matchTopics]);
     }
     expect(baseDimensions.every((dimension) => dimension.layer !== undefined)).toBe(true);
+  });
+});
+
+describe('plan facts tree budget metadata', () => {
+  it('reports omitted symbols before and after attaching the real full-tree artifact', async () => {
+    const projectRoot = mkdtempSync(path.join(tmpdir(), 'plan-tree-budget-'));
+    try {
+      const file = { filePath: 'src/main.ts', language: 'typescript', lineCount: 1 };
+      const signature = 'veryLongType'.repeat(500);
+      const analysis = makeAnalysis({ dimensions: [], files: [file], moduleCount: 1 });
+      analysis.moduleSeeds = [
+        { moduleName: 'source', modulePath: 'src', ownedFiles: [file.filePath] },
+      ];
+      analysis.presenterInput = buildProjectContextPresenterInput([]);
+      analysis.presenterInput.files = [file];
+      analysis.presenterInput.fileSymbols = [
+        {
+          file,
+          symbols: [
+            { filePath: file.filePath, name: 'largeSignature', kind: 'function', signature },
+          ],
+          naming: { warnings: [] },
+          nextRefs: [],
+        },
+      ];
+
+      // 大 symbol 一开始就放不下；附加 ref 本身仍有余量，不会触发第二次 prune。
+      const budgetBytes = 2_000;
+      const beforeAttachment = buildProjectInfoTree(analysis, budgetBytes);
+      const { projectInfoTree } = await buildPlanFactsProjection(analysis, {
+        budgetBytes,
+        scope: { projectRoot },
+      });
+      const fullTreeRef = projectInfoTree.meta.fullTreeRef;
+      expect(fullTreeRef).not.toBeNull();
+      const fullTreeText = readFileSync(fullTreeRef!.path, 'utf8');
+      expect(Buffer.byteLength(fullTreeText)).toBe(fullTreeRef!.bytes);
+      expect(JSON.parse(fullTreeText).children[0].children[0].children[0].signature).toBe(
+        signature
+      );
+      expect(Buffer.byteLength(JSON.stringify(projectInfoTree))).toBeLessThanOrEqual(budgetBytes);
+      expect([beforeAttachment.meta, projectInfoTree.meta]).toEqual([
+        expect.objectContaining({ omitted: { symbols: 1 }, truncated: true, fullTreeRef: null }),
+        expect.objectContaining({ omitted: { symbols: 1 }, truncated: true, fullTreeRef }),
+      ]);
+
+      const complete = await buildPlanFactsProjection(analysis, {
+        budgetBytes: 20_000,
+        scope: { projectRoot },
+      });
+      expect(complete.projectInfoTree.meta).toMatchObject({
+        omitted: {},
+        truncated: false,
+        fullTreeRef: null,
+      });
+    } finally {
+      rmSync(projectRoot, { force: true, recursive: true });
+    }
   });
 });

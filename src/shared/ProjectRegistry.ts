@@ -87,13 +87,7 @@ export function normalizeProjectPath(projectRoot: string): string {
 }
 
 export function generateProjectId(projectRoot: string): string {
-  let normalized: string;
-  try {
-    normalized = fs.realpathSync(projectRoot);
-  } catch {
-    normalized = path.resolve(projectRoot);
-  }
-  return createHash('sha256').update(normalized).digest('hex').slice(0, 8);
+  return createHash('sha256').update(normalizeProjectPath(projectRoot)).digest('hex').slice(0, 8);
 }
 
 function loadRegistry(): RegistryData {

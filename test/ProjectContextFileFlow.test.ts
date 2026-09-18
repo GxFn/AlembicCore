@@ -12,6 +12,53 @@ import { ProjectContext } from '../src/project-context.js';
 import { computeContentHash } from '../src/shared/contentHash.js';
 
 describe('ProjectContext PCQ-3 file-flow', () => {
+  it('does not project block-comment examples as public exports', async () => {
+    await withFixture(
+      { 'src/example.ts': '/*\nexport const phantom = 1;\n*/\nexport const real = 2;\n' },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        expect(
+          (data as FileFlowContext).outflow
+            .filter((relation) => relation.kind === 'exports')
+            .map((relation) => relation.from?.symbol)
+        ).toEqual(['real']);
+      }
+    );
+  });
+
+  it('binds a caller to its own class before considering another same-name method', async () => {
+    await withFixture(
+      {
+        'src/example.ts': [
+          'export class First { run() { return 1; } }',
+          'export class Second {',
+          '  run() { this.helper(); }',
+          '  helper() {}',
+          '}',
+        ].join('\n'),
+      },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const call = (data as FileFlowContext).callers.find(
+          (relation) => relation.to?.label === 'Second.helper'
+        );
+        expect(call?.from).toMatchObject({
+          label: 'Second.run',
+          qualifiedName: 'Second.run',
+          ref: { scope: { range: { startLine: 3 } } },
+        });
+      }
+    );
+  });
+
   it('returns TypeScript imports, exports, calls, relation refs, and source-slice drill-down', async () => {
     const source = [
       "import type { WorkerPort } from './ports';",

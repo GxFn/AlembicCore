@@ -18,9 +18,10 @@ AI provider、没有 CLI / Dashboard UI、没有 Codex/MCP 交付面。四道边
 - **知识生命周期** —— 单一 `KnowledgeEntry` 聚合，用 `lifecycle` 字段区分
   *candidate*（已提交、未发布）与 *recipe*（已发布、可执行）。统一候选校验
   （`validateCandidatesUnified`：批内去重 → V3 结构校验 → 字段/质量/唯一性
-  检查）、只作咨询绝不作门禁的质量评分，以及六态进化状态机
-  （staging → evolving → active → decaying → deprecated，外加 proposal
-  生成与 GC 清扫）。
+  检查）、质量反馈，以及六态生命周期（pending、staging、active、evolving、
+  decaying、deprecated）。配置质量评分器时，低质量条目会保持 pending，
+  不自动进入 staging；正式发布还要满足检索就绪条件。提案与有界清扫负责
+  持续维护现有知识。
 - **Guard** —— `GuardCheckEngine` 用真实 AST 分析将代码对照已发布 Recipe
   标准检查，返回结构化裁定。
 - **项目智能** —— ProjectContext 装配（space → repo → module → file 查询
@@ -60,13 +61,13 @@ AI provider、没有 CLI / Dashboard UI、没有 Codex/MCP 交付面。四道边
 | `daemon/` | 作业/运行时展示与常驻服务契约 | shared, types |
 | `src/*.ts` | 根门面 —— 公共包入口 | 任意层 |
 
-`core*` 标记受祝福的分析叶子例外：`service/` 与 `workflows/` 可以直接
-import `core/`（如 `GuardCheckEngine`、AST 分块），不必再造一层 adapter。
-每条例外都在契约配置中附有书面理由。
+`core*` 标记 `service/` 可直接消费的分析叶子（如 `GuardCheckEngine`）；
+基础设施中的 AST 分块另有文件级例外。当前契约禁止 `workflows/` 直接运行时
+import `core/`。每条例外都在契约配置中附有书面理由。
 
 ## 包入口
 
-包通过 `package.json` `exports` 子路径暴露 API（v0.2.0 共 65 条）——
+包通过 `package.json` 声明的 `exports` 子路径暴露 API——
 根门面加上按领域、按层、按 workflow 分组的入口：
 
 ```ts
@@ -85,8 +86,8 @@ import { runHostAgentDimensionCompletionWorkflow } from '@alembic/core/host-agen
 
 根门面（`src/index.ts`）刻意保持窄：小区域整体再导出，大区域
 （repositories、types、workflows）只逐一具名导出，避免同名 DTO 冲突。
-已发布的兼容别名保持公开：`HostAgent*` ↔ `IDEAgent*`、`Bootstrap` ↔
-`AppRuntime`。
+已发布的 `HostAgent*` ↔ `IDEAgent*` 兼容别名保持公开。
+`Bootstrap` ↔ `AppRuntime` 别名属于外层 Alembic 应用。
 
 ## 快速开始
 
@@ -114,10 +115,10 @@ npm run check         # 完整门禁链（见下）
 `npm run check` 运行阻断式门禁链：
 
 ```text
-build:check → lint:public-api-boundary → lint:layer-contract
+build → lint:public-api-boundary → lint:layer-contract
 → lint:consumer-core-imports → lint:scope-resolution → smoke:public-api
 → check:output-budgets → check:space-edges → lint:doctrine → lint:naming
-→ test → lint
+→ test → lint → lint:retired-symbols
 ```
 
 要点：

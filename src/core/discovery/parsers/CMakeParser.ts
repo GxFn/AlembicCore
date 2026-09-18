@@ -126,7 +126,8 @@ export function parseCMakeProject(content: string): ParsedCMakeProject {
       continue;
     }
 
-    target.linkDependencies = parseLinkDependencies(depsStr);
+    // CMake允许同一目标多次追加link声明；后一次不能覆盖前一次的依赖与scope。
+    target.linkDependencies.push(...parseLinkDependencies(depsStr));
   }
 
   result.targets = [...targetMap.values()];

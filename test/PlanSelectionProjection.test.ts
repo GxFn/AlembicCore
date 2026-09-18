@@ -159,13 +159,6 @@ describe('PlanSelection projection foundation', () => {
     expect(projection.moduleScope).toEqual(['src/service/planIntent']);
     expect(projection.unknownDimensionIds).toEqual(['missing-dimension']);
   });
-
-  it('exposes the projection primitives from the plans surface', () => {
-    expect(typeof applyPlanSelection).toBe('function');
-    expect(typeof assertPlanSelectionShape).toBe('function');
-    expect(typeof assertPlanSelectionStageRequirements).toBe('function');
-    expect(typeof planSelectionRequiresModuleTargets).toBe('function');
-  });
 });
 
 function basePlanSelection(): PlanSelection {

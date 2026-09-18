@@ -9,6 +9,7 @@
 import { asc, count, desc, eq, sql } from 'drizzle-orm';
 import { type DrizzleDB, getDrizzle } from '../../infrastructure/database/drizzle/index.js';
 import { guardViolations } from '../../infrastructure/database/drizzle/schema.js';
+import Logger from '../../infrastructure/logging/Logger.js';
 
 const MAX_RUNS = 200;
 
@@ -73,7 +74,7 @@ export class ViolationsStore {
         })
         .from(guardViolations)
         .where(eq(guardViolations.filePath, filePath))
-        .orderBy(desc(guardViolations.createdAt))
+        .orderBy(desc(guardViolations.createdAt), sql`rowid DESC`)
         .limit(1)
         .get();
 
@@ -121,7 +122,7 @@ export class ViolationsStore {
       .where(
         sql`${guardViolations.id} NOT IN (
           SELECT ${guardViolations.id} FROM ${guardViolations}
-          ORDER BY ${guardViolations.createdAt} DESC
+          ORDER BY ${guardViolations.createdAt} DESC, rowid DESC
           LIMIT ${MAX_RUNS}
         )`
       )
@@ -149,7 +150,7 @@ export class ViolationsStore {
     const rows = this.#drizzle
       .select()
       .from(guardViolations)
-      .orderBy(asc(guardViolations.createdAt))
+      .orderBy(asc(guardViolations.createdAt), sql`rowid ASC`)
       .all();
     return rows.map((r) => this.#rowToRun(r));
   }
@@ -162,7 +163,7 @@ export class ViolationsStore {
       .select()
       .from(guardViolations)
       .where(eq(guardViolations.filePath, filePath))
-      .orderBy(asc(guardViolations.createdAt))
+      .orderBy(asc(guardViolations.createdAt), sql`rowid ASC`)
       .all();
     return rows.map((r) => this.#rowToRun(r));
   }
@@ -271,13 +272,50 @@ export class ViolationsStore {
     this.#drizzle.delete(guardViolations).run();
   }
 
-  /** 清除指定规则或文件的记录 */
+  /** 清空所有记录（保留异步 void 兼容入口） */
   async clearAll() {
     this.clearRuns();
   }
 
-  async clear({ ruleId, file }: { ruleId?: string; file?: string } = {}) {
-    if (file) {
+  async clear({ ruleId, file }: { ruleId?: string; file?: string } = {}): Promise<void> {
+    if (ruleId) {
+      // 一个 run 可包含多条规则；只清理指定规则，不能连带删除同次审计的其他证据。
+      // file 与 ruleId 是交集。保留原 summary/时间/归属，它们描述的是历史审计。
+      const affectedRuns = this.#drizzle.transaction((tx) => {
+        const rows = tx
+          .select()
+          .from(guardViolations)
+          .where(file ? eq(guardViolations.filePath, file) : undefined)
+          .all();
+        let affected = 0;
+        for (const row of rows) {
+          const violations: ViolationRecord[] = JSON.parse(row.violationsJson || '[]');
+          const remaining = violations.filter((violation) => violation.ruleId !== ruleId);
+          if (remaining.length === violations.length) {
+            continue;
+          }
+          if (remaining.length === 0) {
+            tx.delete(guardViolations).where(eq(guardViolations.id, row.id)).run();
+          } else {
+            tx.update(guardViolations)
+              .set({
+                violationsJson: JSON.stringify(remaining),
+                violationCount: remaining.length,
+              })
+              .where(eq(guardViolations.id, row.id))
+              .run();
+          }
+          affected += 1;
+        }
+        return affected;
+      });
+      Logger.getInstance().info('Guard violation rule clear completed', {
+        ruleId,
+        file: file || null,
+        affectedRuns,
+        preservedHistory: true,
+      });
+    } else if (file) {
       this.#drizzle.delete(guardViolations).where(eq(guardViolations.filePath, file)).run();
     } else {
       this.clearRuns();
@@ -293,7 +331,7 @@ export class ViolationsStore {
       .select()
       .from(guardViolations)
       .where(condition)
-      .orderBy(desc(guardViolations.createdAt))
+      .orderBy(desc(guardViolations.createdAt), sql`rowid DESC`)
       .limit(limit)
       .offset(offset)
       .all();

@@ -740,7 +740,8 @@ export function buildProjectInfoTreeMeta(input: {
       input.delivered.symbols > 0 ? 'symbols' : input.delivered.files > 0 ? 'files' : 'modules',
     fullTreeRef,
     omitted,
-    truncated: fullTreeRef !== null,
+    // 截断由实际遗漏决定；完整树外置是后续步骤，ref 有无不能替代预算事实。
+    truncated: Object.keys(omitted).length > 0,
   };
 }
 

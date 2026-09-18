@@ -1,10 +1,13 @@
 // Scope (documented honestly per CO1/A6): this smoke gate verifies IMPORT
 // ACCESSIBILITY of the built public surface — every exact export path resolves
-// and imports from dist/, required runtime symbols exist, and required type
-// names appear in the declaration files. It is NOT a behavioral contract test;
+// and imports from dist/, required runtime symbols exist, and required declaration
+// names resolve through the built module's exports (including typeof-able values).
+// It is NOT a behavioral contract test;
 // behavior is covered by the vitest suites. It requires a current `npm run
 // build` output.
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 
@@ -618,23 +621,47 @@ for (const [specifier, exportNames] of Object.entries(forbiddenSubpathExports)) 
   }
 }
 
-for (const [specifier, exportNames] of Object.entries(requiredTypeDeclarations)) {
+const declarationEntries = Object.entries(requiredTypeDeclarations).map(([specifier, exportNames]) => {
   const subpath = specifier === pkg.name ? '.' : `./${specifier.slice(`${pkg.name}/`.length)}`;
   const declarationPath = pkg.exports[subpath]?.types;
   if (!declarationPath) {
     throw new Error(`Missing ${specifier} declaration path`);
   }
 
-  const declaration = readFileSync(
-    new URL(`../${declarationPath.replace(/^\.\//, '')}`, import.meta.url),
-    'utf8'
-  );
+  return {
+    specifier,
+    exportNames,
+    file: fileURLToPath(new URL(`../${declarationPath.replace(/^\.\//, '')}`, import.meta.url)),
+  };
+});
+// 声明门面可以合法使用 export *；检查真实声明导出，不能靠重复写一遍名称才让 smoke 通过。
+const declarationProgram = ts.createProgram(declarationEntries.map((entry) => entry.file), {
+  module: ts.ModuleKind.NodeNext,
+  moduleResolution: ts.ModuleResolutionKind.NodeNext,
+  target: ts.ScriptTarget.ES2022,
+  skipLibCheck: true,
+  noEmit: true,
+});
+const declarationChecker = declarationProgram.getTypeChecker();
+
+for (const { specifier, exportNames, file } of declarationEntries) {
+  const sourceFile = declarationProgram.getSourceFile(file);
+  const moduleSymbol = sourceFile && declarationChecker.getSymbolAtLocation(sourceFile);
+  if (!moduleSymbol) {
+    throw new Error(`Missing ${specifier} declaration module`);
+  }
+  const exports = new Map(declarationChecker.getExportsOfModule(moduleSymbol).map((symbol) => [symbol.name, symbol]));
   for (const exportName of exportNames) {
-    if (!new RegExp(`\\b${exportName}\\b`).test(declaration)) {
+    let symbol = exports.get(exportName);
+    if (symbol && (symbol.flags & ts.SymbolFlags.Alias)) {
+      symbol = declarationChecker.getAliasedSymbol(symbol);
+    }
+    if (!symbol?.declarations?.length) {
       throw new Error(`Missing ${specifier} type declaration: ${exportName}`);
     }
   }
 
+  const declaration = readFileSync(file, 'utf8');
   for (const forbiddenRef of forbiddenTypeDeclarationRefs[specifier] ?? []) {
     if (declaration.includes(forbiddenRef)) {
       throw new Error(`Forbidden ${specifier} type declaration reference: ${forbiddenRef}`);

@@ -7,7 +7,12 @@
  *   - 阈值拦截逻辑
  */
 import { describe, expect, it } from 'vitest';
-import { type CandidateSummary, GenerateDedup } from '../../src/service/bootstrap/GenerateDedup.js';
+import { RecipeSimilarity } from '../../src/domain/similarity/RecipeSimilarity.js';
+import {
+  type CandidateSummary,
+  computeCandidateSummarySimilarityV1,
+  GenerateDedup,
+} from '../../src/service/bootstrap/GenerateDedup.js';
 
 function makeSummary(overrides: Partial<CandidateSummary> = {}): CandidateSummary {
   return {
@@ -23,6 +28,26 @@ function makeSummary(overrides: Partial<CandidateSummary> = {}): CandidateSummar
 }
 
 describe('GenerateDedup', () => {
+  it.each([
+    ['abc', 'a b c', 1],
+    ['abcd', 'abce', 1 / 3],
+    ['ab', 'ab', 0],
+    ['', 'abc', 0],
+  ])('keeps raw code Jaccard semantics for %j and %j', (left, right, expected) => {
+    const codeOnly = (coreCode: string): CandidateSummary => ({
+      id: '',
+      title: '',
+      category: '',
+      coreCode,
+      doClause: '',
+      dontClause: '',
+    });
+    expect(RecipeSimilarity.codeSimilarity(left, right)).toBeCloseTo(expected);
+    expect(computeCandidateSummarySimilarityV1(codeOnly(left), codeOnly(right))).toBeCloseTo(
+      0.3 * expected
+    );
+  });
+
   describe('register + count', () => {
     it('should track registered entries', () => {
       const dedup = new GenerateDedup();
@@ -211,8 +236,8 @@ describe('GenerateDedup', () => {
           category: 'code-pattern',
           guardPattern: 'if (condition) { return }',
         },
-        0.15
-      ); // Low threshold to test guard contribution
+        0
+      ); // 让两次查询都返回分数，直接验证 guard 的独立贡献。
 
       const withoutGuard = dedup.findDuplicate(
         {
@@ -223,19 +248,50 @@ describe('GenerateDedup', () => {
           coreCode: 'code B',
           category: 'code-pattern',
         },
-        0.15
+        0
       );
 
-      // With matching guard pattern → higher similarity
-      if (withGuard && withoutGuard) {
-        expect(withGuard.similarity).toBeGreaterThan(withoutGuard.similarity);
-      } else if (withGuard) {
-        expect(withGuard.similarity).toBeGreaterThan(0);
-      }
+      expect(withGuard).not.toBeNull();
+      expect(withoutGuard).not.toBeNull();
+      expect(withGuard!.similarity - withoutGuard!.similarity).toBeCloseTo(0.2, 2);
     });
   });
 
   describe('multiple registered entries', () => {
+    it.each([
+      'higher-first',
+      'lower-first',
+    ])('keeps the highest raw score when rounded scores tie (%s)', (order) => {
+      const titleWords = Array.from({ length: 100 }, (_, index) => `word${index}`);
+      const query = makeSummary({
+        id: 'query',
+        title: titleWords.join(' '),
+        doClause: Array.from({ length: 30 }, (_, index) => `clause${index}`).join(' '),
+        dontClause: '',
+        coreCode: 'const example = 42;',
+        guardPattern: 'match',
+      });
+      // 原始相似度分别为 .654 / .652，展示精度均为 .65，选择不能由舍入值决定。
+      const higher = {
+        ...query,
+        id: 'higher',
+        title: titleWords.slice(0, 72).join(' '),
+        doClause: 'clause0',
+      };
+      const lower = {
+        ...query,
+        id: 'lower',
+        title: titleWords.slice(0, 71).join(' '),
+        doClause: 'clause0',
+      };
+      const dedup = new GenerateDedup();
+      for (const candidate of order === 'higher-first' ? [higher, lower] : [lower, higher]) {
+        dedup.register(candidate);
+      }
+
+      expect(dedup.findDuplicate(query)).toMatchObject({ existingId: 'higher', similarity: 0.65 });
+    });
+
     it('should return the best match among multiple entries', () => {
       const dedup = new GenerateDedup();
 

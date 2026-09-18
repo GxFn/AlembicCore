@@ -13,8 +13,9 @@
  */
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { extname, join, relative } from 'node:path';
+import { dirname, extname, join, relative, sep } from 'node:path';
 import { getProjectSpecPath } from '../../infrastructure/config/Paths.js';
+import Logger from '../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import {
   type DependencyGraph,
@@ -342,6 +343,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
   #parsedConfig: ParsedProjectConfig | null = null;
   #moduleSpecs = new Map<string, ParsedModuleSpec>();
   #targets: DiscoveredTarget[] = [];
+  #dependencyEdges: DependencyGraph['edges'] = [];
 
   get id() {
     return 'customConfig';
@@ -441,6 +443,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     this.#parsedConfig = null;
     this.#moduleSpecs.clear();
     this.#targets = [];
+    this.#dependencyEdges = [];
 
     // 确定匹配的系统（含用户自定义系统）
     this.#matchedSystem = null;
@@ -526,7 +529,10 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   async getDependencyGraph(): Promise<DependencyGraph> {
     if (!this.#parsedConfig) {
-      return { nodes: this.#targets.map((t) => t.name), edges: [] };
+      return {
+        nodes: this.#targets.map((t) => t.name),
+        edges: this.#dependencyEdges.map((edge) => ({ ...edge })),
+      };
     }
 
     const config = this.#parsedConfig;
@@ -969,7 +975,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
     // 扫描所有 BUILD 文件
     const buildFiles = this.#findBuildFiles(projectRoot, buildFileNames);
-    const allTargets: ParsedBuildFile['targets'] = [];
+    const allTargets: { target: ParsedBuildFile['targets'][number]; packagePath: string }[] = [];
     const detectedLanguages = new Set<string>();
 
     for (const buildFile of buildFiles) {
@@ -977,10 +983,12 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
         const content = readFileSync(buildFile, 'utf-8');
         const parsed = parseStarlarkBuildFile(content);
 
-        const dirRelative = relative(projectRoot, buildFile).replace(/\/[^/]+$/, '') || '.';
+        // 根BUILD也属于其父目录；对无斜杠的文件名做replace会错误留下BUILD自身。
+        const modulePath = dirname(buildFile);
+        const packagePath = relative(projectRoot, modulePath).split(sep).join('/');
 
         for (const target of parsed.targets) {
-          allTargets.push(target);
+          allTargets.push({ target, packagePath });
 
           // 语言推断
           const lang = RULE_TO_LANGUAGE[target.rule];
@@ -988,7 +996,6 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             detectedLanguages.add(lang);
           }
 
-          const modulePath = join(projectRoot, dirRelative);
           this.#targets.push({
             name: target.name,
             path: modulePath,
@@ -1006,6 +1013,52 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
         }
       } catch {
         /* skip unreadable BUILD files */
+      }
+    }
+    const labels = new Map(
+      allTargets.map(({ target, packagePath }) => [`//${packagePath}:${target.name}`, target.name])
+    );
+    const edges: DependencyGraph['edges'] = [];
+    for (const { target, packagePath } of allTargets) {
+      for (const dependency of target.deps) {
+        const label = dependency.startsWith(':') ? `//${packagePath}${dependency}` : dependency;
+        const resolved = labels.get(label);
+        if (resolved) {
+          edges.push({ from: target.name, to: resolved, type: 'depends_on' });
+        } else {
+          Logger.getInstance().debug(
+            '[CustomConfigDiscoverer] dependency label unresolved; edge omitted',
+            {
+              from: target.name,
+              dependency,
+              packagePath,
+            }
+          );
+        }
+      }
+    }
+    this.#appendKnownDependencies(edges);
+  }
+
+  /** 保留既有target ID，只投影可唯一对应当前已发现目标的清单依赖。 */
+  #appendKnownDependencies(edges: DependencyGraph['edges']) {
+    const counts = new Map<string, number>();
+    for (const target of this.#targets) {
+      counts.set(target.name, (counts.get(target.name) ?? 0) + 1);
+    }
+    for (const edge of edges) {
+      if (counts.get(edge.from) === 1 && counts.get(edge.to) === 1) {
+        this.#dependencyEdges.push(edge);
+      } else {
+        Logger.getInstance().debug(
+          '[CustomConfigDiscoverer] dependency target unknown or ambiguous; edge omitted',
+          {
+            from: edge.from,
+            to: edge.to,
+            sourceCount: counts.get(edge.from) ?? 0,
+            targetCount: counts.get(edge.to) ?? 0,
+          }
+        );
       }
     }
   }
@@ -1058,6 +1111,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
     const project = parseGradleProject(settingsContent);
     const primaryLang = (this.#matchedSystem?.language[0] as string) || 'kotlin';
+    const edges: DependencyGraph['edges'] = [];
 
     // 解析每个模块的 build.gradle.kts
     for (const mod of project.includedModules) {
@@ -1099,7 +1153,18 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           conventionRole: inferredRole,
         },
       });
+      for (const dependency of mod.dependencies) {
+        if (dependency.isProject) {
+          edges.push({
+            from: mod.path,
+            to: dependency.target,
+            type: 'depends_on',
+            configuration: dependency.configuration,
+          });
+        }
+      }
     }
+    this.#appendKnownDependencies(edges);
   }
 
   // ── Private: CMake 加载 ──────────────────────────────
@@ -1120,6 +1185,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
     const project = parseCMakeProject(content);
     const primaryLang = (this.#matchedSystem?.language[0] as string) || 'cpp';
+    const edges: DependencyGraph['edges'] = [];
 
     // 主目标
     for (const target of project.targets) {
@@ -1132,6 +1198,14 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           cmakeType: target.type,
         },
       });
+      edges.push(
+        ...target.linkDependencies.map((dependency) => ({
+          from: target.name,
+          to: dependency.target,
+          type: 'depends_on',
+          scope: dependency.scope,
+        }))
+      );
     }
 
     // 递归解析子目录的 CMakeLists.txt
@@ -1157,11 +1231,20 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
               subdirectory: subdir,
             },
           });
+          edges.push(
+            ...target.linkDependencies.map((dependency) => ({
+              from: target.name,
+              to: dependency.target,
+              type: 'depends_on',
+              scope: dependency.scope,
+            }))
+          );
         }
       } catch {
         /* skip */
       }
     }
+    this.#appendKnownDependencies(edges);
   }
 
   // ── Private: JSON Config 加载 (Nx/Flutter/RN) ────────
