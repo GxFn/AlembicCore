@@ -951,8 +951,8 @@ describe('HnswVectorAdapter WAL integration', () => {
     store.destroy();
   });
 
-  it('should recover WAL on restart after crash', async () => {
-    // Step 1: Insert data, WAL written but NOT flushed to .asvec
+  it('replays WAL entries newer than the persisted snapshot', async () => {
+    // 先生成基准快照，再通过真实 upsert 产生比快照更新的 WAL。
     const store1 = new HnswVectorAdapter(tmpDir, {
       M: 4,
       efConstruct: 32,
@@ -968,16 +968,20 @@ describe('HnswVectorAdapter WAL integration', () => {
 
     // Flush to create the .asvec (so we have a base)
     await store1.flush();
+    const indexPath = path.join(tmpDir, '.asd/context/index/vector_index.asvec');
+    const baseSnapshot = fs.readFileSync(indexPath);
 
-    // Now insert more WITHOUT flushing (simulating crash)
+    // 新增 c 只属于待重放的日志，基准快照中没有它。
     await store1.upsert({ id: 'c', content: 'gamma', vector: [0, 0, 1], metadata: { x: 3 } });
 
     // Verify WAL file exists with the unflushed op
     const walPath = path.join(tmpDir, '.asd/context/index/vector_index.wal');
     expect(fs.existsSync(walPath)).toBe(true);
 
-    // "Crash" - destroy without flush
+    // destroy 会同步保存，不能假称它等于进程崩溃；保留真实 WAL，再恢复旧快照来构造恢复输入。
     store1.destroy();
+    fs.writeFileSync(indexPath, baseSnapshot);
+    expect(BinaryPersistence.load(indexPath).contents.has('c')).toBe(false);
 
     // Step 2: New instance should recover from .asvec + replay WAL
     const store2 = new HnswVectorAdapter(tmpDir, {
