@@ -5,7 +5,12 @@ import { inferKind, KnowledgeEntry } from '../../domain/knowledge/index.js';
 import { COUNTABLE_LIFECYCLES } from '../../domain/knowledge/Lifecycle.js';
 import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { getDrizzle } from '../../infrastructure/database/drizzle/index.js';
-import { knowledgeEntries } from '../../infrastructure/database/drizzle/schema.js';
+import {
+  evolutionProposals,
+  knowledgeEntries,
+  lifecycleTransitionEvents,
+  recipeWarnings,
+} from '../../infrastructure/database/drizzle/schema.js';
 import { prepareCached } from '../../infrastructure/database/PreparedStatementCache.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { safeJsonParse, safeJsonStringify, unixNow } from '../../shared/utils/common.js';
@@ -200,11 +205,41 @@ export class KnowledgeRepositoryImpl {
    */
   async delete(id: string) {
     try {
-      const result = this.#drizzle
-        .delete(knowledgeEntries)
-        .where(eq(knowledgeEntries.id, id))
-        .run();
-      return result.changes > 0;
+      return this.#drizzle.transaction((tx) => {
+        if (
+          !tx
+            .select({ id: knowledgeEntries.id })
+            .from(knowledgeEntries)
+            .where(eq(knowledgeEntries.id, id))
+            .get()
+        ) {
+          return false;
+        }
+        // 004/006/008 的 FK 没有 CASCADE。仓储拥有真实表关系，不能要求每个服务重复装配清理器。
+        // 同一事务确保主 DELETE 失败（含 RAISE(IGNORE)）时，提案/警告/历史也完整保留。
+        tx.delete(lifecycleTransitionEvents)
+          .where(eq(lifecycleTransitionEvents.recipeId, id))
+          .run();
+        tx.update(lifecycleTransitionEvents)
+          .set({ proposalId: null })
+          .where(
+            inArray(
+              lifecycleTransitionEvents.proposalId,
+              tx
+                .select({ id: evolutionProposals.id })
+                .from(evolutionProposals)
+                .where(eq(evolutionProposals.targetRecipeId, id))
+            )
+          )
+          .run();
+        tx.delete(evolutionProposals).where(eq(evolutionProposals.targetRecipeId, id)).run();
+        tx.delete(recipeWarnings).where(eq(recipeWarnings.targetRecipeId, id)).run();
+        const result = tx.delete(knowledgeEntries).where(eq(knowledgeEntries.id, id)).run();
+        if (result.changes !== 1) {
+          throw new Error(`KNOWLEDGE_DELETE_NOT_APPLIED: id=${id}, changes=${result.changes}`);
+        }
+        return true;
+      });
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error('Error deleting knowledge entry', { id, error: message });

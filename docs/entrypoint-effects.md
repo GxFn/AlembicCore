@@ -22,13 +22,21 @@ Consumed by Alembic, AlembicAgent, AlembicPlugin (space-edge config).
   calls go through INJECTED providers owned by the caller.
 
 With a knowledge file store configured, `KnowledgeService` create, edit,
-quality and lifecycle commands, Guard mutations and sustain updates share an
+quality, lifecycle and delete commands, Guard mutations and sustain updates share an
 internal single-entry write coordinator. File rejection raises `FileWriteError`
-before the DB write. DB failure or mismatched write readback raises
+before the DB write. For creation and updates, DB failure or mismatched write readback raises
 `DivergenceError` (`STATE_DIVERGENCE`), retains the durable file and names
 `KnowledgeSyncService.sync` as the repair route. Success events follow the
 confirmed write. The SQLite repository also rejects an UPDATE that affected
 zero rows, since reading an old row with the same ID does not confirm a write.
+
+Automatic relationships and reverse-reference cleanup also persist their
+Markdown truth. Deletion waits for reverse-reference cleanup before removing
+the main row; the repository removes dependent proposals, warnings and
+lifecycle rows in one SQLite transaction. For a failed DB deletion the repair
+route is `KnowledgeService.delete` with the same ID. An already absent file
+is compatible with index cleanup; unreadable or ambiguous ownership is an
+error. Deletion does not promise atomic rollback of multiple files and DB rows.
 
 Constructors without a file store keep the legacy DB-only behavior and emit a
 diagnostic. Synchronous multi-entry `KnowledgeUnitOfWork` transactions remain

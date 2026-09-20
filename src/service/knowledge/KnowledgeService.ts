@@ -6,8 +6,8 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { KnowledgeFileWriter } from '../../service/knowledge/KnowledgeFileWriter.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
 import type { ConfidenceRouter } from './ConfidenceRouter.js';
+import { commitKnowledgeWrite } from './commitKnowledgeWrite.js';
 import type { KnowledgeGraphService } from './KnowledgeGraphService.js';
-import { persistKnowledgeEntry } from './persistKnowledgeEntry.js';
 import { persistKnowledgeUpdate } from './persistKnowledgeUpdate.js';
 import {
   evaluateRecipeRetrievalReadiness,
@@ -169,6 +169,9 @@ interface PaginationOptions {
  * Service 负责编排 Repository / FileWriter / AuditLog / Graph / SkillHooks。
  */
 export class KnowledgeService {
+  // 只跟踪正在执行的任务，不累积永久删除墓碑；删除计数防止较新失败掩盖仍在途的较早删除。
+  #relationTasks = new Map<string, symbol>();
+  #activeDeletes = new Map<string, number>();
   _confidenceRouter: ConfidenceRouter | null;
   _edgeRepo: EdgeRepoLike | null;
   _eventBus: EventBusLike | null;
@@ -278,7 +281,7 @@ export class KnowledgeService {
       // autoApprovable 标记保留，供前端显示「推荐批准」徽章。
       // 外层交付 hook 可自行决定是否交付高置信度 staging/pending 条目。
 
-      const saved = await persistKnowledgeEntry({
+      const saved = await commitKnowledgeWrite({
         entry,
         fileStore: this._fileWriter,
         operation: 'knowledge.create',
@@ -518,22 +521,34 @@ export class KnowledgeService {
    * @returns >}
    */
   async delete(id: string, context: ServiceContext) {
+    this.#activeDeletes.set(id, (this.#activeDeletes.get(id) ?? 0) + 1);
+    this.#relationTasks.delete(id);
     try {
       const entry = await this._findOrThrow(id);
 
-      // 删除 .md 文件
-      this._removeFile(entry);
+      await commitKnowledgeWrite({
+        entry,
+        fileStore: this._fileWriter,
+        fileOperation: 'remove',
+        operation: 'knowledge.delete',
+        reconcileVia: 'KnowledgeService.delete',
+        fileFailureMessage: `Knowledge file removal failed — aborting delete: ${id}`,
+        dbFailureMessage: 'Knowledge file removed but DB cleanup failed — retry knowledge deletion',
+        commit: async () => {
+          // 先完成反向引用的持久化清理再删主行；中途失败时仍可用相同 id 重试整个删除。
+          await this.#removeReverseRelationsDurably(id);
+          const deleted = await this.repository.delete(id);
+          if (!deleted && (await this.repository.findById(id))) {
+            throw new Error(`KNOWLEDGE_DELETE_NOT_APPLIED: ${id}`);
+          }
+          // 删除没有实体读回；受影响行或确认已不存在就是这次写入的完成凭据。
+          return { id };
+        },
+      });
 
-      // 清除 knowledge_edges
+      // 正式仓储在同步事务内处理 FK 从表；下面保留旧 adapter 的派生索引清理。
       this._removeAllEdges(id);
-
-      // 清除 evolution_proposals（无 ON DELETE CASCADE，需手动删除）
       this._removeRelatedProposals(id);
-
-      // 清除其他 entry 的 relations JSON 中对该 ID 的引用
-      this._removeReverseRelations(id);
-
-      await this.repository.delete(id);
 
       await this._audit('delete_knowledge', id, context.userId, {
         title: entry.title,
@@ -557,6 +572,13 @@ export class KnowledgeService {
         error: error instanceof Error ? error.message : String(error),
       });
       throw error;
+    } finally {
+      const remaining = this.#activeDeletes.get(id)! - 1;
+      if (remaining > 0) {
+        this.#activeDeletes.set(id, remaining);
+      } else {
+        this.#activeDeletes.delete(id);
+      }
     }
   }
 
@@ -1023,7 +1045,7 @@ export class KnowledgeService {
       this._fileWriter && fileOperation === 'persist'
         ? KnowledgeEntry.fromJSON({ ...entry.toJSON(), ...updates })
         : entry;
-    return persistKnowledgeEntry({
+    return commitKnowledgeWrite({
       entry: prospective,
       fileStore: this._fileWriter,
       operation,
@@ -1171,6 +1193,13 @@ export class KnowledgeService {
       return;
     }
 
+    if (this.#activeDeletes.has(id)) {
+      this.logger.info('Auto-discover relations skipped: deletion in progress', { id });
+      return;
+    }
+    const task = Symbol('relations');
+    this.#relationTasks.set(id, task);
+
     try {
       const candidates: { target: string; relation: string; weight: number }[] = [];
 
@@ -1205,40 +1234,50 @@ export class KnowledgeService {
         }
       }
 
-      // 写入 edges（限制最多 3 条自动关联，避免图谱噪声）
-      for (const c of candidates.slice(0, 3)) {
-        try {
-          gs.addEdge(id, 'knowledge', c.target, 'knowledge', c.relation, { weight: c.weight });
-        } catch {
-          /* ignore duplicates */
+      const selected = candidates.slice(0, 3);
+      if (selected.length > 0) {
+        // 查询候选期间条目可能被编辑；以最新实体合并，避免后台关联覆盖刚保存的正文。
+        const current = await this.repository.findById(id);
+        // 读出的实体可能在 await 期间已被删除；删除使既有任务失效，不能再用旧快照写回文件。
+        if (!current || this.#relationTasks.get(id) !== task) {
+          this.logger.info('Auto-discover relations skipped: entry deleted or task superseded', {
+            id,
+          });
+          return;
         }
-      }
-
-      // 将发现的关系写回 entry 的 relations 字段
-      if (candidates.length > 0) {
-        const relatedItems = candidates.slice(0, 3).map((c) => ({
-          target: c.target,
-          description: 'auto-discovered',
-        }));
-        const existingRelations: Record<string, unknown[]> = (
-          typeof entry.relations?.toJSON === 'function'
-            ? entry.relations.toJSON()
-            : entry.relations || {}
-        ) as Record<string, unknown[]>;
-        const merged = {
-          ...existingRelations,
-          related: [...(existingRelations.related || []), ...relatedItems],
-        };
-        await this.repository.update(id, {
-          relations: JSON.stringify(merged),
-          updatedAt: Math.floor(Date.now() / 1000),
-        });
+        const existing = current.relations.toJSON();
+        const related = [...existing.related];
+        for (const candidate of selected) {
+          if (!related.some((relation) => relation.target === candidate.target)) {
+            related.push({ target: candidate.target, description: 'auto-discovered' });
+          }
+        }
+        await this.#persistUpdate(
+          current,
+          { relations: { ...existing, related }, updatedAt: Math.floor(Date.now() / 1000) },
+          'knowledge.auto-relate',
+          `Knowledge relation file write failed: ${id}`
+        );
+        // 派生边只能在关系真相成功写入后更新；addEdge 自身返回并记录失败诊断。
+        for (const candidate of selected) {
+          if (this.#relationTasks.get(id) !== task) {
+            this.logger.info('Auto-discover edge projection cancelled by a newer mutation', { id });
+            return;
+          }
+          await gs.addEdge(id, 'knowledge', candidate.target, 'knowledge', candidate.relation, {
+            weight: candidate.weight,
+          });
+        }
       }
     } catch (err: unknown) {
       this.logger.warn('Auto-discover relations failed (non-blocking)', {
         id,
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      if (this.#relationTasks.get(id) === task) {
+        this.#relationTasks.delete(id);
+      }
     }
   }
 
@@ -1312,7 +1351,12 @@ export class KnowledgeService {
     }
 
     try {
-      this._edgeRepo.deleteByEntryId(id);
+      this._edgeRepo.deleteByEntryId(id).catch((error: unknown) => {
+        this.logger.warn('Failed to remove edges', {
+          id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     } catch (err: unknown) {
       this.logger.warn('Failed to remove edges', {
         id,
@@ -1337,47 +1381,50 @@ export class KnowledgeService {
     }
   }
 
-  /** 清除其他 entry 的 relations JSON 中对该 ID 的反向引用 */
+  /** 兼容旧的非阻塞调用；正式删除等待同一实现完成，避免同步恢复已删除的反向引用。 */
   _removeReverseRelations(id: string) {
-    try {
-      const referrers = this.repository.findByRelationLike(id, id);
-      // findByRelationLike is async but we fire-and-forget for non-blocking cleanup
-      void Promise.resolve(referrers).then(async (rows) => {
-        for (const row of rows) {
-          try {
-            const parsed = JSON.parse(row.relations);
-            let changed = false;
-            for (const bucket of Object.keys(parsed)) {
-              if (!Array.isArray(parsed[bucket])) {
-                continue;
-              }
-              const before = parsed[bucket].length;
-              parsed[bucket] = parsed[bucket].filter((r: unknown) => {
-                if (typeof r === 'string') {
-                  return r !== id;
-                }
-                if (r && typeof r === 'object' && 'target' in r) {
-                  return (r as { target: string }).target !== id;
-                }
-                return true;
-              });
-              if (parsed[bucket].length !== before) {
-                changed = true;
-              }
-            }
-            if (changed) {
-              await this.repository.update(row.id, { relations: JSON.stringify(parsed) });
-            }
-          } catch {
-            // 单条清理失败不阻塞
-          }
-        }
-      });
-    } catch (err: unknown) {
+    void this.#removeReverseRelationsDurably(id).catch((error: unknown) => {
       this.logger.warn('Failed to remove reverse relations', {
         id,
-        error: err instanceof Error ? err.message : String(err),
+        error: error instanceof Error ? error.message : String(error),
       });
+    });
+  }
+
+  async #removeReverseRelationsDurably(id: string): Promise<void> {
+    if (typeof this.repository.findByRelationLike !== 'function') {
+      // 老的独立 adapter 没有反向索引能力；保持既有行为并明确说明未做该清理。
+      this.logger.warn('Reverse relation cleanup unavailable on legacy repository', { id });
+      return;
+    }
+    for (const row of await this.repository.findByRelationLike(id, id)) {
+      const parsed = JSON.parse(row.relations);
+      let changed = false;
+      for (const bucket of Object.keys(parsed)) {
+        if (!Array.isArray(parsed[bucket])) {
+          continue;
+        }
+        const before = parsed[bucket].length;
+        parsed[bucket] = parsed[bucket].filter((relation: unknown) => {
+          const target =
+            typeof relation === 'string'
+              ? relation
+              : relation && typeof relation === 'object' && 'target' in relation
+                ? relation.target
+                : null;
+          return target !== id && this._normalizeKnowledgeRelationTarget(target) !== id;
+        });
+        changed ||= parsed[bucket].length !== before;
+      }
+      if (changed) {
+        await persistKnowledgeUpdate(
+          this.repository,
+          this._fileWriter,
+          row.id,
+          { relations: parsed },
+          'knowledge.remove-reference'
+        );
+      }
     }
   }
 

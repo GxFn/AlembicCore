@@ -4,7 +4,7 @@ import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFil
 import type KnowledgeRepositoryImpl from '../../repository/knowledge/KnowledgeRepositoryImpl.js';
 import { NotFoundError } from '../../shared/errors/index.js';
 import { unixNow } from '../../shared/utils/common.js';
-import { persistKnowledgeEntry } from './persistKnowledgeEntry.js';
+import { commitKnowledgeWrite } from './commitKnowledgeWrite.js';
 
 /**
  * sustain 内部的统一写边界：完整实体先持久化为 Markdown，再更新派生 DB。
@@ -40,7 +40,7 @@ export async function persistKnowledgeUpdate(
     createdAt: current.createdAt,
     updatedAt: unixNow(),
   });
-  await persistKnowledgeEntry({
+  await commitKnowledgeWrite({
     entry: prospective,
     fileStore,
     operation,

@@ -15,12 +15,14 @@ export async function createKnowledgeRuntime() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-knowledge-'));
   pathGuard.configure({ projectRoot: root, knowledgeBaseDir: 'Alembic' });
   const runtime = await openAlembicDatabase({ path: path.join(root, '.asd', 'alembic.db') });
-  const repo = createAlembicRepositories(runtime.connection).knowledgeRepository;
+  const repositories = createAlembicRepositories(runtime.connection);
+  const repo = repositories.knowledgeRepository;
   const writer = new KnowledgeFileWriter(root);
   return {
     root,
     runtime,
     repo,
+    repositories,
     writer,
     sync: () => new KnowledgeSyncService(root).syncAll(runtime.sqlite),
     async seed(props: KnowledgeEntryProps) {

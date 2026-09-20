@@ -30,7 +30,7 @@ export interface KnowledgeFileStore {
   /** 写入 .md 文件到 candidates/ 或 recipes/（基于 lifecycle），返回文件路径 */
   persist(entry: KnowledgeEntry): string | null;
 
-  /** 删除 .md 文件，成功返回 true */
+  /** 删除 .md 文件；实际删除返回 true，未找到匹配文件返回 false，IO/无法确认归属应抛错。 */
   remove(entry: KnowledgeEntry): boolean;
 
   /** 生命周期变更时在 candidates/ ↔ recipes/ 间移动文件，返回新路径 */

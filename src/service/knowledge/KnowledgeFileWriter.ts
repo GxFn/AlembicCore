@@ -314,7 +314,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
     // 先尝试 sourceFile 精确删除
     if (entry.sourceFile) {
       const fullPath = path.join(this.projectRoot, entry.sourceFile);
-      if (fs.existsSync(fullPath) && this.#isOwnedFile(fullPath, entry.id, 'remove')) {
+      if (existsForRemoval(fullPath) && this.#isOwnedFile(fullPath, entry.id, 'remove')) {
         if (this.#wz) {
           const rel = fullPath.replace(this.#wz.dataRoot, '').replace(/^\//, '');
           this.#wz.remove(this.#wz.data(rel));
@@ -337,7 +337,7 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
 
     for (const dir of searchDirs) {
       const fp = path.join(dir, filename);
-      if (fs.existsSync(fp) && this.#isOwnedFile(fp, entry.id, 'remove')) {
+      if (existsForRemoval(fp) && this.#isOwnedFile(fp, entry.id, 'remove')) {
         if (this.#wz) {
           const rel = fp.replace(this.#wz.dataRoot, '').replace(/^\//, '');
           this.#wz.remove(this.#wz.data(rel));
@@ -480,6 +480,9 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
       if (existingId === entryId) {
         return true;
       }
+      if (existingId === null && (operation === 'remove' || operation === 'id-scan')) {
+        throw new Error(`KNOWLEDGE_FILE_OWNER_UNVERIFIABLE: ${filePath}`);
+      }
       const details = { operation, entryId, existingId, path: filePath, result: 'preserved' };
       // id 扫描遇到别的条目是正常分支；显式路径提示错配则提示宿主修复元数据。
       if (operation === 'id-scan') {
@@ -494,13 +497,16 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
         path: filePath,
         error: error instanceof Error ? error.message : String(error),
       });
+      if (operation === 'remove' || operation === 'id-scan') {
+        throw error;
+      }
     }
     return false;
   }
 
   _removeByIdScan(id: string): boolean {
     for (const baseDir of [this.candidatesDir, this.recipesDir]) {
-      if (!fs.existsSync(baseDir)) {
+      if (!existsForRemoval(baseDir)) {
         continue;
       }
       try {
@@ -513,8 +519,13 @@ export class KnowledgeFileWriter implements KnowledgeFileStore {
           this.logger.info('Knowledge entry file removed by id scan', { id });
           return true;
         }
-      } catch {
-        /* ignore scan errors */
+      } catch (error) {
+        this.logger.error('Knowledge removal scan failed; absence cannot be confirmed', {
+          id,
+          baseDir,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
       }
     }
     return false;
@@ -798,12 +809,25 @@ function readKnowledgeFileOwnerId(content: string): string | null {
   return raw || null;
 }
 
+/** 删除必须区分已不存在与权限/IO 故障，existsSync 会把后者也折叠为 false。 */
+function existsForRemoval(filePath: string): boolean {
+  try {
+    fs.statSync(filePath);
+    return true;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return false;
+    }
+    throw error;
+  }
+}
+
 function _walkAndRemoveById(
   dir: string,
   isOwnedFile: (filePath: string) => boolean,
   wz?: WriteZone | null
 ): boolean {
-  if (!fs.existsSync(dir)) {
+  if (!existsForRemoval(dir)) {
     return false;
   }
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {

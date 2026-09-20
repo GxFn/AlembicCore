@@ -4,7 +4,7 @@ import Logger from '../../infrastructure/logging/Logger.js';
 import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
 import { unixNow } from '../../shared/utils/common.js';
-import { persistKnowledgeEntry } from '../knowledge/persistKnowledgeEntry.js';
+import { commitKnowledgeWrite } from '../knowledge/commitKnowledgeWrite.js';
 import { persistKnowledgeUpdate } from '../knowledge/persistKnowledgeUpdate.js';
 
 interface KnowledgeRepositoryLike {
@@ -148,7 +148,7 @@ export class GuardService {
         createdBy: context.userId,
       });
 
-      const created = await persistKnowledgeEntry({
+      const created = await commitKnowledgeWrite({
         entry,
         fileStore: this.#fileStore,
         operation: 'guard.create',
