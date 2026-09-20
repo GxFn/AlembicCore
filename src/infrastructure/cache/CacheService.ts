@@ -1,28 +1,15 @@
 /**
  * 本地内存缓存服务
- * 提供分布式缓存支持，提升 API 响应速度
- * 生产环境建议通过 UnifiedCacheAdapter 接入 Redis
+ * 进程内 TTL Map；UnifiedCacheAdapter 仅提供同一实例的异步兼容接口。
+ * 不包含分布式/Redis 后端，定时回收只在缓存有数据时运行。
  */
 
 import Logger from '../logging/index.js';
 
 /** 本地缓存实现（无 Redis 依赖） */
 export class CacheService {
-  cache: Map<string, { value: unknown; expiresAt: number }>;
-  cleanupInterval: ReturnType<typeof setInterval> | null;
-  constructor() {
-    /** >} */
-    this.cache = new Map();
-    this.cleanupInterval = null;
-
-    // 每 60 秒清理一次过期缓存（unref 避免阻止进程退出）
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupExpired();
-    }, 60000);
-    if (this.cleanupInterval.unref) {
-      this.cleanupInterval.unref();
-    }
-  }
+  cache = new Map<string, { value: unknown; expiresAt: number }>();
+  cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
   /** 获取缓存 */
   get(key: string) {
@@ -35,6 +22,7 @@ export class CacheService {
     // 检查是否过期
     if (entry.expiresAt < Date.now()) {
       this.cache.delete(key);
+      this.#syncCleanup();
       return null;
     }
 
@@ -48,16 +36,20 @@ export class CacheService {
   set(key: string, value: unknown, ttlSeconds = 300) {
     const expiresAt = Date.now() + ttlSeconds * 1000;
     this.cache.set(key, { value, expiresAt });
+    this.#syncCleanup();
   }
 
   /** 删除缓存 */
   delete(key: string) {
-    return this.cache.delete(key);
+    const removed = this.cache.delete(key);
+    this.#syncCleanup();
+    return removed;
   }
 
   /** 清空所有缓存 */
   clear() {
     this.cache.clear();
+    this.#syncCleanup();
   }
 
   /** 清理过期缓存 */
@@ -68,6 +60,7 @@ export class CacheService {
         this.cache.delete(key);
       }
     }
+    this.#syncCleanup();
     Logger.debug(`[Cache] Cleanup completed. Remaining entries: ${this.cache.size}`);
   }
 
@@ -79,13 +72,25 @@ export class CacheService {
     };
   }
 
-  /** 关闭缓存服务 */
+  /** 释放当前数据与后台任务；保留旧的可重用语义，后续 set 会重新启动过期回收。 */
   shutdown() {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-    }
     this.clear();
     Logger.info('[Cache] Service shutdown');
+  }
+
+  /** 模块单例可被多个 adapter 借用；timer 跟随数据，不由某个宿主的启动/关闭取得所有权。 */
+  #syncCleanup() {
+    if (this.cache.size === 0) {
+      if (this.cleanupInterval) {
+        clearInterval(this.cleanupInterval);
+        this.cleanupInterval = null;
+        Logger.debug('[Cache] Empty cache; expiration sweep stopped');
+      }
+    } else if (!this.cleanupInterval) {
+      this.cleanupInterval = setInterval(() => this.cleanupExpired(), 60_000);
+      this.cleanupInterval.unref?.();
+      Logger.debug('[Cache] Cached data present; expiration sweep started', { intervalMs: 60_000 });
+    }
   }
 }
 
