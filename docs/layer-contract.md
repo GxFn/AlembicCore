@@ -142,6 +142,11 @@ contracts. See [search-architecture.md](search-architecture.md) for the file own
 legacy behavior and test responsibilities. These helpers add no import-direction
 exception or public entrypoint.
 
+Embedding protocol adaptation belongs to infrastructure; the existing service
+module re-exports it for compatibility. Provider readiness decisions stay in
+service, while the internal weighted RRF accumulator is a shared leaf with no
+recall or response policy. See [vector-boundaries.md](vector-boundaries.md).
+
 ## Export-surface policy (W4, 4-6)
 
 1. **`service/index.ts` barrel is frozen, not completed.** It keeps exactly its

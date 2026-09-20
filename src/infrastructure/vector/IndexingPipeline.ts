@@ -3,7 +3,7 @@
  * scan → chunk (AST / section / fixed) → detect incremental changes (sourceHash) → batch embed → batch upsert
  *
  * v2 变更:
- * - 集成 BatchEmbedder: 批量 embed 替代串行 per-chunk embed, ~50× 加速
+ * - 集成 BatchEmbedder: 统一批次、并发和 provider 协议适配
  * - 集成 Chunker v2: auto 策略自动选择 AST / section / fixed 分块
  * - 新增 onProgress 回调支持
  * - 新增 chunking 配置透传 (strategy, maxChunkTokens, overlapTokens, useAST)
@@ -11,7 +11,6 @@
 
 import { lstatSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve, sep } from 'node:path';
-import type { EmbeddingPort, LegacyEmbedProvider } from '../../service/vector/EmbeddingPort.js';
 import { computeContentHash } from '../../shared/contentHash.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import { KNOWLEDGE_BASE_DIR } from '../config/Defaults.js';
@@ -19,6 +18,7 @@ import Logger from '../logging/Logger.js';
 import { ensureParser, isASTChunkerAvailable } from './ASTChunker.js';
 import { BatchEmbedder } from './BatchEmbedder.js';
 import { chunk, estimateTokens } from './Chunker.js';
+import type { EmbeddingPort, LegacyEmbedProvider } from './EmbeddingPort.js';
 import type { VectorStore } from './VectorStore.js';
 
 /** Chunk enrichment 接口 (可选, 由外层 service adapter 注入) */

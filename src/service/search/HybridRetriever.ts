@@ -8,10 +8,12 @@
  * - 不需要分数归一化 (不同检索器分数尺度无关)
  * - 对异常高分 (outlier) 不敏感
  * - 数学性质稳定 (有界, 单调)
- * - 已被 Elasticsearch, Weaviate, Qdrant 采用为默认融合策略
+ * - 原始相似度作为证据保留，不参与不同通道间的分数量纲比较
  *
  * @module service/search/HybridRetriever
  */
+
+import { WeightedRrfAccumulator } from '../../shared/WeightedRrfAccumulator.js';
 
 interface RetrievalResult {
   id?: string;
@@ -63,68 +65,45 @@ export class HybridRetriever {
     topK = 10,
     alpha = 0.5,
   }) {
-    const k = this.#rrfK;
-    const scores = new Map();
-
-    // Dense RRF 分数
+    const fusion = new WeightedRrfAccumulator<RetrievalResult>(this.#rrfK, alpha);
     denseResults.forEach((result, rank) => {
       const id = result.item?.id || result.id;
       if (!id) {
         return;
       }
-      const existing = scores.get(id) || {
-        id,
-        denseRank: Infinity,
-        sparseRank: Infinity,
-        rrfScore: 0,
-        data: result,
-      };
-      existing.denseRank = rank + 1;
-      existing.denseSimilarity = result.score;
-      existing.denseContribution = alpha * (1 / (k + rank + 1));
-      existing.rrfScore += existing.denseContribution;
-      existing.data = result;
-      scores.set(id, existing);
+      fusion.add(id, 'dense', rank, result.score).payload = result;
     });
-
-    // Sparse RRF 分数
     sparseResults.forEach((result, rank) => {
       const id = result.id;
       if (!id) {
         return;
       }
-      const existing = scores.get(id) || {
-        id,
-        denseRank: Infinity,
-        sparseRank: Infinity,
-        rrfScore: 0,
-        data: result,
-      };
-      existing.sparseRank = rank + 1;
-      existing.sparseScore = result.score;
-      existing.sparseContribution = (1 - alpha) * (1 / (k + rank + 1));
-      existing.rrfScore += existing.sparseContribution;
-      if (!existing.data || !existing.data.item) {
-        existing.data = result;
+      const entry = fusion.add(id, 'sparse', rank, result.score);
+      // 保留旧 payload 规则：dense 的 item 或首个带 item 的 sparse 会阻止后续 sparse 覆盖。
+      if (!entry.payload?.item) {
+        entry.payload = result;
       }
-      scores.set(id, existing);
     });
 
-    // 按 RRF 分数降序排列
-    const fused = [...scores.values()].sort((a, b) => b.rrfScore - a.rrfScore).slice(0, topK);
-
-    // Preserve the raw RRF total. A page-local maximum is not an absolute
-    // relevance scale and made every weak result page look fully confident.
-    for (const item of fused) {
-      item.score = item.rrfScore;
-      item.rrfContribution = {
-        dense: item.denseContribution ?? 0,
-        sparse: item.sparseContribution ?? 0,
-        total: item.rrfScore,
-      };
-    }
-
-    return fused;
+    return fusion.ranked(topK).map((entry) => ({
+      id: entry.id,
+      denseRank: entry.dense?.rank ?? Infinity,
+      sparseRank: entry.sparse?.rank ?? Infinity,
+      rrfScore: entry.total,
+      data: entry.payload!,
+      ...(entry.dense
+        ? { denseSimilarity: entry.dense.score, denseContribution: entry.dense.contribution }
+        : {}),
+      ...(entry.sparse
+        ? { sparseScore: entry.sparse.score, sparseContribution: entry.sparse.contribution }
+        : {}),
+      score: entry.total,
+      rrfContribution: {
+        dense: entry.dense?.contribution ?? 0,
+        sparse: entry.sparse?.contribution ?? 0,
+        total: entry.total,
+      },
+    }));
   }
 
   /**

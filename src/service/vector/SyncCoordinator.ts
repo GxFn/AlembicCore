@@ -31,6 +31,7 @@ import {
   inspectRecipeVectorGeneration,
   type RecipeVectorGenerationInspection,
 } from './RecipeVectorGeneration.js';
+import { probeEmbeddingAvailability } from './VectorAvailability.js';
 import type { VectorIndexReader, VectorIndexWriter } from './VectorIndexPorts.js';
 import type { EmbedProvider } from './VectorService.js';
 
@@ -142,7 +143,6 @@ interface PendingChange {
   content?: unknown;
   kind?: string;
   entry?: RecipeRegionSourceEntry;
-  timestamp: number;
 }
 
 export interface SyncCoordinatorReconcileResult {
@@ -165,7 +165,6 @@ export class VectorLifecycleCoordinator {
   #writer: VectorIndexWriter;
   #recipeRegionStore: VectorStore;
   #embedProvider: EmbedProvider | null;
-  #contextualEnricher: VectorChunkEnricher | null;
   #debounceMs: number;
   #maxBatchSize: number;
   #drizzle: DrizzleDB | null;
@@ -192,7 +191,6 @@ export class VectorLifecycleCoordinator {
       config.recipeVectorTruthRemover ??
       new SingleStoreRecipeVectorTruthRemover(this.#recipeRegionStore);
     this.#embedProvider = config.embedProvider;
-    this.#contextualEnricher = config.contextualEnricher;
     this.#debounceMs = config.debounceMs;
     this.#maxBatchSize = config.maxBatchSize ?? 20;
     this.#drizzle = config.drizzle ?? null;
@@ -221,7 +219,6 @@ export class VectorLifecycleCoordinator {
         this.#enqueue({
           type: 'remove',
           entryId,
-          timestamp: Date.now(),
         });
       }
     };
@@ -238,7 +235,7 @@ export class VectorLifecycleCoordinator {
         return;
       }
       if (d.to === 'deprecated') {
-        this.#enqueue({ type: 'remove', entryId, timestamp: Date.now() });
+        this.#enqueue({ type: 'remove', entryId });
         return;
       }
       this.#enqueue({
@@ -248,7 +245,6 @@ export class VectorLifecycleCoordinator {
         content: d.entry?.content,
         kind: d.entry?.kind,
         entry: d.entry,
-        timestamp: Date.now(),
       });
     };
     eventBus.on('lifecycle:transition', this.#boundLifecycleHandler);
@@ -505,7 +501,7 @@ export class VectorLifecycleCoordinator {
     }
 
     if (d.action === 'delete' || d.entry?.lifecycle === 'deprecated') {
-      this.#enqueue({ type: 'remove', entryId, timestamp: Date.now() });
+      this.#enqueue({ type: 'remove', entryId });
     } else {
       this.#enqueue({
         type: 'upsert',
@@ -514,7 +510,6 @@ export class VectorLifecycleCoordinator {
         content: d.entry?.content,
         kind: d.entry?.kind,
         entry: d.entry,
-        timestamp: Date.now(),
       });
     }
   }
@@ -692,23 +687,13 @@ export class VectorLifecycleCoordinator {
   }
 
   async #isEmbedProviderAvailable(): Promise<boolean> {
-    if (!this.#embedProvider) {
-      return false;
-    }
-    if (
-      !('isAvailable' in this.#embedProvider) ||
-      typeof this.#embedProvider.isAvailable !== 'function'
-    ) {
-      return true;
-    }
-    try {
-      return await this.#embedProvider.isAvailable();
-    } catch (err: unknown) {
+    const availability = await probeEmbeddingAvailability(this.#embedProvider);
+    if (availability.probeStatus === 'error') {
       this.#logger.warn('[SyncCoordinator] embed provider availability probe failed', {
-        error: err instanceof Error ? err.message : String(err),
+        error: availability.detail,
       });
-      return false;
     }
+    return availability.available;
   }
 
   /**

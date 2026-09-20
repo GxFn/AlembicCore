@@ -18,6 +18,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import pathGuard from '../../shared/PathGuard.js';
+import { WeightedRrfAccumulator } from '../../shared/WeightedRrfAccumulator.js';
 import type { WriteZone } from '../io/WriteZone.js';
 import Logger from '../logging/Logger.js';
 import { AsyncPersistence, WAL_OP } from './AsyncPersistence.js';
@@ -580,65 +581,39 @@ export class HnswVectorAdapter extends VectorStore {
     // Sparse: 关键词搜索
     const keywordResults = this.#keywordSearch(queryText, expandedK, filter);
 
-    // RRF 融合
-    const scores = new Map();
-
-    // Dense RRF 分数
-    vectorResults.forEach((r, rank) => {
-      const id = r.item.id;
-      const entry = scores.get(id) || { item: r.item, rrfScore: 0 };
-      const contribution = alpha * (1 / (rrfK + rank + 1));
-      entry.rrfScore += contribution;
-      entry.denseRank = rank + 1;
-      entry.denseSimilarity = r.score;
-      entry.denseContribution = contribution;
-      entry.item = r.item;
-      scores.set(id, entry);
+    const fusion = new WeightedRrfAccumulator<
+      (typeof vectorResults)[number]['item'],
+      string | undefined
+    >(rrfK, alpha);
+    vectorResults.forEach((result, rank) => {
+      fusion.add(result.item.id, 'dense', rank, result.score).payload = result.item;
+    });
+    keywordResults.forEach((result, rank) => {
+      const entry = fusion.add(result.id, 'sparse', rank, result.score, 'contribution');
+      // Store 路径只在缺少 dense item 时构造 sparse payload，保留空 vector 与真实 metadata。
+      entry.payload ??= {
+        id: result.id,
+        content: this.#contents.get(result.id) || '',
+        vector: [],
+        metadata: this.#metadata.get(result.id) || {},
+      };
     });
 
-    // Sparse RRF 分数
-    keywordResults.forEach((r, rank) => {
-      const id = r.id;
-      const existing = scores.get(id);
-      if (existing) {
-        const contribution = (1 - alpha) * (1 / (rrfK + rank + 1));
-        existing.rrfScore += contribution;
-        existing.sparseRank = rank + 1;
-        existing.sparseScore = r.score;
-        existing.sparseContribution = contribution;
-      } else {
-        scores.set(id, {
-          item: {
-            id,
-            content: this.#contents.get(id) || '',
-            vector: [],
-            metadata: this.#metadata.get(id) || {},
-          },
-          rrfScore: (1 - alpha) * (1 / (rrfK + rank + 1)),
-          sparseRank: rank + 1,
-          sparseScore: r.score,
-          sparseContribution: (1 - alpha) * (1 / (rrfK + rank + 1)),
-        });
-      }
-    });
-
-    // Preserve raw RRF evidence; page-local max normalization is misleading.
-    const fused = [...scores.values()].sort((a, b) => b.rrfScore - a.rrfScore).slice(0, topK);
-
-    return fused.map((r) => ({
-      item: r.item,
-      score: r.rrfScore,
+    return fusion.ranked(topK).map((entry) => ({
+      item: entry.payload!,
+      score: entry.total,
       rrfContribution: {
-        dense: r.denseContribution ?? 0,
-        sparse: r.sparseContribution ?? 0,
-        total: r.rrfScore,
+        dense: entry.dense?.contribution ?? 0,
+        sparse: entry.sparse?.contribution ?? 0,
+        total: entry.total,
       },
-      denseRank: r.denseRank,
-      denseSimilarity: r.denseSimilarity,
-      sparseRank: r.sparseRank,
-      sparseScore: r.sparseScore,
-      vectorScore: r.denseSimilarity,
-      keywordScore: r.sparseScore,
+      // HNSW 的缺通道字段仍是 own undefined，不能变成 HybridRetriever 的 Infinity。
+      denseRank: entry.dense?.rank,
+      denseSimilarity: entry.dense?.score,
+      sparseRank: entry.sparse?.rank,
+      sparseScore: entry.sparse?.score,
+      vectorScore: entry.dense?.score,
+      keywordScore: entry.sparse?.score,
     }));
   }
 

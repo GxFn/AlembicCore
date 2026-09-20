@@ -9,14 +9,18 @@
  * - 每批 batchSize (默认 32) 条文本
  * - 最多 maxConcurrency (默认 2) 个批次并行
  *
- * 性能: 100 chunks × 串行 300ms = 30s → 批量 ≈ 0.6s (50× 加速)
+ * 批次大小和并发由配置或 transport capacity hint 决定。
  *
  * @module infrastructure/vector/BatchEmbedder
  */
 
-import type { EmbeddingPort, LegacyEmbedProvider } from '../../service/vector/EmbeddingPort.js';
 import { createLimit } from '../../shared/concurrency.js';
 import Logger from '../logging/Logger.js';
+import {
+  type EmbeddingPort,
+  type LegacyEmbedProvider,
+  LegacyEmbedProviderAdapter,
+} from './EmbeddingPort.js';
 
 export interface EmbeddingProvider extends LegacyEmbedProvider {
   /**
@@ -41,7 +45,6 @@ export class BatchEmbedder {
     embeddingProvider: EmbeddingPort | EmbeddingProvider | null,
     options: { batchSize?: number; maxConcurrency?: number } = {}
   ) {
-    this.#embeddingPort = embeddingProvider ? toEmbeddingPort(embeddingProvider) : null;
     this.#batchSize = options.batchSize || 32;
     // Concurrency resolution (AD5 provider-aware upgrade): explicit option
     // wins; otherwise the injected provider's transport capacity hint;
@@ -52,6 +55,9 @@ export class BatchEmbedder {
     const hint = (
       embeddingProvider as Partial<EmbeddingProvider> | null
     )?.getEmbeddingCapacityHint?.();
+    this.#embeddingPort = embeddingProvider
+      ? toEmbeddingPort(embeddingProvider, hint?.provider)
+      : null;
     if (typeof hint?.maxInFlightEmbeddings === 'number' && hint.maxInFlightEmbeddings >= 1) {
       concurrency = Math.floor(hint.maxInFlightEmbeddings);
       concurrencySource = `provider-hint(${hint.provider}/${hint.source})`;
@@ -166,7 +172,10 @@ export class BatchEmbedder {
   }
 }
 
-function toEmbeddingPort(provider: EmbeddingPort | EmbeddingProvider): EmbeddingPort {
+function toEmbeddingPort(
+  provider: EmbeddingPort | EmbeddingProvider,
+  providerName?: string
+): EmbeddingPort {
   if (
     'embedDocuments' in provider &&
     typeof provider.embedDocuments === 'function' &&
@@ -175,39 +184,6 @@ function toEmbeddingPort(provider: EmbeddingPort | EmbeddingProvider): Embedding
   ) {
     return provider;
   }
-  const legacy = provider as EmbeddingProvider;
-  return {
-    describeCapabilities: () => ({
-      batchSupported: true,
-      formatProfile: 'symmetric',
-      inputKinds: ['query', 'document'],
-      normalization: 'provider-defined',
-      provider: legacy.getEmbeddingCapacityHint?.().provider ?? 'legacy',
-    }),
-    embedDocuments: async (texts) => {
-      try {
-        const result = await legacy.embed([...texts]);
-        if (Array.isArray(result[0])) {
-          return result as number[][];
-        }
-        if (texts.length === 1) {
-          return [result as number[]];
-        }
-      } catch {
-        // Single-only legacy transports are serialized below.
-      }
-      const vectors: number[][] = [];
-      for (const text of texts) {
-        const result = await legacy.embed(text);
-        vectors.push(
-          Array.isArray(result[0]) ? ((result as number[][])[0] ?? []) : (result as number[])
-        );
-      }
-      return vectors;
-    },
-    embedQuery: async (text) => {
-      const result = await legacy.embed(text);
-      return Array.isArray(result[0]) ? ((result as number[][])[0] ?? []) : (result as number[]);
-    },
-  };
+  // 只收敛 legacy 协议转换。上面的双方法直通是既有兼容面，不强制补 describeCapabilities。
+  return new LegacyEmbedProviderAdapter(provider as EmbeddingProvider, { provider: providerName });
 }

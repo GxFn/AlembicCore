@@ -38,6 +38,7 @@ import type {
   RecipeVectorGenerationManager,
 } from './RecipeVectorGeneration.js';
 import type { RecipeVectorTruthRemover, VectorLifecycleCoordinator } from './SyncCoordinator.js';
+import { probeEmbeddingAvailability, type VectorAvailability } from './VectorAvailability.js';
 
 // ── Types ──
 
@@ -85,30 +86,13 @@ export interface VectorStats {
   autoSyncEnabled: boolean;
 }
 
-export type VectorAvailabilityStatus = 'available' | 'degraded' | 'unavailable';
-
-export type VectorAvailabilityReason =
-  | 'embed-provider-ready'
-  | 'embed-provider-configured'
-  | 'embed-provider-missing'
-  | 'embed-provider-unavailable'
-  | 'embed-provider-probe-failed';
-
-export type VectorAvailabilityProbeStatus =
-  | 'available'
-  | 'error'
-  | 'not-applicable'
-  | 'not-supported'
-  | 'unavailable';
-
-export interface VectorAvailability {
-  available: boolean;
-  status: VectorAvailabilityStatus;
-  reason: VectorAvailabilityReason;
-  embedProviderConfigured: boolean;
-  probeStatus: VectorAvailabilityProbeStatus;
-  detail?: string;
-}
+// 公开类型入口保持兼容，探测状态及其生产逻辑由同一内部模块维护。
+export type {
+  VectorAvailability,
+  VectorAvailabilityProbeStatus,
+  VectorAvailabilityReason,
+  VectorAvailabilityStatus,
+} from './VectorAvailability.js';
 
 export interface ProgressInfo {
   phase: string;
@@ -747,58 +731,7 @@ export class VectorService {
 
   /** Structured readiness state for observable vector degradation. */
   async getAvailability(): Promise<VectorAvailability> {
-    if (!this.#embedProvider) {
-      return {
-        available: false,
-        embedProviderConfigured: false,
-        probeStatus: 'not-applicable',
-        reason: 'embed-provider-missing',
-        status: 'unavailable',
-      };
-    }
-
-    if (
-      !('isAvailable' in this.#embedProvider) ||
-      typeof this.#embedProvider.isAvailable !== 'function'
-    ) {
-      return {
-        available: true,
-        embedProviderConfigured: true,
-        probeStatus: 'not-supported',
-        reason: 'embed-provider-configured',
-        status: 'available',
-      };
-    }
-
-    try {
-      const providerAvailable = await this.#embedProvider.isAvailable();
-      if (providerAvailable) {
-        return {
-          available: true,
-          embedProviderConfigured: true,
-          probeStatus: 'available',
-          reason: 'embed-provider-ready',
-          status: 'available',
-        };
-      }
-
-      return {
-        available: false,
-        embedProviderConfigured: true,
-        probeStatus: 'unavailable',
-        reason: 'embed-provider-unavailable',
-        status: 'degraded',
-      };
-    } catch (err: unknown) {
-      return {
-        available: false,
-        detail: err instanceof Error ? err.message : String(err),
-        embedProviderConfigured: true,
-        probeStatus: 'error',
-        reason: 'embed-provider-probe-failed',
-        status: 'degraded',
-      };
-    }
+    return probeEmbeddingAvailability(this.#embedProvider);
   }
 
   /** 获取向量索引统计信息 */

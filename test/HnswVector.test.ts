@@ -880,33 +880,64 @@ describe('BatchEmbedder', () => {
     const results = await embedder.embedAll([{ id: 'a', content: 'test' }]);
     expect(results.size).toBe(0);
   });
-
-  it('should fallback to serial on batch failure', async () => {
-    let _callCount = 0;
-    const mockProvider = {
-      embed: async (input) => {
-        _callCount++;
-        if (Array.isArray(input) && input.length > 1) {
-          throw new Error('batch not supported');
-        }
-        return [0.1, 0.2, 0.3];
-      },
-    };
-
-    const embedder = new BatchEmbedder(mockProvider, { batchSize: 3 });
-    const results = await embedder.embedAll([
-      { id: 'a', content: 'text1' },
-      { id: 'b', content: 'text2' },
-    ]);
-
-    expect(results.size).toBe(2);
-  });
 });
 
 // ═══════════════════════════════════════════
 //  HybridRetriever (RRF)
 // ═══════════════════════════════════════════
 describe('HybridRetriever', () => {
+  it('preserves rank holes, repeated evidence and the first nested sparse payload', () => {
+    const payload = { id: 'a', item: { id: 'payload-id' }, score: 4 };
+    const denseResults = Object.freeze([
+      { score: 99 },
+      { id: 'outer-id', item: { id: 'a' }, score: 0.9 },
+      { id: 'a', score: 0.4 },
+    ]);
+    const sparseResults = Object.freeze([
+      { item: { id: 'ignored' }, score: 50 },
+      payload,
+      { id: 'a', score: 3 },
+    ]);
+    const denseContribution = 0.4 * (1 / 63);
+    const sparseContribution = 0.6 * (1 / 63);
+    const total = 0.4 * (1 / 62) + denseContribution + 0.6 * (1 / 62) + sparseContribution;
+    const [result] = new HybridRetriever().fuse({ denseResults, sparseResults, alpha: 0.4 });
+    expect(result).toStrictEqual({
+      id: 'a',
+      denseRank: 3,
+      sparseRank: 3,
+      rrfScore: total,
+      data: payload,
+      denseSimilarity: 0.4,
+      denseContribution,
+      sparseScore: 3,
+      sparseContribution,
+      score: total,
+      rrfContribution: { dense: denseContribution, sparse: sparseContribution, total },
+    });
+    expect(result.data).toBe(payload);
+  });
+
+  it('keeps fuse defaults separate from search defaults and preserves zero-weight hits', async () => {
+    const dense = { id: 'dense', item: { id: 'dense' }, score: 0.01 };
+    const sparse = { id: 'sparse', score: 99 };
+    const searchVector = vi.fn(async () => [dense]);
+    const retriever = new HybridRetriever({ vectorStore: { searchVector }, rrfK: 0, alpha: 1 });
+    const direct = retriever.fuse({ denseResults: [dense], sparseResults: [sparse] });
+    expect(direct.map((row) => row.id)).toEqual(['dense', 'sparse']);
+    expect(direct.map((row) => row.score)).toEqual([0.5 * (1 / 61), 0.5 * (1 / 61)]);
+    expect(direct[0].sparseRank).toBe(Infinity);
+    expect(Object.hasOwn(direct[0], 'sparseScore')).toBe(false);
+    expect(direct[1].denseRank).toBe(Infinity);
+    expect(Object.hasOwn(direct[1], 'denseSimilarity')).toBe(false);
+    const queried = await retriever.search('query', [1], {
+      topK: 2,
+      sparseSearchFn: () => [sparse],
+    });
+    expect(queried.map((row) => row.score)).toEqual([1 / 61, 0]);
+    expect(searchVector).toHaveBeenCalledWith([1], { topK: 6, filter: null });
+  });
+
   it('should fuse dense and sparse results via RRF', () => {
     const retriever = new HybridRetriever({ rrfK: 60 });
 
@@ -978,7 +1009,7 @@ describe('HybridRetriever', () => {
     const sparse = Array.from({ length: 20 }, (_, i) => ({ id: `s${i}`, score: 20 - i }));
 
     const fused = retriever.fuse({ denseResults: dense, sparseResults: sparse, topK: 5 });
-    expect(fused).toHaveLength(5);
+    expect(fused.map((row) => row.id)).toEqual(['d0', 's0', 'd1', 's1', 'd2']);
   });
 
   it('should preserve raw RRF scores without page-max normalization', () => {
@@ -1840,7 +1871,7 @@ describe('RRF hybridSearch', () => {
     expect(results.length).toBeGreaterThan(0);
     // 'a' should rank highest: best vector match + best keyword match
     expect(results[0].item.id).toBe('a');
-    // Scores should be normalized to [0, 1]
+    // 保留默认 k=60 的原始 RRF 分数，不做页内最大值归一化。
     expect(results[0].score).toBeLessThanOrEqual(1);
     expect(results[0].score).toBeGreaterThan(0);
   });
@@ -1891,6 +1922,19 @@ describe('RRF hybridSearch', () => {
     expect(results[0]).toHaveProperty('vectorScore');
     expect(results[0]).toHaveProperty('keywordScore');
     expect(results[0]).toHaveProperty('item');
+    const stored = await store.getById('a');
+    const sparseOnly = await store.hybridSearch(null, 'singleton', { topK: 1, rrfK: 0 });
+    expect(sparseOnly[0]).toStrictEqual({
+      item: { id: 'a', content: 'singleton', vector: [], metadata: stored.metadata },
+      score: 0.5,
+      rrfContribution: { dense: 0, sparse: 0.5, total: 0.5 },
+      denseRank: undefined,
+      denseSimilarity: undefined,
+      sparseRank: 1,
+      sparseScore: 1,
+      vectorScore: undefined,
+      keywordScore: 1,
+    });
   });
 });
 

@@ -74,8 +74,11 @@ describe('VectorService availability surface', () => {
 
   it('uses a provider readiness probe for the standard boolean surface', async () => {
     const provider = {
+      ready: true,
       embed: vi.fn(async () => [0.1, 0.2]),
-      isAvailable: vi.fn(async () => true),
+      isAvailable: vi.fn(async function (this: { ready: boolean }) {
+        return this.ready;
+      }),
     };
     const service = createService(provider);
 
@@ -86,7 +89,13 @@ describe('VectorService availability surface', () => {
       reason: 'embed-provider-ready',
       status: 'available',
     });
-    expect(provider.isAvailable).toHaveBeenCalled();
+    expect(provider.isAvailable).toHaveBeenCalledTimes(2);
+    await service.getStats();
+    expect(provider.isAvailable).toHaveBeenCalledTimes(2);
+    provider.ready = false;
+    await expect(service.isAvailable()).resolves.toBe(false);
+    expect(provider.isAvailable).toHaveBeenCalledTimes(3);
+    expect(provider.embed).not.toHaveBeenCalled();
   });
 
   it('reports provider probe degradation without changing legacy stats presence semantics', async () => {
