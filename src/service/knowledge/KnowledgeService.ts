@@ -9,6 +9,7 @@ import type { ConfidenceRouter } from './ConfidenceRouter.js';
 import { commitKnowledgeWrite } from './commitKnowledgeWrite.js';
 import type { KnowledgeGraphService } from './KnowledgeGraphService.js';
 import { persistKnowledgeUpdate } from './persistKnowledgeUpdate.js';
+import { projectKnowledgeQualityFields } from './projectKnowledgeQualityFields.js';
 import {
   evaluateRecipeRetrievalReadiness,
   RECIPE_RETRIEVAL_PROFILE_SCHEMA_VERSION,
@@ -1128,25 +1129,11 @@ export class KnowledgeService {
         ? (entry.constraints as unknown as Record<string, unknown>)
         : ({} as Record<string, unknown>);
 
+    const fields = projectKnowledgeQualityFields(entry);
     return {
-      title: entry.title,
-      trigger: entry.trigger,
-      description: entry.description || '',
-      language: entry.language,
-      category: entry.category,
-      doClause: entry.doClause || '',
-      dontClause: entry.dontClause || '',
-      whenClause: entry.whenClause || '',
-      coreCode: entry.coreCode || '',
-      usageGuide: entry.usageGuide || (content.markdown as string) || entry.doClause || '',
-      contentMarkdown: (content.markdown as string) || '',
-      contentRationale: (content.rationale as string) || '',
-      reasoningWhyStandard: (reasoning.whyStandard as string) || '',
-      reasoningSources: (reasoning.sources as string[]) || [],
-      reasoningConfidence: (reasoning.confidence as number) || 0,
-      source: entry.source || '',
-      headers: entry.headers || [],
-      tags: entry.tags || [],
+      ...fields,
+      // 质量重算沿用 doClause 回退；创建前路由只接受显式用法或 Markdown。
+      usageGuide: fields.usageGuide || entry.doClause || '',
       views: (stats.views ?? 0) + (stats.searchHits ?? 0),
       clicks: (stats.adoptions ?? 0) + (stats.applications ?? 0) + (stats.guardHits ?? 0),
       rating: stats.authority ?? 0,

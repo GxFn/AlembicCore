@@ -1,6 +1,7 @@
 import type { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { HOST_AGENT_SOURCE } from '../../shared/sourceContracts.js';
+import { projectKnowledgeQualityFields } from './projectKnowledgeQualityFields.js';
 import type { QualityScorer } from './validation/quality/QualityScorer.js';
 
 interface ConfidenceRouterConfig {
@@ -121,34 +122,7 @@ export class ConfidenceRouter {
     let qualityScore: number | null = null;
     if (this._qualityScorer) {
       try {
-        const content =
-          entry.content && typeof entry.content === 'object'
-            ? (entry.content as unknown as Record<string, unknown>)
-            : ({} as Record<string, unknown>);
-        const reasoning =
-          entry.reasoning && typeof entry.reasoning === 'object'
-            ? (entry.reasoning as unknown as Record<string, unknown>)
-            : ({} as Record<string, unknown>);
-        const scorerInput = {
-          title: entry.title,
-          trigger: entry.trigger,
-          description: entry.description || '',
-          language: entry.language,
-          category: entry.category,
-          doClause: entry.doClause || '',
-          dontClause: entry.dontClause || '',
-          whenClause: entry.whenClause || '',
-          coreCode: entry.coreCode || '',
-          usageGuide: entry.usageGuide || (content.markdown as string) || '',
-          contentMarkdown: (content.markdown as string) || '',
-          contentRationale: (content.rationale as string) || '',
-          reasoningWhyStandard: (reasoning.whyStandard as string) || '',
-          reasoningSources: (reasoning.sources as string[]) || [],
-          reasoningConfidence: (reasoning.confidence as number) || 0,
-          source: entry.source || '',
-          headers: entry.headers || [],
-          tags: entry.tags || [],
-        };
+        const scorerInput = projectKnowledgeQualityFields(entry);
         const result = this._qualityScorer.score(scorerInput);
         qualityScore = result.score;
       } catch {

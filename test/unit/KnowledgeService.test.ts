@@ -10,17 +10,9 @@ import { KnowledgeService } from '../../src/service/knowledge/KnowledgeService.j
 
 function makeEntry(overrides = {}) {
   return new KnowledgeEntry({
+    ...makeWireData(),
     id: 'test-id-001',
-    title: 'Test Pattern',
-    trigger: '@test',
-    description: 'A test knowledge entry',
-    language: 'objc',
-    category: 'View',
-    knowledgeType: 'code-pattern',
     kind: 'pattern',
-    content: { pattern: 'let x = 1;', rationale: 'idiomatic' },
-    reasoning: { whyStandard: 'because', confidence: 0.9, sources: ['doc'] },
-    tags: ['test'],
     lifecycle: Lifecycle.PENDING,
     ...overrides,
   });
@@ -590,26 +582,81 @@ describe('KnowledgeService', () => {
       );
     });
 
-    test('有 QualityScorer 时计算并更新', async () => {
+    test.each([
+      { guide: 'Explicit guide', markdown: 'Markdown fallback', expected: 'Explicit guide' },
+      { guide: '', markdown: 'Markdown fallback', expected: 'Markdown fallback' },
+      { guide: '', markdown: '', expected: 'Use the designated entry point.' },
+    ])('评分字段完整透传并保留 usageGuide 回退：$expected', async ({
+      guide,
+      markdown,
+      expected,
+    }) => {
       const scorer = {
         score: vi.fn(() => ({
           score: 0.85,
           grade: 'B',
           dimensions: {
             completeness: 0.9,
-            format: 0.8,
-            codeQuality: 0.7,
-            metadata: 0.6,
-            engagement: 0,
+            deliveryReady: 0.8,
+            contentDepth: 0.7,
           },
         })),
       };
       const { service, repo } = createService({ qualityScorer: scorer });
-      repo._seed(makeEntry());
+      repo._seed(
+        makeEntry({
+          doClause: 'Use the designated entry point.',
+          dontClause: 'Do not bypass the service.',
+          whenClause: 'When updating knowledge.',
+          coreCode: 'service.updateQuality(id)',
+          usageGuide: guide,
+          content: { markdown, pattern: 'let x = 1;', rationale: 'idiomatic' },
+          stats: {
+            views: 2,
+            searchHits: 3,
+            adoptions: 4,
+            applications: 5,
+            guardHits: 6,
+            authority: 2,
+          },
+        })
+      );
 
       const result = await service.updateQuality('test-id-001', { userId: 'user1' });
 
       expect(scorer.score).toHaveBeenCalledTimes(1);
+      expect(scorer.score).toHaveBeenCalledWith({
+        title: 'Test Pattern',
+        trigger: '@test',
+        description: 'A test knowledge entry',
+        language: 'objc',
+        category: 'View',
+        doClause: 'Use the designated entry point.',
+        dontClause: 'Do not bypass the service.',
+        whenClause: 'When updating knowledge.',
+        coreCode: 'service.updateQuality(id)',
+        usageGuide: expected,
+        contentMarkdown: markdown,
+        contentRationale: 'idiomatic',
+        reasoningWhyStandard: 'because',
+        reasoningSources: ['doc'],
+        reasoningConfidence: 0.9,
+        source: 'manual',
+        headers: [],
+        tags: ['test'],
+        views: 5,
+        clicks: 15,
+        rating: 2,
+        contentSteps: [],
+        contentVerification: null,
+        constraintsBoundaries: [],
+        constraintsPreconditions: [],
+        constraintsSideEffects: [],
+        reasoningAlternatives: [],
+        groundedSourcePaths: [],
+        groundedRanges: [],
+        groundingAvailable: false,
+      });
       expect(result.score).toBe(0.85);
       expect(result.grade).toBe('B');
       expect(repo.update).toHaveBeenCalled();
@@ -730,35 +777,61 @@ describe('ConfidenceRouter', () => {
     expect(result.reason).toContain('too short');
   });
 
-  test('有 QualityScorer 且质量过低 → 降级为 pending', async () => {
+  test.each([0.1, 0.8, null])('评分门保留输入、低分与失败策略：%s', async (score) => {
     const scorer = {
-      score: vi.fn(() => ({ score: 0.1, grade: 'F', dimensions: {} })),
+      score: vi.fn(() => {
+        if (score === null) {
+          throw new Error('scorer unavailable');
+        }
+        return { score, grade: 'B', dimensions: {} };
+      }),
     };
     const router = new ConfidenceRouter({}, scorer);
     const entry = makeEntry({
       content: { pattern: 'code pattern here for testing', rationale: 'reason' },
       reasoning: { whyStandard: 'standard', confidence: 0.95, sources: ['doc'] },
+      doClause: 'Use the designated entry point.',
     });
 
     const result = await router.route(entry);
 
-    expect(result.action).toBe('pending');
-    expect(result.reason).toContain('quality low');
-  });
-
-  test('有 QualityScorer 且质量 OK → auto_approve', async () => {
-    const scorer = {
-      score: vi.fn(() => ({ score: 0.8, grade: 'B', dimensions: {} })),
-    };
-    const router = new ConfidenceRouter({}, scorer);
-    const entry = makeEntry({
-      content: { pattern: 'code pattern here for testing', rationale: 'reason' },
-      reasoning: { whyStandard: 'standard', confidence: 0.95, sources: ['doc'] },
+    expect(scorer.score).toHaveBeenCalledTimes(1);
+    expect(scorer.score).toHaveBeenCalledWith({
+      title: 'Test Pattern',
+      trigger: '@test',
+      description: 'A test knowledge entry',
+      language: 'objc',
+      category: 'View',
+      doClause: 'Use the designated entry point.',
+      dontClause: '',
+      whenClause: '',
+      coreCode: '',
+      usageGuide: '',
+      contentMarkdown: '',
+      contentRationale: 'reason',
+      reasoningWhyStandard: 'standard',
+      reasoningSources: ['doc'],
+      reasoningConfidence: 0.95,
+      source: 'manual',
+      headers: [],
+      tags: ['test'],
     });
-
-    const result = await router.route(entry);
-
-    expect(result.action).toBe('auto_approve');
+    expect(result).toEqual(
+      score === 0.1
+        ? {
+            action: 'pending',
+            reason: 'Confidence OK (0.95) but quality low (0.10)',
+            confidence: 0.95,
+            targetState: 'pending',
+          }
+        : {
+            action: 'auto_approve',
+            reason: 'Confidence 0.95 >= threshold 0.85 (source: manual)',
+            confidence: 0.95,
+            targetState: 'staging',
+            gracePeriod: 24 * 60 * 60 * 1000,
+          }
+    );
   });
 
   test('默认配置值', () => {

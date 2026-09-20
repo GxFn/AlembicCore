@@ -7,7 +7,7 @@
  *  2) `KnowledgeService.updateQuality` 注入 grounding port 后，scorer **真能拿到** groundedSourcePaths +
  *     深度字段——即门禁在 submit 期丢弃 validSourcePaths 造成的「深度评分拿不到接地」断路已闭合。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { resolveGroundedSourcePaths } from '../src/domain/knowledge/recipe-authoring-spec/gateRules.js';
@@ -96,72 +96,50 @@ describe('KnowledgeService.updateQuality (C7) — port→scorer 断路闭合', (
     });
   }
 
-  it('注入 grounding port → scorer 收到 groundedSourcePaths + 深度字段', async () => {
+  it.each([
+    { label: '已解析', paths: ['lib/foo.ts', 'lib/bar.ts'] },
+    { label: 'port 就位但零接地', paths: [] },
+    { label: '未注入 port', paths: null },
+  ])('$label：传递接地状态与完整深度字段', async ({ paths }) => {
     const entry = buildEntry();
-    let captured: Record<string, unknown> | null = null;
-
     const fakeRepo = {
       findById: async () => entry,
-      update: async () => {},
+      update: async () => entry,
     } as unknown as ConstructorParameters<typeof KnowledgeService>[0];
-
-    const scorer = {
-      score: (input: Record<string, unknown>) => {
-        captured = input;
-        return {
-          score: 0.5,
-          dimensions: { completeness: 0.5, deliveryReady: 0.5, contentDepth: 0.5 },
-          grade: 'B',
-        };
-      },
-    };
-
-    // port 内部用真的 resolveGroundedSourcePaths(与门禁字节同源) + 假 resolver。
-    const port = (it2: Record<string, unknown>) =>
-      resolveGroundedSourcePaths(it2, {
-        sourceRefResolver: fakeResolver(new Set(['lib/foo.ts', 'lib/bar.ts'])),
-        projectRoot: '/proj',
-      });
-
+    const score = vi.fn((_input: Record<string, unknown>) => ({
+      score: 0.5,
+      dimensions: { completeness: 0.5, deliveryReady: 0.5, contentDepth: 0.5 },
+      grade: 'B',
+    }));
+    // 使用真正的接地投影；只有文件解析边界由白名单 resolver 替代。
+    const port =
+      paths === null
+        ? undefined
+        : (item: Record<string, unknown>) =>
+            resolveGroundedSourcePaths(item, {
+              sourceRefResolver: fakeResolver(new Set(paths)),
+              projectRoot: '/proj',
+            });
     const svc = new KnowledgeService(fakeRepo, { log: async () => {} }, null, null, {
-      qualityScorer: scorer,
+      qualityScorer: { score },
       groundedSourcePaths: port,
     });
 
     await svc.updateQuality('k1');
 
-    expect(captured).not.toBeNull();
-    const input = captured as unknown as Record<string, unknown>;
-    // 接地集只含真解析成功的两处，ghost 被剔除(断路闭合的核心证据)。
-    expect((input.groundedSourcePaths as string[]).sort()).toEqual(['lib/bar.ts', 'lib/foo.ts']);
-    expect(input.groundedSourcePaths).not.toContain('lib/ghost.ts');
-    // 深度字段被 additive 透传给 scorer(供 C8 depthCoverage)。
-    expect(input.constraintsBoundaries).toEqual(['仅事务内有效 lib/foo.ts:12']);
-    expect(input.reasoningAlternatives).toEqual(['每次 new — lib/bar.ts:20']);
-    expect(Array.isArray(input.contentSteps)).toBe(true);
-  });
-
-  it('不注入 port → 退化为空接地集(旧评分路径不变、不崩)', async () => {
-    const entry = buildEntry();
-    let captured: Record<string, unknown> | null = null;
-    const fakeRepo = {
-      findById: async () => entry,
-      update: async () => {},
-    } as unknown as ConstructorParameters<typeof KnowledgeService>[0];
-    const scorer = {
-      score: (input: Record<string, unknown>) => {
-        captured = input;
-        return {
-          score: 0.4,
-          dimensions: { completeness: 0.4, deliveryReady: 0.4, contentDepth: 0.4 },
-          grade: 'C',
-        };
-      },
-    };
-    const svc = new KnowledgeService(fakeRepo, { log: async () => {} }, null, null, {
-      qualityScorer: scorer,
+    expect(score).toHaveBeenCalledOnce();
+    const input = score.mock.calls[0][0];
+    expect(input).toMatchObject({
+      groundingAvailable: paths !== null,
+      groundedSourcePaths: paths ?? [],
+      groundedRanges: paths?.length ? ['// lib/foo.ts:10-18', '// lib/bar.ts:3-3'] : [],
+      constraintsBoundaries: ['仅事务内有效 lib/foo.ts:12'],
+      constraintsPreconditions: ['已初始化 lib/bar.ts:3'],
+      constraintsSideEffects: [],
+      reasoningAlternatives: ['每次 new — lib/bar.ts:20'],
+      contentSteps: [{ title: 's', description: 'd' }],
+      contentVerification: { method: 'test', expected_result: 'ok' },
     });
-    await svc.updateQuality('k1');
-    expect((captured as unknown as Record<string, unknown>).groundedSourcePaths).toEqual([]);
+    expect(input.groundedSourcePaths).not.toContain('lib/ghost.ts');
   });
 });
