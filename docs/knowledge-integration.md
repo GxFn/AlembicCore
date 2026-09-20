@@ -58,9 +58,13 @@ KnowledgeService.update、生命周期操作及 RecipeProductionPort.publish 明
 | DB-only update/transition，未投影成功事件 | 原样返回 null，保留原审计与 afterPublish 时机 |
 | DB-only create 或成功事件需要解引用空实体 | 在原 id/toJSON 投影位置保留 TypeError，不提前改变写入流程 |
 | Gateway 的关系补写返回 null | created.raw 原样为 null，不回退旧实体、不增加伪造的成功内容 |
-| Agent publish 读到 null | 保留写入已开始后的失败分类，要求读回确认 |
+| Main / Agent publish 读到 null | 返回 `KNOWLEDGE_WRITE_RECEIPT_UNAVAILABLE`，写入状态为 unknown，要求读回确认，不自动重试 |
+| Main 编辑或生命周期操作读到 null | 同一宿主回执边界返回 HTTP 502；批处理保留已确认子集，单列 unknownCount |
+| Agent 已确认创建身份，但 created.raw 为 null | 保留创建成功结果，标记 degraded 并附 `KNOWLEDGE_CREATED_DETAILS_UNAVAILABLE`，不从候选内容补造持久化详情 |
 
 CreatedRecipeInfo.raw 是原始对象或 null，实际对象可以是带方法的 KnowledgeEntry。Gateway 不克隆或序列化它；展示层只读取所需字段。严格 prepared/admission 的 recipe 仍为经过检查的非空记录，普通 publish 的可空类型不放松严格事实门。
+
+上述回执策略属于宿主消费层：Core 仍如实返回原读回结果，Main 的共享 helper 同时服务 HTTP 与严格生产流程，Agent 则映射到既有工具结果。缺回执不等于写入失败或已回滚；严格流程在获得发布确认前不能继续 CONTENT_READY / PUBLIC_CAS。批量发布中的 publication.confirmed 保持原入口控制器确认含义，写入成功只由 published 子集证明。
 
 其他边界同样保持：查询到的非空 SQLite 行一定映射为实体；空输入的旧 `_rowToEntity(null)` 仍返回 null；空表统计的 SUM 仍为 null。通用 SkillHooks.run 返回 unknown，提交入口仅按原 JavaScript 属性读取语义消费 truthy block/reason，创建后的异步通知不解释返回值。
 
