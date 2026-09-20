@@ -134,6 +134,9 @@ export {
 } from './domain/knowledge/StyleGuide.js';
 export {
   createStatelessValidator,
+  type UnifiedValidationOptions,
+  type UnifiedValidationReport,
+  type UnifiedValidationResult,
   UnifiedValidator,
 } from './domain/knowledge/UnifiedValidator.js';
 export {

@@ -21,6 +21,21 @@ Consumed by Alembic, AlembicAgent, AlembicPlugin (space-edge config).
 - **Network**: none. Core owns no transports (charter); embedding/LLM
   calls go through INJECTED providers owned by the caller.
 
+With a knowledge file store configured, `KnowledgeService` create, edit,
+quality and lifecycle commands, Guard mutations and sustain updates share an
+internal single-entry write coordinator. File rejection raises `FileWriteError`
+before the DB write. DB failure or mismatched write readback raises
+`DivergenceError` (`STATE_DIVERGENCE`), retains the durable file and names
+`KnowledgeSyncService.sync` as the repair route. Success events follow the
+confirmed write. The SQLite repository also rejects an UPDATE that affected
+zero rows, since reading an old row with the same ID does not confirm a write.
+
+Constructors without a file store keep the legacy DB-only behavior and emit a
+diagnostic. Synchronous multi-entry `KnowledgeUnitOfWork` transactions remain
+separate: neither coordinator promises atomic rollback across Markdown files
+and SQLite. Shared coordination does not change caller permissions, lifecycle
+rules, storage layout or public constructor parameters.
+
 ## Family 2 — shipped scripts tooling (`files[]` scripts/, no bin)
 
 `package.json` has NO `bin` field — Core ships no installable CLI. The

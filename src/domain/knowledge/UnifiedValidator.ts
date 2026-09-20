@@ -25,6 +25,24 @@ import { codeFingerprint, getStage3FieldPolicy } from './recipe-authoring-spec/g
 // stage-3 字段门禁策略单例：返回的正则均无 g 标志、状态无关，可安全复用同一实例。
 const STAGE3_FIELD_POLICY = getStage3FieldPolicy();
 
+export interface UnifiedValidationOptions {
+  systemInjectedFields?: string[];
+  skipUniqueness?: boolean;
+}
+
+export interface UnifiedValidationResult {
+  pass: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+export interface UnifiedValidationReport {
+  /** 字段和内容阶段的独立快照，不含唯一性诊断。 */
+  structural: UnifiedValidationResult;
+  /** 与旧 validate 返回完全一致，包含所有启用的阶段。 */
+  result: UnifiedValidationResult;
+}
+
 // ── UnifiedValidator ────────────────────────────────────────
 
 export class UnifiedValidator {
@@ -58,23 +76,31 @@ export class UnifiedValidator {
    * 完整验证链 (3 层)
    *
    * @param candidate 候选数据（扁平字段）
-   * @param [options.mode] 验证模式（自动检测或手动指定）
    * @param [options.systemInjectedFields] 系统注入的字段（跳过 REQUIRED 检查）
    * @param [options.skipUniqueness=false] 跳过去重检查
    * @returns }
    */
   validate(
     candidate: Record<string, unknown>,
-    options: {
-      systemInjectedFields?: string[];
-      skipUniqueness?: boolean;
-    } = {}
-  ) {
+    options: UnifiedValidationOptions = {}
+  ): UnifiedValidationResult {
+    return this.validateDetailed(candidate, options).result;
+  }
+
+  /**
+   * 同次检查提供分阶段诊断，准入调用者无需为区分“结构失败/重复”重新运行字段和内容规则。
+   * 结果只描述本次输入，不是跨调用复用的校验票据；结构失败仍执行旧 validate 的唯一性检查。
+   */
+  validateDetailed(
+    candidate: Record<string, unknown>,
+    options: UnifiedValidationOptions = {}
+  ): UnifiedValidationReport {
     const errors: string[] = [];
     const warnings: string[] = [];
 
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-      return { pass: false, errors: ['候选为空或类型错误'], warnings };
+      const result = { pass: false, errors: ['候选为空或类型错误'], warnings };
+      return { structural: { ...result, errors: [...result.errors], warnings: [] }, result };
     }
 
     const systemInjected = new Set(options.systemInjectedFields || []);
@@ -85,15 +111,17 @@ export class UnifiedValidator {
     // ── Layer 2: 内容质量 (来自 CandidateGuardrail.validateQuality) ──
     this.#checkContentQuality(candidate, errors, warnings);
 
+    // 唯一性会追加 errors；必须在这里复制数组，不能污染结构诊断或靠错误文本反推阶段。
+    const structural = { pass: errors.length === 0, errors: [...errors], warnings: [...warnings] };
+
     // ── Layer 3: 唯一性 (来自 CandidateGuardrail.validateUniqueness) ──
     if (!options.skipUniqueness) {
       this.#checkUniqueness(candidate, errors);
     }
 
     return {
-      pass: errors.length === 0,
-      errors,
-      warnings,
+      structural,
+      result: { pass: errors.length === 0, errors, warnings },
     };
   }
 

@@ -126,6 +126,8 @@ describe('KnowledgeFileWriter', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    pathGuard._reset();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -705,6 +707,32 @@ description: "包含冒号：和引号的描述"
   /* ─── moveOnLifecycleChange ─────────────── */
 
   describe('moveOnLifecycleChange', () => {
+    it('keeps the old file when durable lifecycle replacement fails', () => {
+      const entry = makeEntry({ lifecycle: Lifecycle.PENDING });
+      const oldPath = writer.persist(entry)!;
+      const oldBytes = fs.readFileSync(oldPath, 'utf8');
+      const oldSourceFile = entry.sourceFile;
+      entry.lifecycle = Lifecycle.ACTIVE;
+      vi.spyOn(fs, 'renameSync').mockImplementationOnce(() => {
+        throw new Error('injected-rename-fault');
+      });
+      expect(writer.moveOnLifecycleChange(entry)).toBeNull();
+      expect(fs.existsSync(oldPath)).toBe(true);
+      expect(fs.readFileSync(oldPath, 'utf8')).toBe(oldBytes);
+      expect(entry.sourceFile).toBe(oldSourceFile);
+    });
+
+    it('rejects a traversal-shaped storage bucket before creating a file', () => {
+      const entry = makeEntry({
+        lifecycle: Lifecycle.PENDING,
+        category: '../escape',
+        sourceFile: null,
+      });
+      expect(writer.persist(entry)).toBeNull();
+      expect(fs.existsSync(path.join(tmpDir, 'escape'))).toBe(false);
+      expect(entry.sourceFile).toBeFalsy();
+    });
+
     it('应在 lifecycle 从 pending → active 时移动文件', () => {
       const entry = makeEntry({ lifecycle: Lifecycle.PENDING });
       const oldPath = writer.persist(entry);

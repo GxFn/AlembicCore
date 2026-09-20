@@ -42,7 +42,7 @@ function makeWireData(overrides = {}) {
 }
 
 function mockRepository() {
-  const _store = new Map();
+  const _store = new Map<string, KnowledgeEntry>();
   return {
     create: vi.fn(async (entry) => {
       _store.set(entry.id, entry);
@@ -76,55 +76,10 @@ function mockRepository() {
       if (!entry) {
         return null;
       }
-      // 模拟 DB 更新后重新加载
-      if (updates.lifecycle) {
-        entry.lifecycle = updates.lifecycle;
-      }
-      if (updates.reviewed_by) {
-        entry.reviewedBy = updates.reviewed_by;
-      }
-      if (updates.reviewedBy) {
-        entry.reviewedBy = updates.reviewedBy;
-      }
-      if (updates.reviewed_at) {
-        entry.reviewedAt = updates.reviewed_at;
-      }
-      if (updates.reviewedAt) {
-        entry.reviewedAt = updates.reviewedAt;
-      }
-      if (updates.rejection_reason !== undefined) {
-        entry.rejectionReason = updates.rejection_reason;
-      }
-      if (updates.rejectionReason !== undefined) {
-        entry.rejectionReason = updates.rejectionReason;
-      }
-      if (updates.published_at) {
-        entry.publishedAt = updates.published_at;
-      }
-      if (updates.publishedAt) {
-        entry.publishedAt = updates.publishedAt;
-      }
-      if (updates.published_by) {
-        entry.publishedBy = updates.published_by;
-      }
-      if (updates.publishedBy) {
-        entry.publishedBy = updates.publishedBy;
-      }
-      if (updates.probation !== undefined) {
-        entry.probation = !!updates.probation;
-      }
-      if (updates.lifecycle_history_json) {
-        entry.lifecycleHistory = JSON.parse(updates.lifecycle_history_json);
-      }
-      if (updates.lifecycleHistory) {
-        const lh =
-          typeof updates.lifecycleHistory === 'string'
-            ? JSON.parse(updates.lifecycleHistory)
-            : updates.lifecycleHistory;
-        entry.lifecycleHistory = lh;
-      }
-      entry.updatedAt = updates.updated_at || updates.updatedAt || entry.updatedAt;
-      return entry;
+      // 内存 fake 只保留仓储存取契约；值对象转换复用实体，SQL/旧字段/故障由真实持久化套件验证。
+      const updated = KnowledgeEntry.fromJSON({ ...entry.toJSON(), ...updates });
+      _store.set(id, updated);
+      return updated;
     }),
     delete: vi.fn(async (id) => {
       return _store.delete(id);

@@ -4,10 +4,14 @@ import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
 import {
-  classifyPublicApiExport,
-  PUBLIC_API_BOUNDARY_POLICY,
+  loadPublicApiBoundaryPolicy,
+  makePublicApiBoundaryClassifier,
   summarizePublicApiExports,
-} from './support/public-api-inventory.js';
+} from '../scripts/public-api-boundary-policy.mjs';
+
+// 测试正式门禁分类器，期望值仍由显式断言和独立 policy 给出。
+const PUBLIC_API_BOUNDARY_POLICY = loadPublicApiBoundaryPolicy();
+const classifyPublicApiExport = makePublicApiBoundaryClassifier(PUBLIC_API_BOUNDARY_POLICY);
 
 interface PackageJson {
   exports: Record<string, unknown>;
@@ -62,7 +66,7 @@ describe('public API inventory', () => {
   it('locks the phase 9 export status summary from policy', () => {
     const exportPaths = Object.keys(readPackageJson().exports);
 
-    expect(summarizePublicApiExports(exportPaths)).toStrictEqual(
+    expect(summarizePublicApiExports(exportPaths, PUBLIC_API_BOUNDARY_POLICY)).toStrictEqual(
       PUBLIC_API_BOUNDARY_POLICY.expectedCounts
     );
   });

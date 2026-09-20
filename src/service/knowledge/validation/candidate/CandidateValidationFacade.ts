@@ -11,17 +11,17 @@
  * 保持独立，不进入本门面。
  */
 
-import { UnifiedValidator } from '../../../../domain/knowledge/UnifiedValidator.js';
+import {
+  type UnifiedValidationOptions,
+  type UnifiedValidationResult,
+  UnifiedValidator,
+} from '../../../../domain/knowledge/UnifiedValidator.js';
 import { RecipeCandidateValidator } from '../recipe/RecipeCandidateValidator.js';
 import { aggregateCandidates } from './CandidateAggregator.js';
 
-export interface UnifiedCandidateValidationOptions {
+export interface UnifiedCandidateValidationOptions extends UnifiedValidationOptions {
   /** 去重相似度阈值，透传给 aggregateCandidates */
   aggregateThreshold?: number;
-  /** 透传给 UnifiedValidator.validate 的系统注入字段 */
-  systemInjectedFields?: string[];
-  /** 透传给 UnifiedValidator.validate：跳过跨提交唯一性检查 */
-  skipUniqueness?: boolean;
   /** 复用既有的有状态 UnifiedValidator（默认新建无状态实例） */
   unifiedValidator?: UnifiedValidator;
 }
@@ -29,7 +29,7 @@ export interface UnifiedCandidateValidationOptions {
 export interface UnifiedCandidateValidationItem {
   candidate: Record<string, unknown>;
   /** UnifiedValidator 三层验证结果（字段/质量/唯一性） */
-  unified: { pass: boolean; errors: string[]; warnings: string[] };
+  unified: UnifiedValidationResult;
   /** RecipeCandidateValidator V3 结构校验结果 */
   recipe: { valid: boolean; errors: string[]; warnings: string[] };
   /** 全链通过：unified.pass 且 recipe.valid（纯合取，无新增判定） */

@@ -166,23 +166,23 @@ export class KnowledgeRepositoryImpl {
         throw new Error(`Knowledge entry not found: ${id}`);
       }
 
-      if (updates instanceof KnowledgeEntry) {
-        const fullRow = this._entityToRow(updates);
-        const { id: _id, createdAt: _ca, ...row } = fullRow;
-        row.updatedAt = unixNow();
-        this.#drizzle.update(knowledgeEntries).set(row).where(eq(knowledgeEntries.id, id)).run();
-        return this.findById(id);
+      // 完整实体和部分更新共用序列化/执行/读回边界；部分更新先恢复值对象。
+      const merged =
+        updates instanceof KnowledgeEntry
+          ? updates
+          : KnowledgeEntry.fromJSON({ ...existing.toJSON(), ...updates });
+      const { id: _id, createdAt: _ca, ...row } = this._entityToRow(merged);
+      row.updatedAt = unixNow();
+      const result = this.#drizzle
+        .update(knowledgeEntries)
+        .set(row)
+        .where(eq(knowledgeEntries.id, id))
+        .run();
+      // RAISE(IGNORE) 等路径可能不抛异常而跳过 UPDATE；读回同 id 的旧行不能证明新状态已落库。
+      // 普通同值 UPDATE 仍计一次变更，不能把零行写入当作幂等成功。
+      if (result.changes !== 1) {
+        throw new Error(`KNOWLEDGE_UPDATE_NOT_APPLIED: id=${id}, changes=${result.changes}`);
       }
-
-      // 部分更新 — 合并到现有实体
-      const merged = KnowledgeEntry.fromJSON({
-        ...existing.toJSON(),
-        ...updates,
-        updatedAt: unixNow(),
-      });
-      const fullRow2 = this._entityToRow(merged);
-      const { id: _id2, createdAt: _ca2, ...row } = fullRow2;
-      this.#drizzle.update(knowledgeEntries).set(row).where(eq(knowledgeEntries.id, id)).run();
       return this.findById(id);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

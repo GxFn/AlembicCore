@@ -1,17 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { KnowledgeEntry } from '../../domain/knowledge/KnowledgeEntry.js';
-import { isSqliteBusyError } from '../../infrastructure/database/DatabaseConnection.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
-import { FileWriteError } from '../../repository/knowledge/KnowledgeUnitOfWork.js';
-import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
-import {
-  ConflictError,
-  DivergenceError,
-  NotFoundError,
-  ValidationError,
-} from '../../shared/errors/index.js';
+import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
 import { unixNow } from '../../shared/utils/common.js';
+import { persistKnowledgeEntry } from '../knowledge/persistKnowledgeEntry.js';
 import { persistKnowledgeUpdate } from '../knowledge/persistKnowledgeUpdate.js';
 
 interface KnowledgeRepositoryLike {
@@ -155,7 +148,14 @@ export class GuardService {
         createdBy: context.userId,
       });
 
-      const created = await this.#createEntry(entry);
+      const created = await persistKnowledgeEntry({
+        entry,
+        fileStore: this.#fileStore,
+        operation: 'guard.create',
+        commit: () => this.knowledgeRepository.create(entry),
+        dbFailureMessage:
+          'Guard file persisted but DB insert failed — run knowledge sync to rebuild DB truth',
+      });
       this._engine?.clearCache?.();
 
       await this.auditLogger.log({
@@ -244,57 +244,6 @@ export class GuardService {
     } catch (error: unknown) {
       this.logger.error('Error disabling guard rule', { ruleId, error: (error as Error).message });
       throw error;
-    }
-  }
-
-  /** 旧构造保留 DB-only；宿主注入 writer 后，新规则先写文件，DB 失败显式报告可修复分歧。 */
-  async #createEntry(entry: KnowledgeEntry) {
-    if (!this.#fileStore) {
-      this.logger.warn('Guard creation uses legacy DB-only persistence: fileStore not configured', {
-        entryId: entry.id,
-        operation: 'guard.create',
-      });
-      return this.knowledgeRepository.create(entry);
-    }
-    try {
-      if (this.#fileStore.persist(entry) === null) {
-        throw new Error('Knowledge file store returned null');
-      }
-    } catch (error) {
-      this.logger.error('Guard creation aborted before DB insert: file persistence failed', {
-        entryId: entry.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new FileWriteError(`Knowledge file write failed during guard.create: ${entry.id}`, {
-        cause: error,
-      });
-    }
-    try {
-      const created = await this.knowledgeRepository.create(entry);
-      if (created?.id !== entry.id) {
-        throw new Error(
-          `KNOWLEDGE_CREATE_READBACK_MISMATCH: expected=${entry.id}, actual=${created?.id ?? 'missing'}`
-        );
-      }
-      return created;
-    } catch (error) {
-      const details = {
-        code: CORE_DIAGNOSTIC_CODES.knowledgeFileDbDivergence,
-        entryIds: [entry.id],
-        fileOpsCompleted: 1,
-        operation: 'guard.create',
-        reconcileVia: 'KnowledgeSyncService.sync',
-        sqliteBusy: isSqliteBusyError(error),
-      };
-      this.logger.error('Guard creation left file/DB divergence', {
-        ...details,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw new DivergenceError(
-        'Guard file persisted but DB insert failed — run knowledge sync to rebuild DB truth',
-        details,
-        { cause: error }
-      );
     }
   }
 

@@ -9,6 +9,7 @@
 import { UnifiedValidator } from '../src/domain/knowledge/UnifiedValidator.js';
 import { aggregateCandidates } from '../src/service/knowledge/validation/candidate/CandidateAggregator.js';
 import { validateCandidatesUnified } from '../src/service/knowledge/validation/candidate/CandidateValidationFacade.js';
+import { RecipeCandidateValidator } from '../src/service/knowledge/validation/recipe/RecipeCandidateValidator.js';
 
 function strongCandidate(overrides: Record<string, unknown> = {}) {
   const markdown = [
@@ -152,14 +153,11 @@ describe('validateCandidatesUnified', () => {
   });
 
   test('valid is the AND of both validators (recipe failure flips it)', () => {
-    const missingRationale = strongCandidate({
-      content: {
-        pattern: 'code',
-        markdown: 'Long enough markdown body for the quality layer. '.repeat(6),
-        // no rationale → RecipeCandidateValidator error
-      },
+    // UnifiedValidator 允许单字符 trigger；兼容 Recipe 规则要求长度至少 2。
+    const result = validateCandidatesUnified([strongCandidate({ trigger: '@' })], {
+      skipUniqueness: true,
     });
-    const result = validateCandidatesUnified([missingRationale], { skipUniqueness: true });
+    expect(result.items[0].unified.pass).toBe(true);
     expect(result.items[0].recipe.valid).toBe(false);
     expect(result.items[0].valid).toBe(false);
   });
@@ -181,6 +179,9 @@ describe('validateCandidatesUnified', () => {
     });
     expect(loose.items).toHaveLength(1);
     expect(loose.duplicates).toHaveLength(1);
+    const direct = aggregateCandidates(candidates, { threshold: 0.5 });
+    expect(loose.items.map((item) => item.candidate)).toEqual(direct.items);
+    expect(loose.duplicates).toEqual(direct.duplicates);
   });
 
   test('a shared UnifiedValidator enforces cross-batch uniqueness statefully', () => {
@@ -219,11 +220,17 @@ describe('validateCandidatesUnified', () => {
   });
 
   test('validator outputs are preserved verbatim (no filtering or re-ordering)', () => {
-    const weak = { title: 'x' };
-    const result = validateCandidatesUnified([weak], { skipUniqueness: true });
-    expect(result.items[0].unified.pass).toBe(false);
-    expect(result.items[0].unified.errors.length).toBeGreaterThan(0);
-    expect(result.items[0].recipe.errors.length).toBeGreaterThan(0);
-    expect(result.items[0].candidate).toBe(weak);
+    const candidates = [strongCandidate(), { title: 'x' }];
+    const result = validateCandidatesUnified(candidates, { skipUniqueness: true });
+    const recipeValidator = new RecipeCandidateValidator();
+    const unifiedValidator = new UnifiedValidator();
+    for (const [index, item] of result.items.entries()) {
+      expect(item.recipe).toEqual(recipeValidator.validate(item.candidate));
+      expect(item.unified).toEqual(
+        unifiedValidator.validate(item.candidate, { skipUniqueness: true })
+      );
+      expect(item.candidate).toBe(candidates[index]);
+      expect(item.valid).toBe(item.unified.pass && item.recipe.valid);
+    }
   });
 });

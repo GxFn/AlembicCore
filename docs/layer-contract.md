@@ -125,6 +125,15 @@ validation entry: it composes `aggregateCandidates` (dedup),
 quality scoring (`QualityScorer`) stays separate; enforcement semantics belong
 to CKG3 and are out of scope here.
 
+For callers that must distinguish structural failure from duplicate content,
+`UnifiedValidator.validateDetailed(candidate, options)` returns
+`{ structural, result }` from one execution. `structural` snapshots the field
+and content stages; `result` preserves the existing `validate()` result,
+including uniqueness diagnostics. Strict admission consumes these two views
+instead of running the complete validator twice. The result is local to one
+call and does not authorize skipping later trust-boundary checks. The existing
+`validate()` method and the candidate facade retain their previous contracts.
+
 ## Export-surface policy (W4, 4-6)
 
 1. **`service/index.ts` barrel is frozen, not completed.** It keeps exactly its

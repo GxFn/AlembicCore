@@ -1,20 +1,12 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { openAlembicDatabase } from '../src/database.js';
-import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { GuardCheckEngine, GuardService } from '../src/guard.js';
-import { pathGuard } from '../src/io.js';
-import { KnowledgeFileWriter, KnowledgeSyncService } from '../src/knowledge.js';
-import { createAlembicRepositories } from '../src/repositories.js';
 import { FileWriteError } from '../src/repository/knowledge/KnowledgeUnitOfWork.js';
 import { DivergenceError } from '../src/shared/errors/index.js';
+import { createKnowledgeRuntime } from './support/knowledge-runtime.js';
 
 describe('GuardService public persistence', () => {
-  let root: string;
-  let runtime: Awaited<ReturnType<typeof openAlembicDatabase>>;
-  let repo: ReturnType<typeof createAlembicRepositories>['knowledgeRepository'];
-  let writer: KnowledgeFileWriter;
+  let env: Awaited<ReturnType<typeof createKnowledgeRuntime>>;
+  let repo: typeof env.repo;
+  let writer: typeof env.writer;
   let engine: GuardCheckEngine;
   const audit = { log: async () => {} };
   const context = { userId: 'reviewer' };
@@ -26,19 +18,14 @@ describe('GuardService public persistence', () => {
   };
 
   beforeEach(async () => {
-    root = fs.mkdtempSync(path.join(os.tmpdir(), 'core-guard-persistence-'));
-    pathGuard.configure({ projectRoot: root, knowledgeBaseDir: 'Alembic' });
-    runtime = await openAlembicDatabase({ path: path.join(root, '.asd', 'alembic.db') });
-    repo = createAlembicRepositories(runtime.connection).knowledgeRepository;
-    writer = new KnowledgeFileWriter(root);
-    engine = new GuardCheckEngine(runtime.connection, { knowledgeRepo: repo });
+    env = await createKnowledgeRuntime();
+    ({ repo, writer } = env);
+    engine = new GuardCheckEngine(env.runtime.connection, { knowledgeRepo: repo });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
-    runtime.close();
-    pathGuard._reset();
-    fs.rmSync(root, { recursive: true, force: true });
+    env.close();
   });
 
   function service(fileStore = true) {
@@ -51,7 +38,7 @@ describe('GuardService public persistence', () => {
   }
 
   async function seed() {
-    const entry = new KnowledgeEntry({
+    return env.seed({
       title: ruleData.name,
       lifecycle: 'active',
       kind: 'rule',
@@ -62,9 +49,6 @@ describe('GuardService public persistence', () => {
         guards: [{ pattern: 'BAD', severity: 'warning', message: ruleData.description }],
       },
     });
-    expect(writer.persist(entry)).not.toBeNull();
-    await repo.create(entry);
-    return entry;
   }
 
   test('create, disable and enable persist through sync and refresh cached checks', async () => {
@@ -72,7 +56,7 @@ describe('GuardService public persistence', () => {
     // 先填充空 DB 规则缓存，创建后须立即可检查。
     await guard.checkCode('BAD', { language: 'typescript' });
     const created = await guard.createRule(ruleData, context);
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    await env.sync();
     expect((await repo.findById(created.id))?.lifecycle).toBe('active');
     expect(
       (await guard.checkCode('BAD', { language: 'typescript' })).some(
@@ -80,7 +64,7 @@ describe('GuardService public persistence', () => {
       )
     ).toBe(true);
     await guard.disableRule(created.id, 'Reviewed and disabled', context);
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    await env.sync();
     expect(await repo.findById(created.id)).toMatchObject({
       lifecycle: 'deprecated',
       rejectionReason: 'Reviewed and disabled',
@@ -91,7 +75,7 @@ describe('GuardService public persistence', () => {
       )
     ).toBe(false);
     await guard.enableRule(created.id, context);
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    await env.sync();
     expect((await repo.findById(created.id))?.lifecycle).toBe('active');
     expect(
       (await guard.checkCode('BAD', { language: 'typescript' })).some(
@@ -103,7 +87,7 @@ describe('GuardService public persistence', () => {
   test('existing Markdown disable remains disabled after sync', async () => {
     const entry = await seed();
     await service().disableRule(entry.id, 'No longer applicable', context);
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    await env.sync();
     expect((await repo.findById(entry.id))?.lifecycle).toBe('deprecated');
   });
 
@@ -122,7 +106,7 @@ describe('GuardService public persistence', () => {
       },
       context
     );
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    await env.sync();
     const saved = await repo.findById(created.id);
     expect(saved?.content.markdown).toContain('Unsafe calls require Safe wrapper.');
     expect(saved?.content.markdown).toContain('mustCallThrough');
@@ -148,7 +132,7 @@ describe('GuardService public persistence', () => {
   });
 
   test('create DB failure reports divergence while retaining recoverable file truth', async () => {
-    runtime.sqlite.exec(
+    env.runtime.sqlite.exec(
       "CREATE TRIGGER reject_guard BEFORE INSERT ON knowledge_entries BEGIN SELECT RAISE(ABORT, 'injected insert failure'); END;"
     );
     const outcome = await service()
@@ -161,22 +145,22 @@ describe('GuardService public persistence', () => {
       reconcileVia: 'KnowledgeSyncService.sync',
     });
     expect(await repo.findByTitle(ruleData.name)).toBeNull();
-    runtime.sqlite.exec('DROP TRIGGER reject_guard');
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    env.runtime.sqlite.exec('DROP TRIGGER reject_guard');
+    await env.sync();
     expect((await repo.findByTitle(ruleData.name))?.lifecycle).toBe('active');
   });
 
   test('disable DB failure exposes divergence and sync recovers the disabled file truth', async () => {
     const entry = await seed();
-    runtime.sqlite.exec(
+    env.runtime.sqlite.exec(
       "CREATE TRIGGER reject_guard_update BEFORE UPDATE ON knowledge_entries BEGIN SELECT RAISE(ABORT, 'injected update failure'); END;"
     );
     await expect(
       service().disableRule(entry.id, 'Durable disable', context)
     ).rejects.toBeInstanceOf(DivergenceError);
     expect((await repo.findById(entry.id))?.lifecycle).toBe('active');
-    runtime.sqlite.exec('DROP TRIGGER reject_guard_update');
-    await new KnowledgeSyncService(root).syncAll(runtime.sqlite);
+    env.runtime.sqlite.exec('DROP TRIGGER reject_guard_update');
+    await env.sync();
     expect((await repo.findById(entry.id))?.lifecycle).toBe('deprecated');
   });
 

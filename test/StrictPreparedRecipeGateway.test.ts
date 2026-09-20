@@ -296,7 +296,7 @@ describe('strict prepared Recipe Gateway path', () => {
     expect(knowledgeService.create).not.toHaveBeenCalled();
   });
 
-  it('returns an immutable duplicate receipt for validator-level exact matches', async () => {
+  it('distinguishes structurally valid duplicates from invalid candidates', async () => {
     const exactCorpus = createStrictAcceptedCorpusInspectionV1({
       runId: RUN_ID,
       analysisFixpointHash: FIXPOINT_HASH,
@@ -353,6 +353,34 @@ describe('strict prepared Recipe Gateway path', () => {
         targetRecipeId: 'accepted-exact',
       },
     });
+    expect(create).not.toHaveBeenCalled();
+
+    // 同时缺字段且命中已有标题时，结构失败优先；重复错误不能混入结构诊断。
+    const malformed = validItem({ description: '' });
+    const malformedProjection = createRecipeCandidateFingerprintProjectionV1({
+      ...REVIEWED,
+      authoredFingerprint: undefined,
+      persistedPayload: createStrictRecipePersistedPayloadV1(malformed, 'alembic-agent'),
+    } as never);
+    const failure = await gateway
+      .admitCandidate(malformed, {
+        source: 'alembic-agent',
+        g1Receipt: createStrictG1ReceiptV1({
+          candidateFingerprint: malformedProjection.authoredFingerprint,
+          retrievalReadinessHash: G1.retrievalReadinessHash,
+          rows: G1.rows,
+        }),
+        reviewedProjection: malformedProjection,
+        runId: RUN_ID,
+        analysisFixpointHash: FIXPOINT_HASH,
+        privateCorpusRevision: PRIVATE_REVISION,
+        revisionRootManifestHash: EMPTY_CORPUS.revisionRootManifestHash,
+      })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).toContain('STRICT_ADMISSION_VALIDATION_FAILED:');
+    expect((failure as Error).message).toContain('description');
+    expect((failure as Error).message).not.toContain('重复');
     expect(create).not.toHaveBeenCalled();
   });
 

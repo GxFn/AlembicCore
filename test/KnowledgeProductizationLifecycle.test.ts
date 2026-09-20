@@ -1,23 +1,21 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
+import type {
   KnowledgeEntry,
-  type KnowledgeEntryProps,
+  KnowledgeEntryProps,
 } from '../src/domain/knowledge/KnowledgeEntry.js';
-import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
-import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
+import type { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { EventBus } from '../src/infrastructure/event/EventBus.js';
 import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { LifecycleEventRepository } from '../src/repository/evolution/LifecycleEventRepository.js';
 import { ProposalRepository } from '../src/repository/evolution/ProposalRepository.js';
-import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
+import type { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
 import { FileWriteError } from '../src/repository/knowledge/KnowledgeUnitOfWork.js';
 import { RecipeSourceRefRepositoryImpl } from '../src/repository/sourceref/RecipeSourceRefRepository.js';
 import { ConfidenceRouter } from '../src/service/knowledge/ConfidenceRouter.js';
-import { KnowledgeFileWriter } from '../src/service/knowledge/KnowledgeFileWriter.js';
+import type { KnowledgeFileWriter } from '../src/service/knowledge/KnowledgeFileWriter.js';
 import { KnowledgeService } from '../src/service/knowledge/KnowledgeService.js';
 import { KnowledgeSyncService } from '../src/service/knowledge/KnowledgeSyncService.js';
 import { SourceRefReconciler } from '../src/service/knowledge/SourceRefReconciler.js';
@@ -29,9 +27,10 @@ import {
 } from '../src/service/sustain/RecipeImpactPlanner.js';
 import { StagingManager } from '../src/service/sustain/StagingManager.js';
 import { DivergenceError } from '../src/shared/errors/index.js';
-import pathGuard from '../src/shared/PathGuard.js';
+import { createKnowledgeRuntime } from './support/knowledge-runtime.js';
 
 describe('Knowledge productization lifecycle', () => {
+  let env: Awaited<ReturnType<typeof createKnowledgeRuntime>>;
   let tmpDir: string;
   let connection: DatabaseConnection;
   let knowledgeRepo: KnowledgeRepositoryImpl;
@@ -46,17 +45,13 @@ describe('Knowledge productization lifecycle', () => {
   let oldQuiet: string | undefined;
 
   beforeEach(async () => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'alembic-core-p6-lifecycle-'));
     oldQuiet = process.env.ALEMBIC_QUIET;
     process.env.ALEMBIC_QUIET = '1';
-    pathGuard.configure({ projectRoot: tmpDir, knowledgeBaseDir: 'Alembic' });
-
-    connection = new DatabaseConnection({ path: '.asd/alembic.db' });
-    await connection.connect();
-    await connection.runMigrations();
-
-    knowledgeRepo = new KnowledgeRepositoryImpl(connection);
-    fileStore = new KnowledgeFileWriter(tmpDir);
+    env = await createKnowledgeRuntime();
+    tmpDir = env.root;
+    connection = env.runtime.connection;
+    knowledgeRepo = env.repo;
+    fileStore = env.writer;
     sourceRefRepo = new RecipeSourceRefRepositoryImpl(connection.getDrizzle());
     patcher = new ContentPatcher(knowledgeRepo, sourceRefRepo, { projectRoot: tmpDir, fileStore });
     eventRepo = new LifecycleEventRepository(connection.getDrizzle());
@@ -96,14 +91,12 @@ describe('Knowledge productization lifecycle', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    connection.close();
-    resetDrizzle();
+    env.close();
     if (oldQuiet === undefined) {
       delete process.env.ALEMBIC_QUIET;
     } else {
       process.env.ALEMBIC_QUIET = oldQuiet;
     }
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
   it('keeps staging deadlines through file sync and promotes due entries through lifecycle events', async () => {
@@ -397,16 +390,13 @@ describe('Knowledge productization lifecycle', () => {
   async function createPersistedEntry(
     overrides: KnowledgeEntryProps = {}
   ): Promise<KnowledgeEntry> {
-    const entry = new KnowledgeEntry({
+    return env.seed({
       title: 'Durable lifecycle fixture',
       category: 'architecture',
       lifecycle: 'active',
       content: { markdown: 'Original durable content' },
       ...overrides,
     });
-    expect(fileStore.persist(entry)).not.toBeNull();
-    await knowledgeRepo.create(entry);
-    return entry;
   }
 
   it('reports divergence when a concurrent deletion removes the real update readback', async () => {

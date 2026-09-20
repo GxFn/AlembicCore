@@ -14,7 +14,7 @@
  * → STOP (the re-point is rejected).
  */
 import { describe, expect, it } from 'vitest';
-import { UnifiedValidator } from '../src/domain/knowledge/UnifiedValidator.js';
+import { UnifiedValidator } from '../src/knowledge.js';
 import corpus from './fixtures/stage3-corpus.json' with { type: 'json' };
 import baseline from './fixtures/unified-validator-stage3-baseline.json' with { type: 'json' };
 
@@ -46,6 +46,8 @@ describe('UnifiedValidator stage-3 re-point is byte-identical (P1.3)', () => {
         existingFingerprints: new Set(entry.existingFingerprints ?? []),
       });
       const result = validator.validate(entry.candidate);
+      // 新接口与既有公开返回完全同源，历史 fixture 不重生成。
+      expect(validator.validateDetailed(entry.candidate).result).toEqual(result);
       const expected = baselineByName.get(entry.name);
       expect(expected, `baseline for ${entry.name}`).toBeDefined();
       // full byte-for-byte comparison of the public validation result
@@ -60,6 +62,44 @@ describe('UnifiedValidator stage-3 re-point is byte-identical (P1.3)', () => {
       }
     });
   }
+
+  it('keeps structural diagnostics separate when the same input also has duplicate fields', () => {
+    const candidate = { ...CORPUS.find((entry) => entry.name === 'valid-base')!.candidate };
+    candidate.description = '';
+    const validator = new UnifiedValidator({
+      existingTitles: new Set([String(candidate.title).toLowerCase().trim()]),
+    });
+    const detailed = validator.validateDetailed(candidate);
+    expect(detailed.structural).toEqual(validator.validate(candidate, { skipUniqueness: true }));
+    expect(detailed.structural.pass).toBe(false);
+    expect(detailed.result.errors).toEqual([
+      ...detailed.structural.errors,
+      `标题重复: "${candidate.title}"`,
+    ]);
+    const injected = validator.validateDetailed(candidate, {
+      systemInjectedFields: ['description'],
+    });
+    expect(injected.structural.pass).toBe(true);
+    expect(injected.result.errors).toEqual([`标题重复: "${candidate.title}"`]);
+    expect(
+      validator.validateDetailed(candidate, {
+        systemInjectedFields: ['description'],
+        skipUniqueness: true,
+      }).result.pass
+    ).toBe(true);
+  });
+
+  it.each([
+    { candidate: null },
+    { candidate: [] },
+    { candidate: 42 },
+  ])('returns both diagnostic stages for malformed input $candidate', ({ candidate }) => {
+    const result = { pass: false, errors: ['候选为空或类型错误'], warnings: [] };
+    expect(new UnifiedValidator().validateDetailed(candidate as never)).toEqual({
+      structural: result,
+      result,
+    });
+  });
 
   it('corpus covers every stage-3 path + a passing base', () => {
     expect(CORPUS.length).toBe(12);

@@ -1685,13 +1685,11 @@ function validateStrictAdmissionCandidate(
       entry.admissionSummary.trigger
     );
   }
-  const structural = validator.validate(item as Record<string, unknown>, {
-    skipUniqueness: true,
-  });
+  const { structural, result } = validator.validateDetailed(item as Record<string, unknown>);
   if (!structural.pass) {
     throw new Error(`STRICT_ADMISSION_VALIDATION_FAILED:${structural.errors.join(';')}`);
   }
-  return validator.validate(item as Record<string, unknown>);
+  return result;
 }
 
 function findStrictAdmissionExactMatches(

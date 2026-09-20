@@ -7,6 +7,7 @@ import type { KnowledgeFileWriter } from '../../service/knowledge/KnowledgeFileW
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
 import type { ConfidenceRouter } from './ConfidenceRouter.js';
 import type { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import { persistKnowledgeEntry } from './persistKnowledgeEntry.js';
 import { persistKnowledgeUpdate } from './persistKnowledgeUpdate.js';
 import {
   evaluateRecipeRetrievalReadiness,
@@ -277,23 +278,15 @@ export class KnowledgeService {
       // autoApprovable 标记保留，供前端显示「推荐批准」徽章。
       // 外层交付 hook 可自行决定是否交付高置信度 staging/pending 条目。
 
-      // ── file-first: 先落盘 .md，再写 DB（文件=真相源） ──
-      // fileWriter.persist() 会设置 entry.sourceFile，
-      // 后续 repository.create() 自动包含 sourceFile 字段，无需异步回写。
-      if (this._fileWriter) {
-        // 危险交互根修（2026-07-06 闭环审查）：persist 失败此前吞成 null、DB 照写
-        // → 库有盘无 → 下次 syncAll 孤儿检测把这条合法知识自动标 deprecated
-        // （写失败演变成知识丢失）。file-first 语义下真相源写不进就不该有 DB 条目：
-        // create 主链 fail-fast，提交者立刻看到失败可重试。
-        const persistedPath = this._fileWriter.persist(entry);
-        if (persistedPath === null) {
-          throw new Error(
-            `Knowledge file persist failed for "${entry.title}" — aborting create (file-first source of truth; see fileWriter error log)`
-          );
-        }
-      }
-
-      const saved = await this.repository.create(entry);
+      const saved = await persistKnowledgeEntry({
+        entry,
+        fileStore: this._fileWriter,
+        operation: 'knowledge.create',
+        commit: () => this.repository.create(entry),
+        fileFailureMessage: `Knowledge file persist failed for "${entry.title}" — aborting create (file-first source of truth; see fileWriter error log)`,
+        dbFailureMessage:
+          'Knowledge file persisted but DB insert failed — run knowledge sync to rebuild DB truth',
+      });
 
       // 同步 relations → knowledge_edges
       await this._syncRelationsToGraph(saved.id, saved.relations);
@@ -450,43 +443,9 @@ export class KnowledgeService {
         }
 
         switch (key) {
-          // 标量字段直传
-          case 'title':
-          case 'description':
-          case 'trigger':
-          case 'language':
-          case 'dimensionId':
-          case 'category':
-          case 'complexity':
-          case 'scope':
-          case 'difficulty':
-          case 'agentNotes':
-          case 'aiInsight':
-          case 'moduleName':
-          case 'includeHeaders':
-          case 'topicHint':
-          case 'whenClause':
-          case 'doClause':
-          case 'dontClause':
-          case 'coreCode':
-          case 'usageGuide':
-            dbUpdates[key] = data[key];
-            break;
-
           case 'knowledgeType':
             dbUpdates.knowledgeType = data.knowledgeType;
             dbUpdates.kind = inferKind(data.knowledgeType ?? '');
-            break;
-
-          // 值对象 / 数组字段 — 直传原始值，Repository._entityToRow 负责序列化
-          case 'content':
-          case 'relations':
-          case 'constraints':
-          case 'reasoning':
-          case 'headers':
-          case 'headerPaths':
-          case 'retrievalProfile':
-            dbUpdates[key] = data[key];
             break;
 
           // tags 需要特殊处理：API 返回时已过滤系统标签，保存时需要合并回来
@@ -500,6 +459,9 @@ export class KnowledgeService {
             dbUpdates.tags = [...incomingUserTags, ...existingSystemTags];
             break;
           }
+          // 其余白名单字段直接交给实体/Repository 做同一套值对象归一化。
+          default:
+            dbUpdates[key] = data[key];
         }
       }
 
@@ -509,27 +471,12 @@ export class KnowledgeService {
 
       dbUpdates.updatedAt = Math.floor(Date.now() / 1000);
 
-      // ── file-first: 先落盘 .md，再写 DB（文件=真相源） ──
-      // persist 在 repository.update 之前 fail-fast（与 create 主链同构）：写盘失败即 throw，
-      // DB 更新不再执行 → 库/盘都停在旧态、调用方可重试。若吞掉 null 继续写 DB，则 .md 停在旧内容而
-      // DB 已更新，下一轮 syncAll/rescan 以 .md 为真相源会把 DB 更新回滚覆盖 → 用户更新静默丢失。
-      if (this._fileWriter) {
-        // 结构化编辑输入是普通 JSON；通过聚合根恢复 Content/Reasoning 等值对象，
-        // 不能 Object.assign 覆盖实例后再调用它们的 toJSON。
-        const prospective = KnowledgeEntry.fromJSON({ ..._entry.toJSON(), ...dbUpdates });
-        const persistedPath = this._fileWriter.persist(prospective);
-        if (persistedPath === null) {
-          throw new Error(
-            `Knowledge file persist failed for "${_entry.title}" — aborting update (file-first source of truth; see fileWriter error log)`
-          );
-        }
-        // fileWriter 可能更新 sourceFile，同步到 dbUpdates
-        if (prospective.sourceFile) {
-          dbUpdates.sourceFile = prospective.sourceFile;
-        }
-      }
-
-      const updated = await this.repository.update(id, dbUpdates);
+      const updated = await this.#persistUpdate(
+        _entry,
+        dbUpdates,
+        'knowledge.update',
+        `Knowledge file persist failed for "${_entry.title}" — aborting update (file-first source of truth; see fileWriter error log)`
+      );
 
       // 若 relations 变更，同步到 knowledge_edges
       if (dbUpdates.relations) {
@@ -918,24 +865,12 @@ export class KnowledgeService {
         };
       }
 
-      // Quality uses the same file-first boundary as create/update/lifecycle.
-      // A failed file write must never advance the DB, and a DB failure after
-      // this durable write remains an explicit file/DB divergence for repair.
-      if (this._fileWriter) {
-        const prospective = KnowledgeEntry.fromJSON({
-          ...entry.toJSON(),
-          ...updatePayload,
-        });
-        const persistedPath = this._fileWriter.persist(prospective);
-        if (persistedPath === null) {
-          throw new Error(
-            `Knowledge file persist failed for "${entry.title}" — aborting quality update`
-          );
-        }
-        updatePayload.sourceFile = prospective.sourceFile;
-      }
-
-      await this.repository.update(id, updatePayload);
+      await this.#persistUpdate(
+        entry,
+        updatePayload,
+        'knowledge.quality',
+        `Knowledge file persist failed for "${entry.title}" — aborting quality update`
+      );
 
       if (context.userId) {
         await this._audit('update_knowledge_quality', id, context.userId, {
@@ -1033,20 +968,13 @@ export class KnowledgeService {
         dbUpdates.autoApprovable = entry.autoApprovable ? 1 : 0;
       }
 
-      // ── file-first: 先迁移 .md 文件，再更新 DB lifecycle（文件=真相源） ──
-      if (this._fileWriter) {
-        const movedPath = this._fileWriter.moveOnLifecycleChange(entry);
-        if (movedPath === null) {
-          throw new Error(
-            `Knowledge file lifecycle move failed for "${entry.title}" — aborting DB transition`
-          );
-        }
-        if (entry.sourceFile) {
-          dbUpdates.sourceFile = entry.sourceFile;
-        }
-      }
-
-      const updated = await this.repository.update(id, dbUpdates);
+      const updated = await this.#persistUpdate(
+        entry,
+        dbUpdates,
+        `knowledge.${method}`,
+        `Knowledge file lifecycle move failed for "${entry.title}" — aborting DB transition`,
+        'moveOnLifecycleChange'
+      );
 
       await this._audit(`${method}_knowledge`, id, context.userId, {
         from: prevLifecycle,
@@ -1080,6 +1008,35 @@ export class KnowledgeService {
       });
       throw error;
     }
+  }
+
+  /** 已读实体复用，避免为写协调再次读取；业务字段白名单和生命周期判断留在调用者。 */
+  #persistUpdate(
+    entry: KnowledgeEntry,
+    updates: Record<string, unknown>,
+    operation: string,
+    fileFailureMessage: string,
+    fileOperation: 'persist' | 'moveOnLifecycleChange' = 'persist'
+  ) {
+    // 普通编辑恢复值对象；生命周期调用者已经完成合法转换，搬移使用同一实体。
+    const prospective =
+      this._fileWriter && fileOperation === 'persist'
+        ? KnowledgeEntry.fromJSON({ ...entry.toJSON(), ...updates })
+        : entry;
+    return persistKnowledgeEntry({
+      entry: prospective,
+      fileStore: this._fileWriter,
+      operation,
+      fileOperation,
+      fileFailureMessage,
+      commit: () => {
+        // 文件写入可能改变路径，只有成功之后才能把路径交给 DB。
+        if (this._fileWriter && prospective.sourceFile) {
+          updates.sourceFile = prospective.sourceFile;
+        }
+        return this.repository.update(entry.id, updates);
+      },
+    });
   }
 
   /** 查找或抛出 NotFoundError */
