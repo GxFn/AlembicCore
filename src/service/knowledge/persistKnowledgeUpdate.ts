@@ -4,23 +4,14 @@ import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFil
 import { NotFoundError } from '../../shared/errors/index.js';
 import { unixNow } from '../../shared/utils/common.js';
 import { commitKnowledgeWrite } from './commitKnowledgeWrite.js';
-
-// 只表达写协调实际使用的能力；nullable 读回由现有分歧检查处理，
-// 不继承具体 SQLite 实现，也不改变旧公共 KnowledgeRepository 类的类型承诺。
-interface KnowledgeUpdateRepository {
-  findById(id: string): Promise<KnowledgeEntry | null>;
-  update(
-    id: string,
-    updates: KnowledgeEntry | Record<string, unknown>
-  ): Promise<KnowledgeEntry | null>;
-}
+import type { KnowledgeServiceRepository } from './KnowledgeServiceDependencies.js';
 
 /**
  * sustain 内部的统一写边界：完整实体先持久化为 Markdown，再更新派生 DB。
  * 不公开生命周期绕过接口，也不把异步 repository.update 伪装成同步 SQLite 事务。
  */
 export async function persistKnowledgeUpdate(
-  repository: KnowledgeUpdateRepository,
+  repository: Pick<KnowledgeServiceRepository, 'findById' | 'update'>,
   fileStore: KnowledgeFileStore | null,
   entryId: string,
   updates: Record<string, unknown>,

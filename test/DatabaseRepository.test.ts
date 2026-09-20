@@ -82,6 +82,18 @@ describe('DatabaseConnection and repository migration integration', () => {
 
   it('persists and reads a KnowledgeEntry through KnowledgeRepositoryImpl', async () => {
     const repo = new KnowledgeRepositoryImpl(connection);
+    expect(await repo.getStats()).toEqual({
+      total: 0,
+      pending: null,
+      staging: null,
+      active: null,
+      evolving: null,
+      decaying: null,
+      deprecated: null,
+      rules: null,
+      patterns: null,
+      facts: null,
+    });
     const entry = new KnowledgeEntry({
       title: 'Repository persistence pattern',
       description: 'Repository storage smoke test',
@@ -106,6 +118,22 @@ describe('DatabaseConnection and repository migration integration', () => {
     const fetched = await repo.findById(entry.id);
     expect(fetched?.title).toBe('Repository persistence pattern');
     expect(fetched?.content.pattern).toContain('KnowledgeRepositoryImpl');
+    const page = await repo.findWithPagination();
+    expect(page.data).toHaveLength(1);
+    expect(page.data[0]).toBeInstanceOf(KnowledgeEntry);
+    expect(repo._rowToEntity(null)).toBeNull();
+    expect(await repo.getStats()).toEqual({
+      total: 1,
+      pending: 0,
+      staging: 0,
+      active: 1,
+      evolving: 0,
+      decaying: 0,
+      deprecated: 0,
+      rules: 0,
+      patterns: 1,
+      facts: 0,
+    });
   });
 
   it.each([

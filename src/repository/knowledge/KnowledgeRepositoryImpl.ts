@@ -53,6 +53,20 @@ interface KnowledgeCountRow {
   count: number;
 }
 
+/** 无 GROUP BY 的聚合必有一行；空表的 SUM 仍为 null，不能替调用方归零。 */
+type KnowledgeStatsRow = {
+  total: number;
+  pending: number | null;
+  staging: number | null;
+  active: number | null;
+  evolving: number | null;
+  decaying: number | null;
+  deprecated: number | null;
+  rules: number | null;
+  patterns: number | null;
+  facts: number | null;
+};
+
 /**
  * KnowledgeRepositoryImpl — 统一知识实体仓储实现 (Drizzle ORM)
  *
@@ -114,7 +128,7 @@ export class KnowledgeRepositoryImpl {
         .where(eq(knowledgeEntries.id, id))
         .limit(1)
         .get();
-      return row ? this._rowToEntity(row as Record<string, unknown>) : null;
+      return row ? this._rowToEntity(row) : null;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error('Error finding knowledge entry by id', { id, error: message });
@@ -382,7 +396,7 @@ export class KnowledgeRepositoryImpl {
         .from(knowledgeEntries)
         .where(and(eq(knowledgeEntries.kind, 'rule'), eq(knowledgeEntries.lifecycle, 'active')))
         .all();
-      return rows.map((row) => this._rowToEntity(row as Record<string, unknown>));
+      return rows.map((row) => this._rowToEntity(row));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error('Error finding active rules', { error: message });
@@ -408,9 +422,7 @@ export class KnowledgeRepositoryImpl {
         )
       )
       .all();
-    return rows
-      .map((row) => this._rowToEntity(row as Record<string, unknown>))
-      .filter(Boolean) as KnowledgeEntry[];
+    return rows.map((row) => this._rowToEntity(row));
   }
 
   /**
@@ -469,9 +481,7 @@ export class KnowledgeRepositoryImpl {
             .orderBy(asc(knowledgeEntries.createdAt))
             .limit(limit)
             .all();
-    return rows
-      .map((row) => this._rowToEntity(row as Record<string, unknown>))
-      .filter(Boolean) as KnowledgeEntry[];
+    return rows.map((row) => this._rowToEntity(row));
   }
 
   /**
@@ -494,9 +504,7 @@ export class KnowledgeRepositoryImpl {
       )
       .limit(limit)
       .all();
-    return rows
-      .map((row) => this._rowToEntity(row as Record<string, unknown>))
-      .filter(Boolean) as KnowledgeEntry[];
+    return rows.map((row) => this._rowToEntity(row));
   }
 
   /**
@@ -521,9 +529,7 @@ export class KnowledgeRepositoryImpl {
       )
       .limit(limit)
       .all();
-    return rows
-      .map((row) => this._rowToEntity(row as Record<string, unknown>))
-      .filter(Boolean) as KnowledgeEntry[];
+    return rows.map((row) => this._rowToEntity(row));
   }
 
   /**
@@ -584,10 +590,10 @@ export class KnowledgeRepositoryImpl {
   }
 
   /** 获取统计信息 */
-  async getStats() {
+  async getStats(): Promise<KnowledgeStatsRow> {
     try {
       return this.db
-        .prepare(`
+        .prepare<[], KnowledgeStatsRow>(`
         SELECT
           COUNT(*) as total,
           SUM(CASE WHEN lifecycle = 'pending' THEN 1 ELSE 0 END) as pending,
@@ -601,7 +607,7 @@ export class KnowledgeRepositoryImpl {
           SUM(CASE WHEN kind = 'fact' THEN 1 ELSE 0 END) as facts
         FROM knowledge_entries
       `)
-        .get();
+        .get() as KnowledgeStatsRow;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       this.logger.error('Error getting knowledge stats', { error: message });
@@ -1127,7 +1133,10 @@ export class KnowledgeRepositoryImpl {
   /* ═══ 行 ↔ 实体 映射 ═══════════════════════════════ */
 
   /** DB Row → KnowledgeEntry (camelCase 列名 = 属性名，直传) */
-  _rowToEntity(row: Record<string, unknown>): KnowledgeEntry | null {
+  _rowToEntity(row: Record<string, unknown>): KnowledgeEntry;
+  _rowToEntity(row: null | undefined): null;
+  _rowToEntity(row: Record<string, unknown> | null | undefined): KnowledgeEntry | null;
+  _rowToEntity(row: Record<string, unknown> | null | undefined): KnowledgeEntry | null {
     if (!row) {
       return null;
     }

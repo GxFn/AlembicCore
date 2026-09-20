@@ -224,13 +224,44 @@ describe('KnowledgeService', () => {
       ).rejects.toThrow('Content is required');
     });
 
-    test('创建条目 — SkillHooks block 时抛出 ValidationError', async () => {
-      const hooks = { run: vi.fn(async () => ({ block: true, reason: 'forbidden' })) };
-      const { service } = createService({ skillHooks: hooks });
+    test.each([
+      { result: { block: true, reason: 'forbidden' }, reason: 'forbidden' },
+      { result: { block: 1, reason: 42 }, reason: '42' },
+      { result: Object.assign(() => {}, { block: true }), reason: 'unknown' },
+      {
+        result: new Proxy(
+          {},
+          {
+            get: (_target, key) =>
+              key === 'block' ? true : key === 'reason' ? 'proxy-block' : undefined,
+          }
+        ),
+        reason: 'proxy-block',
+      },
+    ])('创建条目 — 保留 hook 阻断和原因语义：$reason', async ({ result, reason }) => {
+      const hooks = { run: vi.fn(async (): Promise<unknown> => result) };
+      const { service, repo, fileWriter } = createService({ skillHooks: hooks });
 
       await expect(service.create(makeWireData(), { userId: 'user1' })).rejects.toThrow(
-        'SkillHook blocked: forbidden'
+        `SkillHook blocked: ${reason}`
       );
+      expect(fileWriter.persist).not.toHaveBeenCalled();
+      expect(repo.create).not.toHaveBeenCalled();
+    });
+
+    test.each([
+      null,
+      'waterfall-value',
+      { block: false },
+    ])('创建条目 — 通用 hook 的非阻断返回值不成为准入条件：%j', async (result) => {
+      const hooks = { run: vi.fn(async (): Promise<unknown> => result) };
+      const { service } = createService({ skillHooks: hooks });
+      const entry = await service.create(makeWireData(), { userId: 'user1' });
+      expect(entry.title).toBe('Test Pattern');
+      expect(hooks.run.mock.calls.map(([name]) => name)).toEqual([
+        'onKnowledgeSubmit',
+        'onKnowledgeCreated',
+      ]);
     });
 
     test('创建条目 — 同步 relations 到 graph', async () => {

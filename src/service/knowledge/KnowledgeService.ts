@@ -1,48 +1,54 @@
-import { z } from 'zod';
 import { KnowledgeEntry, type KnowledgeEntryProps } from '../../domain/knowledge/KnowledgeEntry.js';
-import type { KnowledgeRepository } from '../../domain/knowledge/KnowledgeRepository.js';
 import { inferKind, isValidTransition, Lifecycle } from '../../domain/knowledge/Lifecycle.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type { KnowledgeFileWriter } from '../../service/knowledge/KnowledgeFileWriter.js';
+import type { KnowledgeFileStore } from '../../repository/knowledge/KnowledgeFileStore.js';
 import { ConflictError, NotFoundError, ValidationError } from '../../shared/errors/index.js';
-import type { ConfidenceRouter } from './ConfidenceRouter.js';
 import { commitKnowledgeWrite } from './commitKnowledgeWrite.js';
-import type { KnowledgeGraphService } from './KnowledgeGraphService.js';
+import type {
+  AfterPublishHook,
+  AuditLoggerLike,
+  EdgeRepoLike,
+  EventBusLike,
+  GroundedSourcePathsPort,
+  KnowledgeGraphWriter,
+  KnowledgeRoutingPolicy,
+  KnowledgeServiceOptions,
+  KnowledgeServiceRepository,
+  ProposalRepoLike,
+  QualityScorerLike,
+  RetrievalReadinessEvaluator,
+  SkillHooksLike,
+} from './KnowledgeServiceDependencies.js';
+import { RECIPE_RETRIEVAL_PROFILE_UPDATE_SCHEMA } from './KnowledgeUpdateSchema.js';
 import { persistKnowledgeUpdate } from './persistKnowledgeUpdate.js';
 import { projectKnowledgeQualityFields } from './projectKnowledgeQualityFields.js';
 import {
   evaluateRecipeRetrievalReadiness,
-  RECIPE_RETRIEVAL_PROFILE_SCHEMA_VERSION,
   type RetrievalReadinessReport,
 } from './RecipeRetrieval.js';
 
-interface AuditLoggerLike {
-  log(entry: Record<string, unknown>): Promise<void>;
-}
-
-interface SkillHooksLike {
-  run(
-    hookName: string,
-    ...args: unknown[]
-  ): Promise<{ block?: boolean; reason?: string } | undefined>;
-}
-
-interface QualityScorerLike {
-  score(input: Record<string, unknown>): {
-    score: number;
-    dimensions: Record<string, number>;
-    grade: string;
-  };
-}
-
-interface EventBusLike {
-  emit(event: string | symbol, ...args: unknown[]): boolean;
-}
-
-type AfterPublishHook = () => void | Promise<void>;
-type RetrievalReadinessEvaluator = (entry: KnowledgeEntry) => RetrievalReadinessReport;
-
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** 按旧可选链语义读 unknown hook：保留 Proxy/getter/可调用对象及原始值的 receiver。 */
+function readHookResultField(result: unknown, field: 'block' | 'reason'): unknown {
+  return result === null || result === undefined
+    ? undefined
+    : Reflect.get(Object(result), field, result);
+}
+
+/**
+ * 显式保留旧 DB-only 在实体投影处的 TypeError；不把可空 update/transition
+ * 提前改为失败。file-first 的回读分歧仍由 commitKnowledgeWrite 先行分类。
+ */
+function requireLegacyWriteReadback(
+  entry: KnowledgeEntry | null,
+  property: 'id' | 'toJSON'
+): KnowledgeEntry {
+  if (entry === null || entry === undefined) {
+    throw new TypeError(`Cannot read properties of ${entry} (reading '${property}')`);
+  }
+  return entry;
+}
 
 // 宿主操作名保持兼容；计数持久化只使用 Stats 已有字段，不以类型断言创造新计数器。
 const USAGE_COUNTERS = {
@@ -55,88 +61,6 @@ const USAGE_COUNTERS = {
   guardHits: 'guardHits',
   searchHits: 'searchHits',
 } as const;
-
-// 编辑入口只拦 wire 结构错误和不支持的 schema：空值、未接地、重复或 source hash 失配仍是
-// pending/staging 可修复的 readiness 问题。passthrough 保留未来扩展字段，null 保持旧 Recipe 的
-// compatibility 语义；校验结果不替换原始对象，避免 Markdown/SQLite wire 被 Zod 清洗而丢字段。
-const RECIPE_RETRIEVAL_CONCEPT_UPDATE_SCHEMA = z
-  .object({
-    term: z.string(),
-    language: z.string(),
-    provenanceRefs: z.array(z.string()),
-  })
-  .passthrough();
-const RECIPE_RETRIEVAL_TEXT_FACT_UPDATE_SCHEMA = z
-  .object({
-    text: z.string(),
-    language: z.string(),
-    provenanceRefs: z.array(z.string()),
-  })
-  .passthrough();
-const RECIPE_RETRIEVAL_PROFILE_UPDATE_SCHEMA = z
-  .object({
-    schemaVersion: z.literal(RECIPE_RETRIEVAL_PROFILE_SCHEMA_VERSION),
-    primaryLanguage: z.string(),
-    summary: z
-      .object({
-        primary: z.string(),
-        technicalEnglish: z.string(),
-      })
-      .passthrough(),
-    concepts: z.array(RECIPE_RETRIEVAL_CONCEPT_UPDATE_SCHEMA),
-    scenarios: z.array(RECIPE_RETRIEVAL_TEXT_FACT_UPDATE_SCHEMA),
-    exclusions: z.array(RECIPE_RETRIEVAL_TEXT_FACT_UPDATE_SCHEMA),
-    provenance: z
-      .object({
-        evidenceRefs: z.array(z.string()),
-        sourceFieldRefs: z.array(z.string()),
-        sourceContentHash: z.string(),
-        generator: z.string(),
-      })
-      .passthrough(),
-  })
-  .passthrough()
-  .nullable();
-
-interface EdgeRepoLike {
-  deleteOutgoing(fromId: string, fromType: string): Promise<number>;
-  deleteByEntryId(entryId: string): Promise<number>;
-}
-
-interface ProposalRepoLike {
-  deleteByTargetRecipeId(targetRecipeId: string): number;
-}
-
-/**
- * P0/C7: 宿主注入的「接地投影」port。把一个 recipe item 的结构化 sourceRefs 经宿主 fs resolver 解析成
- * 真接地集(validSourcePaths / validRanges)。宿主(AlembicPlugin / 主体 AlembicAgent)已绑定 projectRoot +
- * RecipeSourceRefResolver，闭包内部调用 Core 的 `resolveGroundedSourcePaths`(与门禁 validateAgainst 字节
- * 同源)，从而 Core 保持 fs-free。
- *
- * 断路背景：门禁在 submit 期算出 validSourcePaths 后只回 violations 就丢弃；而 updateQuality 对已持久化
- * entry 打分时拿不到那次结果。此 port 让评分侧(C8 depthCoverage)重算「哪些 file:line 真接地」，使
- * 「深度只在接地时计分」成立。未注入 → 退化为旧行为(接地集为空、深度覆盖为 0、旧评分路径不变)。
- */
-type GroundedSourcePathsPort = (item: Record<string, unknown>) => {
-  validSourcePaths: string[];
-  validRanges: string[];
-};
-
-interface KnowledgeServiceOptions {
-  fileWriter?: KnowledgeFileWriter | null;
-  skillHooks?: SkillHooksLike | null;
-  confidenceRouter?: ConfidenceRouter | null;
-  qualityScorer?: QualityScorerLike | null;
-  eventBus?: EventBusLike | null;
-  edgeRepo?: EdgeRepoLike | null;
-  proposalRepo?: ProposalRepoLike | null;
-  /** Core 不内置交付渠道，外层可注入发布后的交付/刷新 hook。 */
-  afterPublish?: AfterPublishHook | null;
-  /** P0/C7: 宿主注入的接地投影 port；未注入则深度覆盖退化为 0(向后兼容)。 */
-  groundedSourcePaths?: GroundedSourcePathsPort | null;
-  /** Recipe active-transition gate. Inject only for deterministic diagnostic decoration. */
-  retrievalReadinessEvaluator?: RetrievalReadinessEvaluator;
-}
 
 interface ServiceContext {
   userId: string;
@@ -173,11 +97,11 @@ export class KnowledgeService {
   // 只跟踪正在执行的任务，不累积永久删除墓碑；删除计数防止较新失败掩盖仍在途的较早删除。
   #relationTasks = new Map<string, symbol>();
   #activeDeletes = new Map<string, number>();
-  _confidenceRouter: ConfidenceRouter | null;
+  _confidenceRouter: KnowledgeRoutingPolicy | null;
   _edgeRepo: EdgeRepoLike | null;
   _eventBus: EventBusLike | null;
-  _fileWriter: KnowledgeFileWriter | null;
-  _knowledgeGraphService: KnowledgeGraphService | null;
+  _fileWriter: KnowledgeFileStore | null;
+  _knowledgeGraphService: KnowledgeGraphWriter | null;
   _proposalRepo: ProposalRepoLike | null;
   _qualityScorer: QualityScorerLike | null;
   _skillHooks: SkillHooksLike | null;
@@ -188,12 +112,12 @@ export class KnowledgeService {
   auditLogger: AuditLoggerLike;
   gateway: unknown;
   logger: ReturnType<typeof Logger.getInstance>;
-  repository: KnowledgeRepository;
+  repository: KnowledgeServiceRepository;
   constructor(
-    repository: KnowledgeRepository,
+    repository: KnowledgeServiceRepository,
     auditLogger: AuditLoggerLike,
     gateway: unknown,
-    knowledgeGraphService: KnowledgeGraphService | null,
+    knowledgeGraphService: KnowledgeGraphWriter | null,
     options: KnowledgeServiceOptions = {}
   ) {
     this.repository = repository;
@@ -220,8 +144,7 @@ export class KnowledgeService {
    * 创建知识条目
    *
    * MCP 参数 = wire format → KnowledgeEntry.fromJSON() 直接构造。
-   * 所有新条目初始状态为 pending（待审核）。
-   * ConfidenceRouter 仅标记 auto_approvable 标志，不改变 lifecycle。
+   * 新条目从 pending 开始；ConfidenceRouter 可选择 staging 或 deprecated。
    *
    * @param data wire format 数据
    * @param context { userId }
@@ -257,9 +180,15 @@ export class KnowledgeService {
         const hookResult = await this._skillHooks.run('onKnowledgeSubmit', entry, {
           userId: context.userId,
         });
-        if (hookResult?.block) {
-          throw new ValidationError(`SkillHook blocked: ${hookResult.reason || 'unknown'}`);
+        // 只消费原有 truthy block；不能先用 in 检查而遗漏 Proxy 提供的虚拟属性。
+        if (readHookResultField(hookResult, 'block')) {
+          const reason = readHookResultField(hookResult, 'reason');
+          throw new ValidationError(`SkillHook blocked: ${reason || 'unknown'}`);
         }
+        this.logger.debug('Knowledge submit hook returned no blocking decision', {
+          entryId: entry.id,
+          resultType: typeof hookResult,
+        });
       }
 
       // ── ConfidenceRouter — staging 路由 ──
@@ -282,7 +211,7 @@ export class KnowledgeService {
       // autoApprovable 标记保留，供前端显示「推荐批准」徽章。
       // 外层交付 hook 可自行决定是否交付高置信度 staging/pending 条目。
 
-      const saved = await commitKnowledgeWrite({
+      const persisted = await commitKnowledgeWrite({
         entry,
         fileStore: this._fileWriter,
         operation: 'knowledge.create',
@@ -291,6 +220,7 @@ export class KnowledgeService {
         dbFailureMessage:
           'Knowledge file persisted but DB insert failed — run knowledge sync to rebuild DB truth',
       });
+      const saved = requireLegacyWriteReadback(persisted, 'id');
 
       // 同步 relations → knowledge_edges
       await this._syncRelationsToGraph(saved.id, saved.relations);
@@ -502,7 +432,7 @@ export class KnowledgeService {
         this._eventBus.emit('knowledge:changed', {
           action: 'update',
           entryId: id,
-          entry: updated.toJSON(),
+          entry: requireLegacyWriteReadback(updated, 'toJSON').toJSON(),
         });
       }
 
@@ -1019,7 +949,7 @@ export class KnowledgeService {
           to: entry.lifecycle,
           method,
           actor: context.userId,
-          entry: updated.toJSON(),
+          entry: requireLegacyWriteReadback(updated, 'toJSON').toJSON(),
         });
       }
 

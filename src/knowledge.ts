@@ -226,6 +226,10 @@ export {
   type SyncAllReport,
   stripSourceRangeSuffix,
 } from './service/knowledge/index.js';
+export type {
+  KnowledgeServiceOptions,
+  KnowledgeServiceRepository,
+} from './service/knowledge/KnowledgeServiceDependencies.js';
 // CO2 B3: unified validator entry — composes UnifiedValidator + RecipeCandidateValidator +
 // CandidateAggregator so callers cannot accidentally pick a weaker subset. No enforcement.
 export {

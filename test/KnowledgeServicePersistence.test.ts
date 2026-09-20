@@ -24,25 +24,19 @@ describe('KnowledgeService file-first commands', () => {
   beforeEach(async () => {
     env = await createKnowledgeRuntime();
     events = [];
-    service = new KnowledgeService(
-      env.repo as unknown as ConstructorParameters<typeof KnowledgeService>[0],
-      { log: async () => {} },
-      null,
-      null,
-      {
-        fileWriter: env.writer,
-        edgeRepo: env.repositories.knowledgeEdgeRepository,
-        proposalRepo: env.repositories.proposalRepository,
-        qualityScorer: {
-          score: () => ({
-            score: 0.8,
-            grade: 'A',
-            dimensions: { completeness: 0.8, deliveryReady: 0.8, contentDepth: 0.8 },
-          }),
-        },
-        eventBus: { emit: (event) => Boolean(events.push(String(event))) },
-      }
-    );
+    service = new KnowledgeService(env.repo, { log: async () => {} }, null, null, {
+      fileWriter: env.writer,
+      edgeRepo: env.repositories.knowledgeEdgeRepository,
+      proposalRepo: env.repositories.proposalRepository,
+      qualityScorer: {
+        score: () => ({
+          score: 0.8,
+          grade: 'A',
+          dimensions: { completeness: 0.8, deliveryReady: 0.8, contentDepth: 0.8 },
+        }),
+      },
+      eventBus: { emit: (event) => Boolean(events.push(String(event))) },
+    });
   });
 
   afterEach(() => {
@@ -69,6 +63,54 @@ describe('KnowledgeService file-first commands', () => {
     quality: { quality: { overall: 0.8 }, stats: { authority: 4 } },
     deprecate: { lifecycle: 'deprecated', rejectionReason: 'No longer applicable' },
   };
+
+  describe.each([false, true])('legacy DB-only readback (eventBus=%s)', (withEvents) => {
+    it.each([
+      'create',
+      'update',
+      'deprecate',
+    ] as const)('preserves %s null/error and audit ordering', async (command) => {
+      if (command !== 'create') {
+        await env.seed({ ...data, lifecycle: 'active' });
+      }
+      service._fileWriter = null;
+      service._eventBus = withEvents ? service._eventBus : null;
+      const audit = vi.spyOn(service.auditLogger, 'log');
+      const verb = command === 'create' ? 'INSERT' : 'UPDATE';
+      env.runtime.sqlite.exec(`CREATE TRIGGER remove_readback AFTER ${verb} ON knowledge_entries
+          BEGIN DELETE FROM knowledge_entries WHERE id = NEW.id; END;`);
+
+      if (command === 'create' || withEvents) {
+        await expect(run(command)).rejects.toMatchObject({
+          name: 'TypeError',
+          message: `Cannot read properties of null (reading '${command === 'create' ? 'id' : 'toJSON'}')`,
+        });
+      } else {
+        await expect(run(command)).resolves.toBeNull();
+      }
+      expect(await env.repo.findById(id)).toBeNull();
+      expect(audit).toHaveBeenCalledTimes(command === 'create' ? 0 : 1);
+      expect(events).toEqual([]);
+    });
+  });
+
+  it('keeps the legacy afterPublish hook when DB-only publish returns null', async () => {
+    await env.seed({
+      ...data,
+      lifecycle: 'pending',
+      category: 'guard',
+      knowledgeType: 'boundary-constraint',
+    });
+    service._fileWriter = null;
+    service._eventBus = null;
+    const afterPublish = vi.fn();
+    service._afterPublish = afterPublish;
+    env.runtime.sqlite.exec(`CREATE TRIGGER remove_readback AFTER UPDATE ON knowledge_entries
+      BEGIN DELETE FROM knowledge_entries WHERE id = NEW.id; END;`);
+    await expect(service.publish(id, context)).resolves.toBeNull();
+    await Promise.resolve();
+    expect(afterPublish).toHaveBeenCalledOnce();
+  });
 
   // 每条公开命令验证真实 DB 故障、真实读回丢失及文件 port 拒绝，统一验证恢复而非重复 mock 协议。
   describe.each(commands)('%s', (command) => {
