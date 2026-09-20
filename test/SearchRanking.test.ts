@@ -7,12 +7,14 @@
  *  - Individual Signals      (RelevanceSignal, PopularitySignal, ContextMatchSignal, etc.)
  *  - contextBoost           (共享上下文加成)
  *  - FieldWeightedScorer    (增量 remove/update/compact, lexical 评分器)
+ *  - HybridRetriever       (通用 RRF 数学、默认值与结果兼容)
  */
 
 import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { CoarseRanker } from '../src/service/search/CoarseRanker.js';
 import { contextBoost } from '../src/service/search/contextBoost.js';
 import { FieldWeightedScorer } from '../src/service/search/FieldWeightedScorer.js';
+import { HybridRetriever } from '../src/service/search/HybridRetriever.js';
 import {
   AuthoritySignal,
   ContextMatchSignal,
@@ -709,5 +711,150 @@ describe('FieldWeightedScorer', () => {
     scorer.addDocument('doc1', 'swift networking', { type: 'recipe', title: 'Net' });
     const results = scorer.search('swift');
     expect(results[0].meta).toEqual({ type: 'recipe', title: 'Net' });
+  });
+});
+
+// 通用 RRF 的数学与返回契约归检索测试；store 融合仍在 HnswVector 中验证。
+describe('HybridRetriever', () => {
+  it('preserves rank holes, repeated evidence and the first nested sparse payload', () => {
+    const payload = { id: 'a', item: { id: 'payload-id' }, score: 4 };
+    const denseResults = Object.freeze([
+      { score: 99 },
+      { id: 'outer-id', item: { id: 'a' }, score: 0.9 },
+      { id: 'a', score: 0.4 },
+    ]);
+    const sparseResults = Object.freeze([
+      { item: { id: 'ignored' }, score: 50 },
+      payload,
+      { id: 'a', score: 3 },
+    ]);
+    const denseContribution = 0.4 * (1 / 63);
+    const sparseContribution = 0.6 * (1 / 63);
+    const total = 0.4 * (1 / 62) + denseContribution + 0.6 * (1 / 62) + sparseContribution;
+    const [result] = new HybridRetriever().fuse({ denseResults, sparseResults, alpha: 0.4 });
+    expect(result).toStrictEqual({
+      id: 'a',
+      denseRank: 3,
+      sparseRank: 3,
+      rrfScore: total,
+      data: payload,
+      denseSimilarity: 0.4,
+      denseContribution,
+      sparseScore: 3,
+      sparseContribution,
+      score: total,
+      rrfContribution: { dense: denseContribution, sparse: sparseContribution, total },
+    });
+    expect(result.data).toBe(payload);
+  });
+
+  it('keeps fuse defaults separate from search defaults and preserves zero-weight hits', async () => {
+    const dense = { id: 'dense', item: { id: 'dense' }, score: 0.01 };
+    const sparse = { id: 'sparse', score: 99 };
+    const searchVector = vi.fn(async () => [dense]);
+    const retriever = new HybridRetriever({ vectorStore: { searchVector }, rrfK: 0, alpha: 1 });
+    const direct = retriever.fuse({ denseResults: [dense], sparseResults: [sparse] });
+    expect(direct.map((row) => row.id)).toEqual(['dense', 'sparse']);
+    expect(direct.map((row) => row.score)).toEqual([0.5 * (1 / 61), 0.5 * (1 / 61)]);
+    expect(direct[0].sparseRank).toBe(Infinity);
+    expect(Object.hasOwn(direct[0], 'sparseScore')).toBe(false);
+    expect(direct[1].denseRank).toBe(Infinity);
+    expect(Object.hasOwn(direct[1], 'denseSimilarity')).toBe(false);
+    const queried = await retriever.search('query', [1], {
+      topK: 2,
+      sparseSearchFn: () => [sparse],
+    });
+    expect(queried.map((row) => row.score)).toEqual([1 / 61, 0]);
+    expect(searchVector).toHaveBeenCalledWith([1], { topK: 6, filter: null });
+  });
+
+  it('should fuse dense and sparse results via RRF', () => {
+    const retriever = new HybridRetriever({ rrfK: 60 });
+
+    const denseResults = [
+      { id: 'a', item: { id: 'a' }, score: 0.95 },
+      { id: 'b', item: { id: 'b' }, score: 0.85 },
+      { id: 'c', item: { id: 'c' }, score: 0.7 },
+    ];
+    const sparseResults = [
+      { id: 'b', score: 10.5 },
+      { id: 'd', score: 8.2 },
+      { id: 'a', score: 6.1 },
+    ];
+
+    const fused = retriever.fuse({ denseResults, sparseResults, topK: 10, alpha: 0.5 });
+
+    // Both 'a' and 'b' appear in both lists, so they should rank higher
+    const ids = fused.map((f) => f.id);
+    expect(ids).toContain('a');
+    expect(ids).toContain('b');
+
+    // 'b' is rank 2 in dense, rank 1 in sparse — should get highest combined
+    // 'a' is rank 1 in dense, rank 3 in sparse — close second
+    const aScore = fused.find((f) => f.id === 'a').rrfScore;
+    const bScore = fused.find((f) => f.id === 'b').rrfScore;
+    // Both should have positive scores
+    expect(aScore).toBeGreaterThan(0);
+    expect(bScore).toBeGreaterThan(0);
+  });
+
+  it('should work with only dense results', () => {
+    const retriever = new HybridRetriever({ rrfK: 60 });
+    const fused = retriever.fuse({
+      denseResults: [
+        { id: 'x', item: { id: 'x' } },
+        { id: 'y', item: { id: 'y' } },
+      ],
+      sparseResults: [],
+      topK: 5,
+      alpha: 0.7,
+    });
+
+    expect(fused).toHaveLength(2);
+    expect(fused[0].id).toBe('x');
+  });
+
+  it('should work with only sparse results', () => {
+    const retriever = new HybridRetriever({ rrfK: 60 });
+    const fused = retriever.fuse({
+      denseResults: [],
+      sparseResults: [
+        { id: 'a', score: 5 },
+        { id: 'b', score: 3 },
+      ],
+      topK: 5,
+      alpha: 0.3,
+    });
+
+    expect(fused).toHaveLength(2);
+    expect(fused[0].id).toBe('a');
+  });
+
+  it('should respect topK limit', () => {
+    const retriever = new HybridRetriever({ rrfK: 60 });
+    const dense = Array.from({ length: 20 }, (_, i) => ({
+      id: `d${i}`,
+      item: { id: `d${i}` },
+    }));
+    const sparse = Array.from({ length: 20 }, (_, i) => ({ id: `s${i}`, score: 20 - i }));
+
+    const fused = retriever.fuse({ denseResults: dense, sparseResults: sparse, topK: 5 });
+    expect(fused.map((row) => row.id)).toEqual(['d0', 's0', 'd1', 's1', 'd2']);
+  });
+
+  it('should preserve raw RRF scores without page-max normalization', () => {
+    const retriever = new HybridRetriever({ rrfK: 60 });
+    const fused = retriever.fuse({
+      denseResults: [{ id: 'a', item: { id: 'a' } }],
+      sparseResults: [{ id: 'b', score: 5 }],
+      topK: 10,
+    });
+
+    for (const item of fused) {
+      expect(item.score).toBeGreaterThanOrEqual(0);
+      expect(item.score).toBeLessThanOrEqual(1);
+    }
+    expect(fused[0].score).toBeCloseTo(fused[0].rrfScore, 10);
+    expect(fused[0].score).toBeLessThan(1);
   });
 });

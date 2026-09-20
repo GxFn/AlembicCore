@@ -51,7 +51,8 @@ three buckets (`rule`, `pattern`, `fact`), with unknown kinds falling into patte
 ## Verification ownership
 
 - `SearchRanking.test.ts` owns tokenizer, lexical scorer/index lifecycle, ranking
-  formulas, configuration compatibility and context behavior.
+  formulas, configuration compatibility, context behavior and legacy HybridRetriever
+  RRF defaults/payload contracts. HNSW store fusion remains in `HnswVector.test.ts`.
 - `SearchEngine.test.ts` owns storage/recall integration, fallback, filtering,
   source differences, telemetry and the one-projection-per-row boundary.
 - `KnowledgeRetrievalPolicy`, `KnowledgeTruthProjector` and

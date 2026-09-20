@@ -72,10 +72,17 @@ canonical KnowledgeRetrieval 的 Recipe truth、region、预算和补窗，以�
 ## 测试责任
 
 - `EmbeddingPort.test.ts`：用途、旧协议兼容、最后一次 await 的取消与回退诊断。
-- `HnswVector.test.ts`：真实索引/持久化、两种 RRF 输出契约、排名与 payload 兼容。
+- `HnswVector.test.ts`：HNSW 图、量化、真实 store 查询和 HNSW RRF 输出契约。
+- `VectorPersistence.test.ts`：二进制快照、迁移、WAL 保留/恢复与并发落盘。
+- `VectorPipeline.test.ts`：chunk/embedding/文件扫描到真实索引的增量写入与清理。
+- `SearchRanking.test.ts`：通用 HybridRetriever 的排名、默认值和 payload 契约。
 - `VectorAvailability.test.ts`：五态、方法接收者、探测次数及配置统计的不同语义。
 - `SyncCoordinator.test.ts` / `VectorService.test.ts`：队列、失败恢复、维护与服务编排。
 - package、分层及四个 Core 边界测试继续负责宿主与公共接口边界。
+
+Core 持有上述算法和恢复行为的完整覆盖；宿主通过真实 package 导入验证
+pipeline→持久化/重开→混检链路，另保留 DI、provider 选择、维护等待和关闭顺序测试。
+宿主无需复制同一组算法断言；删除副本前须核对每项独有行为的归属。
 
 ## 设计参考
 
