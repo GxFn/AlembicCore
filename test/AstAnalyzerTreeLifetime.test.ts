@@ -1,9 +1,7 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Parser, Tree } from 'web-tree-sitter';
 import {
+  _resetAstParserCacheForTesting,
   analyzeFile,
   findCallExpressions,
   findPatternInContext,
@@ -12,9 +10,7 @@ import {
 } from '../src/core/AstAnalyzer.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
 import { plugin as typescriptPlugin } from '../src/core/ast/lang-typescript.js';
-import { loadLanguageWasm } from '../src/core/ast/parserInit.js';
 import { chunkByAST, ensureParser } from '../src/infrastructure/vector/ASTChunker.js';
-import { RESOURCES_DIR } from '../src/shared/packageRoot.js';
 
 beforeAll(async () => {
   await reloadPlugins();
@@ -23,12 +19,64 @@ beforeAll(async () => {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  _resetAstParserCacheForTesting();
   await reloadPlugins();
 });
 
 describe('AstAnalyzer web-tree-sitter Tree lifetime', () => {
+  it('releases replaced and reset parsers while returned Trees remain owned by their callers', () => {
+    _resetAstParserCacheForTesting();
+    const bind = vi.spyOn(Parser.prototype, 'setLanguage');
+    const dispose = vi.spyOn(Parser.prototype, 'delete');
+    const source = 'export class Held { run(): void {} }';
+    const held = parseToTree(source, 'typescript');
+    expect(held).not.toBeNull();
+    const originalParser = bind.mock.contexts[0];
+    analyzeFile('export class JavaScript {}', 'javascript');
+    const otherParser = bind.mock.contexts[1];
+    try {
+      registerLanguage('typescript', {
+        ...typescriptPlugin,
+        walk: (root, ctx) => {
+          typescriptPlugin.walk(root, ctx);
+          ctx.classes.push({ name: 'ReplacementPlugin' });
+        },
+      });
+      expect(dispose.mock.contexts).toEqual([originalParser]);
+      expect(held?.rootNode.text).toBe(source);
+      expect(analyzeFile('export class Updated {}', 'typescript')?.classes).toEqual(
+        expect.arrayContaining([expect.objectContaining({ name: 'ReplacementPlugin' })])
+      );
+      const replacementParser = bind.mock.contexts[2];
+      _resetAstParserCacheForTesting();
+      expect(dispose.mock.contexts).toEqual([originalParser, otherParser, replacementParser]);
+      _resetAstParserCacheForTesting();
+      expect(dispose).toHaveBeenCalledTimes(3);
+      expect(held?.rootNode.text).toBe(source);
+    } finally {
+      held?.tree.delete();
+      _resetAstParserCacheForTesting();
+    }
+  });
+
+  it('releases a constructed parser if grammar binding fails and can retry after repair', () => {
+    _resetAstParserCacheForTesting();
+    const dispose = vi.spyOn(Parser.prototype, 'delete');
+    registerLanguage('typescript', { ...typescriptPlugin, getGrammar: () => ({ invalid: true }) });
+    expect(analyzeFile('export class Invalid {}', 'typescript')).toBeNull();
+    expect(dispose).toHaveBeenCalledTimes(1);
+    registerLanguage('typescript', typescriptPlugin);
+    expect(analyzeFile('export class Repaired {}', 'typescript')?.classes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Repaired' })])
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves declarations across repeated production grammar reloads', async () => {
     // 严格生产每个 AST family 都会重载；持续重载不能耗尽 WASM 后把真实声明降级为 null。
+    _resetAstParserCacheForTesting();
+    const created = vi.spyOn(Parser.prototype, 'setLanguage');
+    const deleted = vi.spyOn(Parser.prototype, 'delete');
     for (let iteration = 0; iteration < 140; iteration++) {
       await reloadPlugins();
       const summary = analyzeFile('export class FixtureClass { run(): void {} }', 'typescript');
@@ -36,38 +84,15 @@ describe('AstAnalyzer web-tree-sitter Tree lifetime', () => {
         summary?.classes.map((item) => item.name),
         `reload ${iteration}`
       ).toContain('FixtureClass');
+      expect(created.mock.calls.length - deleted.mock.calls.length).toBe(1);
     }
   });
 
-  it('retries a repaired grammar and observes changed bytes at the same path', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'ast-grammar-reload-'));
-    const file = path.join(root, 'grammar.wasm');
-    const grammarRoot = path.join(RESOURCES_DIR, 'grammars');
-    const relativeFile = path.relative(grammarRoot, file);
-    const parser = new Parser();
-    try {
-      await writeFile(file, 'invalid wasm');
-      expect(await loadLanguageWasm(relativeFile)).toBeNull();
-      // 相同路径从损坏 → TypeScript → JavaScript，缓存不能吞掉修复或后续内容更新。
-      for (const [grammar, hasError] of [
-        ['tree-sitter-typescript.wasm', false],
-        ['tree-sitter-javascript.wasm', true],
-      ] as const) {
-        await writeFile(file, await readFile(path.join(grammarRoot, grammar)));
-        const language = await loadLanguageWasm(relativeFile);
-        expect(language).not.toBeNull();
-        parser.setLanguage(language);
-        const tree = parser.parse('export interface Contract { run(): void }');
-        try {
-          expect(tree?.rootNode.hasError).toBe(hasError);
-        } finally {
-          tree?.delete();
-        }
-      }
-    } finally {
-      parser.delete();
-      await rm(root, { recursive: true, force: true });
-    }
+  it('makes a newly registered language available without reinitializing the runtime', () => {
+    registerLanguage('fixture-new-language', typescriptPlugin);
+    expect(analyzeFile('export class Added {}', 'fixture-new-language')?.classes).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'Added' })])
+    );
   });
 
   it('deletes the analyzeFile Tree exactly once after every root consumer succeeds', () => {

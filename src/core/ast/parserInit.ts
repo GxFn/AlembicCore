@@ -25,6 +25,7 @@ let Parser: any = null;
 /** web-tree-sitter 模块命名空间 — Language.load 在这里 */
 let _namespace: any = null;
 let _initialized = false;
+let initialization: Promise<void> | null = null;
 
 // Language.load 会向进程级 WASM 内存装载模块，丢弃 JS 引用并不能卸载它。
 // 每个 grammar 路径只保留当前内容的加载结果；内容变化仍重载，失败不缓存，安装后可重试。
@@ -41,19 +42,42 @@ export async function initParser() {
   if (_initialized) {
     return;
   }
+  initialization ??= initializeParserRuntime();
+  const pending = initialization;
+  try {
+    await pending;
+  } finally {
+    // 失败后的新重试可能已开始，旧等待者不能清掉它的进行中状态。
+    if (initialization === pending) {
+      initialization = null;
+    }
+  }
+}
 
+async function initializeParserRuntime(): Promise<void> {
   try {
     // web-tree-sitter ESM: 导出 { Parser, Language, ... } 命名空间
     const mod = await import('web-tree-sitter');
-    _namespace = mod.default || mod;
+    const namespace = mod.default || mod;
     // v0.25 导出 { Parser, Language, ... }，需要提取 Parser 类
-    Parser = typeof _namespace === 'function' ? _namespace : _namespace.Parser;
-    await Parser.init();
+    const parser = typeof namespace === 'function' ? namespace : namespace.Parser;
+    await parser.init();
+    // 初始化真正完成后才暴露构造函数，避免同步消费者使用尚未就绪的 WASM runtime。
+    _namespace = namespace;
+    Parser = parser;
     _initialized = true;
-  } catch {
+  } catch (error: unknown) {
     // web-tree-sitter 不可用时优雅降级
+    _namespace = null;
     Parser = null;
     _initialized = false;
+    Logger.getInstance().warn(
+      '[AstParser] runtime initialization failed; retry remains available',
+      {
+        reason: error instanceof Error ? error.message : String(error),
+        retryVia: 'initParser/loadPlugins',
+      }
+    );
   }
 }
 
@@ -108,7 +132,7 @@ export async function loadLanguageWasm(wasmFileName: string): Promise<TreeSitter
       throw error;
     }
   } catch (error: unknown) {
-    Logger.getInstance().warn('[AstParser] grammar load failed; parser remains unavailable', {
+    Logger.getInstance().warn('[AstParser] grammar load failed; returning null for this resource', {
       grammar: wasmFileName,
       reason: error instanceof Error ? error.message : String(error),
       retryVia: 'loadPlugins after grammar repair',

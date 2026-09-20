@@ -13,6 +13,7 @@
  * 插件注册入口: lib/core/ast/index.js
  */
 
+import Logger from '../infrastructure/logging/Logger.js';
 import {
   type CallSiteInfo,
   defaultExtractCallSites,
@@ -26,6 +27,7 @@ import { getParserClass, isParserReady } from './ast/parserInit.js';
 interface TreeSitterParser {
   parse(input: string): TreeSitterTree | null;
   setLanguage(language: unknown): void;
+  delete(): void;
 }
 
 /** Minimal tree-sitter tree interface */
@@ -228,9 +230,13 @@ const _langPlugins: Map<string, LangPlugin> = new Map();
  * @param langId 语言标识 (e.g. 'objectivec', 'swift', 'typescript')
  */
 export function registerLanguage(langId: string, plugin: LangPlugin) {
-  _langPlugins.set(langId, plugin);
-  // 清除 parser cache 以便下次使用新语法
+  const previous = _parserCache.get(langId);
+  // 先解除缓存所有权，再释放 WASM parser；已经返回的 Tree 仍由各调用者持有和释放。
   _parserCache.delete(langId);
+  if (previous) {
+    disposeParser(previous, langId, 'language-registration');
+  }
+  _langPlugins.set(langId, plugin);
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -527,9 +533,27 @@ function supportedLanguages() {
 // per language and may be cleared between tests.
 const _parserCache: Map<string, TreeSitterParser> = new Map();
 
-/** Test-only: drop cached parsers (grammars re-instantiate deterministically). */
+/** Test-only: release owned parsers (grammars re-instantiate deterministically). */
 export function _resetAstParserCacheForTesting(): void {
+  const owned = [..._parserCache];
   _parserCache.clear();
+  for (const [lang, parser] of owned) {
+    disposeParser(parser, lang, 'cache-reset');
+  }
+}
+
+function disposeParser(parser: TreeSitterParser, lang: string, reason: string): void {
+  try {
+    parser.delete();
+    Logger.getInstance().debug('[AstAnalyzer] parser released', { language: lang, reason });
+  } catch (error: unknown) {
+    // 资源释放失败不能把已摘除的实例放回缓存，或遮蔽原有的解析失败/null 语义。
+    Logger.getInstance().warn('[AstAnalyzer] parser release failed; instance retired', {
+      language: lang,
+      reason,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 function _getParser(lang: string): TreeSitterParser | null {
@@ -546,16 +570,25 @@ function _getParser(lang: string): TreeSitterParser | null {
     return null;
   }
 
+  let parser: TreeSitterParser | undefined;
   try {
     const grammar = plugin.getGrammar();
     if (!grammar) {
       return null;
     }
-    const parser = new ParserClass();
+    parser = new ParserClass() as TreeSitterParser;
     parser.setLanguage(grammar);
-    _parserCache.set(lang, parser as TreeSitterParser);
-    return parser as TreeSitterParser;
-  } catch {
+    _parserCache.set(lang, parser);
+    return parser;
+  } catch (error: unknown) {
+    if (parser) {
+      disposeParser(parser, lang, 'grammar-binding-failed');
+    }
+    Logger.getInstance().warn('[AstAnalyzer] parser initialization failed; returning null', {
+      language: lang,
+      phase: parser ? 'grammar-binding' : 'grammar-or-parser-construction',
+      reason: error instanceof Error ? error.message : String(error),
+    });
     return null;
   }
 }

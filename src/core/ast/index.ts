@@ -4,7 +4,7 @@
  *
  * 初始化流程:
  *   1. 调用 initParser() — 初始化 web-tree-sitter WASM 运行时
- *   2. 并行加载所有 .wasm 语法文件
+ *   2. 顺序加载所有 .wasm 语法文件，复用未变化的二进制
  *   3. 将 Language 对象注入每个 lang-*.js 插件
  *   4. 注册到 AstAnalyzer
  *
@@ -21,6 +21,7 @@
 
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import Logger from '../../infrastructure/logging/Logger.js';
 import { RESOURCES_DIR } from '../../shared/packageRoot.js';
 import { analyzeFile, registerLanguage } from '../AstAnalyzer.js';
 import { ensureGrammars, inferLanguagesFromStats, reloadPlugins } from './ensureGrammars.js';
@@ -29,6 +30,8 @@ import { initParser, isParserReady, loadLanguageWasm } from './parserInit.js';
 export { getParserClass, isParserReady } from './parserInit.js';
 
 let _loaded = false;
+let loading: Promise<void> | null = null;
+let reloadRevision = 0;
 
 /**
  * 重置加载标志，允许 loadPlugins() 再次执行
@@ -36,6 +39,7 @@ let _loaded = false;
  */
 export function _resetForReload() {
   _loaded = false;
+  reloadRevision += 1;
 }
 
 export const CORE_GRAMMAR_RESOURCE_FILES = Object.freeze([
@@ -201,41 +205,82 @@ const LANG_REGISTRY = [
  * 加载并注册所有可用的语言 AST 插件
  * 幂等 — 多次调用只执行一次
  */
-export async function loadPlugins() {
-  if (_loaded) {
-    return;
+export function loadPlugins(): Promise<void> {
+  if (loading) {
+    Logger.getInstance().debug('[AstPlugins] awaiting in-flight registration', { reloadRevision });
+    return loading;
   }
-  _loaded = true;
+  if (_loaded) {
+    return Promise.resolve();
+  }
+  loading = loadCurrentPlugins();
+  return loading;
+}
 
+async function loadCurrentPlugins(): Promise<void> {
+  try {
+    for (;;) {
+      const revision = reloadRevision;
+      const complete = await loadPluginPass();
+      if (revision === reloadRevision) {
+        // 部分失败仍保留可用插件，但不能标成全部就绪；后续调用可重新尝试。
+        _loaded = complete;
+        Logger.getInstance().debug('[AstPlugins] registration finished', { revision, complete });
+        return;
+      }
+      // 读取 WASM 期间又收到更新：合并为下一轮刷新，避免旧一轮最后覆盖新注册。
+      Logger.getInstance().debug('[AstPlugins] reload requested during registration', {
+        completedRevision: revision,
+        nextRevision: reloadRevision,
+      });
+    }
+  } finally {
+    // 在 Promise 完成前解除进行中状态，后来的 reload 不会加入一个已经结束的 pass。
+    loading = null;
+  }
+}
+
+async function loadPluginPass(): Promise<boolean> {
   // 1. 初始化 web-tree-sitter WASM 运行时
   await initParser();
   if (!isParserReady()) {
-    return; // web-tree-sitter 不可用，优雅降级（和以前缺少 tree-sitter 一样）
+    Logger.getInstance().warn('[AstPlugins] registration deferred; parser runtime unavailable');
+    return false;
   }
 
   // 2. 按顺序加载所有 .wasm 语法文件（并行加载偶发竞态导致失败）
-  const wasmResults: any[] = [];
+  const grammars: Array<Awaited<ReturnType<typeof loadLanguageWasm>>> = [];
   for (const entry of LANG_REGISTRY) {
     try {
-      const lang = await loadLanguageWasm(entry.wasmFile);
-      wasmResults.push({ status: 'fulfilled', value: lang });
-    } catch (err: any) {
-      wasmResults.push({ status: 'rejected', reason: err });
+      grammars.push(await loadLanguageWasm(entry.wasmFile));
+    } catch (error: unknown) {
+      grammars.push(null);
+      Logger.getInstance().warn('[AstPlugins] grammar load rejected; registration skipped', {
+        language: entry.langId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   // 3. 逐个加载插件模块并注入 Grammar
   const moduleCache = new Map();
+  let complete = true;
 
   for (let i = 0; i < LANG_REGISTRY.length; i++) {
     const entry = LANG_REGISTRY[i];
-    const wasmResult = wasmResults[i];
+    const language = grammars[i];
 
-    if (wasmResult.status !== 'fulfilled' || !wasmResult.value) {
-      continue; // wasm 加载失败，跳过此语言
+    if (!language) {
+      complete = false;
+      Logger.getInstance().warn(
+        '[AstPlugins] grammar unavailable; keeping any prior registration',
+        {
+          language: entry.langId,
+          retryVia: 'loadPlugins/reloadProjectAstPlugins',
+        }
+      );
+      continue;
     }
-
-    const language = wasmResult.value;
 
     try {
       // 模块缓存（TypeScript 模块被 typescript + tsx 共用）
@@ -253,11 +298,25 @@ export async function loadPlugins() {
       const plugin = mod[pluginKey];
       if (plugin) {
         registerLanguage(entry.langId, plugin);
+      } else {
+        complete = false;
+        Logger.getInstance().warn('[AstPlugins] plugin export unavailable; registration skipped', {
+          language: entry.langId,
+          pluginKey,
+        });
       }
-    } catch {
-      /* 插件加载失败，静默跳过 */
+    } catch (error: unknown) {
+      complete = false;
+      Logger.getInstance().warn(
+        '[AstPlugins] plugin registration failed; retry remains available',
+        {
+          language: entry.langId,
+          reason: error instanceof Error ? error.message : String(error),
+        }
+      );
     }
   }
+  return complete;
 }
 
 // 自动加载（ESM 模块顶层 await）

@@ -97,12 +97,12 @@
     {
       "id": "ast-grammar-family",
       "module": "src/core/ast/* (parserInit.ts, index.ts, lang-*.ts _grammar x10)",
-      "export": "lazy native grammar handles",
+      "export": "WASM runtime, grammar-load cache and plugin registration lifecycle",
       "kind": "lazy-native-handle-family",
       "owner": "AlembicCore window",
-      "reason": "tree-sitter native modules and grammars load lazily on first parse; native handles are not safely reloadable in-process.",
-      "lifecycle": "process; restart = process restart (documented)",
-      "resetHook": null
+      "reason": "Core owns the process WASM runtime. Unchanged grammar bytes reuse one Language load per path; initialization and plugin registration share in-flight promises. Explicit reload still observes new or repaired grammar bytes.",
+      "lifecycle": "process-owned WASM modules (no unloading API); one current fingerprint/promise per registered grammar path; one pending initialization and registration; reload revisions coalesce refreshes, failed loads remain retryable",
+      "resetHook": "_resetForReload (invalidates registration; does not unload WASM)"
     },
     {
       "id": "ast-analyzer-caches",
@@ -110,8 +110,8 @@
       "export": "_langPlugins (plugin registry), _parserCache (parser cache)",
       "kind": "bounded-cache",
       "owner": "AlembicCore window",
-      "reason": "Cache policy (AD4, closing the F2 'no policy' finding): both maps are bounded by the registered language set (about a dozen entries), live for the process, and rebuild deterministically; the parser cache has a test reset hook.",
-      "lifecycle": "process; bounded by language count",
+      "reason": "Both maps are bounded by the registered language set (about a dozen entries); replacement/reset disposes each owned Parser, and failed grammar binding releases the unregistered instance. Returned Trees remain caller-owned.",
+      "lifecycle": "process registry; parser cache bounded by language count with explicit native disposal",
       "resetHook": "_resetAstParserCacheForTesting"
     },
     {
@@ -143,13 +143,25 @@
       "file": "src/core/AstAnalyzer.ts",
       "binding": "_parserCache",
       "blessedId": "ast-analyzer-caches",
-      "reason": "Parser cache bounded by language set; test reset hook present (AD4 S11)."
+      "reason": "Parser cache bounded by language set; replacement/reset disposes native instances; test reset hook present (AD4 S11)."
     },
     {
       "file": "src/core/ast/index.ts",
       "binding": "_loaded",
       "blessedId": "ast-grammar-family",
-      "reason": "Set-once native-grammar load flag (AD4 S10; restart = process restart)."
+      "reason": "Completed plugin-registration flag; invalidated by _resetForReload and published only after an asynchronous registration pass finishes."
+    },
+    {
+      "file": "src/core/ast/index.ts",
+      "binding": "reloadRevision",
+      "blessedId": "ast-grammar-family",
+      "reason": "Single invalidation counter owned by the shared plugin-loading lifecycle; requests received during a pass schedule a subsequent refresh, preventing stale registration from overwriting updated grammar."
+    },
+    {
+      "file": "src/core/ast/parserInit.ts",
+      "binding": "grammarLoads",
+      "blessedId": "ast-grammar-family",
+      "reason": "Bounded by registered grammar resource paths; each retains only the current content fingerprint and one successful/in-flight Language promise; failed entries are evicted for retry."
     },
     {
       "file": "src/core/ast/parserInit.ts",
