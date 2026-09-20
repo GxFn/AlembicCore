@@ -1,6 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { KnowledgeGraphService, KnowledgeService } from '../src/knowledge.js';
+import {
+  KnowledgeGraphService,
+  KnowledgeService,
+  RecipeProductionGateway,
+} from '../src/knowledge.js';
 import { FileWriteError } from '../src/repository/knowledge/KnowledgeUnitOfWork.js';
 import type { DivergenceError } from '../src/shared/errors/index.js';
 import { createKnowledgeRuntime } from './support/knowledge-runtime.js';
@@ -107,7 +111,11 @@ describe('KnowledgeService file-first commands', () => {
     service._afterPublish = afterPublish;
     env.runtime.sqlite.exec(`CREATE TRIGGER remove_readback AFTER UPDATE ON knowledge_entries
       BEGIN DELETE FROM knowledge_entries WHERE id = NEW.id; END;`);
-    await expect(service.publish(id, context)).resolves.toBeNull();
+    const gateway = new RecipeProductionGateway({
+      knowledgeService: service,
+      projectRoot: env.root,
+    });
+    await expect(gateway.publish(id, context)).resolves.toBeNull();
     await Promise.resolve();
     expect(afterPublish).toHaveBeenCalledOnce();
   });

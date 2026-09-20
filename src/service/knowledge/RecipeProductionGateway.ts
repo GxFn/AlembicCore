@@ -233,8 +233,8 @@ export interface CreatedRecipeInfo {
   id: string;
   title: string;
   lifecycle: string;
-  /** Raw saved entry from KnowledgeService.create() */
-  raw: Record<string, unknown>;
+  /** 原样保存实体/仓储对象；DB-only 的关系补写可能返回 null，不制造替代事实。 */
+  raw: object | null;
 }
 
 export interface RejectedRecipeInfo {
@@ -368,7 +368,7 @@ export interface RecipeProductionPort {
     context: ProducerContext
   ): Promise<RecipeProductionResult>;
   evaluateReadiness(recipeId: string): Promise<RetrievalReadinessReport>;
-  publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord>;
+  publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord | null>;
 }
 
 export interface StrictPreparedRecipePersistenceContextV1 {
@@ -415,31 +415,21 @@ export interface StrictPreparedRecipePersistencePortV1 {
 
 /* ═══════════════════ Dependencies ═══════════════════ */
 
+// 只要求生产入口实际读取的身份字段，不强迫实体类提供任意字符串索引。
+type GatewaySavedRecipe = Pick<RecipeProductionRecord, 'id' | 'title' | 'lifecycle'> & {
+  kind?: string;
+};
+
 interface GatewayKnowledgeService {
-  create(
-    data: Record<string, unknown>,
-    context: { userId: string }
-  ): Promise<{
-    id: string;
-    title: string;
-    lifecycle: string;
-    kind?: string;
-    [key: string]: unknown;
-  }>;
+  create(data: Record<string, unknown>, context: { userId: string }): Promise<GatewaySavedRecipe>;
   update(
     id: string,
     data: Record<string, unknown>,
     context: { userId: string }
-  ): Promise<{
-    id: string;
-    title: string;
-    lifecycle: string;
-    kind?: string;
-    [key: string]: unknown;
-  }>;
+  ): Promise<GatewaySavedRecipe | null>;
   updateQuality(id: string, context: { userId: string }): Promise<unknown>;
   evaluateRetrievalReadiness?(id: string): Promise<RetrievalReadinessReport>;
-  publish?(id: string, context: { userId: string }): Promise<RecipeProductionRecord>;
+  publish?(id: string, context: { userId: string }): Promise<RecipeProductionRecord | null>;
 }
 
 interface GatewayConsolidationAdvice {
@@ -725,7 +715,7 @@ export class RecipeProductionGateway
     return this.#knowledgeService.evaluateRetrievalReadiness(recipeId);
   }
 
-  async publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord> {
+  async publish(recipeId: string, context: PublishContext): Promise<RecipeProductionRecord | null> {
     if (!this.#knowledgeService.publish) {
       throw new Error('recipe-production-publish-unavailable');
     }
@@ -1035,7 +1025,7 @@ export class RecipeProductionGateway
           id: saved.id,
           title: saved.title,
           lifecycle: saved.lifecycle,
-          raw: saved as Record<string, unknown>,
+          raw: saved,
         };
         result.created.push(created);
         createdByIndex.set(index, created);
@@ -1090,7 +1080,7 @@ export class RecipeProductionGateway
             { relations: resolved.relations },
             { userId }
           );
-          created.raw = updated as Record<string, unknown>;
+          created.raw = updated;
         } catch (err: unknown) {
           result.rejected.push({
             index: created.index,

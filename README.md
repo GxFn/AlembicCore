@@ -104,6 +104,8 @@ named symbols only, to keep same-name DTOs from colliding. Shipped
 compatibility aliases stay public, including `HostAgent*` ↔ `IDEAgent*`.
 The `Bootstrap` ↔ `AppRuntime` alias belongs to the outer Alembic application.
 
+Knowledge service dependency contracts, nullable writes and host module ownership are described in [Knowledge integration](docs/knowledge-integration.md).
+
 ## Getting started
 
 Requirements: Node.js >= 22, npm.

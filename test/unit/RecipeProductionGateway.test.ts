@@ -3,6 +3,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { KnowledgeEntry } from '../../src/domain/knowledge/KnowledgeEntry.js';
 import { GenerateDedup } from '../../src/service/bootstrap/GenerateDedup.js';
 import {
   type CreateRecipeItem,
@@ -748,8 +749,11 @@ describe('RecipeProductionGateway', () => {
       );
     });
 
-    it('应将同批稳定关系键解析为真实 Recipe UUID 后回写 relations', async () => {
+    it.each([false, true])('同批关系回写保留真实返回值（null=%s）', async (nullReadback) => {
       const deps = makeDeps();
+      if (nullReadback) {
+        vi.mocked(deps.knowledgeService.update).mockResolvedValue(null);
+      }
       const gateway = new RecipeProductionGateway(deps);
 
       const result = await gateway.create({
@@ -772,6 +776,10 @@ describe('RecipeProductionGateway', () => {
       });
 
       expect(result.created).toHaveLength(2);
+      expect(result.rejected).toHaveLength(0);
+      if (nullReadback) {
+        expect(result.created[1].raw).toBeNull();
+      }
       expect(deps.knowledgeService.update).toHaveBeenCalledWith(
         'recipe-2',
         expect.objectContaining({
@@ -816,7 +824,14 @@ describe('RecipeProductionGateway', () => {
     });
 
     it('created.raw 应包含完整 saved 对象', async () => {
-      const gateway = new RecipeProductionGateway(makeDeps());
+      const deps = makeDeps();
+      const saved = KnowledgeEntry.fromJSON({
+        ...makeItem(),
+        id: 'saved-entity',
+        lifecycle: 'staging',
+      });
+      vi.mocked(deps.knowledgeService.create).mockResolvedValue(saved);
+      const gateway = new RecipeProductionGateway(deps);
 
       const result = await gateway.create({
         source: 'agent-tool',
@@ -824,9 +839,11 @@ describe('RecipeProductionGateway', () => {
         options: { skipSimilarityCheck: true, skipConsolidation: true },
       });
 
-      expect(result.created[0].raw).toBeDefined();
-      expect(result.created[0].raw.title).toBe('WebSocket 客户端异步消息流模式');
-      expect(result.created[0].raw.kind).toBe('pattern');
+      expect(result.created[0].raw).toBe(saved);
+      expect(result.created[0].raw).toMatchObject({
+        title: 'WebSocket 客户端异步消息流模式',
+        kind: 'pattern',
+      });
     });
   });
 

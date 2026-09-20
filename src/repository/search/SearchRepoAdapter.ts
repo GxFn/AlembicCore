@@ -25,8 +25,11 @@ export interface SearchDb {
 }
 
 /** 解包 DatabaseConnection → raw SearchDb（若已是 raw db 则直接返回） */
-export function unwrapSearchDb(db: SearchDb & { getDb?: () => SearchDb }): SearchDb {
-  return typeof db.getDb === 'function' ? db.getDb() : db;
+export function unwrapSearchDb<T extends SearchDb>(db: T | { getDb(): T }): T {
+  // 联合输入只需一侧能力；此视图用于读取可选 getDb，typeof 决定返回 wrapper 的句柄或 raw DB。
+  // 保留原属性读取和 receiver，不要求 DatabaseConnection 自身也实现 prepare。
+  const source = db as T & { getDb?: () => T };
+  return typeof source.getDb === 'function' ? source.getDb() : source;
 }
 
 /**

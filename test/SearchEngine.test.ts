@@ -40,6 +40,7 @@ describe('search index timestamp consistency', () => {
   test.each([
     'raw-adapter',
     'knowledge-repository',
+    'database-wrapper',
   ] as const)('refreshes same-second inserts, edits and deprecations through %s', async (adapter) => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(1_800_000_000_500);
@@ -47,8 +48,8 @@ describe('search index timestamp consistency', () => {
       await withSearchDatabase(async (runtime) => {
         const repository = createAlembicRepositories(runtime.connection).knowledgeRepository;
         const engine = new SearchEngine(
-          runtime.sqlite,
-          adapter === 'raw-adapter' ? {} : { knowledgeRepo: repository }
+          adapter === 'database-wrapper' ? runtime.connection : runtime.sqlite,
+          adapter === 'knowledge-repository' ? { knowledgeRepo: repository } : {}
         );
         engine.buildIndex();
         runtime.sqlite

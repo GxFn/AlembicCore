@@ -7,7 +7,6 @@
 
 import Logger from '../../infrastructure/logging/Logger.js';
 import type {
-  SearchDb as CoreSearchDb,
   SearchKnowledgeRepo,
   SearchSourceRefRepo,
 } from '../../repository/search/SearchRepoAdapter.js';
@@ -119,10 +118,8 @@ export class SearchEngine {
   scorer: Scorer;
   vectorService: SearchVectorService | null;
   vectorStore: SearchVectorStore | null;
-  constructor(db: SearchDb & { getDb?: () => SearchDb }, options: SearchEngineOptions = {}) {
-    this.db = unwrapSearchDb(
-      db as unknown as CoreSearchDb & { getDb?: () => CoreSearchDb }
-    ) as unknown as SearchDb;
+  constructor(db: SearchDb | { getDb(): SearchDb }, options: SearchEngineOptions = {}) {
+    this.db = unwrapSearchDb<SearchDb>(db);
     const opts = options as Record<string, unknown>;
     this.#knowledgeRepo =
       (opts.knowledgeRepo as SearchKnowledgeRepo | null) ?? new RawDbKnowledgeAdapter(this.db);
