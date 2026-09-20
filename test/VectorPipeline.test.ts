@@ -3,9 +3,13 @@ import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { isASTChunkerAvailable } from '../src/infrastructure/vector/ASTChunker.js';
+import {
+  chunkByAST,
+  ensureParser,
+  isASTChunkerAvailable,
+} from '../src/infrastructure/vector/ASTChunker.js';
 import { BatchEmbedder } from '../src/infrastructure/vector/BatchEmbedder.js';
-import { chunk } from '../src/infrastructure/vector/Chunker.js';
+import { chunk, estimateTokens } from '../src/infrastructure/vector/Chunker.js';
 import { HnswVectorAdapter } from '../src/infrastructure/vector/HnswVectorAdapter.js';
 import { IndexingPipeline } from '../src/infrastructure/vector/IndexingPipeline.js';
 import { JsonVectorAdapter as _JsonVectorAdapter } from '../src/infrastructure/vector/JsonVectorAdapter.js';
@@ -77,20 +81,59 @@ describe('Chunker v2', () => {
     }
   });
 
-  it('explicit strategy: fixed with overlap', () => {
-    const text = 'Line.\n'.repeat(500);
-    const result = chunk(text, {}, { strategy: 'fixed', maxChunkTokens: 50, overlapTokens: 10 });
-    expect(result.length).toBeGreaterThan(1);
-    // With overlap, later chunks should share content with previous
-    if (result.length >= 2) {
-      const first = result[0].content;
-      const second = result[1].content;
-      // The end of first should overlap with start of second
-      const firstEnd = first.slice(-100);
-      const secondStart = second.slice(0, 100);
-      // They should share some common text (from overlap)
-      expect(firstEnd.length + secondStart.length).toBeGreaterThan(0);
+  it('preserves overlap without emitting a redundant terminal suffix', () => {
+    const result = chunk(
+      '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcd',
+      {},
+      {
+        strategy: 'fixed',
+        maxChunkTokens: 4,
+        overlapTokens: 1,
+      }
+    );
+    expect(result.map((item) => item.content)).toEqual([
+      '0123456789ABCDEF',
+      'CDEFGHIJKLMNOPQR',
+      'OPQRSTUVWXYZabcd',
+    ]);
+    expect(result.map((item) => item.metadata)).toEqual([
+      { chunkIndex: 0, totalChunks: 3 },
+      { chunkIndex: 1, totalChunks: 3 },
+      { chunkIndex: 2, totalChunks: 3 },
+    ]);
+  });
+
+  it('keeps mixed text within the shared token estimate without losing code points', () => {
+    const text = '中文🙂abc\n'.repeat(12);
+    const result = chunk(text, {}, { strategy: 'fixed', maxChunkTokens: 4, overlapTokens: 0 });
+    expect(result.map((item) => item.content).join('')).toBe(text);
+    for (const item of result) {
+      expect(estimateTokens(item.content)).toBeLessThanOrEqual(4);
+      expect(item.content.isWellFormed()).toBe(true);
     }
+  });
+
+  it('rejects budgets that cannot produce a chunk and never skips text for negative overlap', () => {
+    for (const maxChunkTokens of [0, -1, Number.NaN, 0.1]) {
+      for (const strategy of ['fixed', 'auto', 'section']) {
+        expect(() => chunk('# Title\nabcdef', {}, { strategy, maxChunkTokens })).toThrow(
+          RangeError
+        );
+      }
+    }
+    expect(() => chunk('short', {}, { strategy: 'auto', overlapTokens: -1 })).toThrow(RangeError);
+    expect(() =>
+      chunkByAST('const x = 1;', 'javascript', {}, { maxChunkTokens: Number.NaN })
+    ).toThrow(RangeError);
+    expect(() => chunk('abcdef', {}, { strategy: 'fixed', overlapTokens: -1 })).toThrow(RangeError);
+    expect(chunk('short', {}, { strategy: 'fixed', maxChunkTokens: Infinity })).toEqual([
+      { content: 'short', metadata: { chunkIndex: 0, totalChunks: 1 } },
+    ]);
+    expect(
+      chunk('12345678', {}, { strategy: 'fixed', maxChunkTokens: 1, overlapTokens: 1 }).map(
+        (item) => item.content
+      )
+    ).toEqual(['1234', '5678']);
   });
 
   it('empty content returns empty array', () => {
@@ -134,6 +177,28 @@ describe('Chunker v2', () => {
 });
 
 describe('ASTChunker', () => {
+  it('bounds an oversized AST leaf while retaining its complete literal content', async () => {
+    expect(await ensureParser()).toBe(true);
+    const literal = 'x'.repeat(320);
+    const source = `export const data = "${literal}";`;
+    const result = chunkByAST(
+      source,
+      'javascript',
+      {},
+      {
+        maxChunkTokens: 16,
+      }
+    );
+    expect(result).not.toBeNull();
+    expect(result!.map((item) => item.content).join('')).toContain(literal);
+    for (const item of result!) {
+      expect(estimateTokens(item.content)).toBeLessThanOrEqual(16);
+      expect(item.metadata.chunkStrategy).toBe('ast');
+      expect(source).toContain(item.content);
+      expect(item.metadata).toMatchObject({ startLine: 1, endLine: 1 });
+    }
+  });
+
   it('isASTChunkerAvailable returns boolean', () => {
     expect(typeof isASTChunkerAvailable('javascript')).toBe('boolean');
     expect(typeof isASTChunkerAvailable('python')).toBe('boolean');

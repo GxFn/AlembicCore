@@ -13,6 +13,7 @@
 
 import { estimateTokens } from '../../shared/tokenUtils.js';
 import { chunkByAST, isASTChunkerAvailable } from './ASTChunker.js';
+import { fixedTextRanges, validateSplitBudget } from './TextChunkRanges.js';
 
 export { estimateTokens };
 
@@ -61,6 +62,11 @@ export function chunk(
 
   if (!content || content.trim().length === 0) {
     return [];
+  }
+  // auto 也需在策略选择前验证，否则 NaN 会绕过 section 的超限比较。
+  // whole 和未知策略原样返回，不使用分块预算，沿用既有行为。
+  if (strategy === 'auto' || strategy === 'section' || strategy === 'fixed' || strategy === 'ast') {
+    validateSplitBudget(maxChunkTokens, overlapTokens);
   }
 
   const tokens = estimateTokens(content);
@@ -194,42 +200,11 @@ function chunkFixed(
   maxChunkTokens: number,
   overlapTokens: number
 ) {
-  const maxChars = maxChunkTokens * 4;
-  const overlapChars = overlapTokens * 4;
-  const results: { content: string; metadata: Record<string, unknown> }[] = [];
-
-  let start = 0;
-  while (start < content.length) {
-    let end = start + maxChars;
-
-    // 尽量在句子边界切割
-    if (end < content.length) {
-      const boundary = content.lastIndexOf('\n', end);
-      if (boundary > start + maxChars * 0.5) {
-        end = boundary + 1;
-      }
-    } else {
-      end = content.length;
-    }
-
-    results.push({
-      content: content.slice(start, end),
-      metadata: { ...metadata, chunkIndex: results.length },
-    });
-
-    // 下一个开始位置（含重叠）
-    const nextStart = end - overlapChars;
-    // 确保至少前进 1 字符，防止 overlap >= maxChars 时无限循环
-    start = nextStart > start ? nextStart : end;
-    if (start >= content.length) {
-      break;
-    }
-  }
-
-  for (const chunk of results) {
-    chunk.metadata.totalChunks = results.length;
-  }
-  return results;
+  const ranges = fixedTextRanges(content, maxChunkTokens, overlapTokens);
+  return ranges.map(({ start, end }, chunkIndex) => ({
+    content: content.slice(start, end),
+    metadata: { ...metadata, chunkIndex, totalChunks: ranges.length },
+  }));
 }
 
 export { DEFAULT_MAX_CHUNK_TOKENS, DEFAULT_OVERLAP_TOKENS };

@@ -13,6 +13,8 @@
  */
 
 import { estimateTokens } from '../../shared/tokenUtils.js';
+import Logger from '../logging/Logger.js';
+import { fixedTextRanges, validateSplitBudget } from './TextChunkRanges.js';
 
 /** Minimal AST node shape from tree-sitter */
 interface ASTNode {
@@ -140,6 +142,7 @@ async function ensureParser() {
     _astReady = _isAvailable?.() ?? false;
     return _astReady;
   } catch {
+    Logger.debug('[ASTChunker] Parser initialization failed; text fallback remains available');
     return false;
   }
 }
@@ -183,21 +186,24 @@ export function chunkByAST(
   if (!content || content.trim().length === 0) {
     return [];
   }
+  validateSplitBudget(maxChunkTokens);
 
   const langId = (LANG_ID_MAP as Record<string, string>)[language] || language;
   if (!_astReady || !_parseToTree) {
+    Logger.debug('[ASTChunker] Parser not initialized; requesting text fallback', { language });
     return null; // 返回 null 表示不支持, 调用方应 fallback
   }
 
   const parsed = _parseToTree(content, langId);
   if (!parsed) {
+    Logger.debug('[ASTChunker] No parse tree; requesting text fallback', { language });
     return null;
   }
 
   const rootNode = parsed.rootNode;
   try {
     const chunks: Array<{ content: string; metadata: Record<string, unknown> }> = [];
-    let preambleLines: string[] = []; // 非声明代码 (imports, comments 等)
+    const preamble: ASTNode[] = []; // 保留原跨度，不能用人为换行重建源代码。
 
     // 遍历根节点的直接子节点
     for (let i = 0; i < rootNode.childCount; i++) {
@@ -212,38 +218,36 @@ export function chunkByAST(
 
       if (!isTopLevel) {
         // 非顶层声明 → 积累到 preamble
-        preambleLines.push(nodeText);
+        preamble.push(child);
         continue;
       }
 
       // 先 flush preamble
-      if (preambleLines.length > 0) {
-        const preamble = preambleLines.join('\n');
-        if (preamble.trim().length > 0) {
-          chunks.push({
-            content: preamble,
-            metadata: {
-              ...metadata,
-              nodeType: 'preamble',
-              startLine: chunks.length === 0 ? 1 : undefined,
-            },
-          });
-        }
-        preambleLines = [];
-      }
+      appendNodeSpan(
+        chunks,
+        preamble,
+        content,
+        { ...metadata, nodeType: 'preamble' },
+        maxChunkTokens
+      );
+      preamble.length = 0;
 
       if (nodeTokens <= maxChunkTokens) {
         // 单个 chunk
-        chunks.push({
-          content: nodeText,
-          metadata: {
-            ...metadata,
-            nodeType: child.type,
-            name: extractNodeName(child),
-            startLine: child.startPosition.row + 1,
-            endLine: child.endPosition.row + 1,
+        appendChunk(
+          chunks,
+          {
+            content: nodeText,
+            metadata: {
+              ...metadata,
+              nodeType: child.type,
+              name: extractNodeName(child),
+              startLine: child.startPosition.row + 1,
+              endLine: child.endPosition.row + 1,
+            },
           },
-        });
+          maxChunkTokens
+        );
       } else {
         // 超大节点: 递归拆分
         const subChunks = splitLargeNode(child, content, metadata, maxChunkTokens);
@@ -252,18 +256,17 @@ export function chunkByAST(
     }
 
     // flush 剩余 preamble
-    if (preambleLines.length > 0) {
-      const preamble = preambleLines.join('\n');
-      if (preamble.trim().length > 0) {
-        chunks.push({
-          content: preamble,
-          metadata: { ...metadata, nodeType: 'epilogue' },
-        });
-      }
-    }
+    appendNodeSpan(
+      chunks,
+      preamble,
+      content,
+      { ...metadata, nodeType: 'epilogue' },
+      maxChunkTokens
+    );
 
     // 如果 AST 没有产生任何 chunk (例如空文件), 返回 null 让 fallback 处理
     if (chunks.length === 0) {
+      Logger.debug('[ASTChunker] No content nodes; requesting text fallback', { language });
       return null;
     }
 
@@ -298,140 +301,127 @@ function splitLargeNode(
   const chunks: Array<{ content: string; metadata: Record<string, unknown> }> = [];
   const parentName = extractNodeName(node);
 
-  // 如果没有子节点, 按行切割
+  // 叶子不能再按语法拆开，交给共用文本跨度算法，仍优先对齐行边界。
   if (node.childCount === 0) {
-    return splitByLines(
-      source.slice(node.startIndex, node.endIndex),
-      metadata,
-      node,
-      parentName,
+    appendChunk(
+      chunks,
+      {
+        content: source.slice(node.startIndex, node.endIndex),
+        metadata: {
+          ...metadata,
+          nodeType: node.type,
+          name: parentName,
+          startLine: node.startPosition.row + 1,
+          endLine: node.endPosition.row + 1,
+          splitPart: true,
+        },
+      },
       maxChunkTokens
     );
+    return chunks;
   }
 
-  // 按子节点分组, 累积到 maxChunkTokens
-  let currentLines: string[] = [];
-  let currentTokens = 0;
-  let groupStartLine = node.startPosition.row + 1;
-
+  const group: ASTNode[] = [];
+  const flushGroup = () => {
+    appendNodeSpan(
+      chunks,
+      group,
+      source,
+      {
+        ...metadata,
+        nodeType: node.type,
+        name: parentName,
+        splitPart: true,
+      },
+      maxChunkTokens
+    );
+    group.length = 0;
+  };
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
     if (!child) {
       continue;
     }
-
-    const childText = source.slice(child.startIndex, child.endIndex);
-    const childTokens = estimateTokens(childText);
-
-    // 如果单个子节点就超大, 递归拆分
-    if (childTokens > maxChunkTokens && child.childCount > 0) {
-      // 先 flush 当前积累
-      if (currentLines.length > 0) {
-        chunks.push({
-          content: currentLines.join('\n'),
-          metadata: {
-            ...metadata,
-            nodeType: node.type,
-            name: parentName,
-            startLine: groupStartLine,
-            endLine: child.startPosition.row,
-            splitPart: true,
-          },
-        });
-        currentLines = [];
-        currentTokens = 0;
-      }
-      // 递归
+    const childTokens = estimateTokens(source.slice(child.startIndex, child.endIndex));
+    if (childTokens > maxChunkTokens) {
+      flushGroup();
       chunks.push(...splitLargeNode(child, source, metadata, maxChunkTokens));
-      groupStartLine = child.endPosition.row + 2;
       continue;
     }
-
-    // 如果加入后超限, 先 flush
-    if (currentTokens + childTokens > maxChunkTokens && currentLines.length > 0) {
-      chunks.push({
-        content: currentLines.join('\n'),
-        metadata: {
-          ...metadata,
-          nodeType: node.type,
-          name: parentName,
-          startLine: groupStartLine,
-          endLine: child.startPosition.row,
-          splitPart: true,
-        },
-      });
-      currentLines = [];
-      currentTokens = 0;
-      groupStartLine = child.startPosition.row + 1;
+    const first = group[0];
+    // 按真实跨度计算组预算，包含原来的空白，而不是按子节点token和猜测行号。
+    if (first && estimateTokens(source.slice(first.startIndex, child.endIndex)) > maxChunkTokens) {
+      flushGroup();
     }
-
-    currentLines.push(childText);
-    currentTokens += childTokens;
+    group.push(child);
   }
-
-  // flush 剩余
-  if (currentLines.length > 0) {
-    chunks.push({
-      content: currentLines.join('\n'),
-      metadata: {
-        ...metadata,
-        nodeType: node.type,
-        name: parentName,
-        startLine: groupStartLine,
-        endLine: node.endPosition.row + 1,
-        splitPart: chunks.length > 0,
-      },
-    });
-  }
+  flushGroup();
 
   return chunks;
 }
 
-/** 按行切割 (最后手段, 当 AST 无法进一步拆分时) */
-function splitByLines(
-  text: string,
+/** 用真实 AST 起止位置物化连续分组；元数据行号与内容来自同一段原文。 */
+function appendNodeSpan(
+  chunks: Array<{ content: string; metadata: Record<string, unknown> }>,
+  nodes: ASTNode[],
+  source: string,
   metadata: Record<string, unknown>,
-  node: ASTNode,
-  parentName: string | undefined,
   maxChunkTokens: number
 ) {
-  const lines = text.split('\n');
-  const chunks: Array<{ content: string; metadata: Record<string, unknown> }> = [];
-  let current: string[] = [];
-  let currentTokens = 0;
-
-  for (const line of lines) {
-    const lineTokens = estimateTokens(line);
-    if (currentTokens + lineTokens > maxChunkTokens && current.length > 0) {
-      chunks.push({
-        content: current.join('\n'),
-        metadata: {
-          ...metadata,
-          nodeType: node.type,
-          name: parentName,
-          splitPart: true,
-        },
-      });
-      current = [];
-      currentTokens = 0;
-    }
-    current.push(line);
-    currentTokens += lineTokens;
+  const first = nodes[0];
+  if (!first) {
+    return;
   }
-
-  if (current.length > 0) {
-    chunks.push({
-      content: current.join('\n'),
+  const last = nodes[nodes.length - 1];
+  appendChunk(
+    chunks,
+    {
+      content: source.slice(first.startIndex, last.endIndex),
       metadata: {
         ...metadata,
-        nodeType: node.type,
-        name: parentName,
-        splitPart: chunks.length > 0,
+        startLine: first.startPosition.row + 1,
+        endLine: last.endPosition.row + 1,
+      },
+    },
+    maxChunkTokens
+  );
+}
+
+/** 单一物化入口：叶子、preamble 和分组都遵守同一个估算预算。 */
+function appendChunk(
+  chunks: Array<{ content: string; metadata: Record<string, unknown> }>,
+  chunk: { content: string; metadata: Record<string, unknown> },
+  maxChunkTokens: number
+) {
+  if (estimateTokens(chunk.content) <= maxChunkTokens) {
+    chunks.push(chunk);
+    return;
+  }
+  const ranges = fixedTextRanges(chunk.content, maxChunkTokens, 0);
+  Logger.debug('[ASTChunker] Oversized span split within the token budget', {
+    nodeType: chunk.metadata.nodeType,
+    maxChunkTokens,
+    splitCount: ranges.length,
+  });
+  for (const { start, end } of ranges) {
+    const startLine =
+      typeof chunk.metadata.startLine === 'number'
+        ? chunk.metadata.startLine + chunk.content.slice(0, start).split('\n').length - 1
+        : undefined;
+    chunks.push({
+      content: chunk.content.slice(start, end),
+      metadata: {
+        ...chunk.metadata,
+        splitPart: true,
+        ...(startLine === undefined
+          ? {}
+          : {
+              startLine,
+              endLine: startLine + chunk.content.slice(start, end).split('\n').length - 1,
+            }),
       },
     });
   }
-
-  return chunks;
 }
 
 /**
