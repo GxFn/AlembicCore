@@ -11,8 +11,11 @@
  * 下游 analyzeFile / findCallExpressions 等保持同步调用。
  */
 
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { Language as TreeSitterLanguage } from 'web-tree-sitter';
+import Logger from '../../infrastructure/logging/Logger.js';
 import { RESOURCES_DIR } from '../../shared/packageRoot.js';
 
 /** 预编译 .wasm 文件存放目录 */
@@ -22,6 +25,13 @@ let Parser: any = null;
 /** web-tree-sitter 模块命名空间 — Language.load 在这里 */
 let _namespace: any = null;
 let _initialized = false;
+
+// Language.load 会向进程级 WASM 内存装载模块，丢弃 JS 引用并不能卸载它。
+// 每个 grammar 路径只保留当前内容的加载结果；内容变化仍重载，失败不缓存，安装后可重试。
+const grammarLoads = new Map<
+  string,
+  { fingerprint: string; language: Promise<TreeSitterLanguage> }
+>();
 
 /**
  * 初始化 web-tree-sitter WASM 运行时
@@ -62,8 +72,12 @@ export function isParserReady() {
  * @param wasmFileName 如 'tree-sitter-javascript.wasm'
  * @returns Language 对象，失败返回 null
  */
-export async function loadLanguageWasm(wasmFileName: any) {
+export async function loadLanguageWasm(wasmFileName: string): Promise<TreeSitterLanguage | null> {
   if (!_initialized || !_namespace) {
+    Logger.getInstance().debug('[AstParser] grammar skipped; parser runtime is unavailable', {
+      grammar: wasmFileName,
+      retryVia: 'initParser/loadPlugins',
+    });
     return null;
   }
 
@@ -71,9 +85,34 @@ export async function loadLanguageWasm(wasmFileName: any) {
   try {
     // 自行读取 wasm 文件为 Uint8Array，绕过 ESM 下 __require("fs/promises") 的兼容问题
     const buffer = await readFile(wasmPath);
+    const fingerprint = createHash('sha256').update(buffer).digest('hex');
+    const cached = grammarLoads.get(wasmPath);
+    if (cached?.fingerprint === fingerprint) {
+      Logger.getInstance().debug('[AstParser] reusing unchanged grammar load', {
+        grammar: wasmFileName,
+        fingerprint,
+      });
+      // 也复用尚未完成的加载，避免并发重载实例化相同 WASM。
+      return await cached.language;
+    }
     const Language = _namespace.Language || Parser.Language;
-    return await Language.load(new Uint8Array(buffer));
-  } catch {
+    const language: Promise<TreeSitterLanguage> = Language.load(new Uint8Array(buffer));
+    const entry = { fingerprint, language };
+    grammarLoads.set(wasmPath, entry);
+    try {
+      return await entry.language;
+    } catch (error: unknown) {
+      if (grammarLoads.get(wasmPath) === entry) {
+        grammarLoads.delete(wasmPath);
+      }
+      throw error;
+    }
+  } catch (error: unknown) {
+    Logger.getInstance().warn('[AstParser] grammar load failed; parser remains unavailable', {
+      grammar: wasmFileName,
+      reason: error instanceof Error ? error.message : String(error),
+      retryVia: 'loadPlugins after grammar repair',
+    });
     return null;
   }
 }
