@@ -3,6 +3,9 @@
 公共接入继续使用 `@alembic/core/vector`。内部实现按协议适配、索引编排、
 可用性决策和排名计算拆分；这些文件不增加 package exports。
 
+文本与语法跨度的预算/行号契约见 [vector-chunking.md](vector-chunking.md)；
+快照验证、量化恢复和失败写入的职责见 [vector-snapshots.md](vector-snapshots.md)。
+
 | 文件 | 输入与输出 | 责任 |
 | --- | --- | --- |
 | `infrastructure/vector/EmbeddingPort.ts` | query/document 文本 → 向量 | 用途契约、旧 `embed` 协议转换、串行兼容与调用前后取消检查 |

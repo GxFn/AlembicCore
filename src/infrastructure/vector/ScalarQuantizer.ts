@@ -5,9 +5,8 @@
  *   q_i = round((v_i - min_i) / (max_i - min_i) * 255)
  *   v̂_i = q_i / 255 * (max_i - min_i) + min_i
  *
- * 优势:
- * - 内存: 768 维 × 4 bytes → 768 维 × 1 byte = 75% 节省
- * - Recall: > 95% (误差极小)
+ * 编码结果每维使用 1 字节 (Uint8)，训练参数保留 per-dimension min/max。
+ * 检索方可保留原始向量做候选精排；编码尺寸不代表整个索引的内存占用。
  *
  * @module infrastructure/vector/ScalarQuantizer
  */

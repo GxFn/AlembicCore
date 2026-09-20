@@ -1,13 +1,17 @@
 // 二进制快照、迁移与 WAL 恢复的权威行为覆盖；宿主只维护接入契约。
 import fs from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
+import { WriteZone } from '../src/infrastructure/io/WriteZone.js';
 import { AsyncPersistence, crc32, WAL_OP } from '../src/infrastructure/vector/AsyncPersistence.js';
 import { BinaryPersistence } from '../src/infrastructure/vector/BinaryPersistence.js';
 import { HnswIndex } from '../src/infrastructure/vector/HnswIndex.js';
 import { HnswVectorAdapter } from '../src/infrastructure/vector/HnswVectorAdapter.js';
 import { ScalarQuantizer } from '../src/infrastructure/vector/ScalarQuantizer.js';
 import { VectorMigration } from '../src/infrastructure/vector/VectorMigration.js';
+import { WorkspaceResolver } from '../src/shared/WorkspaceResolver.js';
 
 describe('BinaryPersistence', () => {
   let tmpDir;
@@ -98,6 +102,34 @@ describe('BinaryPersistence', () => {
     expect(loaded.quantizerData.dimension).toBe(4);
   });
 
+  it.each([
+    0, 2, 3,
+  ])('writes a trained quantizer only when it matches positive dimension %s', (dimension) => {
+    const index = new HnswIndex({ M: 4 });
+    if (dimension > 0) {
+      index.addPoint(
+        'vector',
+        Array.from({ length: dimension }, (_, i) => (i === 0 ? 1 : 0))
+      );
+    }
+    const quantizer = new ScalarQuantizer(2);
+    quantizer.train([
+      [1, 0],
+      [0, 1],
+    ]);
+    const encoded = BinaryPersistence.encode({
+      index,
+      quantizer,
+      metadata: new Map([['keyword-only', { kind: 'fact' }]]),
+      contents: new Map([['keyword-only', 'Retained without ANN data']]),
+    });
+    const expectedQuantizer = dimension === 2;
+    expect(Boolean(encoded.readUInt16LE(6) & 1)).toBe(expectedQuantizer);
+    const decoded = BinaryPersistence.decode(encoded);
+    expect(decoded.quantizerData !== null).toBe(expectedQuantizer);
+    expect(decoded.contents.get('keyword-only')).toBe('Retained without ANN data');
+  });
+
   it('should handle empty index', () => {
     const index = new HnswIndex({ M: 4 });
     const filePath = path.join(tmpDir, 'empty.asvec');
@@ -138,6 +170,97 @@ describe('BinaryPersistence', () => {
     const restored = HnswIndex.deserialize(loaded.indexData);
     const results = restored.searchKnn([1, 0, 0], 2);
     expect(results[0].id).toBe('a');
+  });
+
+  it.each(
+    ['save', 'saveAsync'].flatMap((method) =>
+      [false, true].flatMap((zoned) =>
+        ['write', 'rename'].map((failure) => ({ method, zoned, failure }))
+      )
+    )
+  )('preserves the old snapshot on $failure failure ($method, WriteZone=$zoned)', async ({
+    method,
+    zoned,
+    failure,
+  }) => {
+    const index = new HnswIndex({ M: 4 });
+    index.addPoint('kept', [1, 0]);
+    const data = {
+      index,
+      quantizer: null,
+      metadata: new Map(),
+      contents: new Map([['kept', 'old content']]),
+    };
+    const wz = zoned ? new WriteZone(WorkspaceResolver.fromProject(tmpDir)) : undefined;
+    const filePath = path.join(tmpDir, '.asd/context/index/safe.asvec');
+    BinaryPersistence.save(filePath, data, wz);
+    expect(fs.statSync(filePath).mode & 0o777).toBe(0o666 & ~process.umask());
+    fs.chmodSync(filePath, 0o600);
+    const previous = fs.readFileSync(filePath);
+    const directory = path.dirname(filePath);
+    const originalSync = fs.writeFileSync;
+    const originalAsync = fsPromises.writeFile;
+    const originalRename = fs.renameSync;
+    const code = failure === 'write' ? 'ENOSPC' : 'EACCES';
+    const isSnapshotWrite = (file, buffer) =>
+      typeof file === 'string' && path.dirname(file) === directory && Buffer.isBuffer(buffer);
+    const fault = () => Object.assign(new Error('injected snapshot I/O failure'), { code });
+    let partialWriteMode: number | undefined;
+    const spies = [];
+    if (failure === 'rename') {
+      spies.push(
+        vi.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+          if (to === filePath) {
+            throw fault();
+          }
+          return originalRename(from, to);
+        })
+      );
+    } else if (method === 'save') {
+      spies.push(
+        vi.spyOn(fs, 'writeFileSync').mockImplementation((file, buffer, ...options) => {
+          if (isSnapshotWrite(file, buffer)) {
+            originalSync(file, buffer.subarray(0, 20));
+            partialWriteMode = fs.statSync(file).mode & 0o777;
+            throw fault();
+          }
+          return originalSync(file, buffer, ...options);
+        })
+      );
+    } else {
+      spies.push(
+        vi.spyOn(fsPromises, 'writeFile').mockImplementation(async (file, buffer, ...options) => {
+          if (isSnapshotWrite(file, buffer)) {
+            await originalAsync(file, buffer.subarray(0, 20));
+            partialWriteMode = fs.statSync(file).mode & 0o777;
+            throw fault();
+          }
+          return originalAsync(file, buffer, ...options);
+        })
+      );
+    }
+    syncBuiltinESMExports();
+    const replacement = { ...data, contents: new Map([['kept', 'new content']]) };
+    try {
+      await expect(
+        (async () => BinaryPersistence[method](filePath, replacement, wz))()
+      ).rejects.toMatchObject({ code });
+      expect(fs.readFileSync(filePath)).toEqual(previous);
+      expect(BinaryPersistence.load(filePath).contents.get('kept')).toBe('old content');
+      expect(fs.readdirSync(directory)).toEqual(['safe.asvec']);
+      if (failure === 'write') {
+        expect(partialWriteMode).toBe(0o600);
+      }
+    } finally {
+      for (const spy of spies) {
+        spy.mockRestore();
+      }
+      syncBuiltinESMExports();
+    }
+    await BinaryPersistence[method](filePath, replacement, wz);
+    expect(BinaryPersistence.load(filePath).contents.get('kept')).toBe('new content');
+    expect(fs.statSync(filePath).mode & 0o777).toBe(0o600);
+    expect(fs.readdirSync(directory)).toEqual(['safe.asvec']);
   });
 });
 
@@ -221,6 +344,23 @@ describe('BinaryPersistence Validation', () => {
     index.addPoint('a', [1, 0, 0]);
     index.addPoint('b', [0, 1, 0]);
 
+    // 随机生成两个普通节点不能覆盖 UInt8 clamp；显式提供可序列化的高层级状态。
+    for (const node of index.nodes) {
+      if (node) {
+        node.level = 300;
+      }
+    }
+    index.entryPoint = 0;
+    index.maxLevel = 300;
+    while (index.graphs.length <= 300) {
+      index.graphs.push(
+        new Map([
+          [0, new Set([1])],
+          [1, new Set([0])],
+        ])
+      );
+    }
+
     // Encode should succeed without overflow
     const encoded = BinaryPersistence.encode({ index });
     expect(encoded).toBeInstanceOf(Buffer);
@@ -229,6 +369,78 @@ describe('BinaryPersistence Validation', () => {
     const decoded = BinaryPersistence.decode(encoded);
     expect(decoded.indexData.nodes).toHaveLength(2);
     expect(decoded.dimension).toBe(3);
+    expect(decoded.indexData.nodes.map((node) => node.level)).toEqual([255, 255]);
+  });
+
+  it.each([
+    'entryPoint',
+    'graph node',
+    'graph neighbor',
+    'future version',
+  ] as const)('rejects an invalid %s in the shared decode/isValid boundary', (field) => {
+    const index = new HnswIndex({ M: 4 });
+    index.addPoint('a', [1, 0]);
+    index.addPoint('b', [0, 1]);
+    const encoded = BinaryPersistence.encode({ index });
+    // v1 固定 fixture：32B header，两个 id='a'/'b'、2维向量，各占12B。
+    const graphStart = 32 + 2 * 12;
+    if (field === 'future version') {
+      encoded.writeUInt8(2, 5);
+    } else {
+      const offset =
+        field === 'entryPoint' ? 18 : graphStart + 2 + 4 + (field === 'graph neighbor' ? 6 : 0);
+      encoded.writeUInt32LE(2, offset); // 两个节点的合法索引只有 0、1。
+    }
+    const filePath = path.join(tmpDir, 'invalid-reference.asvec');
+    fs.writeFileSync(filePath, encoded);
+    expect(BinaryPersistence.isValid(filePath)).toBe(false);
+    expect(() => BinaryPersistence.decode(encoded)).toThrow();
+  });
+
+  it('rejects metadata length overrun while preserving optional metadata and legacy zero-dimensional quantizers', () => {
+    const index = new HnswIndex({ M: 4 });
+    const encoded = BinaryPersistence.encode({
+      index,
+      quantizer: null,
+      metadata: new Map([['keyword-only', { kind: 'fact' }]]),
+      contents: new Map([['keyword-only', 'No ANN node is required']]),
+    });
+    const metadataOffset = 32 + 2; // empty v1 index: header + graph level count
+    const overrun = Buffer.from(encoded);
+    overrun.writeUInt32LE(encoded.readUInt32LE(metadataOffset) + 1, metadataOffset);
+    expect(() => BinaryPersistence.decode(overrun)).toThrow();
+
+    const omitted = BinaryPersistence.decode(encoded.subarray(0, metadataOffset));
+    expect(omitted.metadata.size).toBe(0);
+    expect(omitted.contents.size).toBe(0);
+    const malformedJson = Buffer.from(encoded);
+    malformedJson.fill('x', metadataOffset + 4);
+    expect(BinaryPersistence.decode(malformedJson).contents.size).toBe(0);
+
+    // 旧 encoder 会输出 dimension=0 + HAS_QUANTIZER；不能因此丢掉正常 keyword-only 内容。
+    const historical = Buffer.from(encoded);
+    historical.writeUInt16LE(3, 6);
+    const decoded = BinaryPersistence.decode(historical);
+    expect(decoded.quantizerData).toEqual({ dimension: 0, mins: [], maxs: [] });
+    expect(decoded.metadata.get('keyword-only')).toEqual({ kind: 'fact' });
+    expect(decoded.contents.get('keyword-only')).toBe('No ANN node is required');
+  });
+
+  it('rejects a header referencing absent graph levels while retaining empty graph layers after deletion', () => {
+    const index = new HnswIndex({ M: 4 });
+    index.addPoint('removed', [1, 0]);
+    index.removePoint('removed');
+    const encoded = BinaryPersistence.encode({ index });
+    const storedLevels = encoded.readUInt16LE(32);
+    expect(storedLevels).toBeGreaterThan(0);
+    expect(encoded.readUInt16LE(16)).toBe(0);
+    const decoded = BinaryPersistence.decode(encoded);
+    expect(decoded.indexData.maxLevel).toBe(-1);
+    expect(decoded.indexData.graphs).toHaveLength(storedLevels);
+
+    const invalid = Buffer.from(encoded);
+    invalid.writeUInt16LE(storedLevels + 1, 16);
+    expect(() => BinaryPersistence.decode(invalid)).toThrow();
   });
 
   it('isValid returns false for garbage data', () => {
@@ -283,6 +495,25 @@ describe('VectorMigration corruption handling', () => {
     expect(result).toBe('migrated');
     expect(upserted.length).toBeGreaterThan(0);
     expect(upserted[0].id).toBe('test1');
+  });
+
+  it('recovers JSON when a truncated snapshot retains a complete valid-looking header', async () => {
+    const index = new HnswIndex({ M: 4 });
+    index.addPoint('partial', [1, 0]);
+    const snapshotPath = path.join(tmpDir, 'vector_index.asvec');
+    fs.writeFileSync(snapshotPath, BinaryPersistence.encode({ index }).subarray(0, 32));
+    const items = [{ id: 'recoverable', content: 'from JSON', vector: [1, 0], metadata: {} }];
+    fs.writeFileSync(path.join(tmpDir, 'vector_index.json'), JSON.stringify(items));
+    const recovered = [];
+    const result = await VectorMigration.migrate(tmpDir, {
+      batchUpsert: async (batch) => {
+        recovered.push(...batch);
+      },
+    });
+    expect(result).toBe('migrated');
+    expect(recovered).toEqual(items);
+    expect(BinaryPersistence.isValid(snapshotPath)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, 'vector_index.json.bak'))).toBe(true);
   });
 
   it('should return binary for valid .asvec', async () => {

@@ -35,10 +35,21 @@
  * @module infrastructure/vector/BinaryPersistence
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { dirname, relative } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import type { WriteZone } from '../io/WriteZone.js';
+import Logger from '../logging/Logger.js';
 import type { ScalarQuantizer } from './ScalarQuantizer.js';
 
 const MAGIC = 'ASVEC';
@@ -61,6 +72,14 @@ interface HnswSerializedData {
   graphs: [number, number[]][][];
 }
 
+/** 三个写入入口共用同一快照输入，字段与既有签名保持一致。 */
+interface BinarySnapshotData {
+  index: { serialize: () => HnswSerializedData };
+  quantizer: ScalarQuantizer | null;
+  metadata: Map<string, unknown>;
+  contents: Map<string, string>;
+}
+
 export class BinaryPersistence {
   /**
    * 保存 HNSW 索引到二进制文件 (同步)
@@ -71,50 +90,40 @@ export class BinaryPersistence {
    * @param data.metadata 文档 metadata
    * @param data.contents 文档 content
    */
-  static save(
-    filePath: string,
-    data: {
-      index: { serialize: () => HnswSerializedData };
-      quantizer: ScalarQuantizer | null;
-      metadata: Map<string, unknown>;
-      contents: Map<string, string>;
-    },
-    wz?: WriteZone
-  ) {
+  static save(filePath: string, data: BinarySnapshotData, wz?: WriteZone) {
     const buffer = BinaryPersistence.encode(data);
-    if (wz) {
-      const rel = relative(wz.dataRoot, filePath);
-      wz.writeFile(wz.data(rel), buffer);
-    } else {
-      const dir = dirname(filePath);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
+    const temporaryPath = snapshotTemporaryPath(filePath);
+    try {
+      prepareSnapshotMode(temporaryPath, filePath, wz);
+      if (wz) {
+        wz.writeFile(wz.data(relative(wz.dataRoot, temporaryPath)), buffer);
+      } else {
+        mkdirSync(dirname(filePath), { recursive: true });
+        writeFileSync(temporaryPath, buffer);
       }
-      writeFileSync(filePath, buffer);
+      commitSnapshot(temporaryPath, filePath, wz);
+    } catch (error) {
+      discardTemporarySnapshot(temporaryPath, wz);
+      throw error;
     }
   }
 
   /** 异步保存 */
-  static async saveAsync(
-    filePath: string,
-    data: {
-      index: { serialize: () => HnswSerializedData };
-      quantizer: ScalarQuantizer | null;
-      metadata: Map<string, unknown>;
-      contents: Map<string, string>;
-    },
-    wz?: WriteZone
-  ) {
+  static async saveAsync(filePath: string, data: BinarySnapshotData, wz?: WriteZone) {
     const buffer = BinaryPersistence.encode(data);
-    if (wz) {
-      const rel = relative(wz.dataRoot, filePath);
-      await wz.writeFileAsync(wz.data(rel), buffer);
-    } else {
-      const dir = dirname(filePath);
-      if (!existsSync(dir)) {
-        mkdirSync(dir, { recursive: true });
+    const temporaryPath = snapshotTemporaryPath(filePath);
+    try {
+      prepareSnapshotMode(temporaryPath, filePath, wz);
+      if (wz) {
+        await wz.writeFileAsync(wz.data(relative(wz.dataRoot, temporaryPath)), buffer);
+      } else {
+        mkdirSync(dirname(filePath), { recursive: true });
+        await writeFile(temporaryPath, buffer);
       }
-      await writeFile(filePath, buffer);
+      commitSnapshot(temporaryPath, filePath, wz);
+    } catch (error) {
+      discardTemporarySnapshot(temporaryPath, wz);
+      throw error;
     }
   }
 
@@ -128,12 +137,7 @@ export class BinaryPersistence {
   }
 
   /** 编码为 Buffer */
-  static encode(data: {
-    index: { serialize: () => HnswSerializedData };
-    quantizer: ScalarQuantizer | null;
-    metadata: Map<string, unknown>;
-    contents: Map<string, string>;
-  }) {
+  static encode(data: BinarySnapshotData) {
     const { index, quantizer, metadata, contents } = data;
     const indexData = index.serialize();
 
@@ -159,7 +163,16 @@ export class BinaryPersistence {
     // Flags
     let flags = FLAG_HAS_HNSW_GRAPH;
     if (quantizer?.trained) {
-      flags |= FLAG_HAS_QUANTIZER;
+      if (dimension > 0 && quantizer.dimension === dimension) {
+        flags |= FLAG_HAS_QUANTIZER;
+      } else {
+        // 删除最后一个 ANN 节点后仍可保留正文；不能把旧模型编码成“已训练的零维模型”。
+        Logger.getInstance().debug('[BinaryPersistence] Omitting incompatible snapshot quantizer', {
+          dimension,
+          quantizerDimension: quantizer.dimension,
+          reason: dimension === 0 ? 'empty-index' : 'dimension-mismatch',
+        });
+      }
     }
 
     // 安全校验: 维度 / level 范围
@@ -302,8 +315,16 @@ export class BinaryPersistence {
    */
   static decode(buf: Buffer) {
     let offset = 0;
+    // 只在格式入口校验布局；isValid 与所有读取方复用这里，避免魔数检查冒充完整可读性。
+    // 先验证计数对应的最小字节数，再分配/遍历，损坏长度不能越界或被 Buffer.toString 截短吞掉。
+    const requireBytes = (length: number, section: string) => {
+      if (length > buf.length - offset) {
+        throw new Error(`Invalid ASVEC file: truncated ${section}`);
+      }
+    };
 
     // ── Header ──
+    requireBytes(HEADER_SIZE, 'header');
     const magic = buf.toString('ascii', offset, offset + 5);
     offset += 5;
     if (magic !== MAGIC) {
@@ -329,10 +350,17 @@ export class BinaryPersistence {
     const entryPoint = buf.readUInt32LE(offset);
     offset += 4;
     offset += 10; // reserved
+    if (entryPoint === 0xffffffff ? numVectors !== 0 : entryPoint >= numVectors) {
+      throw new Error(
+        `Invalid ASVEC file: entry point ${entryPoint} exceeds node count ${numVectors}`
+      );
+    }
 
     // ── Quantizer ──
     let quantizerData: { dimension: number; mins: number[]; maxs: number[] } | null = null;
     if (flags & FLAG_HAS_QUANTIZER) {
+      // 历史空索引可带零维量化模型；其字节布局有效，模型是否可用于检索由 adapter 判断。
+      requireBytes(dimension * 4 * 2, 'quantizer');
       const mins = new Array(dimension);
       for (let i = 0; i < dimension; i++) {
         mins[i] = buf.readFloatLE(offset);
@@ -348,10 +376,12 @@ export class BinaryPersistence {
 
     // ── Vectors ──
     const nodes: { id: string; vector: number[]; level: number }[] = [];
-    const idToIndex = new Map();
+    requireBytes(numVectors * (2 + 1 + dimension * 4), 'vectors');
     for (let i = 0; i < numVectors; i++) {
+      requireBytes(2, 'vector id length');
       const idLen = buf.readUInt16LE(offset);
       offset += 2;
+      requireBytes(idLen + 1 + dimension * 4, 'vector record');
       const id = buf.toString('utf-8', offset, offset + idLen);
       offset += idLen;
       const level = buf.readUInt8(offset);
@@ -362,28 +392,50 @@ export class BinaryPersistence {
         offset += 4;
       }
       nodes.push({ id, vector: Array.from(vector), level });
-      idToIndex.set(id, i);
     }
 
     // ── Graph ──
+    requireBytes(2, 'graph level count');
     const numLevels = buf.readUInt16LE(offset);
     offset += 2;
+    // HnswIndex 新增节点会先扩充图层；删除节点只降低 maxLevel，可留下多余空层，不能要求相等。
+    if (numLevelsHeader > numLevels) {
+      throw new Error(
+        `Invalid ASVEC file: header references ${numLevelsHeader} graph levels but only ${numLevels} are stored`
+      );
+    }
     const graphs: [number, number[]][][] = [];
+    requireBytes(numLevels * 4, 'graph levels');
 
     for (let l = 0; l < numLevels; l++) {
+      requireBytes(4, 'graph entry count');
       const numEntries = buf.readUInt32LE(offset);
       offset += 4;
       const levelEntries: [number, number[]][] = [];
+      requireBytes(numEntries * 6, 'graph entries');
 
       for (let e = 0; e < numEntries; e++) {
+        requireBytes(6, 'graph entry');
         const nodeIdx = buf.readUInt32LE(offset);
         offset += 4;
+        if (nodeIdx >= numVectors) {
+          throw new Error(
+            `Invalid ASVEC file: graph node ${nodeIdx} exceeds node count ${numVectors}`
+          );
+        }
         const numNeighbors = buf.readUInt16LE(offset);
         offset += 2;
         const neighbors: number[] = [];
+        requireBytes(numNeighbors * 4, 'graph neighbors');
         for (let n = 0; n < numNeighbors; n++) {
-          neighbors.push(buf.readUInt32LE(offset));
+          const neighborIdx = buf.readUInt32LE(offset);
           offset += 4;
+          if (neighborIdx >= numVectors) {
+            throw new Error(
+              `Invalid ASVEC file: graph neighbor ${neighborIdx} exceeds node count ${numVectors}`
+            );
+          }
+          neighbors.push(neighborIdx);
         }
         levelEntries.push([nodeIdx, neighbors]);
       }
@@ -395,8 +447,10 @@ export class BinaryPersistence {
     const contents = new Map();
 
     if (offset < buf.length) {
+      requireBytes(4, 'metadata length');
       const metaLen = buf.readUInt32LE(offset);
       offset += 4;
+      requireBytes(metaLen, 'metadata');
       if (metaLen > 0) {
         const metaJson = buf.toString('utf-8', offset, offset + metaLen);
         offset += metaLen;
@@ -443,18 +497,57 @@ export class BinaryPersistence {
   /** 检查文件是否为有效的 ASVEC 文件 */
   static isValid(filePath: string) {
     try {
-      if (!existsSync(filePath)) {
-        return false;
-      }
-      const buf = readFileSync(filePath);
-      if (buf.length < HEADER_SIZE) {
-        return false;
-      }
-      const magic = buf.toString('ascii', 0, 5);
-      return magic === MAGIC;
+      BinaryPersistence.load(filePath);
+      return true;
     } catch {
       return false;
     }
+  }
+}
+
+/** 同目录 rename 只发布完整快照；UUID 仅用于临时文件唯一性，不改变格式或索引身份。 */
+function snapshotTemporaryPath(filePath: string): string {
+  return join(dirname(filePath), `.asvec-${randomUUID()}.tmp`);
+}
+
+function prepareSnapshotMode(temporaryPath: string, filePath: string, wz?: WriteZone): void {
+  // 写正文前就继承旧 mode：不能先用默认权限写入私有内容，再在 rename 前补 chmod。
+  // 空目标不预创建临时文件，沿用原有新文件默认 mode；WriteZone 的授权检查仍不可绕过。
+  if (existsSync(filePath)) {
+    if (wz) {
+      wz.writeFile(wz.data(relative(wz.dataRoot, temporaryPath)), '');
+    } else {
+      writeFileSync(temporaryPath, '');
+    }
+    chmodSync(temporaryPath, statSync(filePath).mode & 0o777);
+  }
+}
+
+function commitSnapshot(temporaryPath: string, filePath: string, wz?: WriteZone): void {
+  if (wz) {
+    wz.rename(
+      wz.data(relative(wz.dataRoot, temporaryPath)),
+      wz.data(relative(wz.dataRoot, filePath))
+    );
+  } else {
+    renameSync(temporaryPath, filePath);
+  }
+}
+
+function discardTemporarySnapshot(temporaryPath: string, wz?: WriteZone): void {
+  try {
+    if (wz) {
+      wz.remove(wz.data(relative(wz.dataRoot, temporaryPath)));
+    } else {
+      rmSync(temporaryPath, { force: true });
+    }
+  } catch (error) {
+    // 不让临时文件清理错误覆盖原始写入/发布异常；原目标不会为“回滚”而被删除。
+    Logger.getInstance().warn('[BinaryPersistence] Failed to remove temporary snapshot', {
+      temporaryPath,
+      reason: 'temporary-snapshot-cleanup-failed',
+      errorCode: error && typeof error === 'object' && 'code' in error ? error.code : undefined,
+    });
   }
 }
 

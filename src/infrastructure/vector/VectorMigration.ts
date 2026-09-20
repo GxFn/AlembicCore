@@ -11,6 +11,7 @@
 
 import { existsSync, readFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
+import Logger from '../logging/Logger.js';
 
 export class VectorMigration {
   /**
@@ -51,41 +52,62 @@ export class VectorMigration {
 
     // 场景 2: 存在旧 JSON 索引
     if (existsSync(jsonPath)) {
+      let itemList: Array<{
+        id?: string;
+        content?: string;
+        vector?: number[];
+        metadata?: Record<string, unknown>;
+      }>;
       try {
         const raw = readFileSync(jsonPath, 'utf-8');
         const items = JSON.parse(raw);
-        const itemList = Array.isArray(items)
+        itemList = Array.isArray(items)
           ? items
           : Object.entries(items).map(([id, item]) => ({
               ...(item as Record<string, unknown>),
               id,
             }));
-
-        if (itemList.length > 0) {
-          // 过滤有效条目并批量插入
-          const validItems = itemList.filter((item) => item?.id);
-          if (validItems.length > 0) {
-            await adapter.batchUpsert(
-              validItems.map((item) => ({
-                id: item.id,
-                content: item.content || '',
-                vector: item.vector || [],
-                metadata: item.metadata || {},
-              }))
-            );
+      } catch (error) {
+        // 只对旧文件读取/解析保持宽容；不能把目标存储失败归为“新安装”。
+        Logger.getInstance().warn(
+          '[VectorMigration] legacy JSON unreadable; using new-index fallback',
+          {
+            jsonPath,
+            errorType: error instanceof Error ? error.name : typeof error,
+            result: 'new-json-retained',
           }
+        );
+        return 'new';
+      }
 
-          // 重命名旧文件
-          try {
-            renameSync(jsonPath, `${jsonPath}.bak`);
-          } catch {
-            /* 重命名失败不影响迁移 */
-          }
-
-          return 'migrated';
+      if (itemList.length > 0) {
+        const validItems = itemList.filter((item) => item?.id);
+        if (validItems.length > 0) {
+          // 迁移调用方在此回调内完成所需持久化；成功之前保留唯一 JSON 恢复输入。
+          await adapter.batchUpsert(
+            validItems.map((item) => ({
+              id: item.id!,
+              content: item.content || '',
+              vector: item.vector || [],
+              metadata: item.metadata || {},
+            }))
+          );
         }
-      } catch {
-        // JSON 解析失败, 视为新安装
+
+        try {
+          renameSync(jsonPath, `${jsonPath}.bak`);
+        } catch (error) {
+          // 已完成批次不能因备份归档失败反转为失败；保留旧输入供宿主后续清理。
+          Logger.getInstance().warn(
+            '[VectorMigration] legacy JSON archive failed after migration',
+            {
+              jsonPath,
+              errorType: error instanceof Error ? error.name : typeof error,
+              result: 'migrated-json-retained',
+            }
+          );
+        }
+        return 'migrated';
       }
     }
 

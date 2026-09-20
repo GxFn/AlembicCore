@@ -8,7 +8,7 @@
  *
  * 特点:
  * - O(log N) 搜索, 替代暴力 O(N)
- * - 75% 内存节省 (SQ8 量化)
+ * - 保留原始向量，并附加 SQ8 编码用于粗排；候选使用原始向量的余弦距离精排
  * - 异步 debounced 持久化
  * - 自动从 JSON 旧格式迁移
  *
@@ -118,34 +118,8 @@ export class HnswVectorAdapter extends VectorStore {
       }
     }
 
-    // 只把解码失败归为旧索引损坏；WAL 恢复后的写盘失败必须向调用方传播。
-    let snapshotLoaded = false;
-    if (existsSync(this.#indexPath) && BinaryPersistence.isValid(this.#indexPath)) {
-      try {
-        const loaded = BinaryPersistence.load(this.#indexPath);
-        const { indexData, quantizerData, metadata, contents, dimension } = loaded;
-
-        // 恢复 HNSW 索引
-        this.#index = HnswIndex.deserialize(indexData);
-        this.#index.efSearch = this.#config.efSearch;
-        this.#dimension = dimension;
-
-        // 恢复量化器
-        if (quantizerData) {
-          this.#quantizer = ScalarQuantizer.deserialize(quantizerData);
-          // 从 quantizer 重新编码量化向量到 HNSW 节点 (qvector 不序列化, 启动时重建)
-          this.#index.setQuantizedVectors(this.#quantizer);
-        }
-
-        // 恢复 metadata 和 contents
-        this.#metadata = metadata;
-        this.#contents = contents;
-        snapshotLoaded = true;
-      } catch {
-        // 损坏的文件, 忽略, 重新构建
-      }
-    }
-    if (snapshotLoaded) {
+    // 快照只读取/解码一次；WAL 恢复后的写盘失败仍在恢复 helper 的 catch 外传播。
+    if (this.#restoreSnapshot()) {
       this.#initWal();
       const { replayed } = this.#wal?.recover() || { replayed: 0 };
       if (replayed > 0) {
@@ -157,11 +131,13 @@ export class HnswVectorAdapter extends VectorStore {
 
     // 尝试从 JSON 迁移
     const { VectorMigration } = await import('./VectorMigration.js');
-    const migrationResult = await VectorMigration.migrate(this.#indexDir, this);
-    if (migrationResult === 'migrated') {
-      // 迁移完成, 数据已加载到内存
-      await this.#persist();
-    }
+    await VectorMigration.migrate(this.#indexDir, {
+      batchUpsert: async (items) => {
+        await this.batchUpsert(items);
+        // Migration 只有在回调成功后才归档 JSON；内存写入本身不是迁移完成凭据。
+        await this.#persist();
+      },
+    });
 
     // 初始化 WAL + replay 未刷盘操作 (即使是空索引也创建, 以便后续操作写 WAL)
     this.#initWal();
@@ -188,30 +164,8 @@ export class HnswVectorAdapter extends VectorStore {
       }
     }
 
-    // 同步恢复也区分解码失败与落盘失败，后者不能触发迁移 fallback。
-    let snapshotLoaded = false;
-    if (existsSync(this.#indexPath) && BinaryPersistence.isValid(this.#indexPath)) {
-      try {
-        const loaded = BinaryPersistence.load(this.#indexPath);
-        const { indexData, quantizerData, metadata, contents, dimension } = loaded;
-        this.#index = HnswIndex.deserialize(indexData);
-        this.#index.efSearch = this.#config.efSearch;
-        this.#dimension = dimension;
-        if (quantizerData) {
-          this.#quantizer = ScalarQuantizer.deserialize(quantizerData);
-          // 从 quantizer 重新编码量化向量到 HNSW 节点 (qvector 不序列化, 启动时重建)
-          this.#index.setQuantizedVectors(this.#quantizer);
-        }
-        this.#metadata = metadata;
-        this.#contents = contents;
-        snapshotLoaded = true;
-      } catch {
-        // 损坏或不兼容, 尝试从 JSON 迁移
-      }
-    }
-
     // 同步迁移: 读取 JSON 索引并加载到内存
-    if (!snapshotLoaded) {
+    if (!this.#restoreSnapshot()) {
       this.#syncMigrateFromJson();
     }
 
@@ -235,6 +189,45 @@ export class HnswVectorAdapter extends VectorStore {
     }
   }
 
+  /** 同步快照读取供两种初始化入口复用；这里只容纳读取/解码/内存恢复，不包含 WAL 写盘。 */
+  #restoreSnapshot(): boolean {
+    if (!existsSync(this.#indexPath)) {
+      Logger.getInstance().debug('[HnswVectorAdapter] snapshot absent; trying migration and WAL', {
+        indexPath: this.#indexPath,
+        result: 'migration-and-wal-fallback',
+      });
+      return false;
+    }
+    try {
+      const { indexData, quantizerData, metadata, contents, dimension } = BinaryPersistence.load(
+        this.#indexPath
+      );
+      this.#index = HnswIndex.deserialize(indexData);
+      this.#index.efSearch = this.#config.efSearch;
+      this.#dimension = dimension;
+      this.#restoreQuantizer(quantizerData);
+      this.#metadata = metadata;
+      this.#contents = contents;
+      return true;
+    } catch (error) {
+      // 不输出解码器消息或原始数据，避免坏 JSON 的诊断携带知识正文。
+      const errorCode =
+        error && typeof error === 'object' && 'code' in error && typeof error.code === 'string'
+          ? error.code
+          : undefined;
+      Logger.getInstance().warn(
+        '[HnswVectorAdapter] snapshot restore failed; trying migration and WAL',
+        {
+          indexPath: this.#indexPath,
+          errorType: error instanceof Error ? error.name : typeof error,
+          ...(errorCode ? { errorCode } : {}),
+          result: 'migration-and-wal-fallback',
+        }
+      );
+      return false;
+    }
+  }
+
   /** 同步从 JSON 索引迁移 (用于 initSync 路径) */
   #syncMigrateFromJson() {
     const jsonPath = join(this.#indexDir, 'vector_index.json');
@@ -242,58 +235,78 @@ export class HnswVectorAdapter extends VectorStore {
       return;
     }
 
+    let itemList: Array<{
+      id?: string;
+      content?: string;
+      vector?: number[];
+      metadata?: Record<string, unknown>;
+    }>;
     try {
       const raw = readFileSync(jsonPath, 'utf-8');
       const items = JSON.parse(raw);
-      const itemList = Array.isArray(items)
+      itemList = Array.isArray(items)
         ? items
         : Object.entries(items).map(([id, item]) => ({ ...(item as Record<string, unknown>), id }));
-
-      for (const item of itemList) {
-        if (!item?.id) {
-          continue;
-        }
-        const vector = item.vector || [];
-        if (vector.length > 0 && this.#dimension === 0) {
-          this.#dimension = vector.length;
-        }
-        this.#metadata.set(item.id, {
-          ...(item.metadata || {}),
-          updatedAt: Date.now(),
-        });
-        this.#contents.set(item.id, item.content || '');
-        if (vector.length > 0) {
-          this.#index.addPoint(item.id, vector);
-        }
-      }
-
-      // 同步保存二进制索引
-      BinaryPersistence.save(
-        this.#indexPath,
+    } catch (error) {
+      Logger.getInstance().warn(
+        '[HnswVectorAdapter] legacy JSON unreadable; retaining migration input',
         {
-          index: this.#index,
-          quantizer: this.#quantizer,
-          metadata: this.#metadata,
-          contents: this.#contents,
-        },
-        this.#wz ?? undefined
-      );
-      this.#dirty = false;
-
-      // 重命名旧文件
-      try {
-        if (this.#wz) {
-          const relSrc = relative(this.#wz.dataRoot, jsonPath);
-          const relDest = relative(this.#wz.dataRoot, `${jsonPath}.bak`);
-          this.#wz.rename(this.#wz.data(relSrc), this.#wz.data(relDest));
-        } else {
-          renameSync(jsonPath, `${jsonPath}.bak`);
+          jsonPath,
+          errorType: error instanceof Error ? error.name : typeof error,
+          result: 'migration-skipped',
         }
-      } catch {
-        /* ignore */
+      );
+      return;
+    }
+
+    for (const item of itemList) {
+      if (!item?.id) {
+        continue;
       }
-    } catch {
-      // JSON 解析失败, 保持空索引
+      const vector = item.vector || [];
+      if (vector.length > 0 && this.#dimension === 0) {
+        this.#dimension = vector.length;
+      }
+      this.#metadata.set(item.id, {
+        ...(item.metadata || {}),
+        updatedAt: Date.now(),
+      });
+      this.#contents.set(item.id, item.content || '');
+      if (vector.length > 0) {
+        this.#index.addPoint(item.id, vector);
+      }
+    }
+
+    // 保存失败必须传播，JSON 原件只在二进制快照成功后归档。
+    BinaryPersistence.save(
+      this.#indexPath,
+      {
+        index: this.#index,
+        quantizer: this.#quantizer,
+        metadata: this.#metadata,
+        contents: this.#contents,
+      },
+      this.#wz ?? undefined
+    );
+    this.#dirty = false;
+
+    try {
+      if (this.#wz) {
+        const relSrc = relative(this.#wz.dataRoot, jsonPath);
+        const relDest = relative(this.#wz.dataRoot, `${jsonPath}.bak`);
+        this.#wz.rename(this.#wz.data(relSrc), this.#wz.data(relDest));
+      } else {
+        renameSync(jsonPath, `${jsonPath}.bak`);
+      }
+    } catch (error) {
+      Logger.getInstance().warn(
+        '[HnswVectorAdapter] legacy JSON archive failed after persistence',
+        {
+          jsonPath,
+          errorType: error instanceof Error ? error.name : typeof error,
+          result: 'migrated-json-retained',
+        }
+      );
     }
   }
 
@@ -913,6 +926,49 @@ export class HnswVectorAdapter extends VectorStore {
 
   // ── 量化器 ──
 
+  /** 快照中的量化参数是可选加速数据；恢复不能覆盖调用方明确禁用的运行策略。 */
+  #restoreQuantizer(data: { dimension: number; mins: number[]; maxs: number[] } | null) {
+    this.#quantizer = null;
+    if (!data) {
+      return;
+    }
+    if (this.#config.quantize === 'none') {
+      Logger.getInstance().info('[HnswVectorAdapter] stored quantizer disabled by configuration', {
+        indexPath: this.#indexPath,
+        quantize: this.#config.quantize,
+        dimension: data.dimension,
+        result: 'float-vector-search',
+      });
+      return;
+    }
+    if (
+      !Number.isInteger(data.dimension) ||
+      data.dimension <= 0 ||
+      data.dimension !== this.#dimension ||
+      data.mins.length !== data.dimension ||
+      data.maxs.length !== data.dimension
+    ) {
+      // 旧空索引快照可能保留 HAS_QUANTIZER，却没有任何维度参数。
+      // 它仍是可读快照；只忽略失效加速模型，保留原始向量与 metadata，后续写入按原规则训练。
+      Logger.getInstance().warn(
+        '[HnswVectorAdapter] stored quantizer has incompatible dimensions',
+        {
+          indexPath: this.#indexPath,
+          dimension: this.#dimension,
+          quantizerDimension: data.dimension,
+          minCount: data.mins.length,
+          maxCount: data.maxs.length,
+          result: 'float-vector-search',
+          recovery: 'train-on-normal-write-threshold',
+        }
+      );
+      return;
+    }
+    this.#quantizer = ScalarQuantizer.deserialize(data);
+    // qvector 不序列化；只有当前策略启用的模型才重建到 HNSW 节点。
+    this.#index.setQuantizedVectors(this.#quantizer);
+  }
+
   /** 检查是否需要训练量化器, 训练后批量设置量化向量到 HNSW 节点 */
   #maybeTrainQuantizer() {
     if (this.#config.quantize === 'none') {
@@ -922,7 +978,7 @@ export class HnswVectorAdapter extends VectorStore {
       return;
     }
 
-    // 已训练则跳过 (除非文档增长 50% 以上需要重训练)
+    // 已训练则复用既有模型，保持当前训练触发策略。
     if (this.#quantizer?.trained) {
       return;
     }

@@ -1,5 +1,6 @@
 // HNSW 图、量化、召回与 store 查询契约；pipeline、持久化和通用排名分别维护。
 import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { crc32, WAL_OP } from '../src/infrastructure/vector/AsyncPersistence.js';
@@ -12,6 +13,7 @@ import {
 } from '../src/infrastructure/vector/HnswIndex.js';
 import { HnswVectorAdapter } from '../src/infrastructure/vector/HnswVectorAdapter.js';
 import { ScalarQuantizer } from '../src/infrastructure/vector/ScalarQuantizer.js';
+import { VectorMigration } from '../src/infrastructure/vector/VectorMigration.js';
 
 function randomVector(dim) {
   const v = new Float32Array(dim);
@@ -577,6 +579,104 @@ describe('HnswVectorAdapter', () => {
   });
 });
 
+describe('HnswVectorAdapter JSON migration recovery', () => {
+  let root: string;
+  let stores: HnswVectorAdapter[];
+
+  const makeStore = () => {
+    const store = new HnswVectorAdapter(root, {
+      M: 4,
+      walEnabled: false,
+      flushIntervalMs: 60_000,
+      flushBatchSize: 10_000,
+    });
+    stores.push(store);
+    return store;
+  };
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'hnsw-migration-recovery-'));
+    stores = [];
+  });
+
+  afterEach(() => {
+    for (const store of stores) {
+      store.destroy();
+    }
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['init', 'array'],
+    ['init', 'object'],
+    ['initSync', 'array'],
+    ['initSync', 'object'],
+  ] as const)('keeps legacy JSON until %s publishes its snapshot (%s)', async (method, shape) => {
+    const indexDir = path.join(root, '.asd/context/index');
+    const snapshotPath = path.join(indexDir, 'vector_index.asvec');
+    const jsonPath = path.join(indexDir, 'vector_index.json');
+    const entry = {
+      content: 'recoverable legacy content',
+      vector: [1, 0],
+      metadata: { type: 'recipe' },
+    };
+    const json = JSON.stringify(
+      shape === 'array' ? [{ id: 'legacy', ...entry }] : { legacy: entry }
+    );
+    // 真实目标目录阻止 snapshot 发布，不 mock BinaryPersistence 或文件写入边界。
+    fs.mkdirSync(snapshotPath, { recursive: true });
+    fs.writeFileSync(jsonPath, json);
+    const failed = makeStore();
+    await expect(Promise.resolve().then(() => failed[method]())).rejects.toMatchObject({
+      code: 'EISDIR',
+    });
+    expect(fs.existsSync(jsonPath)).toBe(true);
+    expect(fs.readFileSync(jsonPath, 'utf8')).toBe(json);
+    expect(fs.existsSync(`${jsonPath}.bak`)).toBe(false);
+    failed.destroy();
+    stores = stores.filter((store) => store !== failed);
+
+    fs.rmSync(snapshotPath, { recursive: true });
+    const retried = makeStore();
+    const publish = vi.spyOn(BinaryPersistence, method === 'init' ? 'saveAsync' : 'save');
+    await retried[method]();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(await retried.getById('legacy')).toMatchObject(entry);
+    expect((await retried.searchVector([1, 0], { topK: 1 }))[0]?.item.id).toBe('legacy');
+    expect(BinaryPersistence.isValid(snapshotPath)).toBe(true);
+    expect(fs.existsSync(jsonPath)).toBe(false);
+    expect(fs.readFileSync(`${jsonPath}.bak`, 'utf8')).toBe(json);
+  });
+
+  it.each(['[]', '{}', '{invalid'])('retains legacy %s on the new-index fallback', async (json) => {
+    const indexDir = path.join(root, '.asd/context/index');
+    const jsonPath = path.join(indexDir, 'vector_index.json');
+    fs.mkdirSync(indexDir, { recursive: true });
+    fs.writeFileSync(jsonPath, json);
+    await expect(VectorMigration.migrate(indexDir, makeStore())).resolves.toBe('new');
+    expect(fs.readFileSync(jsonPath, 'utf8')).toBe(json);
+    expect(fs.existsSync(`${jsonPath}.bak`)).toBe(false);
+  });
+
+  it.each([
+    'init',
+    'initSync',
+  ] as const)('keeps the published snapshot when %s cannot archive JSON', async (method) => {
+    const indexDir = path.join(root, '.asd/context/index');
+    const jsonPath = path.join(indexDir, 'vector_index.json');
+    const entry = { id: 'legacy', content: 'retained snapshot', vector: [1, 0], metadata: {} };
+    const json = JSON.stringify([entry]);
+    fs.mkdirSync(`${jsonPath}.bak`, { recursive: true });
+    fs.writeFileSync(jsonPath, json);
+    const store = makeStore();
+    await store[method]();
+    expect(BinaryPersistence.isValid(path.join(indexDir, 'vector_index.asvec'))).toBe(true);
+    expect(await store.getById('legacy')).toMatchObject(entry);
+    expect(fs.readFileSync(jsonPath, 'utf8')).toBe(json);
+  });
+});
+
 describe('HNSW Recall Quality', () => {
   it('Recall@10 should be > 0.9 for 200 vectors 32d', () => {
     const dim = 32;
@@ -642,6 +742,178 @@ describe('HnswIndex randomLevel safety', () => {
 
 describe('SQ8 2-pass search', () => {
   const DIM = 32;
+
+  describe('adapter quantization restore', () => {
+    let root: string;
+    let items: Array<{
+      id: string;
+      content: string;
+      vector: Float32Array;
+      metadata: Record<string, unknown>;
+    }>;
+    let stores: HnswVectorAdapter[];
+    let source: HnswVectorAdapter;
+    let quantizedIndexes: HnswIndex[];
+
+    const openStore = async (method: 'init' | 'initSync', quantize = 'sq8') => {
+      const store = new HnswVectorAdapter(root, {
+        M: 8,
+        efConstruct: 40,
+        efSearch: 16,
+        quantize,
+        quantizeThreshold: 64,
+        walEnabled: false,
+        flushIntervalMs: 60_000,
+        flushBatchSize: 10_000,
+      });
+      stores.push(store);
+      await store[method]();
+      return store;
+    };
+
+    beforeEach(async () => {
+      root = fs.mkdtempSync(path.join(os.tmpdir(), 'hnsw-quantization-'));
+      stores = [];
+      quantizedIndexes = [];
+      const setQuantizedVectors = HnswIndex.prototype.setQuantizedVectors;
+      // 观察真实训练/恢复后的节点，不替换量化编码或文件读取边界。
+      vi.spyOn(HnswIndex.prototype, 'setQuantizedVectors').mockImplementation(function (
+        this: HnswIndex,
+        quantizer
+      ) {
+        setQuantizedVectors.call(this, quantizer);
+        quantizedIndexes.push(this);
+      });
+      let seed = 12345;
+      // 同一训练数据和图层种子，避免把 ANN 的随机差异当作恢复缺陷。
+      vi.spyOn(Math, 'random').mockImplementation(() => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return seed / 4294967296;
+      });
+      items = Array.from({ length: 128 }, (_, index) => {
+        const values = [
+          Math.cos(index * 0.31),
+          Math.sin(index * 0.31),
+          Math.sin(index * 0.73),
+          0.4 + Math.cos(index * 0.17),
+        ];
+        const norm = Math.hypot(...values);
+        return {
+          id: `v${index}`,
+          content: `point ${index}`,
+          vector: new Float32Array(values.map((value) => value / norm)),
+          metadata: {},
+        };
+      });
+      source = await openStore('initSync');
+      await source.batchUpsert(items);
+      await source.flush();
+    });
+
+    afterEach(() => {
+      for (const store of stores) {
+        store.destroy();
+      }
+      vi.restoreAllMocks();
+      syncBuiltinESMExports();
+      fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    it.each([
+      'init',
+      'initSync',
+    ] as const)('respects quantize:none when %s reopens a trained snapshot', async (method) => {
+      expect(await source.getStats()).toMatchObject({ quantized: true, dimension: 4 });
+      source.destroy();
+      const distance = vi.spyOn(ScalarQuantizer.prototype, 'distance');
+      const reopened = await openStore(method, 'none');
+      const results = await reopened.searchVector(items[31].vector, { topK: 1 });
+      expect(results[0]?.item.id).toBe('v31');
+      expect(distance).not.toHaveBeenCalled();
+      expect(await reopened.getStats()).toMatchObject({ quantized: false, dimension: 4 });
+    });
+
+    it.each([
+      'init',
+      'initSync',
+    ] as const)('reads a snapshot once through %s before restoring it', async (method) => {
+      source.destroy();
+      const read = vi.spyOn(fs, 'readFileSync');
+      syncBuiltinESMExports();
+      const reopened = await openStore(method);
+      const snapshotPath = path.join(root, '.asd/context/index/vector_index.asvec');
+      expect(read.mock.calls.filter(([file]) => file === snapshotPath)).toHaveLength(1);
+      expect(await reopened.getById('v31')).toMatchObject({ content: 'point 31' });
+    });
+
+    it.each([
+      'init',
+      'initSync',
+    ] as const)('restores actual SQ8 codes and search ordering after %s', async (method) => {
+      const quantizedNodes = (index: HnswIndex) =>
+        index.nodes
+          .filter((node) => node !== null)
+          .map((node) => ({
+            id: node.id,
+            codes: Array.from(node.qvector!),
+          }));
+      const beforeCodes = quantizedNodes(quantizedIndexes[0]);
+      expect(beforeCodes).toHaveLength(128);
+      expect(beforeCodes.every((node) => node.codes.length === 4)).toBe(true);
+      const beforeHits = await source.searchVector(items[31].vector, { topK: 5 });
+      source.destroy();
+
+      const distance = vi.spyOn(ScalarQuantizer.prototype, 'distance');
+      const reopened = await openStore(method);
+      const afterHits = await reopened.searchVector(items[31].vector, { topK: 5 });
+      expect(quantizedIndexes).toHaveLength(2);
+      expect(quantizedNodes(quantizedIndexes[1])).toEqual(beforeCodes);
+      expect(distance).toHaveBeenCalled();
+      expect(afterHits.map((hit) => ({ id: hit.item.id, score: hit.score }))).toEqual(
+        beforeHits.map((hit) => ({ id: hit.item.id, score: hit.score }))
+      );
+      expect(afterHits[0]?.item.id).toBe('v31');
+    });
+
+    it.each([
+      ['init', false],
+      ['initSync', false],
+      ['init', true],
+      ['initSync', true],
+    ] as const)('rebuilds usable SQ8 after %s reopens an emptied snapshot (legacy=%s)', async (method, legacy) => {
+      for (const item of items) {
+        await source.remove(item.id);
+      }
+      await source.flush();
+      source.destroy();
+      if (legacy) {
+        // 9e8d033 实际删除至空后生成的 ASVEC：HAS_QUANTIZER + dimension=0。
+        // 固定旧字节，避免新 encoder 不再写该模型后掩盖恢复兼容性。
+        fs.writeFileSync(
+          path.join(root, '.asd/context/index/vector_index.asvec'),
+          Buffer.from(
+            'QVNWRUMBAwAAAAAAAAAIAAAA/////wAAAAAAAAAAAAADAAAAAAAAAAAAAAAAAB0AAAB7Im1ldGFkYXRhIjp7fSwiY29udGVudHMiOnt9fQ==',
+            'base64'
+          )
+        );
+      }
+      const reopened = await openStore(method);
+      const restoredStats = await reopened.getStats();
+      const distance = vi.spyOn(ScalarQuantizer.prototype, 'distance');
+      await reopened.batchUpsert(items);
+      const results = await reopened.searchVector(items[31].vector, { topK: 5 });
+      expect(distance).toHaveBeenCalled();
+      expect(
+        distance.mock.results.every(
+          (result) => result.type === 'return' && Number.isFinite(result.value)
+        )
+      ).toBe(true);
+      expect(restoredStats).toMatchObject({ quantized: false, dimension: 0 });
+      expect(await reopened.getStats()).toMatchObject({ quantized: true, dimension: 4 });
+      expect(results[0]?.item.id).toBe('v31');
+      expect(await reopened.getById('v31')).toMatchObject({ vector: Array.from(items[31].vector) });
+    });
+  });
 
   it('searchKnn should accept quantizedQuery + quantizer options', () => {
     const index = new HnswIndex({ M: 8, efConstruct: 64, efSearch: 64 });
@@ -759,49 +1031,6 @@ describe('SQ8 2-pass search', () => {
         expect(node).toHaveProperty('level');
       }
     }
-  });
-
-  it('HnswVectorAdapter should restore qvectors after loading with quantizer', async () => {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'hnsw-2pass-'));
-    const store = new HnswVectorAdapter(tmpDir, {
-      M: 4,
-      efConstruct: 32,
-      efSearch: 32,
-      quantize: 'none', // disable auto-quantize for manual control
-      walEnabled: false,
-    });
-    store.initSync();
-
-    // Insert enough vectors
-    const vectors = [];
-    for (let i = 0; i < 20; i++) {
-      const v = randomVector(DIM);
-      vectors.push(v);
-      await store.upsert({
-        id: `d${i}`,
-        content: `content ${i}`,
-        vector: Array.from(v),
-        metadata: {},
-      });
-    }
-    await store.flush();
-    store.destroy();
-
-    // Verify basic persistence works
-    const store2 = new HnswVectorAdapter(tmpDir, {
-      M: 4,
-      efConstruct: 32,
-      efSearch: 32,
-      quantize: 'none',
-      walEnabled: false,
-    });
-    store2.initSync();
-
-    const ids = await store2.listIds();
-    expect(ids.length).toBe(20);
-    store2.destroy();
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 });
 
