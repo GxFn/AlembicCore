@@ -174,13 +174,19 @@ export class PopularitySignal {
   }
 }
 
+// 配置键来自调用方；字典不继承 Object.prototype，未知名称始终走原有默认值。
+const DIFFICULTY_LEVELS: Record<string, number> = Object.assign(Object.create(null), {
+  beginner: 1,
+  intermediate: 2,
+  advanced: 3,
+  expert: 4,
+});
+
 /** 难度信号 — 用于学习场景的难度匹配 */
 export class DifficultySignal {
   compute(candidate: SignalCandidate, context: SignalContext) {
-    const levels = { beginner: 1, intermediate: 2, advanced: 3, expert: 4 };
-    const candidateLevel =
-      (levels as Record<string, number>)[candidate.difficulty || 'intermediate'] || 2;
-    const userLevel = (levels as Record<string, number>)[context.userLevel || 'intermediate'] || 2;
+    const candidateLevel = DIFFICULTY_LEVELS[candidate.difficulty || 'intermediate'] || 2;
+    const userLevel = DIFFICULTY_LEVELS[context.userLevel || 'intermediate'] || 2;
     // 难度匹配：越接近用户等级得分越高
     const diff = Math.abs(candidateLevel - userLevel);
     return Math.max(0, 1 - diff * 0.3);
@@ -224,7 +230,7 @@ export class ContextMatchSignal {
 }
 
 // 语言家族关系表 — 跨语言上下文匹配
-const LANGUAGE_FAMILIES = {
+const LANGUAGE_FAMILIES: Record<string, string[]> = Object.assign(Object.create(null), {
   'objective-c': ['swift', 'c', 'c++'],
   swift: ['objective-c', 'c'],
   javascript: ['typescript', 'jsx', 'tsx'],
@@ -234,10 +240,10 @@ const LANGUAGE_FAMILIES = {
   c: ['c++', 'objective-c'],
   'c++': ['c', 'objective-c'],
   python: ['cython'],
-};
+});
 
 function _isRelatedLanguage(a: string, b: string) {
-  const related = (LANGUAGE_FAMILIES as Record<string, string[]>)[a?.toLowerCase()] || [];
+  const related = LANGUAGE_FAMILIES[a?.toLowerCase()] || [];
   return related.includes(b?.toLowerCase());
 }
 
@@ -278,7 +284,7 @@ export class MultiSignalRanker {
     };
     // 合并自定义权重，支持旧配置中的 "seasonality" 键向后兼容
     const customWeights = options.scenarioWeights || {};
-    const remapped: Record<string, Record<string, number>> = {};
+    const remapped: Record<string, Record<string, number>> = Object.create(null);
     for (const [scenario, weights] of Object.entries(customWeights)) {
       remapped[scenario] = { ...(weights as Record<string, number>) };
       if ('seasonality' in remapped[scenario] && !('contextMatch' in remapped[scenario])) {
@@ -286,7 +292,11 @@ export class MultiSignalRanker {
         delete remapped[scenario].seasonality;
       }
     }
-    this.#scenarioWeights = { ...SCENARIO_WEIGHTS, ...remapped };
+    this.#scenarioWeights = Object.assign(
+      Object.create(null),
+      SCENARIO_WEIGHTS,
+      remapped
+    ) as Record<string, Record<string, number>>;
   }
 
   /**
@@ -300,9 +310,7 @@ export class MultiSignalRanker {
     }
 
     const scenario = context.scenario || context.intent || 'default';
-    const weights =
-      (this.#scenarioWeights as Record<string, Record<string, number>>)[scenario] ||
-      this.#scenarioWeights.default;
+    const weights = this.#scenarioWeights[scenario] || this.#scenarioWeights.default;
 
     const scored = candidates.map((candidate: SignalCandidate) => {
       const signals: Record<string, number> = {};

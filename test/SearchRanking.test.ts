@@ -1,9 +1,9 @@
 /**
- * SearchRanking.test.js — Ranking 组件单元测试
+ * SearchRanking.test.ts — 搜索算法与索引单元测试
  *
  * 覆盖:
  *  - CoarseRanker           (5维粗排、动态权重、边界)
- *  - MultiSignalRanker      (6信号、场景权重、向后兼容)
+ *  - MultiSignalRanker      (7信号、场景权重、向后兼容)
  *  - Individual Signals      (RelevanceSignal, PopularitySignal, ContextMatchSignal, etc.)
  *  - contextBoost           (共享上下文加成)
  *  - FieldWeightedScorer    (增量 remove/update/compact, lexical 评分器)
@@ -12,6 +12,7 @@
 import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { CoarseRanker } from '../src/service/search/CoarseRanker.js';
 import { contextBoost } from '../src/service/search/contextBoost.js';
+import { FieldWeightedScorer } from '../src/service/search/FieldWeightedScorer.js';
 import {
   AuthoritySignal,
   ContextMatchSignal,
@@ -21,7 +22,7 @@ import {
   RecencySignal,
   RelevanceSignal,
 } from '../src/service/search/MultiSignalRanker.js';
-import { FieldWeightedScorer } from '../src/service/search/SearchEngine.js';
+import { tokenize } from '../src/service/search/tokenizer.js';
 
 /* ════════════════════════════════════════════════════════════════════
  *  CoarseRanker
@@ -298,6 +299,41 @@ describe('ContextMatchSignal', () => {
 describe('MultiSignalRanker', () => {
   const ranker = new MultiSignalRanker();
 
+  test.each([
+    'constructor',
+    '__proto__',
+    'toString',
+  ])('treats %s as an ordinary unknown configuration key', (key) => {
+    const candidates = [
+      { id: 'low', recallScore: 0.1 },
+      { id: 'high', recallScore: 0.9 },
+    ];
+    expect(ranker.rank(candidates, { scenario: key })).toEqual(
+      ranker.rank(candidates, { scenario: 'not-configured' })
+    );
+    expect(new DifficultySignal().compute({ difficulty: key }, {})).toBe(1);
+    expect(new DifficultySignal().compute({}, { userLevel: key })).toBe(1);
+    const result = ranker.rank([{ id: 'unknown', difficulty: key, language: key }], {
+      userLevel: key,
+      language: 'typescript',
+    });
+    expect(Number.isFinite(result[0].rankerScore)).toBe(true);
+    expect(result[0].signals).toMatchObject({ difficulty: 1, contextMatch: 0.1 });
+  });
+
+  test('honors an own __proto__ scenario from JSON like any other custom scenario', () => {
+    const subject = new MultiSignalRanker({
+      scenarioWeights: JSON.parse('{"__proto__":{"relevance":1},"named":{"relevance":1}}'),
+    });
+    const candidates = [
+      { id: 'low', recallScore: 0.1 },
+      { id: 'high', recallScore: 0.9 },
+    ];
+    expect(subject.rank(candidates, { scenario: '__proto__' })).toEqual(
+      subject.rank(candidates, { scenario: 'named' })
+    );
+  });
+
   test('keeps ranking stateless without retaining unused bus subscriptions', () => {
     const signalBus = new SignalBus();
     const subject = new MultiSignalRanker({ signalBus });
@@ -533,5 +569,145 @@ describe('FieldWeightedScorer incremental', () => {
     expect(scorer.avgLength).toBe(0);
     expect(Object.keys(scorer.docFreq)).toHaveLength(0);
     expect(scorer.search('react')).toEqual([]);
+  });
+});
+
+// 纯算法契约集中在本套件；SearchEngine.test 只保留仓储/召回/编排与元数据集成。
+/* ────────────────────────────────────────────
+ *  tokenize()
+ * ──────────────────────────────────────────── */
+describe('tokenize', () => {
+  test('should return empty array for falsy input', () => {
+    expect(tokenize('')).toEqual([]);
+    expect(tokenize(null)).toEqual([]);
+    expect(tokenize(undefined)).toEqual([]);
+  });
+
+  test('should lowercase and split by whitespace', () => {
+    const result = tokenize('Hello World');
+    expect(result).toContain('hello');
+    expect(result).toContain('world');
+  });
+
+  test.each([
+    { input: 'myFunction', words: ['my', 'function'] },
+    { input: 'URLSession', words: ['url', 'session'] },
+    { input: 'getDataSource', words: ['get', 'data', 'source'] },
+  ])('splits case boundaries in $input', ({ input, words }) => {
+    expect(tokenize(input)).toEqual(expect.arrayContaining(words));
+  });
+
+  test('should deduplicate tokens', () => {
+    const result = tokenize('test test test');
+    expect(result).toEqual(['test']);
+  });
+
+  test('should filter tokens shorter than 2 chars', () => {
+    const result = tokenize('a b cd ef');
+    expect(result).not.toContain('a');
+    expect(result).not.toContain('b');
+    expect(result).toContain('cd');
+    expect(result).toContain('ef');
+  });
+
+  test('supports Chinese unigrams and bigrams', () => {
+    expect(tokenize('网络请求')).toEqual(
+      expect.arrayContaining(['网', '络', '网络', '络请', '请求'])
+    );
+  });
+
+  test('keeps Chinese tokens around camel-case English identifiers', () => {
+    expect(tokenize('使用URLSession发送请求')).toEqual(
+      expect.arrayContaining(['url', 'session', '发送', '请求'])
+    );
+  });
+
+  test('should strip punctuation', () => {
+    const result = tokenize('hello, world! foo@bar');
+    expect(result).toContain('hello');
+    expect(result).toContain('world');
+  });
+});
+
+/* ────────────────────────────────────────────
+ *  FieldWeightedScorer
+ * ──────────────────────────────────────────── */
+describe('FieldWeightedScorer', () => {
+  let scorer: FieldWeightedScorer;
+
+  beforeEach(() => {
+    scorer = new FieldWeightedScorer();
+  });
+
+  test('tracks constructor token frequencies through add, remove and clear', () => {
+    scorer.addDocument('constructor-doc', 'constructor', { tags: ['constructor'] });
+    expect(scorer.docFreq.constructor).toBe(1);
+    expect(scorer.topicDocFreq.constructor).toBe(1);
+    expect(scorer.search('constructor').map((item) => item.id)).toEqual(['constructor-doc']);
+    scorer.removeDocument('constructor-doc');
+    expect(scorer.search('constructor')).toEqual([]);
+    expect(scorer.docFreq.constructor).toBeUndefined();
+    expect(scorer.topicDocFreq.constructor).toBeUndefined();
+    scorer.clear();
+    scorer.addDocument('recreated', 'constructor', { tags: ['constructor'] });
+    expect(scorer.search('constructor').map((item) => item.id)).toEqual(['recreated']);
+  });
+
+  test('starts empty and updates totals when indexing a document', () => {
+    expect(scorer.totalDocs).toBe(0);
+    expect(scorer.documents).toHaveLength(0);
+    scorer.addDocument('doc1', 'hello world');
+    expect(scorer.totalDocs).toBe(1);
+    expect(scorer.avgLength).toBeGreaterThan(0);
+  });
+
+  test('addDocument should track doc frequency', () => {
+    scorer.addDocument('doc1', 'swift networking');
+    scorer.addDocument('doc2', 'swift ui');
+    expect(scorer.docFreq.swift).toBe(2);
+    expect(scorer.docFreq.networking).toBe(1);
+  });
+
+  test('search should return empty for empty query', () => {
+    scorer.addDocument('doc1', 'hello world');
+    const results = scorer.search('');
+    expect(results).toEqual([]);
+  });
+
+  test('search should return matching documents', () => {
+    scorer.addDocument('doc1', 'swift networking URLSession');
+    scorer.addDocument('doc2', 'python requests HTTP');
+    scorer.addDocument('doc3', 'swift UIKit interface');
+
+    const results = scorer.search('swift');
+    expect(results.length).toBe(2);
+    expect(results.map((r) => r.id)).toContain('doc1');
+    expect(results.map((r) => r.id)).toContain('doc3');
+  });
+
+  test('search should rank structured field matches higher', () => {
+    scorer.addDocument('doc1', 'swift networking', {
+      title: 'Swift Networking',
+      trigger: 'swift-networking',
+      tags: ['networking'],
+    });
+    scorer.addDocument('doc2', 'swift python java', { title: 'General Swift' });
+
+    const results = scorer.search('swift networking');
+    expect(results[0].id).toBe('doc1');
+  });
+
+  test('search should respect limit', () => {
+    for (let i = 0; i < 30; i++) {
+      scorer.addDocument(`doc${i}`, `swift document ${i}`);
+    }
+    const results = scorer.search('swift', 5);
+    expect(results.length).toBe(5);
+  });
+
+  test('search should include meta in results', () => {
+    scorer.addDocument('doc1', 'swift networking', { type: 'recipe', title: 'Net' });
+    const results = scorer.search('swift');
+    expect(results[0].meta).toEqual({ type: 'recipe', title: 'Net' });
   });
 });

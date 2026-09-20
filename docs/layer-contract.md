@@ -134,6 +134,14 @@ instead of running the complete validator twice. The result is local to one
 call and does not authorize skipping later trust-boundary checks. The existing
 `validate()` method and the candidate facade retain their previous contracts.
 
+## Search boundaries
+
+Storage column selection belongs to repository; canonical sparse document projection
+belongs to service. Retrieval, ranking and response projection retain distinct
+contracts. See [search-architecture.md](search-architecture.md) for the file owners,
+legacy behavior and test responsibilities. These helpers add no import-direction
+exception or public entrypoint.
+
 ## Export-surface policy (W4, 4-6)
 
 1. **`service/index.ts` barrel is frozen, not completed.** It keeps exactly its

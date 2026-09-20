@@ -5,13 +5,12 @@ import { vi } from 'vitest';
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
 import { pathGuard } from '../src/io.js';
 import { createAlembicRepositories } from '../src/repositories.js';
-import { createSearchEngine } from '../src/search.js';
+import { createSearchEngine, groupByKind, RawDbKnowledgeAdapter } from '../src/search.js';
+import * as recipeRetrieval from '../src/service/knowledge/RecipeRetrieval.js';
 import {
   buildSearchResponseMeta,
-  FieldWeightedScorer,
   resolveSearchWorkspaceIdentity,
   SearchEngine,
-  tokenize,
 } from '../src/service/search/SearchEngine.js';
 
 async function withSearchDatabase(
@@ -82,7 +81,103 @@ describe('search index timestamp consistency', () => {
   });
 });
 
+describe('search repository read boundary', () => {
+  test.each([
+    'raw-adapter',
+    'knowledge-repository',
+  ] as const)('honors escaped literal LIKE patterns through %s', async (adapter) => {
+    await withSearchDatabase(async (runtime) => {
+      const insert = runtime.sqlite.prepare(
+        "INSERT INTO knowledge_entries (id, title, lifecycle, createdAt, updatedAt) VALUES (?, ?, 'active', 1, 1)"
+      );
+      for (const [id, title] of [
+        ['underscore', 'Literal_Token'],
+        ['percent', 'Literal%Token'],
+        ['slash', 'Literal\\Token'],
+        ['other', 'LiteralXToken'],
+      ]) {
+        insert.run(id, title);
+      }
+      const repo =
+        adapter === 'raw-adapter'
+          ? new RawDbKnowledgeAdapter(runtime.sqlite)
+          : createAlembicRepositories(runtime.connection).knowledgeRepository;
+      for (const [id, query] of [
+        ['underscore', 'Literal_Token'],
+        ['percent', 'Literal%Token'],
+        ['slash', 'Literal\\Token'],
+      ]) {
+        // keyword 模式另会合并 canonical sparse 命中；这里锁定它实际消费的 SQL 读取 port。
+        const pattern = `%${query.replace(/[%_\\]/g, (character) => `\\${character}`)}%`;
+        expect(repo.keywordSearchSync(pattern, 20).map((row) => row.id)).toEqual([id]);
+      }
+    });
+  });
+
+  test('takes one schema snapshot and preserves legacy defaults across full and incremental reads', async () => {
+    await withSearchDatabase(async (runtime) => {
+      // TEMP 表遮蔽真实迁移表，复现旧存储缺少较新检索字段，不伪造 SQL 返回值。
+      runtime.sqlite.exec(`CREATE TEMP TABLE knowledge_entries AS SELECT
+        id, title, description, language, category, knowledgeType, kind, content,
+        lifecycle, tags, trigger, difficulty, quality, stats, updatedAt, createdAt
+        FROM main.knowledge_entries`);
+      runtime.sqlite
+        .prepare(
+          "INSERT INTO knowledge_entries (id,title,lifecycle,updatedAt) VALUES ('legacy','Legacy record','active',1)"
+        )
+        .run();
+      const prepare = vi.spyOn(runtime.sqlite, 'prepare');
+      try {
+        const adapter = new RawDbKnowledgeAdapter(runtime.sqlite);
+        const full = adapter.findNonDeprecatedSync();
+        expect(full[0]).toMatchObject({
+          dimensionId: '',
+          scope: '',
+          topicHint: '',
+          moduleName: '',
+          reasoning: '{}',
+          retrievalProfile: null,
+        });
+        expect(adapter.findUpdatedSinceSync('1970-01-01T00:00:01.000Z')).toEqual(full);
+        expect(
+          prepare.mock.calls.filter(([sql]) => sql === 'PRAGMA table_info(knowledge_entries)')
+        ).toHaveLength(1);
+      } finally {
+        prepare.mockRestore();
+      }
+    });
+  });
+});
+
 describe('search vocabulary dictionary boundaries', () => {
+  test('projects each indexed row once for both searchable text and metadata', async () => {
+    await withSearchDatabase(async (runtime) => {
+      runtime.sqlite.exec(
+        "INSERT INTO knowledge_entries (id,title,lifecycle,createdAt,updatedAt) VALUES ('a','Original guidance','active',1,1), ('b','Separate guidance','active',1,1)"
+      );
+      const project = vi.spyOn(recipeRetrieval, 'projectRecipeRetrievalDocumentSet');
+      try {
+        const engine = createSearchEngine(runtime.sqlite);
+        engine.buildIndex();
+        expect(engine.scorer.totalDocs).toBe(2);
+        expect(project).toHaveBeenCalledTimes(2);
+        project.mockClear();
+        runtime.sqlite
+          .prepare(
+            "UPDATE knowledge_entries SET title='Updated guidance', updatedAt=? WHERE id='a'"
+          )
+          .run(Math.floor(Date.now() / 1000));
+        engine.refreshIndex();
+        expect(project).toHaveBeenCalledTimes(1);
+        expect(
+          (await engine.search('Updated', { mode: 'weighted', rank: false })).items[0]?.id
+        ).toBe('a');
+      } finally {
+        project.mockRestore();
+      }
+    });
+  });
+
   test('retrieves a constructor-tagged recipe through the public engine and real SQLite', async () => {
     await withSearchDatabase(async (runtime) => {
       runtime.sqlite
@@ -230,40 +325,52 @@ describe('search knowledge collection type aliases', () => {
   });
 
   test.each([
-    'vector-service',
-    'legacy-vector-store',
-  ] as const)('keeps aliases on the real injected semantic %s lane', async (lane) => {
+    { lane: 'vector-service', adapter: 'raw' },
+    { lane: 'vector-service', adapter: 'repository' },
+    { lane: 'legacy-vector-store', adapter: 'raw' },
+    { lane: 'legacy-vector-store', adapter: 'repository' },
+  ] as const)('keeps aliases on semantic $lane with $adapter reads', async ({ lane, adapter }) => {
     await withSearchDatabase(async (runtime) => {
       insertKnowledgeCollection(runtime);
       const hits = [
         {
           id: 'entry_pattern-entry',
           score: 0.9,
+          similarity: 0.81234,
           metadata: { entryId: 'pattern-entry', kind: 'pattern' },
         },
         {
           id: 'entry_rule-entry',
           score: 0.8,
+          similarity: 0.71234,
           metadata: { entryId: 'rule-entry', kind: 'rule' },
         },
       ];
       const search = vi.fn(async () =>
         hits.map((hit) => ({ item: { id: hit.id, metadata: hit.metadata }, score: hit.score }))
       );
-      const engine = createSearchEngine(
-        runtime.sqlite,
+      const options =
         lane === 'vector-service'
           ? { vectorService: { search, hybridSearch: vi.fn(async () => []) } }
-          : {
-              aiProvider: { embed: async () => [1] },
-              vectorStore: { query: async () => hits },
-            }
-      );
+          : { aiProvider: { embed: async () => [1] }, vectorStore: { query: async () => hits } };
+      const engine = createSearchEngine(runtime.sqlite, {
+        ...options,
+        ...(adapter === 'repository'
+          ? { knowledgeRepo: createAlembicRepositories(runtime.connection).knowledgeRepository }
+          : {}),
+      });
       for (const type of ['recipe', 'solution', 'knowledge']) {
         const result = await engine.search('Factory', { mode: 'semantic', type, rank: false });
         expect(result.items.map((item) => item.id)).toEqual(['pattern-entry', 'rule-entry']);
         expect(result.items.every((item) => item.type === 'recipe')).toBe(true);
         expect(result.searchMeta?.vectorUsed).toBe(true);
+        const semantic = lane === 'vector-service' ? 0.9 : 0.81234;
+        expect(result.items[0]).toMatchObject({
+          score: Math.round(semantic * 1000) / 1000,
+          semanticScore: Math.round(semantic * 1000) / 1000,
+          vectorScore: Math.round(semantic * 1000) / 1000,
+          scoreBreakdown: { semantic, vector: 0.9 },
+        });
       }
       if (lane === 'vector-service') {
         expect(search).toHaveBeenLastCalledWith('Factory', { topK: 40, filter: null });
@@ -274,161 +381,41 @@ describe('search knowledge collection type aliases', () => {
         rank: false,
       });
       expect(rules.items.map((item) => item.id)).toEqual(['rule-entry']);
+      // 向量元数据可以没有 knowledgeType，两个实际读取端口都须补齐该过滤事实。
+      const constrained = await engine.search('Factory', {
+        mode: 'semantic',
+        rank: false,
+        knowledgeType: 'boundary-constraint',
+      });
+      expect(constrained.items.map((item) => item.id)).toEqual(['rule-entry']);
     });
   });
-});
 
-/* ────────────────────────────────────────────
- *  tokenize()
- * ──────────────────────────────────────────── */
-describe('tokenize', () => {
-  test('should return empty array for falsy input', () => {
-    expect(tokenize('')).toEqual([]);
-    expect(tokenize(null)).toEqual([]);
-    expect(tokenize(undefined)).toEqual([]);
-  });
-
-  test('should lowercase and split by whitespace', () => {
-    const result = tokenize('Hello World');
-    expect(result).toContain('hello');
-    expect(result).toContain('world');
-  });
-
-  test('should split camelCase at lower→upper boundary', () => {
-    const result = tokenize('myFunction');
-    expect(result).toContain('my');
-    expect(result).toContain('function');
-  });
-
-  test('should split all-caps prefix from camelCase suffix', () => {
-    // 'URLSession' → expanded 'URL Session' → lowered ['url', 'session']
-    const result = tokenize('URLSession');
-    expect(result).toContain('url');
-    expect(result).toContain('session');
-  });
-
-  test('should split multi-hump camelCase', () => {
-    const result = tokenize('getDataSource');
-    expect(result).toContain('get');
-    expect(result).toContain('data');
-    expect(result).toContain('source');
-  });
-
-  test('should deduplicate tokens', () => {
-    const result = tokenize('test test test');
-    expect(result).toEqual(['test']);
-  });
-
-  test('should filter tokens shorter than 2 chars', () => {
-    const result = tokenize('a b cd ef');
-    expect(result).not.toContain('a');
-    expect(result).not.toContain('b');
-    expect(result).toContain('cd');
-    expect(result).toContain('ef');
-  });
-
-  test('supports Chinese unigrams and bigrams', () => {
-    expect(tokenize('网络请求')).toEqual(
-      expect.arrayContaining(['网', '络', '网络', '络请', '请求'])
-    );
-  });
-
-  test('keeps Chinese tokens around camel-case English identifiers', () => {
-    expect(tokenize('使用URLSession发送请求')).toEqual(
-      expect.arrayContaining(['url', 'session', '发送', '请求'])
-    );
-  });
-
-  test('should strip punctuation', () => {
-    const result = tokenize('hello, world! foo@bar');
-    expect(result).toContain('hello');
-    expect(result).toContain('world');
-  });
-});
-
-/* ────────────────────────────────────────────
- *  FieldWeightedScorer
- * ──────────────────────────────────────────── */
-describe('FieldWeightedScorer', () => {
-  let scorer;
-
-  beforeEach(() => {
-    scorer = new FieldWeightedScorer();
-  });
-
-  test('tracks constructor token frequencies through add, remove and clear', () => {
-    scorer.addDocument('constructor-doc', 'constructor', { tags: ['constructor'] });
-    expect(scorer.docFreq.constructor).toBe(1);
-    expect(scorer.topicDocFreq.constructor).toBe(1);
-    expect(scorer.search('constructor').map((item) => item.id)).toEqual(['constructor-doc']);
-    scorer.removeDocument('constructor-doc');
-    expect(scorer.search('constructor')).toEqual([]);
-    expect(scorer.docFreq.constructor).toBeUndefined();
-    expect(scorer.topicDocFreq.constructor).toBeUndefined();
-    scorer.clear();
-    scorer.addDocument('recreated', 'constructor', { tags: ['constructor'] });
-    expect(scorer.search('constructor').map((item) => item.id)).toEqual(['recreated']);
-  });
-
-  test('should start with 0 documents', () => {
-    expect(scorer.totalDocs).toBe(0);
-    expect(scorer.documents).toHaveLength(0);
-  });
-
-  test('addDocument should increment totals', () => {
-    scorer.addDocument('doc1', 'hello world');
-    expect(scorer.totalDocs).toBe(1);
-    expect(scorer.avgLength).toBeGreaterThan(0);
-  });
-
-  test('addDocument should track doc frequency', () => {
-    scorer.addDocument('doc1', 'swift networking');
-    scorer.addDocument('doc2', 'swift ui');
-    expect(scorer.docFreq.swift).toBe(2);
-    expect(scorer.docFreq.networking).toBe(1);
-  });
-
-  test('search should return empty for empty query', () => {
-    scorer.addDocument('doc1', 'hello world');
-    const results = scorer.search('');
-    expect(results).toEqual([]);
-  });
-
-  test('search should return matching documents', () => {
-    scorer.addDocument('doc1', 'swift networking URLSession');
-    scorer.addDocument('doc2', 'python requests HTTP');
-    scorer.addDocument('doc3', 'swift UIKit interface');
-
-    const results = scorer.search('swift');
-    expect(results.length).toBe(2);
-    expect(results.map((r) => r.id)).toContain('doc1');
-    expect(results.map((r) => r.id)).toContain('doc3');
-  });
-
-  test('search should rank structured field matches higher', () => {
-    scorer.addDocument('doc1', 'swift networking', {
-      title: 'Swift Networking',
-      trigger: 'swift-networking',
-      tags: ['networking'],
+  test.each([
+    false,
+    true,
+  ])('distinguishes empty dense recall from orphan-only recall (orphan=%s)', async (orphan) => {
+    await withSearchDatabase(async (runtime) => {
+      insertKnowledgeCollection(runtime);
+      const legacyQuery = vi.fn(async () => [
+        { id: 'entry_pattern-entry', score: 0.7, metadata: { entryId: 'pattern-entry' } },
+      ]);
+      const engine = createSearchEngine(runtime.sqlite, {
+        vectorService: {
+          search: async () =>
+            orphan
+              ? [{ item: { id: 'entry_gone', metadata: { entryId: 'gone' } }, score: 0.9 }]
+              : [],
+          hybridSearch: async () => [],
+        },
+        aiProvider: { embed: async () => [1] },
+        vectorStore: { query: legacyQuery },
+      });
+      const result = await engine.search('Factory', { mode: 'semantic', rank: false });
+      expect(result.items.map((item) => item.id)).toEqual(orphan ? [] : ['pattern-entry']);
+      expect(legacyQuery).toHaveBeenCalledTimes(orphan ? 0 : 1);
+      expect(result.searchMeta).toMatchObject({ actualMode: 'semantic', vectorUsed: true });
     });
-    scorer.addDocument('doc2', 'swift python java', { title: 'General Swift' });
-
-    const results = scorer.search('swift networking');
-    expect(results[0].id).toBe('doc1');
-  });
-
-  test('search should respect limit', () => {
-    for (let i = 0; i < 30; i++) {
-      scorer.addDocument(`doc${i}`, `swift document ${i}`);
-    }
-    const results = scorer.search('swift', 5);
-    expect(results.length).toBe(5);
-  });
-
-  test('search should include meta in results', () => {
-    scorer.addDocument('doc1', 'swift networking', { type: 'recipe', title: 'Net' });
-    const results = scorer.search('swift');
-    expect(results[0].meta).toEqual({ type: 'recipe', title: 'Net' });
   });
 });
 
@@ -1470,15 +1457,54 @@ describe('SearchEngine', () => {
     expect(engine.getStats().indexed).toBe(true);
   });
 
-  test('search with groupByKind should partition results', async () => {
-    const db = makeMockDb([]);
-    const engine = new SearchEngine(db);
-
-    const result = await engine.search('something', { mode: 'keyword', groupByKind: true });
-    expect(result.byKind).toBeDefined();
-    expect(result.byKind.rule).toBeDefined();
-    expect(result.byKind.pattern).toBeDefined();
-    expect(result.byKind.fact).toBeDefined();
+  test.each([
+    'helper',
+    'engine',
+  ])('groups supported and unknown kinds through %s', async (route) => {
+    const items = [
+      { id: 'rule', kind: 'rule' },
+      { id: 'fact', kind: 'fact' },
+      { id: 'pattern', kind: 'pattern' },
+      { id: 'constructor', kind: 'constructor' },
+      { id: 'proto', kind: '__proto__' },
+      { id: 'unknown', kind: 'custom' },
+    ];
+    const verify = (groups: Record<string, { id: string }[]>) => {
+      expect(
+        Object.fromEntries(
+          Object.entries(groups).map(([kind, group]) => [kind, group.map((item) => item.id).sort()])
+        )
+      ).toEqual({
+        rule: ['rule'],
+        fact: ['fact'],
+        pattern: ['constructor', 'pattern', 'proto', 'unknown'],
+      });
+    };
+    if (route === 'helper') {
+      const groups = groupByKind(items);
+      verify(groups);
+      expect(groups.pattern.map((item) => item.id)).toEqual([
+        'pattern',
+        'constructor',
+        'proto',
+        'unknown',
+      ]);
+    } else {
+      await withSearchDatabase(async (runtime) => {
+        const insert = runtime.sqlite.prepare(
+          "INSERT INTO knowledge_entries (id,title,kind,lifecycle,createdAt,updatedAt) VALUES (?,'Grouping',?,'active',1,1)"
+        );
+        for (const item of items) {
+          insert.run(item.id, item.kind);
+        }
+        const result = await createSearchEngine(runtime.sqlite).search('Grouping', {
+          mode: 'keyword',
+          groupByKind: true,
+          rank: false,
+        });
+        verify(result.byKind!);
+      });
+    }
   });
 
   test('cache should expire after maxAge', async () => {

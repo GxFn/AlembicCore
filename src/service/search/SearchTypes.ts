@@ -1,8 +1,9 @@
 /**
- * SearchTypes — SearchEngine 共享类型定义
+ * SearchTypes — 搜索共享类型与既有响应辅助入口
  *
  * 从 SearchEngine.ts 提取的所有接口和类型，
  * 供 SearchEngine、FieldWeightedScorer 及测试文件独立消费。
+ * 响应/workspace 辅助函数保留已发布入口；数据库索引投影归 SearchDocumentProjection。
  *
  * @module SearchTypes
  */
@@ -582,7 +583,8 @@ export function groupByKind<T extends { kind?: string }>(
   const byKind: { rule: T[]; pattern: T[]; fact: T[] } = { rule: [], pattern: [], fact: [] };
   for (const it of items) {
     const kind = it.kind || 'pattern';
-    const bucket = (byKind as unknown as Record<string, T[]>)[kind] || byKind.pattern;
+    // 固定输出只有三类；未知字符串也回落 pattern，不能读到 constructor/__proto__ 等继承属性。
+    const bucket = kind === 'rule' ? byKind.rule : kind === 'fact' ? byKind.fact : byKind.pattern;
     bucket.push(it);
   }
   return byKind;

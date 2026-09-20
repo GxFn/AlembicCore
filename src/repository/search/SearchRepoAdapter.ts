@@ -7,6 +7,11 @@
  */
 
 import { prepareCached } from '../../infrastructure/database/PreparedStatementCache.js';
+import Logger from '../../infrastructure/logging/Logger.js';
+import {
+  rawKnowledgeIndexProjection,
+  rawKnowledgeSearchColumn,
+} from './KnowledgeSearchProjection.js';
 
 // AD5 hot path: search reads reuse prepared statements via the bounded LRU.
 type SearchStatement = {
@@ -67,32 +72,20 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
   #db: SearchDb;
   #dimensionIdSelect: string;
   #scopeSelect: string;
-  #retrievalSelect: string;
+  #indexProjection: string;
   constructor(db: SearchDb) {
     this.#db = db;
-    this.#dimensionIdSelect = hasKnowledgeColumn(db, 'dimensionId')
-      ? 'dimensionId'
-      : "'' AS dimensionId";
-    this.#scopeSelect = hasKnowledgeColumn(db, 'scope') ? 'scope' : "'' AS scope";
-    this.#retrievalSelect = [
-      hasKnowledgeColumn(db, 'topicHint') ? 'topicHint' : "'' AS topicHint",
-      hasKnowledgeColumn(db, 'whenClause') ? 'whenClause' : "'' AS whenClause",
-      hasKnowledgeColumn(db, 'doClause') ? 'doClause' : "'' AS doClause",
-      hasKnowledgeColumn(db, 'dontClause') ? 'dontClause' : "'' AS dontClause",
-      hasKnowledgeColumn(db, 'coreCode') ? 'coreCode' : "'' AS coreCode",
-      hasKnowledgeColumn(db, 'usageGuide') ? 'usageGuide' : "'' AS usageGuide",
-      hasKnowledgeColumn(db, 'moduleName') ? 'moduleName' : "'' AS moduleName",
-      hasKnowledgeColumn(db, 'reasoning') ? 'reasoning' : "'{}' AS reasoning",
-      hasKnowledgeColumn(db, 'retrievalProfile') ? 'retrievalProfile' : 'NULL AS retrievalProfile',
-    ].join(', ');
+    // 同步构造只取一个 schema 快照，避免为每个兼容字段重复 PRAGMA 校验。
+    const columns = readKnowledgeColumns(db);
+    this.#dimensionIdSelect = rawKnowledgeSearchColumn('dimensionId', columns);
+    this.#scopeSelect = rawKnowledgeSearchColumn('scope', columns);
+    this.#indexProjection = rawKnowledgeIndexProjection(columns);
   }
 
   findNonDeprecatedSync() {
     return prepareCached<SearchStatement>(
       this.#db,
-      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
-                content, lifecycle, tags, trigger, difficulty, quality, stats,
-                ${this.#retrievalSelect}, updatedAt, createdAt
+      `SELECT ${this.#indexProjection}
          FROM knowledge_entries WHERE lifecycle != 'deprecated'`
     ).all();
   }
@@ -128,22 +121,25 @@ export class RawDbKnowledgeAdapter implements SearchKnowledgeRepo {
     const sinceEpoch = Math.floor(new Date(sinceIso).getTime() / 1000);
     return prepareCached<SearchStatement>(
       this.#db,
-      `SELECT id, title, description, language, ${this.#dimensionIdSelect}, category, knowledgeType, kind, ${this.#scopeSelect},
-                content, lifecycle, tags, trigger, difficulty, quality, stats,
-                ${this.#retrievalSelect}, updatedAt, createdAt
+      `SELECT ${this.#indexProjection}
          FROM knowledge_entries WHERE updatedAt >= ?`
     ).all(sinceEpoch);
   }
 }
 
-function hasKnowledgeColumn(db: SearchDb, column: string): boolean {
+function readKnowledgeColumns(db: SearchDb): ReadonlySet<string> {
   try {
-    const rows = db.prepare('PRAGMA table_info(knowledge_entries)').all() as Array<{
-      name?: unknown;
-    }>;
-    return rows.some((row) => row.name === column);
-  } catch {
-    return false;
+    const rows = db.prepare('PRAGMA table_info(knowledge_entries)').all();
+    return new Set(rows.flatMap((row) => (typeof row.name === 'string' ? [row.name] : [])));
+  } catch (error) {
+    Logger.getInstance().warn(
+      'Search schema inspection failed; applying legacy optional-field defaults',
+      {
+        error: error instanceof Error ? error.message : String(error),
+        verifyVia: 'SearchEngine.buildIndex',
+      }
+    );
+    return new Set();
   }
 }
 

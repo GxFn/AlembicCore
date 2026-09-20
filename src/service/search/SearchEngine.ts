@@ -5,7 +5,6 @@
  * 从 V1 SearchServiceV2 迁移，适配 V2 架构
  */
 
-import type { RecipeRetrievalProfile } from '../../domain/knowledge/RecipeRetrievalProfile.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type {
   SearchDb as CoreSearchDb,
@@ -18,11 +17,6 @@ import {
   unwrapSearchDb,
 } from '../../repository/search/SearchRepoAdapter.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
-import {
-  projectRecipeRetrievalDocumentSet,
-  projectRecipeRetrievalSparseProjection,
-  serializeRecipeRetrievalDocumentSetForSparse,
-} from '../knowledge/RecipeRetrieval.js';
 import { parseRecipeIdFromRegionVectorId } from '../vector/RecipeRegionVectorIndex.js';
 import { CoarseRanker } from './CoarseRanker.js';
 import type { SearchItem } from './contextBoost.js';
@@ -30,6 +24,7 @@ import { contextBoost } from './contextBoost.js';
 import { FieldWeightedScorer } from './FieldWeightedScorer.js';
 import type { KnowledgeRetrievalCandidate, KnowledgeRetrievalPort } from './KnowledgeRetrieval.js';
 import { MultiSignalRanker } from './MultiSignalRanker.js';
+import { projectSearchDocument } from './SearchDocumentProjection.js';
 import type {
   DbRow,
   DocMeta,
@@ -50,7 +45,7 @@ import type {
   SearchVectorStore,
   VectorHit,
 } from './SearchTypes.js';
-import { buildSearchResponseMeta } from './SearchTypes.js';
+import { buildSearchResponseMeta, groupByKind } from './SearchTypes.js';
 
 export { FieldWeightedScorer } from './FieldWeightedScorer.js';
 export type {
@@ -91,38 +86,6 @@ export { tokenize } from './tokenizer.js';
 // G-C P1:源锚漂移的检索降权因子(乘性)。0.85=温和降权——漂移不等于错误,
 // 只在同分附近让 active 上浮,不把漂移知识挤出结果(降级消费而非排除)。
 const DRIFTED_SOURCE_REF_SCORE_FACTOR = 0.85;
-
-function parseJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  if (typeof value !== 'string' || !value) {
-    return {};
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-
-function parseJsonArray(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.filter((item): item is string => typeof item === 'string');
-  }
-  if (typeof value !== 'string' || !value) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === 'string')
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 /**
  * SearchEngine - 完整搜索服务
@@ -225,8 +188,7 @@ export class SearchEngine {
       }
 
       for (const r of entries) {
-        const text = this._buildDocText(r);
-        const meta = this._buildDocMeta(r);
+        const { text, meta } = projectSearchDocument(r);
         meta.status = r.status; // buildIndex uses mapped status from lifecycle
         this.scorer.addDocument(r.id, text, meta);
       }
@@ -513,12 +475,7 @@ export class SearchEngine {
     );
 
     if (options.groupByKind) {
-      response.byKind = { rule: [], pattern: [], fact: [] };
-      for (const r of results) {
-        const kind = r.kind || 'pattern';
-        const bucket = response.byKind[kind] ?? response.byKind.pattern;
-        bucket.push(r);
-      }
+      response.byKind = groupByKind(results);
     }
 
     if (cacheKey) {
@@ -789,6 +746,70 @@ export class SearchEngine {
     return items;
   }
 
+  /** 两个旧 dense 来源只适配 score/content 差异，同义字段在此映射；canonical/RRF 保留自身合同。 */
+  #mapSemanticHit(
+    rawId: string,
+    metadata: Record<string, unknown>,
+    content: string | undefined,
+    score: number,
+    rawVectorScore: number
+  ): SearchResultItem {
+    const entryId = this.#resolveVectorEntryId(rawId, metadata);
+    const rounded = Math.round(score * 1000) / 1000;
+    return {
+      id: entryId,
+      title: (metadata.title as string) || entryId,
+      type: 'recipe',
+      kind: (metadata.kind as string) || 'pattern',
+      status: (metadata.status as string) || 'active',
+      score: rounded,
+      semanticScore: rounded,
+      vectorScore: rounded,
+      semanticUsed: true,
+      vectorUsed: true,
+      description: (metadata.description as string) || undefined,
+      content,
+      language: (metadata.language as string) || '',
+      dimensionId: (metadata.dimensionId as string) || '',
+      category: (metadata.category as string) || '',
+      knowledgeType: (metadata.knowledgeType as string) || '',
+      scope: (metadata.scope as string) || '',
+      tags: this.#readStringArray(metadata.tags),
+      scoreBreakdown: { semantic: score, vector: rawVectorScore },
+    };
+  }
+
+  /** 同步后处理留在原来源的 try/catch 内；原始空 lane 的回退仍由调用者决定。 */
+  #finishSemanticSearch(
+    results: SearchResultItem[],
+    query: string,
+    type: string,
+    limit: number,
+    filters: NormalizedSearchMetadataFilters
+  ) {
+    const projection = this.#projectLiveVectorCandidates(this.#deduplicateByEntryId(results));
+    if (!projection.ok) {
+      return {
+        items: this._scorerSearch(query, type, limit, filters),
+        actualMode: 'weighted',
+        fallbackReason: 'knowledge_truth_lookup_failed',
+        semanticUsed: false,
+        vectorUsed: false,
+      };
+    }
+    const live =
+      type === 'all'
+        ? projection.items
+        : projection.items.filter((item) => this.#matchesTypeFilter(item, type));
+    return {
+      items: this.#applyMetadataFilters(live, filters).slice(0, limit),
+      actualMode: 'semantic',
+      semanticUsed: true,
+      vectorUsed: true,
+      filteredOrphanVectorCount: projection.filteredOrphanVectorCount,
+    };
+  }
+
   /**
    * 语义搜索 - 需要 AI Provider 的 embed 功能
    * 不可用时降级到 FieldWeighted 搜索
@@ -842,58 +863,17 @@ export class SearchEngine {
           filter: this.#hasMetadataFilters(filters) ? filters : null,
         });
         if (vectorResults.length > 0) {
-          let results: SearchResultItem[] = vectorResults.map((vr) => {
+          const results = vectorResults.map((vr) => {
             const item = vr.item as Record<string, unknown>;
-            const metadata = (item.metadata || {}) as Record<string, unknown>;
-            const rawId = (item.id as string) || '';
-            const entryId = this.#resolveVectorEntryId(rawId, metadata);
-            return {
-              id: entryId,
-              title: (metadata.title as string) || entryId,
-              type: 'recipe',
-              kind: (metadata.kind as string) || 'pattern',
-              status: (metadata.status as string) || 'active',
-              score: Math.round(vr.score * 1000) / 1000,
-              semanticScore: Math.round(vr.score * 1000) / 1000,
-              vectorScore: Math.round(vr.score * 1000) / 1000,
-              semanticUsed: true,
-              vectorUsed: true,
-              description: (metadata.description as string) || undefined,
-              content: (item.content as string) || undefined,
-              language: (metadata.language as string) || '',
-              dimensionId: (metadata.dimensionId as string) || '',
-              category: (metadata.category as string) || '',
-              knowledgeType: (metadata.knowledgeType as string) || '',
-              scope: (metadata.scope as string) || '',
-              tags: this.#readStringArray(metadata.tags),
-              scoreBreakdown: { semantic: vr.score, vector: vr.score },
-            } as SearchResultItem;
+            return this.#mapSemanticHit(
+              (item.id as string) || '',
+              (item.metadata || {}) as Record<string, unknown>,
+              (item.content as string) || undefined,
+              vr.score,
+              vr.score
+            );
           });
-          // 按 entryId 去重 — 同一 Recipe 的多个 chunk 只保留最高分
-          results = this.#deduplicateByEntryId(results);
-          const projection = this.#projectLiveVectorCandidates(results);
-          if (!projection.ok) {
-            return {
-              items: this._scorerSearch(query, type, limit, filters),
-              actualMode: 'weighted',
-              fallbackReason: 'knowledge_truth_lookup_failed',
-              semanticUsed: false,
-              vectorUsed: false,
-            };
-          }
-          results = projection.items;
-          if (type !== 'all') {
-            results = results.filter((r: SearchResultItem) => this.#matchesTypeFilter(r, type));
-          }
-          results = this.#applyMetadataFilters(results, filters);
-          results = results.slice(0, limit);
-          return {
-            items: results,
-            actualMode: 'semantic',
-            semanticUsed: true,
-            vectorUsed: true,
-            filteredOrphanVectorCount: projection.filteredOrphanVectorCount,
-          };
+          return this.#finishSemanticSearch(results, query, type, limit, filters);
         }
       } catch (err: unknown) {
         this.logger.warn('VectorService search failed, falling back to legacy path', {
@@ -944,59 +924,16 @@ export class SearchEngine {
             vectorResults = await this.vectorStore.query(queryEmbedding, limit * 2);
           }
           if (vectorResults && vectorResults.length > 0) {
-            let results: SearchResultItem[] = vectorResults.map((vr: VectorHit) => {
-              const rawId = vr.id || '';
-              const entryId = this.#resolveVectorEntryId(
-                rawId,
-                (vr.metadata ?? {}) as Record<string, unknown>
-              );
-              return {
-                id: entryId,
-                title: (vr.metadata?.title as string) || entryId,
-                type: 'recipe',
-                kind: (vr.metadata?.kind as string) || 'pattern',
-                status: (vr.metadata?.status as string) || 'active',
-                score: Math.round((vr.similarity || vr.score || 0) * 1000) / 1000,
-                semanticScore: Math.round((vr.similarity || vr.score || 0) * 1000) / 1000,
-                vectorScore: Math.round((vr.similarity || vr.score || 0) * 1000) / 1000,
-                semanticUsed: true,
-                vectorUsed: true,
-                description: (vr.metadata?.description as string) || undefined,
-                content: vr.content,
-                language: (vr.metadata?.language as string) || '',
-                dimensionId: (vr.metadata?.dimensionId as string) || '',
-                category: (vr.metadata?.category as string) || '',
-                knowledgeType: (vr.metadata?.knowledgeType as string) || '',
-                scope: (vr.metadata?.scope as string) || '',
-                tags: this.#readStringArray(vr.metadata?.tags),
-                scoreBreakdown: { semantic: vr.similarity || vr.score || 0, vector: vr.score ?? 0 },
-              } as SearchResultItem;
-            });
-            // 按 entryId 去重
-            results = this.#deduplicateByEntryId(results);
-            const projection = this.#projectLiveVectorCandidates(results);
-            if (!projection.ok) {
-              return {
-                items: this._scorerSearch(query, type, limit, filters),
-                actualMode: 'weighted',
-                fallbackReason: 'knowledge_truth_lookup_failed',
-                semanticUsed: false,
-                vectorUsed: false,
-              };
-            }
-            results = projection.items;
-            if (type !== 'all') {
-              results = results.filter((r: SearchResultItem) => this.#matchesTypeFilter(r, type));
-            }
-            results = this.#applyMetadataFilters(results, filters);
-            results = results.slice(0, limit);
-            return {
-              items: results,
-              actualMode: 'semantic',
-              semanticUsed: true,
-              vectorUsed: true,
-              filteredOrphanVectorCount: projection.filteredOrphanVectorCount,
-            };
+            const results = vectorResults.map((vr) =>
+              this.#mapSemanticHit(
+                vr.id || '',
+                (vr.metadata ?? {}) as Record<string, unknown>,
+                vr.content,
+                vr.similarity || vr.score || 0,
+                vr.score ?? 0
+              )
+            );
+            return this.#finishSemanticSearch(results, query, type, limit, filters);
           }
         } catch (vecErr: unknown) {
           const errorMessage = vecErr instanceof Error ? vecErr.message : String(vecErr);
@@ -1470,8 +1407,7 @@ export class SearchEngine {
         }
 
         // 解析文档文本（复用 buildIndex 逻辑）
-        const text = this._buildDocText(r);
-        const meta = this._buildDocMeta(r);
+        const { text, meta } = projectSearchDocument(r);
         this.scorer.updateDocument(r.id, text, meta);
         added++;
       }
@@ -1491,86 +1427,16 @@ export class SearchEngine {
   }
 
   /**
-   * 从 DB 行构建索引文本
-   *
-   * 高价值字段（title, trigger）通过重复出现提升 TF 权重
-   * — title ×3, trigger ×2, description ×1.5（通过重复 token 实现）
-   * 这确保标题匹配的文档获得显著更高的分数
-   * 注：FieldWeightedScorer 内部已有字段权重机制，此文本用于兼容通用 scorer 输入。
+   * 兼容旧单文本入口，返回 canonical sparse roles 拼接后的文本。
+   * 字段权重由 FieldWeightedScorer 负责；正式 build/refresh 一次取回 text 和 meta。
    */
   _buildDocText(r: DbRow) {
-    return serializeRecipeRetrievalDocumentSetForSparse(
-      projectRecipeRetrievalDocumentSet({
-        ...r,
-        content: parseJsonObject(r.content),
-        reasoning: parseJsonObject(r.reasoning),
-        retrievalProfile: r.retrievalProfile
-          ? (parseJsonObject(r.retrievalProfile) as unknown as RecipeRetrievalProfile)
-          : null,
-        tags: parseJsonArray(r.tags),
-      })
-    );
+    return projectSearchDocument(r).text;
   }
 
-  /**
-   * 从 DB 行构建文档 meta
-   */
+  /** 旧调用入口保留；正式索引构建一次投影即可同时取得 text/meta。 */
   _buildDocMeta(r: DbRow) {
-    let parsedTags: string[] = [];
-    try {
-      parsedTags = JSON.parse(r.tags || '[]');
-    } catch {
-      /* ignore */
-    }
-    let usageCount = 0;
-    let authorityScore = 0;
-    try {
-      const stats = JSON.parse(r.stats || '{}');
-      usageCount = (stats.adoptions || 0) + (stats.applications || 0) + (stats.searchHits || 0);
-      authorityScore = stats.authority || 0;
-    } catch {
-      /* ignore */
-    }
-    let qualityOverall = 0;
-    try {
-      qualityOverall = JSON.parse(r.quality || '{}').overall || 0;
-    } catch {
-      /* ignore */
-    }
-    const documentSet = projectRecipeRetrievalDocumentSet({
-      ...r,
-      content: parseJsonObject(r.content),
-      reasoning: parseJsonObject(r.reasoning),
-      retrievalProfile: r.retrievalProfile
-        ? (parseJsonObject(r.retrievalProfile) as unknown as RecipeRetrievalProfile)
-        : null,
-      tags: parseJsonArray(r.tags),
-    });
-    const sparseProjection = projectRecipeRetrievalSparseProjection(documentSet);
-    return {
-      type: 'knowledge',
-      title: r.title,
-      trigger: r.trigger || '',
-      description: r.description || '',
-      contentText: sparseProjection.text,
-      retrievalIntentText: sparseProjection.intentText,
-      retrievalBoundaryText: sparseProjection.boundaryText,
-      retrievalSupportText: sparseProjection.supportText,
-      status: r.lifecycle,
-      knowledgeType: r.knowledgeType,
-      kind: r.kind || 'pattern',
-      language: r.language || '',
-      dimensionId: r.dimensionId || '',
-      category: r.category || '',
-      scope: r.scope || '',
-      updatedAt: r.updatedAt || null,
-      createdAt: r.createdAt || null,
-      difficulty: r.difficulty || 'intermediate',
-      tags: parsedTags,
-      usageCount,
-      authorityScore,
-      qualityScore: qualityOverall,
-    };
+    return projectSearchDocument(r).meta;
   }
 
   #metadataFilterOnlySearch(

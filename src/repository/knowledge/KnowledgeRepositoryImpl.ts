@@ -14,6 +14,7 @@ import {
 import { prepareCached } from '../../infrastructure/database/PreparedStatementCache.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { safeJsonParse, safeJsonStringify, unixNow } from '../../shared/utils/common.js';
+import { knowledgeSearchIndexSelection } from '../search/KnowledgeSearchProjection.js';
 
 /** Database connection wrapper interface */
 interface KnowledgeDatabaseWrapper {
@@ -1217,35 +1218,7 @@ export class KnowledgeRepositoryImpl {
   /** 查询所有非 deprecated 条目（buildIndex 用） */
   findNonDeprecatedSync() {
     return this.#drizzle
-      .select({
-        id: knowledgeEntries.id,
-        title: knowledgeEntries.title,
-        description: knowledgeEntries.description,
-        language: knowledgeEntries.language,
-        dimensionId: knowledgeEntries.dimensionId,
-        scope: knowledgeEntries.scope,
-        category: knowledgeEntries.category,
-        knowledgeType: knowledgeEntries.knowledgeType,
-        kind: knowledgeEntries.kind,
-        content: knowledgeEntries.content,
-        lifecycle: knowledgeEntries.lifecycle,
-        tags: knowledgeEntries.tags,
-        trigger: knowledgeEntries.trigger,
-        topicHint: knowledgeEntries.topicHint,
-        whenClause: knowledgeEntries.whenClause,
-        doClause: knowledgeEntries.doClause,
-        dontClause: knowledgeEntries.dontClause,
-        coreCode: knowledgeEntries.coreCode,
-        usageGuide: knowledgeEntries.usageGuide,
-        moduleName: knowledgeEntries.moduleName,
-        reasoning: knowledgeEntries.reasoning,
-        retrievalProfile: knowledgeEntries.retrievalProfile,
-        difficulty: knowledgeEntries.difficulty,
-        quality: knowledgeEntries.quality,
-        stats: knowledgeEntries.stats,
-        updatedAt: knowledgeEntries.updatedAt,
-        createdAt: knowledgeEntries.createdAt,
-      })
+      .select(knowledgeSearchIndexSelection)
       .from(knowledgeEntries)
       .where(ne(knowledgeEntries.lifecycle, 'deprecated'))
       .all();
@@ -1276,10 +1249,10 @@ export class KnowledgeRepositoryImpl {
         and(
           ne(knowledgeEntries.lifecycle, 'deprecated'),
           or(
-            like(knowledgeEntries.title, pattern),
-            like(knowledgeEntries.description, pattern),
-            like(knowledgeEntries.trigger, pattern),
-            like(knowledgeEntries.content, pattern)
+            sql`${knowledgeEntries.title} LIKE ${pattern} ESCAPE '\\'`,
+            sql`${knowledgeEntries.description} LIKE ${pattern} ESCAPE '\\'`,
+            sql`${knowledgeEntries.trigger} LIKE ${pattern} ESCAPE '\\'`,
+            sql`${knowledgeEntries.content} LIKE ${pattern} ESCAPE '\\'`
           )
         )
       )
@@ -1305,6 +1278,9 @@ export class KnowledgeRepositoryImpl {
         dimensionId: knowledgeEntries.dimensionId,
         scope: knowledgeEntries.scope,
         category: knowledgeEntries.category,
+        // 语义召回可能未携带这些 facets；正式仓储与 raw 详情投影必须提供同样的过滤事实。
+        knowledgeType: knowledgeEntries.knowledgeType,
+        kind: knowledgeEntries.kind,
         updatedAt: knowledgeEntries.updatedAt,
         createdAt: knowledgeEntries.createdAt,
         quality: knowledgeEntries.quality,
@@ -1327,35 +1303,7 @@ export class KnowledgeRepositoryImpl {
     // 与 raw SearchRepoAdapter 同口径：秒精度水位必须包含边界秒，索引更新按 id 幂等。
     const sinceEpoch = Math.floor(new Date(sinceIso).getTime() / 1000);
     return this.#drizzle
-      .select({
-        id: knowledgeEntries.id,
-        title: knowledgeEntries.title,
-        description: knowledgeEntries.description,
-        language: knowledgeEntries.language,
-        dimensionId: knowledgeEntries.dimensionId,
-        scope: knowledgeEntries.scope,
-        category: knowledgeEntries.category,
-        knowledgeType: knowledgeEntries.knowledgeType,
-        kind: knowledgeEntries.kind,
-        content: knowledgeEntries.content,
-        lifecycle: knowledgeEntries.lifecycle,
-        tags: knowledgeEntries.tags,
-        trigger: knowledgeEntries.trigger,
-        topicHint: knowledgeEntries.topicHint,
-        whenClause: knowledgeEntries.whenClause,
-        doClause: knowledgeEntries.doClause,
-        dontClause: knowledgeEntries.dontClause,
-        coreCode: knowledgeEntries.coreCode,
-        usageGuide: knowledgeEntries.usageGuide,
-        moduleName: knowledgeEntries.moduleName,
-        reasoning: knowledgeEntries.reasoning,
-        retrievalProfile: knowledgeEntries.retrievalProfile,
-        difficulty: knowledgeEntries.difficulty,
-        quality: knowledgeEntries.quality,
-        stats: knowledgeEntries.stats,
-        updatedAt: knowledgeEntries.updatedAt,
-        createdAt: knowledgeEntries.createdAt,
-      })
+      .select(knowledgeSearchIndexSelection)
       .from(knowledgeEntries)
       .where(gte(knowledgeEntries.updatedAt, sinceEpoch))
       .all();
