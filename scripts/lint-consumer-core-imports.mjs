@@ -1,6 +1,7 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { classifyCoreImportSpecifier } from './public-api-boundary-policy.mjs';
 
 export { classifyCoreImportSpecifier } from './public-api-boundary-policy.mjs';
@@ -402,7 +403,14 @@ async function main() {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// 本地 file 依赖和 worktree 可经符号链接启动；ESM 已解析真实路径，argv 仍可能保留链接。
+// 统一真实路径与 URL 编码，避免 CLI 静默跳过；被当作库导入或通过 stdin 使用时保持无副作用。
+const entryPath = process.argv[1];
+if (
+  entryPath &&
+  existsSync(entryPath) &&
+  import.meta.url === pathToFileURL(realpathSync(entryPath)).href
+) {
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

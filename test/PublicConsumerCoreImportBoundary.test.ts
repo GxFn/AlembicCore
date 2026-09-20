@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,15 +25,15 @@ async function writeFixtureFile(root: string, relativePath: string, content: str
   await writeFile(absolutePath, content, 'utf8');
 }
 
-function runBoundaryLint(root: string, args: string[] = []) {
-  return execFileAsync(process.execPath, [scriptPath, root, ...args], {
+function runBoundaryLint(root: string, args: string[] = [], entry = scriptPath) {
+  return execFileAsync(process.execPath, [entry, root, ...args], {
     maxBuffer: 1024 * 1024,
   });
 }
 
-async function expectBoundaryFailure(root: string, args: string[] = []) {
+async function expectBoundaryFailure(root: string, args: string[] = [], entry = scriptPath) {
   try {
-    await runBoundaryLint(root, args);
+    await runBoundaryLint(root, args, entry);
   } catch (error) {
     return error as Error & { code?: number; stdout?: string };
   }
@@ -45,6 +45,29 @@ afterEach(async () => {
 });
 
 describe('consumer core import boundary lint', () => {
+  it.each([false, true])('runs through a symlinked CLI path (blocked=%s)', async (blocked) => {
+    const root = await createConsumerFixture();
+    const entry = join(root, 'linked lint entry.mjs');
+    await symlink(scriptPath, entry);
+    const specifier = blocked
+      ? '@alembic/core/workflows/cold-start/' + 'ColdStartIntent'
+      : '@alembic/core/knowledge';
+    await writeFixtureFile(
+      root,
+      'src/app.ts',
+      `import * as core from '${specifier}';\nvoid core;\n`
+    );
+    if (blocked) {
+      const error = await expectBoundaryFailure(root, [], entry);
+      expect(error.code).toBe(1);
+      expect(error.stdout).toContain('Core import boundary violations: 1');
+    } else {
+      const { stdout } = await runBoundaryLint(root, [], entry);
+      expect(stdout).toContain('Core import boundary OK');
+      expect(stdout).toContain('1 @alembic/core imports');
+    }
+  });
+
   it('allows stable public facade imports without a config file', async () => {
     const root = await createConsumerFixture();
     await writeFixtureFile(
