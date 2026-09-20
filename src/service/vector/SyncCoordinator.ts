@@ -17,7 +17,7 @@ import type { DrizzleDB } from '../../infrastructure/database/drizzle/index.js';
 import { knowledgeEntries } from '../../infrastructure/database/drizzle/schema.js';
 import type { EventBus } from '../../infrastructure/event/EventBus.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import { VectorStore } from '../../infrastructure/vector/VectorStore.js';
+import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
 import { queryNonDeprecatedEntries } from '../../repository/search/SearchRepoAdapter.js';
 import { CORE_DIAGNOSTIC_CODES } from '../../shared/DiagnosticCodes.js';
 import type { VectorChunkEnricher } from './EnrichmentTypes.js';
@@ -68,33 +68,6 @@ export interface VectorLifecycleCoordinatorConfig {
 
 /** @deprecated Use VectorLifecycleCoordinatorConfig. */
 export type SyncCoordinatorConfig = VectorLifecycleCoordinatorConfig;
-
-class LifecycleVectorStoreBridge extends VectorStore {
-  readonly #reader: VectorIndexReader;
-  readonly #writer: VectorIndexWriter;
-
-  constructor(reader: VectorIndexReader, writer: VectorIndexWriter) {
-    super();
-    this.#reader = reader;
-    this.#writer = writer;
-  }
-
-  listIds(): Promise<string[]> {
-    return this.#reader.listIds();
-  }
-
-  getById(id: string): Promise<Record<string, unknown> | null> {
-    return this.#reader.getById(id);
-  }
-
-  remove(id: string): Promise<void> {
-    return this.#writer.remove(id);
-  }
-
-  batchUpsert(items: Parameters<VectorIndexWriter['batchUpsert']>[0]): Promise<void> {
-    return this.#writer.batchUpsert(items);
-  }
-}
 
 class SingleStoreRecipeVectorTruthRemover implements RecipeVectorTruthRemover {
   readonly #store: Pick<VectorStore, 'listIds' | 'remove'>;
@@ -163,7 +136,7 @@ export interface SyncCoordinatorReconcileResult {
 export class VectorLifecycleCoordinator {
   #reader: VectorIndexReader;
   #writer: VectorIndexWriter;
-  #recipeRegionStore: VectorStore;
+  #recipeRegionStore: Parameters<typeof syncRecipeSemanticRegionVectors>[0];
   #embedProvider: EmbedProvider | null;
   #debounceMs: number;
   #maxBatchSize: number;
@@ -186,7 +159,14 @@ export class VectorLifecycleCoordinator {
     }
     this.#reader = reader;
     this.#writer = writer;
-    this.#recipeRegionStore = config.vectorStore ?? new LifecycleVectorStoreBridge(reader, writer);
+    // 保留 aggregate 的历史路由优先级；闭包调用保留各 port 的 this，
+    // 不再继承 init/search/destroy 等同步流程未使用的存储方法。
+    this.#recipeRegionStore = config.vectorStore ?? {
+      listIds: () => reader.listIds(),
+      getById: (id) => reader.getById(id),
+      batchUpsert: (items) => writer.batchUpsert(items),
+      remove: (id) => writer.remove(id),
+    };
     this.#recipeVectorTruthRemover =
       config.recipeVectorTruthRemover ??
       new SingleStoreRecipeVectorTruthRemover(this.#recipeRegionStore);

@@ -1,6 +1,11 @@
 /** SyncCoordinator — CRUD→向量同步 单元测试 */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildRecipeSemanticRegionChunks } from '../src/service/vector/RecipeRegionVectorIndex.js';
+import {
+  VectorIndexReaderAdapter,
+  VectorIndexWriterAdapter,
+} from '../src/service/vector/VectorIndexPorts.js';
 
 // ── Mock 工厂 ──
 
@@ -119,6 +124,64 @@ describe('SyncCoordinator', () => {
     expect(writer.remove).toHaveBeenCalledWith('entry_orphan');
     expect('remove' in reader).toBe(false);
     expect('listIds' in writer).toBe(false);
+  });
+
+  it.each([
+    false,
+    true,
+  ])('preserves stateful port receivers and region store priority (aggregate: %s)', async (withAggregate) => {
+    const portStore = createMockVectorStore();
+    const aggregate = withAggregate ? createMockVectorStore() : undefined;
+    const selectedStore = aggregate ?? portStore;
+    const reader = new VectorIndexReaderAdapter({
+      ...portStore,
+      getStats: async () => ({ count: 0, indexSize: 0 }),
+      searchVector: async () => [],
+    });
+    const writer = new VectorIndexWriterAdapter(portStore);
+    const events = createMockEventBus();
+    const entry = { id: 'live', title: 'Live Recipe', content: 'Keep derived regions current.' };
+    const chunks = buildRecipeSemanticRegionChunks(entry);
+    await selectedStore.batchUpsert([
+      { id: 'entry_live' },
+      { id: 'recipe_region_live_identity_oldhash' },
+    ]);
+    const coordinator = new VectorLifecycleCoordinator({
+      contextualEnricher: null,
+      debounceMs: 100,
+      embedProvider: createMockEmbedProvider(),
+      vectorStore: aggregate as never,
+      reader,
+      writer,
+    });
+
+    try {
+      coordinator.bindEventBus(events as never);
+      events.emit('knowledge:changed', { action: 'update', entry });
+      await coordinator.flush();
+
+      expect(chunks.length).toBeGreaterThan(0);
+      // region 路由优先 aggregate；live 更新中的 entry_* 退休仍走独立 writer。
+      expect(await selectedStore.listIds()).toEqual([
+        ...(withAggregate ? ['entry_live'] : []),
+        ...chunks.map((c) => c.id),
+      ]);
+      for (const chunk of chunks) {
+        expect(selectedStore.getById).toHaveBeenCalledWith(chunk.id);
+      }
+
+      // 终态清理沿用同一个 region store，且不依赖 embedding 可用性。
+      coordinator.setEmbedProvider(null);
+      events.emit('knowledge:deleted', { id: entry.id });
+      await coordinator.flush();
+      expect(await selectedStore.listIds()).toEqual([]);
+      if (withAggregate) {
+        expect(portStore.batchUpsert).not.toHaveBeenCalled();
+        expect(portStore.remove.mock.calls).toEqual([['entry_live']]);
+      }
+    } finally {
+      await coordinator.destroy();
+    }
   });
   let vectorStore: ReturnType<typeof createMockVectorStore>;
   let embedProvider: ReturnType<typeof createMockEmbedProvider>;

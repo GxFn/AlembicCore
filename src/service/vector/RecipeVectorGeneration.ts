@@ -11,6 +11,7 @@ import {
   type RecipeRegionSourceEntry,
   syncRecipeSemanticRegionVectors,
 } from './RecipeRegionVectorIndex.js';
+import type { VectorIndexReader } from './VectorIndexPorts.js';
 import type { EmbedProvider } from './VectorService.js';
 
 export const RECIPE_VECTOR_GENERATION_MANIFEST_VERSION = 1 as const;
@@ -396,7 +397,7 @@ export function buildRecipeVectorGenerationManifest(
 }
 
 export async function inspectRecipeVectorGeneration(
-  store: VectorStore,
+  store: Pick<VectorIndexReader, 'listIds' | 'getById'>,
   entries: RecipeRegionSourceEntry[],
   expectation: number | null | RecipeVectorGenerationInspectionOptions
 ): Promise<RecipeVectorGenerationInspection> {

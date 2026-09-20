@@ -6,6 +6,7 @@ import {
   type RecipeRetrievalDocumentRole,
 } from '../knowledge/RecipeRetrieval.js';
 import { asEmbeddingPort } from './EmbeddingPort.js';
+import type { VectorIndexReader, VectorIndexWriter } from './VectorIndexPorts.js';
 import type { EmbedProvider } from './VectorService.js';
 
 export const RECIPE_SEMANTIC_REGION_METADATA_TYPE = 'recipe-semantic-region';
@@ -447,7 +448,9 @@ function compatibilityRegionClass(role: RecipeRetrievalDocumentRole): RecipeSema
 }
 
 export async function syncRecipeSemanticRegionVectors(
-  vectorStore: VectorStore,
+  // 同步只借用读取、批写和删除能力，初始化/搜索/关闭由存储所有者负责。
+  vectorStore: Pick<VectorIndexReader, 'listIds' | 'getById'> &
+    Pick<VectorIndexWriter, 'batchUpsert' | 'remove'>,
   embedProvider: EmbedProvider | null,
   entries: RecipeRegionSourceEntry[],
   options: RecipeRegionSyncOptions = {}
