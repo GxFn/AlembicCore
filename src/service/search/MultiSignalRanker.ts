@@ -1,6 +1,6 @@
 /**
- * MultiSignalRanker — 6 信号加权排序
- * Signals: relevance, authority, recency, popularity, difficulty, contextMatch
+ * MultiSignalRanker — 7 信号加权排序
+ * Signals: relevance, authority, recency, popularity, difficulty, contextMatch, vector
  * 不同场景使用不同权重配置（向后兼容旧配置中的 'seasonality' 键）
  */
 
@@ -259,12 +259,11 @@ export class VectorSignal {
 export class MultiSignalRanker {
   #signals;
   #scenarioWeights;
-  #realtimeWeights: Map<string, number> = new Map();
-  #recentlyUsed: Set<string> = new Set();
 
   constructor(
     options: {
       scenarioWeights?: Record<string, Record<string, number>>;
+      /** 旧构造参数保留；评分只读候选事实，搜索事件仍由 SearchEngine 发出。 */
       signalBus?: import('../../infrastructure/signal/SignalBus.js').SignalBus;
     } = {}
   ) {
@@ -288,22 +287,6 @@ export class MultiSignalRanker {
       }
     }
     this.#scenarioWeights = { ...SCENARIO_WEIGHTS, ...remapped };
-
-    // Phase 2: 订阅实时信号更新权重
-    if (options.signalBus) {
-      options.signalBus.subscribe('quality|usage', (signal) => {
-        this.#onSignal(signal);
-      });
-    }
-  }
-
-  #onSignal(signal: import('../../infrastructure/signal/SignalBus.js').Signal): void {
-    if (signal.type === 'quality' && signal.target) {
-      this.#realtimeWeights.set(signal.target, signal.value);
-    }
-    if (signal.type === 'usage' && signal.target) {
-      this.#recentlyUsed.add(signal.target);
-    }
   }
 
   /**

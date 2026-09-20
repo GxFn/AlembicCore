@@ -9,6 +9,7 @@
  *  - FieldWeightedScorer    (增量 remove/update/compact, lexical 评分器)
  */
 
+import { SignalBus } from '../src/infrastructure/signal/SignalBus.js';
 import { CoarseRanker } from '../src/service/search/CoarseRanker.js';
 import { contextBoost } from '../src/service/search/contextBoost.js';
 import {
@@ -297,6 +298,21 @@ describe('ContextMatchSignal', () => {
 describe('MultiSignalRanker', () => {
   const ranker = new MultiSignalRanker();
 
+  test('keeps ranking stateless without retaining unused bus subscriptions', () => {
+    const signalBus = new SignalBus();
+    const subject = new MultiSignalRanker({ signalBus });
+    const candidates = [
+      { id: 'a', title: 'alpha', recallScore: 0.5 },
+      { id: 'b', title: 'beta', recallScore: 0.2 },
+    ];
+    const before = subject.rank(candidates, { query: 'alpha' });
+    for (const type of ['quality', 'usage'] as const) {
+      signalBus.emit({ type, source: 'test', target: 'b', value: 1, metadata: {}, timestamp: 0 });
+    }
+    expect(subject.rank(candidates, { query: 'alpha' })).toEqual(before);
+    expect(signalBus.listenerCount).toBe(0);
+  });
+
   test('returns empty for empty/null input', () => {
     expect(ranker.rank([])).toEqual([]);
     expect(ranker.rank(null)).toEqual([]);
@@ -347,7 +363,25 @@ describe('MultiSignalRanker', () => {
       language: 'javascript',
     });
     expect(result[0].signals).toHaveProperty('contextMatch');
-    expect(result[0].rankerScore).toBeGreaterThan(0);
+    const equivalent = new MultiSignalRanker({
+      scenarioWeights: {
+        custom: {
+          relevance: 0.5,
+          authority: 0.1,
+          recency: 0.1,
+          popularity: 0.1,
+          difficulty: 0.1,
+          contextMatch: 0.1,
+        },
+      },
+    });
+    expect(result).toEqual(
+      equivalent.rank([{ id: 'a', recallScore: 0.5, language: 'javascript' }], {
+        query: 'test',
+        scenario: 'custom',
+        language: 'javascript',
+      })
+    );
   });
 
   test('sorts by rankerScore descending', () => {
@@ -422,7 +456,7 @@ describe('contextBoost', () => {
  * ════════════════════════════════════════════════════════════════════ */
 
 describe('FieldWeightedScorer incremental', () => {
-  let scorer;
+  let scorer: FieldWeightedScorer;
 
   beforeEach(() => {
     scorer = new FieldWeightedScorer();
@@ -431,32 +465,25 @@ describe('FieldWeightedScorer incremental', () => {
     scorer.addDocument('d3', 'angular signals effect');
   });
 
-  test('addDocument with duplicate id replaces old document', () => {
+  test.each(['addDocument', 'updateDocument'] as const)('%s replaces the same id', (method) => {
+    scorer[method]('d1', 'python django flask');
     expect(scorer.totalDocs).toBe(3);
-    scorer.addDocument('d1', 'new content for d1');
-    expect(scorer.totalDocs).toBe(3);
-    // old tokens should be removed
-    const result = scorer.search('react hooks', 5);
-    const d1Match = result.find((r) => r.id === 'd1');
-    expect(d1Match).toBeUndefined(); // 'react hooks' no longer in d1
+    expect(scorer.search('react hooks', 10).some((row) => row.id === 'd1')).toBe(false);
+    expect(scorer.search('python', 10).some((row) => row.id === 'd1')).toBe(true);
   });
 
-  test('removeDocument reduces totalDocs', () => {
+  test('removeDocument updates membership, frequencies and searchable documents', () => {
+    expect(scorer.hasDocument('d2')).toBe(true);
+    expect(scorer.docFreq.vue).toBe(1);
     expect(scorer.removeDocument('d2')).toBe(true);
     expect(scorer.totalDocs).toBe(2);
     expect(scorer.hasDocument('d2')).toBe(false);
+    expect(scorer.docFreq.vue).toBeUndefined();
+    expect(scorer.search('vue', 10).some((row) => row.id === 'd2')).toBe(false);
   });
 
   test('removeDocument returns false for non-existent id', () => {
     expect(scorer.removeDocument('nonexistent')).toBe(false);
-  });
-
-  test('removeDocument updates docFreq correctly', () => {
-    // 'vue' should have df=1
-    expect(scorer.docFreq.vue).toBe(1);
-    scorer.removeDocument('d2');
-    // 'vue' df should drop to 0 and be deleted
-    expect(scorer.docFreq.vue).toBeUndefined();
   });
 
   test('removeDocument updates semantic topic frequencies', () => {
@@ -472,26 +499,6 @@ describe('FieldWeightedScorer incremental', () => {
 
     expect(scorer.topicDocFreq.architecture).toBeUndefined();
     expect(scorer.topicDocFreq.rule).toBeUndefined();
-  });
-
-  test('search correctly skips tombstones', () => {
-    scorer.removeDocument('d1');
-    const result = scorer.search('react', 10);
-    expect(result.find((r) => r.id === 'd1')).toBeUndefined();
-  });
-
-  test('updateDocument replaces content', () => {
-    scorer.updateDocument('d1', 'python django flask');
-    const reactResult = scorer.search('react', 10);
-    expect(reactResult.find((r) => r.id === 'd1')).toBeUndefined();
-    const pythonResult = scorer.search('python', 10);
-    expect(pythonResult.find((r) => r.id === 'd1')).toBeDefined();
-  });
-
-  test('hasDocument tracks correctly', () => {
-    expect(scorer.hasDocument('d1')).toBe(true);
-    scorer.removeDocument('d1');
-    expect(scorer.hasDocument('d1')).toBe(false);
   });
 
   test('compact triggers when nullRatio > 30% and docs > 100', () => {

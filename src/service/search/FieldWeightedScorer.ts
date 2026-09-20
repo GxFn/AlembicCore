@@ -212,9 +212,8 @@ export class FieldWeightedScorer implements Scorer {
     return true;
   }
 
-  /** 更新文档（remove + add） */
+  /** 与 addDocument 共用同 id 替换逻辑，避免两次检查/移除。 */
   updateDocument(id: string, text: string, meta: Record<string, unknown> = {}) {
-    this.removeDocument(id);
     this.addDocument(id, text, meta);
   }
 
