@@ -21,15 +21,15 @@ export function getDiscovererRegistry() {
   if (!_registry) {
     _registry = new DiscovererRegistry();
     _registry
-      .register(new SpmDiscoverer())
-      .register(new NodeDiscoverer())
-      .register(new PythonDiscoverer())
-      .register(new JvmDiscoverer())
-      .register(new GoDiscoverer())
-      .register(new DartDiscoverer())
-      .register(new RustDiscoverer())
-      .register(new CustomConfigDiscoverer())
-      .register(new GenericDiscoverer());
+      .register(new SpmDiscoverer(), () => new SpmDiscoverer())
+      .register(new NodeDiscoverer(), () => new NodeDiscoverer())
+      .register(new PythonDiscoverer(), () => new PythonDiscoverer())
+      .register(new JvmDiscoverer(), () => new JvmDiscoverer())
+      .register(new GoDiscoverer(), () => new GoDiscoverer())
+      .register(new DartDiscoverer(), () => new DartDiscoverer())
+      .register(new RustDiscoverer(), () => new RustDiscoverer())
+      .register(new CustomConfigDiscoverer(), () => new CustomConfigDiscoverer())
+      .register(new GenericDiscoverer(), () => new GenericDiscoverer());
   }
   return _registry;
 }

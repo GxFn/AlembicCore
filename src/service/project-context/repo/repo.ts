@@ -1,7 +1,11 @@
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { type ConflictResult, getDiscovererRegistry } from '../../../core/discovery/index.js';
+import {
+  type ConflictResult,
+  type DiscovererRegistry,
+  getDiscovererRegistry,
+} from '../../../core/discovery/index.js';
 import type {
   DiscoveredFile,
   DiscoveredTarget,
@@ -196,22 +200,26 @@ export const repoProjectContextHandler: ProjectContextHandler = async (
     return createRepoFailure(repoIdentity.error, repoIdentity.errors);
   }
 
-  const facts = await collectRepoContextFacts({
-    context,
-    initialErrors: repoIdentity.errors,
-    payload,
-    project: request.project,
-    repo: repoIdentity.identity,
-    requestScope: request.scope,
-  });
-  throwIfProjectContextAborted(context);
-  const data = createRepoContextData(facts);
+  // 旧自定义 discoverer 可能返回内部可变数组，使用权持续到 repo 投影完成再释放。
+  return getDiscovererRegistry().withSession(async (registry) => {
+    const facts = await collectRepoContextFacts({
+      context,
+      initialErrors: repoIdentity.errors,
+      payload,
+      project: request.project,
+      registry,
+      repo: repoIdentity.identity,
+      requestScope: request.scope,
+    });
+    throwIfProjectContextAborted(context);
+    const data = createRepoContextData(facts);
 
-  return {
-    data,
-    errors: facts.errors.length > 0 ? dedupeErrors(facts.errors) : undefined,
-    refs: dedupeRefs([facts.repo.repo.ref, ...data.nextRefs]),
-  };
+    return {
+      data,
+      errors: facts.errors.length > 0 ? dedupeErrors(facts.errors) : undefined,
+      refs: dedupeRefs([facts.repo.repo.ref, ...data.nextRefs]),
+    };
+  }, context);
 };
 
 async function collectRepoContextFacts(input: {
@@ -219,6 +227,7 @@ async function collectRepoContextFacts(input: {
   initialErrors: readonly ProjectContextQueryError[];
   payload: RepoRequestPayload;
   project: CanonicalProjectContextRequest['project'];
+  registry: DiscovererRegistry;
   repo: RepoIdentity;
   requestScope: ProjectContextScope;
 }): Promise<RepoContextFacts> {
@@ -230,6 +239,7 @@ async function collectRepoContextFacts(input: {
   const sourceFacts = await collectRepoSourceFacts({
     context: input.context,
     maxFiles: input.payload.maxFiles,
+    registry: input.registry,
     repo: input.repo,
   });
   throwIfProjectContextAborted(input.context);
@@ -313,6 +323,7 @@ async function collectRepoContextFacts(input: {
 }
 
 async function collectRepoSourceFacts(input: {
+  registry: DiscovererRegistry;
   repo: RepoIdentity;
   maxFiles?: number;
   context?: ProjectContextExecutionContext;
@@ -326,6 +337,7 @@ async function collectRepoSourceFacts(input: {
   const discovery = await collectDiscoveryFacts({
     context: input.context,
     maxFiles: input.maxFiles ?? DEFAULT_MAX_FILES,
+    registry: input.registry,
     repo: input.repo,
   });
   throwIfProjectContextAborted(input.context);
@@ -568,11 +580,12 @@ async function readRepoManifestFacts(
 }
 
 async function collectDiscoveryFacts(input: {
+  registry: DiscovererRegistry;
   repo: RepoIdentity;
   maxFiles: number;
   context?: ProjectContextExecutionContext;
 }): Promise<DiscoveryFacts> {
-  const registry = getDiscovererRegistry();
+  const registry = input.registry;
   const errors: ProjectContextQueryError[] = [];
   let conflict: ConflictResult | undefined;
   try {

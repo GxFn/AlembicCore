@@ -11,6 +11,7 @@
 import { WorkspaceResolver } from '../../shared/WorkspaceResolver.js';
 import type { ConflictResult, DetectMatch } from './DiscovererPreference.js';
 import { detectConflict, loadPreference } from './DiscovererPreference.js';
+import { withDiscovererSession } from './DiscovererSession.js';
 import {
   type ProjectDiscoverer,
   type ProjectDiscoveryExecutionContext,
@@ -19,24 +20,54 @@ import {
 
 export class DiscovererRegistry {
   #discoverers: ProjectDiscoverer[] = [];
+  #sessionFactories = new WeakMap<ProjectDiscoverer, () => ProjectDiscoverer>();
+  #pendingDetections = new Set<Promise<unknown>>();
 
   /**
-   * 注册一个 Discoverer 实现
+   * 注册一个 Discoverer 实现。可选工厂显式创建请求独立实例；不推测构造参数或复制私有字段。
    * @returns this 支持链式调用
    */
-  register(discoverer: ProjectDiscoverer) {
+  register(discoverer: ProjectDiscoverer, createSession?: () => ProjectDiscoverer) {
     this.#discoverers.push(discoverer);
+    if (createSession) {
+      this.#sessionFactories.set(discoverer, createSession);
+    }
     return this;
+  }
+
+  /**
+   * 在一个会话内完成检测、加载及读取；回调应返回已投影的值，不把 discoverer 留给异步调用。
+   * 旧 register(instance) 保留对象身份并串行使用，内置工厂实例可并发服务不同项目。
+   */
+  async withSession<T>(
+    read: (registry: DiscovererRegistry) => Promise<T>,
+    context?: ProjectDiscoveryExecutionContext
+  ): Promise<T> {
+    const registrations = this.#discoverers.map((discoverer) => ({
+      discoverer,
+      factory: this.#sessionFactories.get(discoverer),
+    }));
+    return withDiscovererSession(
+      registrations.filter(({ factory }) => !factory).map(({ discoverer }) => discoverer),
+      async () => {
+        const session = new DiscovererRegistry();
+        for (const { discoverer, factory } of registrations) {
+          session.register(factory ? factory() : discoverer);
+        }
+        try {
+          return await read(session);
+        } finally {
+          // Promise.all 可以先报取消；旧扩展中仍未结束的 detect 必须完成后才能释放对象。
+          await Promise.all(session.#pendingDetections);
+        }
+      },
+      context
+    );
   }
 
   /** 自动检测项目类型，返回最佳 Discoverer */
   async detect(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
-    const results = await Promise.all(
-      this.#discoverers.map(async (d) => ({
-        discoverer: d,
-        result: await detectWithCancellation(d, projectRoot, context),
-      }))
-    );
+    const results = await this.#detectAll(projectRoot, context);
 
     const matched = results
       .filter((r) => r.result.match)
@@ -61,12 +92,7 @@ export class DiscovererRegistry {
    * @returns 按 confidence 降序排列的匹配结果（偏好优先）
    */
   async detectAll(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
-    const results = await Promise.all(
-      this.#discoverers.map(async (d) => ({
-        discoverer: d,
-        result: await detectWithCancellation(d, projectRoot, context),
-      }))
-    );
+    const results = await this.#detectAll(projectRoot, context);
 
     const matched = results
       .filter((r) => r.result.match)
@@ -94,12 +120,7 @@ export class DiscovererRegistry {
     projectRoot: string,
     context?: ProjectDiscoveryExecutionContext
   ): Promise<ConflictResult> {
-    const results = await Promise.all(
-      this.#discoverers.map(async (d) => ({
-        discoverer: d,
-        result: await detectWithCancellation(d, projectRoot, context),
-      }))
-    );
+    const results = await this.#detectAll(projectRoot, context);
 
     const matches: DetectMatch[] = results
       .filter((r) => r.result.match)
@@ -122,6 +143,20 @@ export class DiscovererRegistry {
   /** 获取所有已注册的 Discoverer */
   getAll() {
     return [...this.#discoverers];
+  }
+
+  #detectAll(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
+    const work = this.#discoverers.map(async (discoverer) => ({
+      discoverer,
+      result: await detectWithCancellation(discoverer, projectRoot, context),
+    }));
+    // 对外保留 Promise.all 的既有错误语义，会话只用 allSettled 等待剩余 worker 收尾。
+    const settled = Promise.allSettled(work);
+    this.#pendingDetections.add(settled);
+    void settled.then(() => {
+      this.#pendingDetections.delete(settled);
+    });
+    return Promise.all(work);
   }
 }
 

@@ -1,9 +1,16 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { resetDiscovererRegistry } from '../src/core/discovery/index.js';
+import {
+  DiscovererRegistry,
+  getDiscovererRegistry,
+  NodeDiscoverer,
+  ProjectDiscoverer,
+  resetDiscovererRegistry,
+} from '../src/core/discovery/index.js';
+import type { DiscoveredTarget } from '../src/core/discovery/ProjectDiscoverer.js';
 import type {
   ProjectContextUnavailableData,
   RepoContext,
@@ -17,7 +24,239 @@ describe('ProjectContext PCQ-7 repo context', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetDiscovererRegistry();
+  });
+
+  it('isolates targets, dependency facts, and files when two repo requests interleave', async () => {
+    await withFixture(
+      {
+        'package.json': JSON.stringify({ name: 'project-a', dependencies: { 'dep-a': '1.0.0' } }),
+        'src/a.ts': 'export const a = 1;',
+      },
+      async (firstRoot) => {
+        await withFixture(
+          {
+            'package.json': JSON.stringify({
+              name: 'project-b',
+              dependencies: { 'dep-b': '1.0.0' },
+            }),
+            'src/b.js': 'export const b = 2;',
+          },
+          async (secondRoot) => {
+            const a = await fs.realpath(firstRoot);
+            const b = await fs.realpath(secondRoot);
+            const entered = Promise.withResolvers<void>();
+            const release = Promise.withResolvers<void>();
+            const load = NodeDiscoverer.prototype.load;
+            // 只控制交错时机；解析清单、枚举源码和 repo 投影仍经过真实入口。
+            vi.spyOn(NodeDiscoverer.prototype, 'load').mockImplementation(async function (
+              this: NodeDiscoverer,
+              root
+            ) {
+              await load.call(this, root);
+              if (root === a) {
+                entered.resolve();
+                await release.promise;
+              }
+            });
+            const first = ProjectContext.execute({
+              kind: 'repo',
+              payload: { includeMapSummary: false },
+              scope: { projectRoot: a },
+            });
+            await entered.promise;
+            try {
+              const second = await ProjectContext.execute({
+                kind: 'repo',
+                payload: { includeMapSummary: false },
+                scope: { projectRoot: b },
+              });
+              expect((second.data as RepoContext).targets.map((target) => target.name)).toEqual([
+                'project-b',
+              ]);
+            } finally {
+              release.resolve();
+            }
+            const result = await first;
+            const data = result.data as RepoContext;
+
+            expect(result.errors).toBeUndefined();
+            expect(data.targets.map((target) => target.name)).toEqual(['project-a']);
+            expect(data.dependencyGraph?.edges).toEqual([
+              { from: 'project-a', to: 'dep-a', type: 'depends_on' },
+            ]);
+            expect(data.languages).toEqual([{ fileCount: 1, language: 'typescript' }]);
+            expect(JSON.stringify(data)).not.toContain('project-b');
+          }
+        );
+      }
+    );
+  });
+
+  it('preserves a configured legacy instance until its mutable targets are projected', async () => {
+    await withFixture(createLegacyDiscoveryFixture('a'), async (firstRoot) => {
+      await withFixture(createLegacyDiscoveryFixture('b'), async (secondRoot) => {
+        const a = await fs.realpath(firstRoot);
+        const b = await fs.realpath(secondRoot);
+        const custom = new ConfiguredLegacyDiscoverer('configured');
+        const registry = getDiscovererRegistry().register(custom);
+        const load = vi.spyOn(custom, 'load');
+        const projected = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const access = fs.access;
+        let paused = false;
+        // discoverer 已完成所有读取后暂停 repo 投影，验证锁没有过早释放。
+        vi.spyOn(fs, 'access').mockImplementation(async (...args) => {
+          if (!paused && String(args[0]) === path.join(a, 'src')) {
+            paused = true;
+            projected.resolve();
+            await release.promise;
+          }
+          return access(...args);
+        });
+        const first = ProjectContext.execute({
+          kind: 'repo',
+          payload: { includeMapSummary: false },
+          scope: { projectRoot: a },
+        });
+        await projected.promise;
+        const sessions = vi.spyOn(registry, 'withSession');
+        const second = ProjectContext.execute({
+          kind: 'repo',
+          payload: { includeMapSummary: false },
+          scope: { projectRoot: b },
+        });
+        try {
+          await vi.waitFor(() => expect(sessions).toHaveBeenCalledTimes(1));
+          expect(load).toHaveBeenCalledTimes(1);
+        } finally {
+          release.resolve();
+          await Promise.allSettled([first, second]);
+        }
+
+        const [left, right] = await Promise.all([first, second]);
+        expect((left.data as RepoContext).targets.map((target) => target.name)).toEqual([
+          'configured:a',
+        ]);
+        expect((right.data as RepoContext).targets.map((target) => target.name)).toEqual([
+          'configured:b',
+        ]);
+        expect((left.data as RepoContext).dependencyGraph?.nodes).toEqual([{ id: 'configured:a' }]);
+        expect((left.data as RepoContext).languages).toEqual([
+          { fileCount: 1, language: 'typescript' },
+        ]);
+        expect(registry.getAll()).toContain(custom);
+        expect(await registry.detect(a)).toBe(custom);
+      });
+    });
+  });
+
+  it('keeps a shared legacy instance fenced when a queued session is cancelled', async () => {
+    await withFixture(createLegacyDiscoveryFixture('a'), async (a) => {
+      await withFixture(createLegacyDiscoveryFixture('b'), async (b) => {
+        const custom = new ConfiguredLegacyDiscoverer('configured');
+        const firstRegistry = new DiscovererRegistry().register(custom);
+        const secondRegistry = new DiscovererRegistry().register(custom);
+        const entered = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const controller = new AbortController();
+        const first = firstRegistry.withSession(async (session) => {
+          const discoverer = await session.detect(a);
+          await discoverer.load(a);
+          entered.resolve();
+          await release.promise;
+          return (await discoverer.listTargets()).map((target) => target.name);
+        });
+        await entered.promise;
+        const cancelledRead = vi.fn(async () => []);
+        const cancelled = secondRegistry.withSession(cancelledRead, {
+          signal: controller.signal,
+        });
+        let nextStarted = false;
+        const next = secondRegistry.withSession(async (session) => {
+          nextStarted = true;
+          const discoverer = await session.detect(b);
+          await discoverer.load(b);
+          return (await discoverer.listTargets()).map((target) => target.name);
+        });
+        try {
+          controller.abort('cancel queued repo');
+          await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+          expect(cancelledRead).not.toHaveBeenCalled();
+          expect(nextStarted).toBe(false);
+        } finally {
+          release.resolve();
+          await Promise.allSettled([first, cancelled, next]);
+        }
+        await expect(first).resolves.toEqual(['configured:a']);
+        await expect(next).resolves.toEqual(['configured:b']);
+
+        // 回调失败也释放原对象，不让一次失败永久阻塞后续请求。
+        await expect(
+          firstRegistry.withSession(async () => {
+            throw new Error('legacy read failed');
+          })
+        ).rejects.toThrow('legacy read failed');
+        await expect(
+          secondRegistry.withSession(async (session) => {
+            const discoverer = await session.detect(a);
+            await discoverer.load(a);
+            return (await discoverer.listTargets()).map((target) => target.name);
+          })
+        ).resolves.toEqual(['configured:a']);
+      });
+    });
+  });
+
+  it('waits for every in-flight legacy detector before releasing a cancelled session', async () => {
+    await withFixture(createLegacyDiscoveryFixture('a'), async (root) => {
+      const slow = new ConfiguredLegacyDiscoverer('slow');
+      const cancellable = new ConfiguredLegacyDiscoverer('cancellable');
+      const registry = new DiscovererRegistry().register(slow).register(cancellable);
+      const otherRegistry = new DiscovererRegistry().register(slow);
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const controller = new AbortController();
+      const detect = slow.detect;
+      vi.spyOn(slow, 'detect').mockImplementation(async (projectRoot) => {
+        const result = await detect.call(slow, projectRoot);
+        entered.resolve();
+        // 旧扩展可以忽略 AbortSignal；其异步状态修改结束前不能交给下一请求。
+        await release.promise;
+        return result;
+      });
+      vi.spyOn(cancellable, 'detect').mockImplementation(async (_root, context) => {
+        return new Promise((_resolve, reject) => {
+          context?.signal?.addEventListener(
+            'abort',
+            () => reject(Object.assign(new Error('detector cancelled'), { name: 'AbortError' })),
+            { once: true }
+          );
+        });
+      });
+      const first = registry.withSession(
+        (session) => session.analyzeConflict(root, { signal: controller.signal }),
+        { signal: controller.signal }
+      );
+      const firstOutcome = first.catch((error: unknown) => error);
+      await entered.promise;
+      controller.abort('cancel detection');
+      let nextStarted = false;
+      const next = otherRegistry.withSession(async () => {
+        nextStarted = true;
+      });
+      try {
+        // 排空当前任务的 promise continuations，第二请求仍应被活动 detect 阻挡。
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(nextStarted).toBe(false);
+      } finally {
+        release.resolve();
+        await Promise.allSettled([firstOutcome, next]);
+      }
+      await expect(firstOutcome).resolves.toMatchObject({ name: 'AbortError' });
+      expect(nextStarted).toBe(true);
+    });
   });
 
   it('returns repo identity, package/build facts, entrypoints, mapRef, and drill-down refs', async () => {
@@ -249,6 +488,65 @@ function createFeatureSeed(): { moduleName: string; modulePath: string; ownedFil
     modulePath: 'src/feature',
     ownedFiles: ['src/feature/index.ts'],
   };
+}
+
+function createLegacyDiscoveryFixture(name: string): Record<string, string> {
+  return {
+    'discovery.json': JSON.stringify({ name }),
+    [`src/${name}.ts`]: `export const ${name} = 1;`,
+  };
+}
+
+/** 模拟现有扩展：必需构造配置、原生私有字段、重复使用同一 target 对象。 */
+class ConfiguredLegacyDiscoverer extends ProjectDiscoverer {
+  #prefix: string;
+  #root = '';
+  #targets: DiscoveredTarget[] = [{ name: '', path: '', type: 'library' }];
+
+  constructor(prefix: string) {
+    super();
+    this.#prefix = prefix;
+  }
+
+  override get id() {
+    return 'configured-legacy';
+  }
+
+  override get displayName() {
+    return this.#prefix;
+  }
+
+  override async detect(root: string, _context?: { signal?: AbortSignal }) {
+    await fs.access(path.join(root, 'discovery.json'));
+    return { match: true, confidence: 1, reason: 'discovery.json exists' };
+  }
+
+  override async load(root: string) {
+    const manifest = JSON.parse(await fs.readFile(path.join(root, 'discovery.json'), 'utf8'));
+    this.#root = root;
+    Object.assign(this.#targets[0], {
+      name: `${this.#prefix}:${manifest.name}`,
+      path: root,
+      language: 'typescript',
+    });
+  }
+
+  override async listTargets() {
+    return this.#targets;
+  }
+
+  override async getTargetFiles() {
+    return (await fs.readdir(path.join(this.#root, 'src'))).map((name) => ({
+      name,
+      path: path.join(this.#root, 'src', name),
+      relativePath: path.join('src', name),
+      language: 'typescript',
+    }));
+  }
+
+  override async getDependencyGraph() {
+    return { nodes: this.#targets.map((target) => target.name), edges: [] };
+  }
 }
 
 function createSharedSeed(): { moduleName: string; modulePath: string; ownedFiles: string[] } {
