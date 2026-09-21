@@ -26,6 +26,8 @@ export interface SourceSliceFileIdentity {
 }
 
 export interface SourceSliceFileFacts extends SourceSliceFileIdentity {
+  /** 内部完整原始字节身份；不进入公开短 hash / ref。 */
+  blobSha256: `sha256:${string}`;
   hash: string;
   language?: string;
   lineCount: number;

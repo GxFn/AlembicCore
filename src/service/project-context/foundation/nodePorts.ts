@@ -10,6 +10,7 @@ import type {
   ProjectContextResult,
 } from '../../../domain/project-context/index.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
+import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { ProjectContext } from '../ProjectContextService.js';
 import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import {
@@ -471,6 +472,22 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
       string,
       { relativePath: string; blobSha256: CanonicalSha256 }
     >();
+    const recordSourceVersion: NonNullable<
+      ProjectContextHandlerExecutionContext['onSourceFileVersion']
+    > = ({ projectRoot, filePath, blobSha256 }) => {
+      const relativePath = path
+        .relative(input.repository.sourceRoot, path.resolve(projectRoot, filePath))
+        .split(path.sep)
+        .join('/');
+      sourceFileReads.set(`${relativePath}\u0000${blobSha256}`, { relativePath, blobSha256 });
+    };
+    const execution: ProjectContextHandlerExecutionContext = {
+      signal: input.signal,
+      // 保留自定义 ProjectContext 的旧物理读取回调；内置 reader 另通知缓存版本消费。
+      onSourceFileRead: ({ projectRoot, filePath, content }) =>
+        recordSourceVersion({ projectRoot, filePath, blobSha256: hashBytes(content) }),
+      onSourceFileVersion: recordSourceVersion,
+    };
     try {
       const envelope = await this.#projectContext.execute(
         {
@@ -488,18 +505,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           },
           payload: input.plan.selector,
         },
-        {
-          signal: input.signal,
-          onSourceFileRead: ({ projectRoot, filePath, content }) => {
-            const relativePath = path
-              .relative(input.repository.sourceRoot, path.resolve(projectRoot, filePath))
-              .split(path.sep)
-              .join('/');
-            const blobSha256 = hashBytes(content);
-            // 聚合查询会重复读同一文件。只合并相同版本，不能让末次读取覆盖中途的漂移。
-            sourceFileReads.set(`${relativePath}\u0000${blobSha256}`, { relativePath, blobSha256 });
-          },
-        }
+        execution
       );
       return {
         ...projectContextEnvelopeToAuditResult(

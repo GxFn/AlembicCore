@@ -38,6 +38,8 @@ export const sourceSliceProjectContextHandler: ProjectContextHandler = async (
     sourceFolder: request.scope.sourceFolder,
     signal: context?.signal,
     onSourceFileRead: context?.onSourceFileRead,
+    analysis: context?.analysis,
+    onSourceFileVersion: context?.onSourceFileVersion,
   });
   throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {

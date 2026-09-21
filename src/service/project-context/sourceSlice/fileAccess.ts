@@ -1,10 +1,17 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
 import type { ProjectContextExecutionContext } from '../../../domain/project-context/index.js';
 import { computeContentHash } from '../../../shared/contentHash.js';
+import type { FileAnalysisSession } from '../analysis/FileAnalysisSession.js';
+import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
-import type { SourceSliceFileFacts, SourceSliceQueryFailure } from './contracts.js';
+import type {
+  SourceSliceFileFacts,
+  SourceSliceFileIdentity,
+  SourceSliceQueryFailure,
+} from './contracts.js';
 
 export type SourceSliceFileAccessResult =
   | { ok: true; facts: SourceSliceFileFacts }
@@ -17,6 +24,8 @@ export async function loadSourceSliceFile(input: {
   sourceFolder?: string;
   signal?: AbortSignal;
   onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
+  analysis?: FileAnalysisSession;
+  onSourceFileVersion?: ProjectContextHandlerExecutionContext['onSourceFileVersion'];
 }): Promise<SourceSliceFileAccessResult> {
   throwIfProjectContextAborted(input);
   const identity = resolveSourceSliceFileIdentity(input);
@@ -24,6 +33,28 @@ export async function loadSourceSliceFile(input: {
     return identity;
   }
 
+  const read = () => readSourceSliceFile(input, identity.identity);
+  // 路径校验必须先于缓存命中，不能让含 '..' 的非法别名复用合法文件的缓存。
+  const result = await (input.analysis
+    ? input.analysis.readSourceFile(identity.identity, read)
+    : read());
+  throwIfProjectContextAborted(input);
+  if (result.ok) {
+    // 缓存命中也绑定消费版本，旧会话内容不能被下一次 capture 默认为新 inventory。
+    const { projectRoot, filePath, blobSha256 } = result.facts;
+    input.onSourceFileVersion?.({ projectRoot, filePath, blobSha256 });
+  }
+  return result;
+}
+
+async function readSourceSliceFile(
+  input: {
+    projectRoot: string;
+    signal?: AbortSignal;
+    onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
+  },
+  identity: SourceSliceFileIdentity
+): Promise<SourceSliceFileAccessResult> {
   const rootRealpath = await readRealpath(input.projectRoot);
   throwIfProjectContextAborted(input);
   if (!rootRealpath) {
@@ -38,14 +69,14 @@ export async function loadSourceSliceFile(input: {
     };
   }
 
-  const fileRealpath = await readRealpath(identity.identity.absolutePath);
+  const fileRealpath = await readRealpath(identity.absolutePath);
   throwIfProjectContextAborted(input);
   if (!fileRealpath) {
     return {
       failure: {
         code: 'not-found',
-        message: `source-slice file was not found: ${identity.identity.filePath}`,
-        path: identity.identity.filePath,
+        message: `source-slice file was not found: ${identity.filePath}`,
+        path: identity.filePath,
         retryable: false,
       },
       ok: false,
@@ -56,7 +87,7 @@ export async function loadSourceSliceFile(input: {
       failure: {
         code: 'outside-scope',
         message: 'source-slice file realpath must stay inside scope.projectRoot.',
-        path: identity.identity.filePath,
+        path: identity.filePath,
         retryable: false,
       },
       ok: false,
@@ -64,37 +95,39 @@ export async function loadSourceSliceFile(input: {
   }
 
   try {
-    const stat = await fs.stat(identity.identity.absolutePath);
+    const stat = await fs.stat(identity.absolutePath);
     throwIfProjectContextAborted(input);
     if (!stat.isFile()) {
       return {
         failure: {
           code: 'not-found',
-          message: `source-slice target is not a regular file: ${identity.identity.filePath}`,
-          path: identity.identity.filePath,
+          message: `source-slice target is not a regular file: ${identity.filePath}`,
+          path: identity.filePath,
           retryable: false,
         },
         ok: false,
       };
     }
 
-    const content = await fs.readFile(identity.identity.absolutePath, {
+    const content = await fs.readFile(identity.absolutePath, {
       signal: input.signal,
     });
     throwIfProjectContextAborted(input);
     const text = content.toString('utf8');
+    const blobSha256 = `sha256:${createHash('sha256').update(content).digest('hex')}` as const;
     // 原始 blob 与兼容短 hash 各司其职；UTF-8 解码替换字符不能改变捕获校验的依据。
     input.onSourceFileRead?.({
-      projectRoot: identity.identity.projectRoot,
-      filePath: identity.identity.filePath,
+      projectRoot: identity.projectRoot,
+      filePath: identity.filePath,
       content,
     });
     const lines = splitSourceTextLines(text);
     return {
       facts: {
-        ...identity.identity,
+        ...identity,
+        blobSha256,
         hash: computeContentHash(text),
-        language: inferLanguage(identity.identity.filePath),
+        language: inferLanguage(identity.filePath),
         lineCount: Math.max(1, lines.length),
         lines,
         mtimeMs: Math.trunc(stat.mtimeMs),
@@ -107,7 +140,7 @@ export async function loadSourceSliceFile(input: {
       throwIfProjectContextAborted(input);
     }
     return {
-      failure: classifyReadFailure(error, identity.identity.filePath),
+      failure: classifyReadFailure(error, identity.filePath),
       ok: false,
     };
   }

@@ -37,6 +37,8 @@ export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
     sourceFolder: request.scope.sourceFolder,
     signal: context?.signal,
     onSourceFileRead: context?.onSourceFileRead,
+    analysis: context?.analysis,
+    onSourceFileVersion: context?.onSourceFileVersion,
   });
   throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {
@@ -50,12 +52,9 @@ export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
     repoId: fileAccess.facts.repoId,
     sourceFolder: fileAccess.facts.sourceFolder,
   });
-  const extraction = extractFileSymbolsFromSource({
-    filePath: fileAccess.facts.filePath,
-    language: fileAccess.facts.language,
-    lineCount: fileAccess.facts.lineCount,
-    text: fileAccess.facts.text,
-  });
+  const extraction = context?.analysis
+    ? context.analysis.symbols(fileAccess.facts)
+    : extractFileSymbolsFromSource(fileAccess.facts);
   const normalized = normalizeFileSymbols({
     facts: fileAccess.facts,
     fileRef,

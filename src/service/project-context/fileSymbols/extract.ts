@@ -1,6 +1,8 @@
-import '../../../core/ast/index.js';
-import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
-import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
+import {
+  type ProjectContextAstFacts,
+  type ProjectContextAstInput,
+  readProjectContextAst,
+} from '../analysis/astFacts.js';
 import type { ExtractedFileSymbol, FileSymbolsExtractionResult } from './contracts.js';
 import { createSourceLineRange } from './ranges.js';
 
@@ -21,44 +23,32 @@ interface AstFileSummaryLike {
   exports?: unknown[];
 }
 
-export function extractFileSymbolsFromSource(input: {
-  text: string;
-  filePath: string;
-  language?: string;
-  lineCount: number;
-}): FileSymbolsExtractionResult {
-  const parserLanguage = resolveParserLanguage(input.filePath, input.language);
-  if (!parserLanguage) {
+export function extractFileSymbolsFromSource(
+  input: ProjectContextAstInput,
+  ast?: ProjectContextAstFacts
+): FileSymbolsExtractionResult {
+  const facts = ast ?? readProjectContextAst(input, false);
+  if (facts.status !== 'ready') {
     return {
       symbols: [],
-      unavailableReason: `file-symbols parser is unavailable for language ${input.language ?? 'unknown'}.`,
-    };
-  }
-
-  if (!isAstAvailable()) {
-    return {
-      symbols: [],
-      unavailableReason: 'file-symbols parser runtime is unavailable.',
+      unavailableReason:
+        facts.status === 'unsupported'
+          ? `file-symbols parser is unavailable for language ${input.language ?? 'unknown'}.`
+          : facts.status === 'runtime-unavailable'
+            ? 'file-symbols parser runtime is unavailable.'
+            : facts.status === 'empty'
+              ? `file-symbols parser returned no AST summary for ${facts.parserLanguage}.`
+              : `file-symbols parser failed for ${input.filePath}.`,
     };
   }
 
   try {
-    const summary = analyzeFile(input.text, parserLanguage, {
-      extractCallSites: false,
-    }) as AstFileSummaryLike | null;
-    if (!summary) {
-      return {
-        symbols: [],
-        unavailableReason: `file-symbols parser returned no AST summary for ${parserLanguage}.`,
-      };
-    }
-
     return {
       symbols: collectExtractedSymbols({
         filePath: input.filePath,
         lineCount: input.lineCount,
         lines: input.text.split(/\r\n|\n|\r/),
-        summary,
+        summary: facts.summary,
       }),
     };
   } catch {
@@ -170,12 +160,6 @@ function collectExtractedSymbols(input: {
   }
 
   return symbols;
-}
-
-// 解析语言判定收敛到单源 shared/parserLanguage(与 fileFlow 同修:此前私有白名单只认
-// ts/js 四型,Swift/ObjC/Kotlin 的 file-symbols 自诞生起 unavailable——2026-07-10 深审)。
-function resolveParserLanguage(filePath: string, language?: string): string | undefined {
-  return resolveAstParserLanguage(filePath, language);
 }
 
 function normalizeClassKind(value: unknown): string {

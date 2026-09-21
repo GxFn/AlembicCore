@@ -352,7 +352,7 @@ export interface ProjectContextRequestExecutionResult {
   continuation?: string;
   sourceRanges?: ProjectContextSourceRangeV1[];
   /**
-   * 实际源码读取收据；相对本次 repository，以原始字节的完整 SHA256 绑定。
+   * 实际消费的源码版本收据（含缓存读取）；相对本次 repository，以原始字节完整 SHA256 绑定。
    * 相同文件的不同读取版本必须全部保留。不是目录/构建配置的完整 read-set 声明。
    * 旧自定义 host port 可省略；自定义实现仍负责确保自身 output 使用捕获版本。
    */

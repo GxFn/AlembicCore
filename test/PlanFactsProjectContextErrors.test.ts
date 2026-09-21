@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Parser } from 'web-tree-sitter';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
+import type { ModuleContext } from '../src/domain/project-context/index.js';
 import { collectPlanProjectContext } from '../src/service/plan/facts/collectProjectContext.js';
 
 const fixtureRoots: string[] = [];
@@ -20,6 +21,33 @@ afterEach(() => {
 });
 
 describe('planFacts ProjectContext error posture', () => {
+  it('shares real AST extraction across a collection batch and reads fresh source in the next batch', async () => {
+    const source = 'export class BatchOriginal { run() { return 1; } }\n';
+    const changedSource = 'export class BatchChanged { run() { return 2; } }\n';
+    const fixtureRoot = createNodeFixture('src/index.ts', source);
+    // Spy 只计数，实际源码读取、tree-sitter 解析、module/map 组合与投影全部照常执行。
+    const parse = vi.spyOn(Parser.prototype, 'parse');
+    const first = await collectPlanProjectContext(fixtureRoot, undefined);
+    const firstModule = first.envelopes.find((envelope) => envelope.queryLevel === 'module')
+      ?.data as ModuleContext;
+
+    expect(first.requestKinds).toEqual(['space', 'repo', 'map', 'module', 'module-layers']);
+    expect(firstModule.publicSurfaces.map((symbol) => symbol.name)).toContain('BatchOriginal');
+    expect(parse.mock.calls.filter(([input]) => input === source)).toHaveLength(1);
+
+    parse.mockClear();
+    writeFileSync(join(fixtureRoot, 'src/index.ts'), changedSource);
+    const second = await collectPlanProjectContext(fixtureRoot, undefined);
+    const secondModule = second.envelopes.find((envelope) => envelope.queryLevel === 'module')
+      ?.data as ModuleContext;
+
+    expect(secondModule.publicSurfaces.map((symbol) => symbol.name)).toContain('BatchChanged');
+    expect(secondModule.publicSurfaces.map((symbol) => symbol.name)).not.toContain('BatchOriginal');
+    expect(parse.mock.calls.filter(([input]) => input === changedSource)).toHaveLength(1);
+    expect(parse.mock.calls.filter(([input]) => input === source)).toHaveLength(0);
+    expect(firstModule.publicSurfaces.map((symbol) => symbol.name)).toContain('BatchOriginal');
+  });
+
   it('retains fatal AST query errors and reports required facts as partial', async () => {
     const fixtureRoot = createNodeFixture();
     vi.spyOn(Parser.prototype, 'parse').mockImplementation(() => {

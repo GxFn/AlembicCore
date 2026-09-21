@@ -37,6 +37,8 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     sourceFolder: request.scope.sourceFolder,
     signal: context?.signal,
     onSourceFileRead: context?.onSourceFileRead,
+    analysis: context?.analysis,
+    onSourceFileVersion: context?.onSourceFileVersion,
   });
   throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {
@@ -50,23 +52,17 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     repoId: fileAccess.facts.repoId,
     sourceFolder: fileAccess.facts.sourceFolder,
   });
-  const symbolExtraction = extractFileSymbolsFromSource({
-    filePath: fileAccess.facts.filePath,
-    language: fileAccess.facts.language,
-    lineCount: fileAccess.facts.lineCount,
-    text: fileAccess.facts.text,
-  });
+  const symbolExtraction = context?.analysis
+    ? context.analysis.symbols(fileAccess.facts)
+    : extractFileSymbolsFromSource(fileAccess.facts);
   const normalizedSymbols = normalizeFileSymbols({
     facts: fileAccess.facts,
     fileRef,
     symbols: symbolExtraction.symbols,
   });
-  const flowExtraction = extractFileFlowFromSource({
-    filePath: fileAccess.facts.filePath,
-    language: fileAccess.facts.language,
-    lineCount: fileAccess.facts.lineCount,
-    text: fileAccess.facts.text,
-  });
+  const flowExtraction = context?.analysis
+    ? context.analysis.flow(fileAccess.facts)
+    : extractFileFlowFromSource(fileAccess.facts);
   const normalized = await normalizeFileFlow({
     callSites: flowExtraction.callSites,
     exports: flowExtraction.exports,

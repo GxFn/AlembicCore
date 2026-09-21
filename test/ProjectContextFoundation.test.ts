@@ -5,7 +5,10 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import * as AstAnalyzer from '../src/core/AstAnalyzer.js';
+import { withProjectContextSession } from '../src/project-context.js';
 import {
   buildProjectContextRequestMatrixV2,
   buildProjectScopeManifestV1,
@@ -555,6 +558,65 @@ describe('ProjectContext certified facts foundation', () => {
     });
     expect(observed).toBe(true);
     expect(await fs.readFile(fixture.sourcePath)).toEqual(fixture.sourceBytes);
+  });
+
+  it('shares source and AST facts across a real strict capture request matrix', async () => {
+    const fixture = await createNodeCaptureFixture();
+    const analyze = vi.spyOn(AstAnalyzer, 'analyzeFile');
+    const reads: { relativePath: string; blobSha256: string }[] = [];
+    let physicalReads = 0;
+    try {
+      const artifact = await withProjectContextSession(async (session) => {
+        const ports = new NodeProjectContextFoundationHostPorts({
+          execute: (request, context) =>
+            session.execute(request, {
+              ...context,
+              onSourceFileRead: (read) => {
+                if (read.filePath === 'src/index.ts') {
+                  physicalReads++;
+                }
+                context?.onSourceFileRead?.(read);
+              },
+            }),
+        });
+        const execute = ports.executeRequest.bind(ports);
+        vi.spyOn(ports, 'executeRequest').mockImplementation(async (input) => {
+          const result = await execute(input);
+          reads.push(...(result.sourceFileReads ?? []));
+          return result;
+        });
+        return captureCertifiedProjectFactsV2(fixture.input, ports);
+      });
+      expect(artifact.readiness.verdict).toBe('passed');
+      expect(analyze).toHaveBeenCalledTimes(1);
+      expect(physicalReads).toBe(1);
+      const versions = reads.filter((read) => read.relativePath === 'src/index.ts');
+      expect(versions.length).toBeGreaterThan(1);
+      expect(versions.every((read) => read.blobSha256 === hashBytes(fixture.sourceBytes))).toBe(
+        true
+      );
+      expect(
+        evaluateCertifiedProjectFactsReadinessV2(artifact, {
+          acceptedScopeManifest: fixture.input.projectScope.manifest,
+          requestMatrix: fixture.input.requestMatrix,
+        })
+      ).toEqual({ errors: [], ok: true });
+    } finally {
+      analyze.mockRestore();
+    }
+  });
+
+  it('rejects cached source facts when a later capture in the same session binds a new inventory', async () => {
+    const fixture = await createNodeCaptureFixture();
+    await withProjectContextSession(async (session) => {
+      const ports = new NodeProjectContextFoundationHostPorts(session);
+      const first = await captureCertifiedProjectFactsV2(fixture.input, ports);
+      expect(first.readiness.verdict).toBe('passed');
+      await fs.writeFile(fixture.sourcePath, 'export const value = "Changed";\n');
+      await expect(captureCertifiedProjectFactsV2(fixture.input, ports)).rejects.toMatchObject({
+        code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+      });
+    });
   });
 
   it('does not let a later source read erase a different version read within the same request', async () => {

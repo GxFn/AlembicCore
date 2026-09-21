@@ -4,6 +4,34 @@
 `@alembic/core/project-context-foundation` 捕获和重开认证事实。两者不能共用一个
 隐式的“当前项目”状态，也不能把实时查询结果当成完整冻结文件系统的重放结果。
 
+## 分析会话
+
+普通 `ProjectContext.execute()` 为每次查询创建独立会话。嵌套的 module/layers/map/
+anchor 查询复用实际读取的源码和一次 AST 提取，symbols 与 flow 从同一摘要投影。
+源码在查询期间改变时，已经读取的文件仍使用同一版本；下一次独立查询会读取新版本。
+
+整批事实收集使用既有包入口新增的 `withProjectContextSession`：
+
+```ts
+import { withProjectContextSession } from '@alembic/core/project-context';
+
+const facts = await withProjectContextSession(async (context) => {
+  const symbols = await context.execute({ kind: 'file-symbols', scope, payload: { filePath } });
+  const flow = await context.execute({ kind: 'file-flow', scope, payload: { filePath } });
+  return { symbols, flow };
+});
+```
+
+回调内共享已读源码及所需符号/调用事实；Core 的 Plan collector 已使用此入口。
+不同 root/repo 的内容不混用，sourceFolder 等导航字段按每个请求保留。返回值可由调用方
+修改，不会污染后续缓存。批次内请求按接收顺序执行，各自保留 AbortSignal；退出时停止
+接单、排空已接收请求并清理缓存，回调异常也执行同样的清理。不能保存执行器在回调结束
+后继续使用，也不应把会话用于长期监控或无限批次。
+
+会话只缓存实际读取的源码及紧凑投影，不保留完整 AST 树/指标摘要。捕获的 inventory
+读取和终态 fence 仍独立读取真实源树。目录、manifest、偏好及导入存在性不在此缓存的
+保证范围内；它还不是完整文件系统的冻结重放协议。
+
 ## 发现会话
 
 `DiscovererRegistry.withSession()` 覆盖检测、加载、读取和结果投影。内置 discoverer
@@ -21,6 +49,10 @@ registry 也共用队列。取消排队不会越过仍在执行的前序请求�
 module、module-layers、map）通过非序列化的 `onSourceFileRead` 传递实际读取的原始字节。
 Node host port 生成 `sourceFileReads`，以相对路径和完整 SHA256 记录读取版本。同一文件
 重复读到相同内容可合并；读到不同版本必须全部保留。
+
+物理读取观察与版本消费分开：缓存命中仍通过内部通知携带原始字节的完整 hash，并进入
+当前查询的 `sourceFileReads`。因此复用会话再次捕获时，旧缓存不能被误绑定到新的
+inventory。每个查询都核对所用版本，同时避免重复磁盘 IO 和 AST 解析。
 
 capture 在接受查询输出前，对照 inventory 中的原始 blob hash 检查这些收据。读取内容
 不一致或不在捕获 inventory 中时，抛出 `PROJECT_CONTEXT_SOURCE_STATE_DRIFT`，整次捕获

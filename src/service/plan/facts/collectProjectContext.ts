@@ -1,12 +1,13 @@
 // planFacts/collect-project-context —— 从 host 交付层 plan-tool.ts 下沉的「有限-requestKinds
 // ProjectContext 收集器」：collectPlanProjectContext(projectRoot, hints) → PlanProjectContextAnalysis，
-// honor 原生 ProjectScope、经 ProjectContextCapabilities 静态执行有限 requestKinds，双宿主
+// honor 原生 ProjectScope、经同一分析会话执行有限 requestKinds，双宿主
 // (host-agent + 主体 in-process)共用。U1b.3 纯提取，行为字节不变；Core 内部相对路径引依赖。
 // 注：projectRoot 由 host 交付层解析(resolvePlanProjectRoot 读 MCP ctx)后传入，本模块不碰 host DI。
 import path, { basename } from 'node:path';
 import { baseDimensions } from '../../../domain/dimension/BaseDimensions.js';
 import {
   buildProjectContextPresenterInput,
+  type ProjectContext as ProjectContextContract,
   type ProjectContextEnvelope,
   type ProjectContextPresenterInput,
   type ProjectContextRequestKind,
@@ -19,7 +20,7 @@ import {
   type ProjectFolderDescriptor,
   readProjectScopeRegistryDocument,
 } from '../../../shared/ProjectScope.js';
-import { ProjectContextCapabilities } from '../../project-context/capabilities.js';
+import { withProjectContextSession } from '../../project-context/ProjectContextService.js';
 import type { PlanModuleSeed, PlanProjectContextAnalysis } from './projectInfoTree.js';
 import {
   attachSourceFilesToProjectContextModuleSeeds,
@@ -53,6 +54,17 @@ export async function collectPlanProjectContext(
   projectRoot: string,
   hints: PlanCollectHints | undefined
 ): Promise<PlanProjectContextAnalysis> {
+  // map/module/layers 属于同批事实，复用源码和提取结果；目录与 manifest 扫描仍按原逻辑执行。
+  return withProjectContextSession((projectContext) =>
+    collectPlanProjectContextInSession(projectContext, projectRoot, hints)
+  );
+}
+
+async function collectPlanProjectContextInSession(
+  projectContext: ProjectContextContract,
+  projectRoot: string,
+  hints: PlanCollectHints | undefined
+): Promise<PlanProjectContextAnalysis> {
   const scopeContext = resolvePlanProjectScopeContext(projectRoot, hints);
   const envelopes: ProjectContextEnvelope<ProjectContextResult>[] = [];
   const push = async (
@@ -66,7 +78,7 @@ export async function collectPlanProjectContext(
       projectRoot: scopeContext.scanBase,
     }
   ): Promise<ProjectContextEnvelope<ProjectContextResult>> => {
-    const envelope = await ProjectContextCapabilities.execute({
+    const envelope = await projectContext.execute({
       kind,
       payload,
       project: {

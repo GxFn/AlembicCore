@@ -12,6 +12,8 @@ import type {
   ProjectContextRefScope,
   ProjectContextScope,
 } from '../../../../domain/project-context/index.js';
+import type { FileAnalysisSession } from '../../analysis/FileAnalysisSession.js';
+import type { ProjectContextHandlerExecutionContext } from '../../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../../interface/execution.js';
 import { loadSourceSliceFile } from '../../sourceSlice/fileAccess.js';
 import { createProjectContextFileRef } from '../sourceSlice-fileSymbols/index.js';
@@ -64,6 +66,8 @@ export async function resolveProjectContextModuleSeed(input: {
   scope: ProjectContextScope;
   signal?: AbortSignal;
   onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
+  analysis?: FileAnalysisSession;
+  onSourceFileVersion?: ProjectContextHandlerExecutionContext['onSourceFileVersion'];
 }): Promise<ResolveProjectContextModuleSeedResult> {
   throwIfProjectContextAborted(input);
   const payload = isRecord(input.payload) ? input.payload : {};
@@ -115,6 +119,8 @@ export async function resolveProjectContextModuleSeed(input: {
       sourceFolder: input.scope.sourceFolder,
       signal: input.signal,
       onSourceFileRead: input.onSourceFileRead,
+      analysis: input.analysis,
+      onSourceFileVersion: input.onSourceFileVersion,
     });
     if (!fileAccess.ok) {
       errors.push(

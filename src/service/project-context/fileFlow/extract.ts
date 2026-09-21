@@ -1,5 +1,8 @@
-import '../../../core/ast/index.js';
-import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
+import {
+  type ProjectContextAstFacts,
+  type ProjectContextAstInput,
+  readProjectContextAst,
+} from '../analysis/astFacts.js';
 import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import type {
   ExtractedFileFlowCallSite,
@@ -8,12 +11,6 @@ import type {
   FileFlowExtractionResult,
   FileFlowImportKind,
 } from './contracts.js';
-
-interface AstFileFlowSummaryLike {
-  imports?: unknown[];
-  exports?: unknown[];
-  callSites?: unknown[];
-}
 
 interface AstImportRecordLike {
   path?: unknown;
@@ -84,56 +81,55 @@ function detectPathologicalSourceShape(
   return { pathological: false };
 }
 
-export function extractFileFlowFromSource(input: {
-  text: string;
-  filePath: string;
-  language?: string;
-  lineCount: number;
-}): FileFlowExtractionResult {
+/** 会话和独立调用共用同一防线：先语言，再形态，均发生在调用点 AST 读取之前。 */
+export function getFileFlowUnavailableReason(input: ProjectContextAstInput): string | undefined {
   const parserLanguage = resolveParserLanguage(input.filePath, input.language);
   if (!parserLanguage) {
-    return {
-      callSites: [],
-      exports: [],
-      imports: [],
-      unavailableReason: `file-flow parser is unavailable for language ${input.language ?? 'unknown'}.`,
-    };
+    return `file-flow parser is unavailable for language ${input.language ?? 'unknown'}.`;
   }
 
   // 防线①:压缩/生成物整体跳过(先于 AST——垃圾内容连 AST 成本也不值得付)。
   // 降级走既有 unavailableReason 通道,消费方(fileFlow handler/上游投影)已适配该形态。
   const shape = detectPathologicalSourceShape(input.text);
   if (shape.pathological) {
+    return `file-flow line-parse skipped for ${input.filePath}: ${shape.reason}.`;
+  }
+  return undefined;
+}
+
+export function extractFileFlowFromSource(
+  input: ProjectContextAstInput,
+  ast?: ProjectContextAstFacts
+): FileFlowExtractionResult {
+  const unavailableReason = getFileFlowUnavailableReason(input);
+  if (unavailableReason) {
     return {
       callSites: [],
       exports: [],
       imports: [],
-      unavailableReason: `file-flow line-parse skipped for ${input.filePath}: ${shape.reason}.`,
+      unavailableReason,
     };
   }
 
-  if (!isAstAvailable()) {
+  const facts = ast ?? readProjectContextAst(input, true);
+  if (facts.status !== 'ready') {
     return {
       callSites: [],
       exports: [],
       imports: [],
-      unavailableReason: 'file-flow parser runtime is unavailable.',
+      unavailableReason:
+        facts.status === 'unsupported'
+          ? `file-flow parser is unavailable for language ${input.language ?? 'unknown'}.`
+          : facts.status === 'runtime-unavailable'
+            ? 'file-flow parser runtime is unavailable.'
+            : facts.status === 'empty'
+              ? `file-flow parser returned no AST summary for ${facts.parserLanguage}.`
+              : `file-flow parser failed for ${input.filePath}.`,
     };
   }
 
   try {
-    const summary = analyzeFile(input.text, parserLanguage, {
-      extractCallSites: true,
-    }) as AstFileFlowSummaryLike | null;
-    if (!summary) {
-      return {
-        callSites: [],
-        exports: [],
-        imports: [],
-        unavailableReason: `file-flow parser returned no AST summary for ${parserLanguage}.`,
-      };
-    }
-
+    const { parserLanguage, summary } = facts;
     const lines = input.text.split(/\r\n|\n|\r/);
     // JS 家族:行级 import/export 正则为主、AST 只做 supplement(既有语义不变)。
     // 非 JS 语言(swift/objc/kotlin/...):行级正则是 JS 语法专用、天然零匹配,

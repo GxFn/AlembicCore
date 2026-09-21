@@ -46,6 +46,7 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       'createProjectContextCapabilities',
       'createProjectContextFileRef',
       'resolveAstParserLanguage',
+      'withProjectContextSession',
     ]);
     expect(ProjectContext.execute).toBeInstanceOf(Function);
     expect(publicModule.ProjectContextCapabilities.executeFileSymbolsQuery).toBeInstanceOf(
@@ -53,6 +54,16 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
     );
     expect(publicModule.buildProjectContextPresenterInput).toBeInstanceOf(Function);
     expect(publicModule.createProjectContextFileRef).toBeInstanceOf(Function);
+  });
+
+  it.each([
+    null,
+    undefined,
+  ])('retains a structured invalid-kind result for malformed input %s', async (input) => {
+    const result = await ProjectContext.execute(
+      input as unknown as Parameters<typeof ProjectContext.execute>[0]
+    );
+    expect(result.errors?.[0]?.code).toBe('invalid-request-kind');
   });
 
   it('keeps public request kinds exact and ordered for deterministic dispatch', () => {
@@ -276,11 +287,7 @@ describe('ProjectContext PCU-2 contract and path authority', () => {
     const projectContextDir = fileURLToPath(
       new URL('../src/service/project-context', import.meta.url)
     );
-    const allowedBasicSyntaxConsumers = new Set([
-      'fileFlow/extract.ts',
-      'fileSymbols/extract.ts',
-      'repo/repo.ts',
-    ]);
+    const allowedBasicSyntaxConsumers = new Set(['analysis/astFacts.ts', 'repo/repo.ts']);
     const offenders = readTypeScriptFiles(projectContextDir)
       .filter((file) =>
         /from ['"].*(?:core\/AstAnalyzer|core\/ast|core\/discovery)/.test(file.source)

@@ -8,6 +8,18 @@ import type {
   ProjectContextResult,
   ProjectContextScope,
 } from '../../../domain/project-context/index.js';
+import type { FileAnalysisSession } from '../analysis/FileAnalysisSession.js';
+
+/** 内部分析依赖由 service 装配，不进入公开请求 JSON、domain DTO 或持久化产物。 */
+export interface ProjectContextHandlerExecutionContext extends ProjectContextExecutionContext {
+  analysis?: FileAnalysisSession;
+  /** 记录实际消费的原始字节版本，含会话缓存命中；与物理 IO 观察分开。 */
+  onSourceFileVersion?: (input: {
+    projectRoot: string;
+    filePath: string;
+    blobSha256: `sha256:${string}`;
+  }) => void;
+}
 
 export const PROJECT_CONTEXT_INTERFACE_ALLOWED_OPERATIONS = [
   'request-kind-validation',
@@ -44,7 +56,7 @@ export interface ProjectContextHandlerResult {
 
 export type ProjectContextHandler = (
   request: CanonicalProjectContextRequest,
-  context?: ProjectContextExecutionContext
+  context?: ProjectContextHandlerExecutionContext
 ) => Promise<ProjectContextHandlerResult> | ProjectContextHandlerResult;
 
 export type ProjectContextHandlerRegistry = Partial<

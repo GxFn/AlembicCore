@@ -1,8 +1,10 @@
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as AstAnalyzer from '../src/core/AstAnalyzer.js';
 import { resetDiscovererRegistry } from '../src/core/discovery/index.js';
 import {
   type AnchorRangeContext,
@@ -19,7 +21,8 @@ import {
   type SourceSliceContext,
   type SpaceContext,
 } from '../src/domain/project-context/index.js';
-import { ProjectContext } from '../src/project-context.js';
+import { ProjectContext, withProjectContextSession } from '../src/project-context.js';
+import { computeContentHash } from '../src/shared/contentHash.js';
 import {
   createProjectDescriptor,
   createProjectScopeRegistryDocument,
@@ -52,7 +55,190 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     resetDiscovererRegistry();
+  });
+
+  it.each([
+    'file-flow',
+    'module',
+    'module-layers',
+    'map',
+    'anchor-range',
+  ] as const)('shares one source read and one real AST extraction inside a %s query', async (kind) => {
+    const filePath = 'src/model.ts';
+    const source = 'export class Model { run() { return this.helper(); } helper() { return 1; } }';
+    await withFixture({ [filePath]: source }, async (projectRoot) => {
+      const seed = { moduleName: 'model', modulePath: 'src', ownedFiles: [filePath] };
+      const analyze = vi.spyOn(AstAnalyzer, 'analyzeFile');
+      const reads = vi.fn();
+      const envelope = await ProjectContext.execute(
+        {
+          kind,
+          scope: { projectRoot, repoId: 'model' },
+          payload:
+            kind === 'map'
+              ? { moduleSeeds: [seed] }
+              : kind === 'module' || kind === 'module-layers'
+                ? seed
+                : { filePath, line: 1, relationHops: 1 },
+        },
+        { onSourceFileRead: reads }
+      );
+      expect(envelope.errors).toBeUndefined();
+      expect(envelope.refs.length).toBeGreaterThan(0);
+      expect(analyze).toHaveBeenCalledTimes(1);
+      expect(reads).toHaveBeenCalledTimes(1);
+      expect(analyze.mock.calls[0]?.[0]).toBe(source);
+    });
+  });
+
+  it('keeps a fixed source version inside a query and sees edits in the next query with reused controls', async () => {
+    const filePath = 'src/model.ts';
+    const original = 'export class Original { run() { return 1; } }';
+    const changed = 'export class Changed { run() { return 2; } }';
+    await withFixture({ [filePath]: original }, async (projectRoot) => {
+      let reads = 0;
+      const controls = {
+        onSourceFileRead: () => {
+          if (++reads === 1) {
+            fsSync.writeFileSync(path.join(projectRoot, filePath), changed);
+          }
+        },
+      };
+      const request = {
+        kind: 'module' as const,
+        scope: { projectRoot, repoId: 'model' },
+        payload: { moduleName: 'model', ownedFiles: [filePath] },
+      };
+      const first = await ProjectContext.execute(request, controls);
+      expect(first.errors).toBeUndefined();
+      expect((first.data as ModuleContext).publicSurfaces.map((symbol) => symbol.name)).toContain(
+        'Original'
+      );
+      expect(JSON.stringify(first)).not.toContain('Changed');
+      expect((first.data as ModuleContext).ownedFiles[0]?.hash).toBe(computeContentHash(original));
+      expect(reads).toBe(1);
+      const next = await ProjectContext.execute(request, controls);
+      expect(next.errors).toBeUndefined();
+      expect((next.data as ModuleContext).publicSurfaces.map((symbol) => symbol.name)).toContain(
+        'Changed'
+      );
+      expect((next.data as ModuleContext).ownedFiles[0]?.hash).toBe(computeContentHash(changed));
+      expect(reads).toBe(2);
+    });
+  });
+
+  it('shares a complete analysis batch without leaking edited results, file identities, or a closed session', async () => {
+    const filePath = 'src/model.ts';
+    await withFixture(
+      { [filePath]: 'export class Left { run() { return this.help(); } help() {} }' },
+      async (leftRoot) => {
+        await withFixture({ [filePath]: 'export class Right { run() {} }' }, async (rightRoot) => {
+          const analyze = vi.spyOn(AstAnalyzer, 'analyzeFile');
+          const read = vi.fn();
+          const controls = { onSourceFileRead: read };
+          let closedSession: typeof ProjectContext | undefined;
+          await withProjectContextSession(async (session) => {
+            closedSession = session;
+            const request = {
+              kind: 'file-symbols' as const,
+              scope: { projectRoot: leftRoot, repoId: 'same-id' },
+              payload: { filePath },
+            };
+            const first = await session.execute(request, controls);
+            const pristine = structuredClone(first);
+            (first.data as FileSymbolContext).symbols[0]!.range!.startLine = 999;
+            const again = await session.execute(request, controls);
+            expect(again).toStrictEqual(pristine);
+            const [left, right] = await Promise.all([
+              session.execute({ ...request, kind: 'file-flow' }, controls),
+              session.execute(
+                { ...request, scope: { ...request.scope, projectRoot: rightRoot } },
+                controls
+              ),
+            ]);
+            expect(
+              (left.data as FileFlowContext).callees.some(
+                (relation) => relation.to?.qualifiedName === 'Left.help'
+              )
+            ).toBe(true);
+            expect(
+              (right.data as FileSymbolContext).symbols.some((symbol) => symbol.name === 'Right')
+            ).toBe(true);
+            expect(JSON.stringify(right)).not.toContain(leftRoot);
+            expect(analyze).toHaveBeenCalledTimes(2);
+            expect(read).toHaveBeenCalledTimes(2);
+            const escaped = await session.execute(
+              { ...request, payload: { filePath: 'src/../src/model.ts' } },
+              controls
+            );
+            expect(escaped.errors?.[0]?.code).toBe('outside-scope');
+          });
+          await expect(
+            closedSession!.execute({
+              kind: 'source-slice',
+              scope: { projectRoot: leftRoot },
+              payload: { filePath },
+            })
+          ).rejects.toThrow('session is closed');
+        });
+      }
+    );
+  });
+
+  it('does not poison later batch requests after cancellation and drains accepted work on callback failure', async () => {
+    const filePath = 'src/model.ts';
+    const latePath = 'src/late.ts';
+    await withFixture(
+      { [filePath]: 'export class Model {}', [latePath]: 'export class Late {}' },
+      async (projectRoot) => {
+        const request = {
+          kind: 'file-symbols' as const,
+          scope: { projectRoot },
+          payload: { filePath },
+        };
+        const controller = new AbortController();
+        controller.abort('one request');
+        const reads = vi.fn();
+        const failure = new Error('collection failed');
+        const entered = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const readFile = fs.readFile;
+        vi.spyOn(fs, 'readFile').mockImplementation(async (...args) => {
+          if (String(args[0]) === path.join(projectRoot, latePath)) {
+            entered.resolve();
+            await release.promise;
+          }
+          return Reflect.apply(readFile, fs, args);
+        });
+        let settled = false;
+        let finished = false;
+        const batch = withProjectContextSession(async (session) => {
+          const cancelled = session.execute(request, { signal: controller.signal });
+          const live = session.execute(request, { onSourceFileRead: reads });
+          await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+          expect((await live).errors).toBeUndefined();
+          void session.execute({ ...request, payload: { filePath: latePath } }).then(() => {
+            finished = true;
+          });
+          throw failure;
+        }).catch((error: unknown) => {
+          settled = true;
+          return error;
+        });
+        try {
+          await entered.promise;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(settled).toBe(false);
+        } finally {
+          release.resolve();
+        }
+        expect(await batch).toBe(failure);
+        expect(finished).toBe(true);
+        expect(reads).toHaveBeenCalledTimes(1);
+      }
+    );
   });
 
   it('connects project-space top-down refs without hidden broad scan or command execution', async () => {

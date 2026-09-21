@@ -48,6 +48,8 @@ export const moduleLayersProjectContextHandler: ProjectContextHandler = async (
     scope: request.scope,
     signal: context?.signal,
     onSourceFileRead: context?.onSourceFileRead,
+    analysis: context?.analysis,
+    onSourceFileVersion: context?.onSourceFileVersion,
   });
   throwIfProjectContextAborted(context);
   if (!seedResult.ok) {
