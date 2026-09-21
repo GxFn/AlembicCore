@@ -1,5 +1,5 @@
 import type { SQL } from 'drizzle-orm';
-import { and, count, desc, eq, like, or } from 'drizzle-orm';
+import { and, count, desc, eq, inArray, like, or } from 'drizzle-orm';
 import {
   createSourceFileNode,
   createSourceGraphEdge,
@@ -410,6 +410,83 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
       .limit(normalizeLimit(options.limit))
       .all();
     return rows.map(mapEdgeRow);
+  }
+
+  /**
+   * 内部代际复制/构建结果读取必须覆盖完整图；不能复用 listEdges 的查询输出预算，
+   * 否则一次无变化增量也会把未读到的旧边永久丢弃。查询端仍使用有界接口。
+   */
+  async listGenerationEdges(generationId: string): Promise<SourceGraphEdge[]> {
+    return this.drizzle
+      .select()
+      .from(sourceGraphEdges)
+      .where(eq(sourceGraphEdges.generationId, generationId))
+      .all()
+      .map(mapEdgeRow);
+  }
+
+  /** 先定位目标关联边；服务完成方向/排序后再应用输出预算，无关边不能抢占额度。 */
+  async findEdgesForTargets(
+    generationId: string,
+    targets: {
+      symbolIds?: readonly string[];
+      filePaths?: readonly string[];
+      direction?: SourceGraphEdgeDirection;
+    }
+  ): Promise<SourceGraphEdge[]> {
+    const direction = targets.direction ?? 'both';
+    const selections = [
+      {
+        values: [...new Set(targets.symbolIds ?? [])],
+        columns:
+          direction === 'incoming'
+            ? [sourceGraphEdges.toSymbolId]
+            : direction === 'outgoing'
+              ? [sourceGraphEdges.fromSymbolId]
+              : [sourceGraphEdges.fromSymbolId, sourceGraphEdges.toSymbolId],
+      },
+      {
+        values: [...new Set(targets.filePaths ?? [])],
+        columns: [
+          sourceGraphEdges.fromFilePath,
+          sourceGraphEdges.toFilePath,
+          sourceGraphEdges.siteFilePath,
+        ],
+      },
+    ];
+    const rows = new Map<number, EdgeRow>();
+    let batches = 0;
+    // 多文件变更仍须完整查询；每批最多 600 个路径占位符，避免 SQLite 变量上限
+    // 成为新的隐式查询预算。按原行 id 合并，保留同一目标的存储顺序并去重。
+    for (const selection of selections) {
+      for (let offset = 0; offset < selection.values.length; offset += 200) {
+        const values = selection.values.slice(offset, offset + 200);
+        const selected = this.drizzle
+          .select()
+          .from(sourceGraphEdges)
+          .where(
+            and(
+              eq(sourceGraphEdges.generationId, generationId),
+              or(...selection.columns.map((column) => inArray(column, values)))
+            )
+          )
+          .all();
+        for (const row of selected) {
+          rows.set(row.id, row);
+        }
+        batches++;
+      }
+    }
+    if (batches !== 1) {
+      this.logger.debug('Source graph target edge read completed', {
+        generationId,
+        symbolTargets: selections[0].values.length,
+        fileTargets: selections[1].values.length,
+        batches,
+        edgeCount: rows.size,
+      });
+    }
+    return [...rows.values()].sort((left, right) => left.id - right.id).map(mapEdgeRow);
   }
 
   async findEdgesForSymbol(

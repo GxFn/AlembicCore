@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -117,6 +118,7 @@ interface SourceGraphQueryContext {
   symbolById: Map<string, SourceSymbolNode>;
   options: NormalizedRankingOptions;
   sectionBudget: SectionBudget;
+  sourceLines: Map<string, string[]>;
 }
 
 interface QueryTerms {
@@ -163,7 +165,10 @@ export class SourceGraphQueryService {
     const symbols = rankedSymbols.slice(0, context.options.limit).map((ranked) => ranked.symbol);
     const symbolSections = await this.buildRankedSymbolSections(context, rankedSymbols);
     const textSections = await this.buildTextRecallSections(context, terms, symbolSections);
-    const sourceSections = dedupeSections([...symbolSections, ...textSections]);
+    const sourceSections = finalizeSourceSections(
+      context,
+      dedupeSections([...symbolSections, ...textSections])
+    );
     const edges =
       context.options.includeEdges === false
         ? []
@@ -202,11 +207,11 @@ export class SourceGraphQueryService {
   }
 
   async node(input: SourceGraphNodeInput): Promise<SourceGraphNodeResult> {
-    const context = await this.createContext(input);
+    const context = await this.createContext(input, 'target');
     const nodeId = input.nodeId.trim();
     const symbol = context.symbolById.get(nodeId);
     const file = context.fileByPath.get(normalizeRepoPath(nodeId));
-    const diagnostics = [...context.diagnostics];
+    const diagnostics: SourceGraphDiagnostic[] = [];
 
     if (!symbol && !file) {
       diagnostics.push(
@@ -217,6 +222,11 @@ export class SourceGraphQueryService {
         })
       );
     }
+
+    await this.loadTargetEdges(
+      context,
+      symbol ? { symbolIds: [symbol.symbolId] } : { filePaths: file ? [file.repoRelativePath] : [] }
+    );
 
     const sections =
       symbol !== undefined
@@ -247,15 +257,16 @@ export class SourceGraphQueryService {
       repoId: context.repoId,
       nodeId,
       symbol,
-      sourceSections: sections,
+      sourceSections: finalizeSourceSections(context, sections),
       edges,
       freshness: context.freshness,
-      diagnostics,
+      diagnostics: [...context.diagnostics, ...diagnostics],
     });
   }
 
   async callers(input: SourceGraphRelationInput): Promise<SourceGraphCallersResult> {
-    const context = await this.createContext(input);
+    const context = await this.createContext(input, 'target');
+    await this.loadTargetEdges(context, { symbolIds: [input.symbolId], direction: 'incoming' });
     const relation = this.collectRelationSymbols(context, input.symbolId, 'incoming');
     const sections = await this.buildRelationSections(context, relation.symbols, relation.edges);
     return createSourceGraphCallersResult({
@@ -264,7 +275,7 @@ export class SourceGraphQueryService {
       repoId: context.repoId,
       symbolId: input.symbolId,
       callers: relation.symbols,
-      sourceSections: sections,
+      sourceSections: finalizeSourceSections(context, sections),
       edges: context.options.includeEdges === false ? [] : relation.edges,
       freshness: context.freshness,
       diagnostics: [...context.diagnostics, ...relation.diagnostics],
@@ -272,7 +283,8 @@ export class SourceGraphQueryService {
   }
 
   async callees(input: SourceGraphRelationInput): Promise<SourceGraphCalleesResult> {
-    const context = await this.createContext(input);
+    const context = await this.createContext(input, 'target');
+    await this.loadTargetEdges(context, { symbolIds: [input.symbolId], direction: 'outgoing' });
     const relation = this.collectRelationSymbols(context, input.symbolId, 'outgoing');
     const sections = await this.buildRelationSections(context, relation.symbols, relation.edges);
     return createSourceGraphCalleesResult({
@@ -281,7 +293,7 @@ export class SourceGraphQueryService {
       repoId: context.repoId,
       symbolId: input.symbolId,
       callees: relation.symbols,
-      sourceSections: sections,
+      sourceSections: finalizeSourceSections(context, sections),
       edges: context.options.includeEdges === false ? [] : relation.edges,
       freshness: context.freshness,
       diagnostics: [...context.diagnostics, ...relation.diagnostics],
@@ -289,8 +301,12 @@ export class SourceGraphQueryService {
   }
 
   async impact(input: SourceGraphImpactInput): Promise<SourceGraphImpactResult> {
-    const context = await this.createContext(input);
+    const context = await this.createContext(input, 'target');
     const seedFiles = this.resolveImpactSeedFiles(context, input);
+    await this.loadTargetEdges(context, {
+      filePaths: seedFiles,
+      symbolIds: input.symbolId ? [input.symbolId] : [],
+    });
     const impactedEdges = collectImpactEdges(context, seedFiles, input.symbolId).slice(
       0,
       context.options.edgeLimit
@@ -325,8 +341,9 @@ export class SourceGraphQueryService {
   async affectedTests(
     input: SourceGraphAffectedTestsInput
   ): Promise<SourceGraphAffectedTestsResult> {
-    const context = await this.createContext(input);
+    const context = await this.createContext(input, 'target');
     const changedFiles = normalizeStringList(input.changedFiles.map(normalizeRepoPath));
+    await this.loadTargetEdges(context, { filePaths: changedFiles });
     const impactedEdges = collectImpactEdges(context, changedFiles, undefined).slice(
       0,
       context.options.edgeLimit
@@ -364,11 +381,12 @@ export class SourceGraphQueryService {
   async validationPlan(
     input: SourceGraphValidationPlanInput
   ): Promise<SourceGraphValidationPlanResult> {
-    const context = await this.createContext(input);
+    const context = await this.createContext(input, 'target');
     const changedFiles = normalizeStringList((input.changedFiles ?? []).map(normalizeRepoPath));
     const seedSymbols = normalizeStringList(input.symbolIds ?? []);
     const missingSeedSymbols = seedSymbols.filter((symbolId) => !context.symbolById.has(symbolId));
     const seedFiles = this.resolveValidationSeedFiles(context, input, changedFiles, seedSymbols);
+    await this.loadTargetEdges(context, { filePaths: seedFiles, symbolIds: seedSymbols });
     const impactedEdges = collectImpactEdges(context, seedFiles, seedSymbols).slice(
       0,
       context.options.edgeLimit
@@ -428,7 +446,22 @@ export class SourceGraphQueryService {
     });
   }
 
-  private async createContext(input: SourceGraphRankingOptions): Promise<SourceGraphQueryContext> {
+  private async loadTargetEdges(
+    context: SourceGraphQueryContext,
+    targets: Parameters<SourceGraphRepositoryImpl['findEdgesForTargets']>[1]
+  ): Promise<void> {
+    if (context.snapshot) {
+      context.edges = await this.repository.findEdgesForTargets(
+        context.snapshot.generationId,
+        targets
+      );
+    }
+  }
+
+  private async createContext(
+    input: SourceGraphRankingOptions,
+    edgeRead: 'ranking' | 'target' = 'ranking'
+  ): Promise<SourceGraphQueryContext> {
     const options = normalizeRankingOptions(input);
     // 同一查询的符号召回与文本召回复用总预算，不能各自重新获得一份额度。
     const sectionBudget = new SectionBudget(options.sourceSectionLineBudget);
@@ -467,14 +500,18 @@ export class SourceGraphQueryService {
         symbolById: new Map(),
         options,
         sectionBudget,
+        sourceLines: new Map(),
       };
     }
 
     const files = await this.repository.listFiles(snapshot.generationId);
     const symbols = await this.repository.listSymbols(snapshot.generationId);
-    const edges = await this.repository.listEdges(snapshot.generationId, {
-      limit: options.edgeLimit,
-    });
+    // 排名继续使用既有连通性采样；显式目标操作在识别 symbol/file 后读取相关边，
+    // 不能先对全图 LIMIT 再筛选，否则其他文件会吞掉目标的全部返回预算。
+    const edges =
+      edgeRead === 'ranking'
+        ? await this.repository.listEdges(snapshot.generationId, { limit: options.edgeLimit })
+        : [];
     const diagnostics = buildFreshnessDiagnostics(snapshot);
     return {
       snapshot,
@@ -490,6 +527,7 @@ export class SourceGraphQueryService {
       symbolById: new Map(symbols.map((symbol) => [symbol.symbolId, symbol])),
       options,
       sectionBudget,
+      sourceLines: new Map(),
     };
   }
 
@@ -662,7 +700,7 @@ export class SourceGraphQueryService {
     const existingKeys = new Set(existingSections.map((section) => section.filePath));
     const matches: TextMatch[] = [];
     for (const file of context.files) {
-      const lines = await readProjectFileLines(context.projectRoot, file.repoRelativePath);
+      const lines = await readProjectFileLines(context, file.repoRelativePath);
       if (lines.length === 0) {
         continue;
       }
@@ -713,12 +751,7 @@ export class SourceGraphQueryService {
       const shouldRedact = file?.classification === 'config';
       const text =
         canIncludeSourceText(context) && !shouldRedact
-          ? await readProjectFileText(
-              context.projectRoot,
-              plan.filePath,
-              allowed.startLine,
-              allowed.endLine
-            )
+          ? await readProjectFileText(context, plan.filePath, allowed.startLine, allowed.endLine)
           : undefined;
       const overflow = allowed.endLine < plan.endLine || allowed.startLine > plan.startLine;
       sections.push(
@@ -1056,11 +1089,26 @@ function canIncludeSourceText(context: SourceGraphQueryContext): boolean {
 }
 
 async function readProjectFileLines(
-  projectRoot: string,
+  context: SourceGraphQueryContext,
   repoRelativePath: string
 ): Promise<string[]> {
+  const cached = context.sourceLines.get(repoRelativePath);
+  if (cached !== undefined) {
+    return cached;
+  }
+  // 同一查询只读取并核验一次正文；后续 range/text-recall 共用已核验字节，
+  // 避免两次读取跨过文件编辑时把不同版本拼成同一份 source section。
+  // 两个读取循环均串行 await；若未来改为并发读取，此处须改存 Promise 而非空数组哨兵。
+  context.sourceLines.set(repoRelativePath, []);
+  const { projectRoot } = context;
+  const expectedContentHash = context.fileByPath.get(repoRelativePath)?.contentHash;
   const absolutePath = resolveProjectFile(projectRoot, repoRelativePath);
+  if (!expectedContentHash) {
+    rejectUnverifiedSourceText(context, repoRelativePath, 'missing-indexed-hash');
+    return [];
+  }
   if (!absolutePath) {
+    rejectUnverifiedSourceText(context, repoRelativePath, 'outside-project-scope');
     return [];
   }
   try {
@@ -1074,26 +1122,103 @@ async function readProjectFileLines(
         repoRelativePath,
         fileRealpath,
       });
+      rejectUnverifiedSourceText(context, repoRelativePath, 'outside-project-scope');
       return [];
     }
     const content = await fs.readFile(fileRealpath, 'utf8');
-    return content.split(/\r\n|\n|\r/);
-  } catch {
+    const actualContentHash = crypto.createHash('sha256').update(content).digest('hex');
+    if (actualContentHash !== expectedContentHash) {
+      rejectUnverifiedSourceText(context, repoRelativePath, 'content-hash-mismatch', {
+        expectedContentHash,
+        actualContentHash,
+      });
+      return [];
+    }
+    const lines = content.split(/\r\n|\n|\r/);
+    context.sourceLines.set(repoRelativePath, lines);
+    return lines;
+  } catch (error) {
+    rejectUnverifiedSourceText(context, repoRelativePath, 'source-unavailable', {
+      error: error instanceof Error ? error.message : String(error),
+      expectedContentHash,
+    });
     return [];
   }
 }
 
 async function readProjectFileText(
-  projectRoot: string,
+  context: SourceGraphQueryContext,
   repoRelativePath: string,
   startLine: number,
   endLine: number
 ): Promise<string | undefined> {
-  const lines = await readProjectFileLines(projectRoot, repoRelativePath);
+  const lines = await readProjectFileLines(context, repoRelativePath);
   if (lines.length === 0) {
     return undefined;
   }
   return lines.slice(startLine - 1, endLine).join('\n');
+}
+
+function rejectUnverifiedSourceText(
+  context: SourceGraphQueryContext,
+  filePath: string,
+  reason:
+    | 'content-hash-mismatch'
+    | 'missing-indexed-hash'
+    | 'outside-project-scope'
+    | 'source-unavailable',
+  metadata: Record<string, unknown> = {}
+): void {
+  const changed = reason === 'content-hash-mismatch';
+  const message = changed
+    ? 'Live source content no longer matches the indexed source graph file.'
+    : 'Source graph text could not be verified against an indexed file.';
+  const nextAction = changed
+    ? 'run_incremental_source_graph_index'
+    : 'verify_source_ref_before_citing';
+  const alreadyUnavailable = context.freshness.status === 'unavailable';
+  // 只降级本次读取，不在查询中修改持久化 generation 或偷偷重建图。
+  // 后续另一个文件的 hash 变化不能把先前无法核验的状态升级为仅需增量更新的 stale。
+  context.freshness = createSourceGraphFreshness({
+    ...context.freshness,
+    status: changed && !alreadyUnavailable ? 'stale' : 'unavailable',
+    checkedAt: Date.now(),
+    pendingFileCount: context.freshness.pendingFileCount + (changed ? 1 : 0),
+    reason: alreadyUnavailable ? context.freshness.reason : message,
+    nextAction: alreadyUnavailable ? context.freshness.nextAction : nextAction,
+  });
+  context.diagnostics.push(
+    createSourceGraphDiagnostic({
+      code: changed ? 'pending-file-in-response' : 'source-ref-unproven',
+      message,
+      filePath,
+      nextAction,
+      metadata: { reason, ...metadata },
+    })
+  );
+  Logger.getInstance().warn('Source graph omitted unverified source text', {
+    generationId: context.generationId,
+    filePath,
+    reason,
+    ...metadata,
+    freshness: context.freshness.status,
+    nextAction: context.freshness.nextAction,
+  });
+}
+
+function finalizeSourceSections(
+  context: SourceGraphQueryContext,
+  sections: SourceSection[]
+): SourceSection[] {
+  if (context.freshness.status === 'fresh') {
+    return sections;
+  }
+  // 后续文本召回也可能发现漂移；先前已生成的 section 必须服从同一查询的降级状态。
+  return sections.map((section) => ({
+    ...section,
+    text: undefined,
+    freshness: createSourceGraphFreshness(context.freshness),
+  }));
 }
 
 function resolveProjectFile(projectRoot: string, repoRelativePath: string): string | undefined {

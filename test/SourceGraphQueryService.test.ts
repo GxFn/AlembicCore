@@ -194,6 +194,110 @@ describe('SourceGraphQueryService', () => {
     );
   });
 
+  it.each([
+    'node-symbol',
+    'node-file',
+    'callers',
+    'callees',
+    'impact',
+    'affected-tests',
+    'validation-plan',
+  ] as const)('locates %s edges before applying the target query budget', async (operation) => {
+    const repo = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const service = new SourceGraphService(repo);
+    const generationId = 'crowded-generation';
+    const target = 'src/target.ts#target';
+    const caller = 'src/caller.ts#caller';
+    const testSymbol = 'test/target.test.ts#testTarget';
+    await repo.replaceGeneration({
+      snapshot: { generationId, projectRoot: tmpDir, status: 'indexed' },
+      files: ['src/target.ts', 'src/caller.ts', 'test/target.test.ts'].map((filePath) => ({
+        generationId,
+        projectRoot: tmpDir,
+        repoRelativePath: filePath,
+        contentHash: 'fixture-hash',
+        classification: filePath.startsWith('test/') ? 'test' : 'source',
+        lineCount: 1,
+      })),
+      symbols: [target, caller, testSymbol].map((symbolId) => ({
+        generationId,
+        symbolId,
+        displayName: symbolId.split('#')[1],
+        filePath: symbolId.split('#')[0],
+        kind: 'function',
+        range: { startLine: 1, startColumn: 0, endLine: 1, endColumn: 1 },
+      })),
+      edges: [
+        ...Array.from({ length: 501 }, (_, index) => ({
+          generationId,
+          edgeId: `unrelated-${index}`,
+          kind: 'imports',
+          fromFilePath: 'src/unrelated.ts',
+          toFilePath: 'src/dependency.ts',
+        })),
+        {
+          generationId,
+          edgeId: 'a-target-test',
+          kind: 'symbol_to_test',
+          fromSymbolId: target,
+          toSymbolId: testSymbol,
+          fromFilePath: 'src/target.ts',
+          toFilePath: 'test/target.test.ts',
+        },
+        {
+          generationId,
+          edgeId: 'b-target-call',
+          kind: 'calls',
+          fromSymbolId: caller,
+          toSymbolId: target,
+          fromFilePath: 'src/caller.ts',
+          toFilePath: 'src/target.ts',
+        },
+      ],
+    });
+    const input = { generationId, edgeLimit: 1, includeText: false };
+    const expectedEdge =
+      operation === 'callers' || operation === 'callees' ? 'b-target-call' : 'a-target-test';
+
+    if (operation === 'affected-tests') {
+      const result = await service.getSourceGraphAffectedTests({
+        ...input,
+        changedFiles: ['src/target.ts'],
+      });
+      expect(result.testFiles).toEqual(['test/target.test.ts']);
+      expect(result.unknownReason).toBeUndefined();
+      return;
+    }
+
+    const result =
+      operation === 'node-symbol' || operation === 'node-file'
+        ? await service.getSourceGraphNode({
+            ...input,
+            nodeId: operation === 'node-symbol' ? target : 'src/target.ts',
+          })
+        : operation === 'callers'
+          ? await service.getSourceGraphCallers({ ...input, symbolId: target })
+          : operation === 'callees'
+            ? await service.getSourceGraphCallees({ ...input, symbolId: caller })
+            : operation === 'impact'
+              ? await service.getSourceGraphImpact({ ...input, changedFiles: ['src/target.ts'] })
+              : await service.getSourceGraphValidationPlan({ ...input, symbolIds: [target] });
+
+    expect(result.edges.map((edge) => edge.edgeId)).toEqual([expectedEdge]);
+    if (result.operation === 'callers') {
+      expect(result.callers.map((symbol) => symbol.symbolId)).toEqual([caller]);
+    } else if (result.operation === 'callees') {
+      expect(result.callees.map((symbol) => symbol.symbolId)).toEqual([target]);
+    } else if (result.operation === 'impact') {
+      expect(result.impactedFiles).toEqual(['src/target.ts', 'test/target.test.ts']);
+      expect(result.affectedValidations).toEqual(['test:test/target.test.ts']);
+    } else if (result.operation === 'validation-plan') {
+      expect(result.mustRun.map((recommendation) => recommendation.filePath)).toEqual([
+        'test/target.test.ts',
+      ]);
+    }
+  });
+
   it('builds validation plans from changed source files with tests, commands, and evidence', async () => {
     const service = await buildFixtureGraph();
 
@@ -302,6 +406,131 @@ describe('SourceGraphQueryService', () => {
       freshness: { status: 'stale' },
     });
     expect(result.sourceSections[0]?.text).toBeUndefined();
+  });
+
+  it.each([
+    'node',
+    'search',
+    'querySymbols',
+  ] as const)('marks %s source text stale when the live bytes no longer match the indexed hash', async (operation) => {
+    const { service, sourceGraphRepository } = await buildFixtureGraphWithRepository();
+    const filePath = 'src/app.ts';
+    const absolutePath = path.join(tmpDir, filePath);
+    const indexed = await sourceGraphRepository.findFile('gen-query', filePath);
+    const before = fs.statSync(absolutePath);
+    const original = fs.readFileSync(absolutePath, 'utf8');
+    fs.writeFileSync(absolutePath, original.replaceAll('AppController', 'NewController'));
+    fs.utimesSync(absolutePath, before.atime, before.mtime);
+    expect(fs.statSync(absolutePath).size).toBe(before.size);
+
+    const result =
+      operation === 'node'
+        ? await service.getSourceGraphNode({
+            generationId: 'gen-query',
+            nodeId: 'src/app.ts#AppController',
+          })
+        : operation === 'search'
+          ? await service.searchSourceGraph({
+              generationId: 'gen-query',
+              query: 'AppController',
+              limit: 1,
+            })
+          : await service.querySymbols('gen-query', 'AppController', { limit: 1 });
+
+    expect(result.freshness.status).toBe('stale');
+    const diagnostic = result.diagnostics.find((entry) => entry.filePath === filePath);
+    expect(diagnostic).toMatchObject({
+      code: 'pending-file-in-response',
+      blocksReady: true,
+      metadata: {
+        expectedContentHash: indexed?.contentHash,
+        actualContentHash: expect.any(String),
+      },
+    });
+    expect(diagnostic?.metadata.actualContentHash).not.toBe(indexed?.contentHash);
+    expect(result.sourceSections.length).toBeGreaterThan(0);
+    for (const section of result.sourceSections) {
+      expect(section.text).toBeUndefined();
+      expect(section.freshness.status).toBe('stale');
+    }
+    // 查询只报告漂移，不写状态或偷偷重建；原 generation 仍可供显式 catch-up 使用。
+    expect((await sourceGraphRepository.getSnapshot('gen-query'))?.freshness.status).toBe('fresh');
+    expect((await sourceGraphRepository.findFile('gen-query', filePath))?.contentHash).toBe(
+      indexed?.contentHash
+    );
+  });
+
+  it('removes earlier fresh sections when later text recall discovers source drift', async () => {
+    const service = await buildFixtureGraph();
+    writeFixture(
+      'src/pluginRuntime.ts',
+      "export function changedAfterIndex() { return 'unindexed'; }\n"
+    );
+    const result = await service.searchSourceGraph({
+      generationId: 'gen-query',
+      query: 'AppController',
+      limit: 1,
+    });
+    expect(result.freshness.status).toBe('stale');
+    expect(result.ready).toBe(false);
+    expect(result.sourceSections.some((section) => section.filePath === 'src/app.ts')).toBe(true);
+    expect(result.sourceSections.every((section) => section.text === undefined)).toBe(true);
+    expect(result.sourceSections.every((section) => section.freshness.status === 'stale')).toBe(
+      true
+    );
+    expect(
+      result.diagnostics.some((diagnostic) => diagnostic.filePath === 'src/pluginRuntime.ts')
+    ).toBe(true);
+  });
+
+  it('keeps source unavailability when a later file also has a hash mismatch', async () => {
+    const service = await buildFixtureGraph();
+    fs.unlinkSync(path.join(tmpDir, 'src/alternate.ts'));
+    writeFixture('src/dashboard.ts', 'export function changedDashboard() {}\n');
+    const result = await service.searchSourceGraph({
+      generationId: 'gen-query',
+      query: 'AppController',
+      limit: 1,
+    });
+    expect(result.freshness.status).toBe('unavailable');
+    expect(result.freshness.nextAction).toBe('verify_source_ref_before_citing');
+    expect(result.ready).toBe(false);
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'source-ref-unproven', filePath: 'src/alternate.ts' }),
+        expect.objectContaining({ code: 'pending-file-in-response', filePath: 'src/dashboard.ts' }),
+      ])
+    );
+    expect(result.sourceSections.every((section) => section.text === undefined)).toBe(true);
+  });
+
+  it.each([
+    'missing-file',
+    'missing-indexed-hash',
+  ] as const)('does not claim fresh source sections when verification fails with %s', async (failure) => {
+    const { service, sourceGraphRepository } = await buildFixtureGraphWithRepository();
+    const filePath = failure === 'missing-file' ? 'src/app.ts' : 'src/unindexed.ts';
+    const nodeId =
+      failure === 'missing-file' ? 'src/app.ts#AppController' : 'src/unindexed.ts#Unindexed';
+    if (failure === 'missing-file') {
+      fs.unlinkSync(path.join(tmpDir, filePath));
+    } else {
+      writeFixture(filePath, 'export class Unindexed {}\n');
+      await sourceGraphRepository.upsertSymbol({
+        generationId: 'gen-query',
+        symbolId: nodeId,
+        displayName: 'Unindexed',
+        kind: 'class',
+        filePath,
+        range: { startLine: 1, startColumn: 0, endLine: 1, endColumn: 1 },
+      });
+    }
+    const result = await service.getSourceGraphNode({ generationId: 'gen-query', nodeId });
+    expect(result.ready).toBe(false);
+    expect(result.freshness.status).not.toBe('fresh');
+    expect(result.sourceSections).toHaveLength(1);
+    expect(result.sourceSections[0].text).toBeUndefined();
+    expect(result.diagnostics.some((diagnostic) => diagnostic.filePath === filePath)).toBe(true);
   });
 
   async function buildFixtureGraph(): Promise<SourceGraphService> {

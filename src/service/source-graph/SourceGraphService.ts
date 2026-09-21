@@ -126,13 +126,18 @@ export class SourceGraphService {
       filePath: options.filePath,
       includeEdges: options.includeEdges,
     });
-    const diagnostics = buildQueryDiagnostics(query, searchResult.symbols, snapshot);
+    const diagnostics = [
+      ...buildQueryDiagnostics(query, searchResult.symbols, snapshot),
+      // 保留旧 wrapper 的排名诊断，同时透传读取时发现的文件证据问题。
+      // 持久化快照仍可能标为 fresh，不能覆盖本次实际正文核验得出的降级状态。
+      ...searchResult.diagnostics.filter((diagnostic) => diagnostic.filePath !== undefined),
+    ];
 
     return createSourceGraphQueryResult({
       generationId,
       projectRoot: snapshot.projectRoot,
       query,
-      freshness: snapshot.freshness,
+      freshness: searchResult.freshness,
       symbols: searchResult.symbols,
       edges: searchResult.edges,
       sourceSections: searchResult.sourceSections,

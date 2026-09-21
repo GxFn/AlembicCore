@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -48,6 +49,41 @@ describe('SourceGraphRepository', () => {
       })
     ).rejects.toThrow('Source graph generation not found: ignored-generation');
     expect(await repo.getSnapshot('ignored-generation')).toBeNull();
+  });
+
+  it('separates complete generation edges from bounded query results without crossing generations', async () => {
+    const repo = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const generationId = 'complete-edge-read';
+    const edgeIds = Array.from({ length: 501 }, (_, index) => `edge-${index}`);
+    await repo.replaceGeneration({
+      snapshot: { generationId, projectRoot: tmpDir },
+      edges: edgeIds.map((edgeId) => ({
+        generationId,
+        edgeId,
+        kind: 'imports',
+        fromFilePath: `${edgeId}.ts`,
+        toFilePath: 'target.ts',
+      })),
+    });
+    await repo.replaceGeneration({
+      snapshot: { generationId: 'other-generation', projectRoot: tmpDir },
+      edges: [
+        {
+          generationId: 'other-generation',
+          edgeId: 'other-edge',
+          kind: 'imports',
+          fromFilePath: 'other.ts',
+          toFilePath: 'target.ts',
+        },
+      ],
+    });
+
+    expect(await repo.listEdges(generationId)).toHaveLength(50);
+    expect(await repo.listEdges(generationId, { limit: 2 })).toHaveLength(2);
+    expect(await repo.listEdges(generationId, { limit: 1000 })).toHaveLength(500);
+    expect(
+      (await repo.listGenerationEdges(generationId)).map((edge) => edge.edgeId).sort()
+    ).toEqual([...edgeIds].sort());
   });
 
   it.each([
@@ -129,6 +165,26 @@ describe('SourceGraphRepository', () => {
     const sourceGraphRepository = repositories.sourceGraphRepository;
     const repositoryFile = 'src/repository/source-graph/SourceGraphRepository.ts';
     const serviceFile = 'src/service/source-graph/SourceGraphService.ts';
+    const repositorySource = Array.from({ length: 620 }, (_, index) =>
+      index === 79
+        ? 'export class SourceGraphRepositoryImpl {'
+        : index === 619
+          ? '}'
+          : '// repository fixture'
+    ).join('\n');
+    const serviceSource = Array.from({ length: 120 }, (_, index) =>
+      index === 19 ? 'export class SourceGraphService {' : index === 83 ? '}' : '// service fixture'
+    ).join('\n');
+    for (const [filePath, content] of [
+      [repositoryFile, repositorySource],
+      [serviceFile, serviceSource],
+    ]) {
+      const absolutePath = path.join(tmpDir, filePath);
+      fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+      fs.writeFileSync(absolutePath, content);
+    }
+    const repositoryHash = createHash('sha256').update(repositorySource).digest('hex');
+    const serviceHash = createHash('sha256').update(serviceSource).digest('hex');
 
     const snapshot = await sourceGraphRepository.replaceGeneration({
       snapshot: {
@@ -151,21 +207,21 @@ describe('SourceGraphRepository', () => {
           projectRoot: tmpDir,
           repoRelativePath: repositoryFile,
           language: 'typescript',
-          contentHash: 'sha256-repository',
-          sizeBytes: 1200,
+          contentHash: repositoryHash,
+          sizeBytes: Buffer.byteLength(repositorySource),
           mtimeMs: 1000,
           indexedAt: 200,
           classification: 'source',
           parseStatus: 'parsed',
-          lineCount: 220,
+          lineCount: 620,
         },
         {
           generationId: 'source-graph-gen-1',
           projectRoot: tmpDir,
           repoRelativePath: serviceFile,
           language: 'typescript',
-          contentHash: 'sha256-service',
-          sizeBytes: 800,
+          contentHash: serviceHash,
+          sizeBytes: Buffer.byteLength(serviceSource),
           mtimeMs: 1001,
           indexedAt: 201,
           classification: 'source',
@@ -237,7 +293,7 @@ describe('SourceGraphRepository', () => {
       'outgoing'
     );
 
-    expect(repositoryNode?.contentHash).toBe('sha256-repository');
+    expect(repositoryNode?.contentHash).toBe(repositoryHash);
     expect(serviceSymbols.map((symbol) => symbol.symbolId)).toStrictEqual(['sourceGraphService']);
     expect(outgoingEdges[0]?.kind).toBe('calls');
     expect(outgoingEdges[0]?.provenance).toBe('deterministic');
@@ -251,6 +307,9 @@ describe('SourceGraphRepository', () => {
     expect(queryResult.edges).toHaveLength(1);
     expect(queryResult.impactedFiles).toStrictEqual([repositoryFile, serviceFile]);
     expect(queryResult.diagnostics).toStrictEqual([]);
+    expect(queryResult.sourceSections.every((section) => typeof section.text === 'string')).toBe(
+      true
+    );
 
     await expect(
       sourceGraphRepository.replaceGeneration({

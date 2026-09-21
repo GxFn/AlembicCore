@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import '../../core/ast/index.js';
 import { analyzeFile, isAvailable as isAstAvailable } from '../../core/AstAnalyzer.js';
+import { ImportPathResolver } from '../../core/analysis/ImportPathResolver.js';
 import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
 import {
   createSourceGraphDiagnostic,
@@ -217,7 +218,7 @@ export class SourceGraphIndexer {
     const preservedSymbols = (await this.repository.listSymbols(baseSnapshot.generationId))
       .filter((symbol) => !impacted.has(symbol.filePath))
       .map((symbol) => ({ ...symbol, generationId: input.generationId ?? '' }));
-    const preservedEdges = (await this.repository.listEdges(baseSnapshot.generationId))
+    const preservedEdges = (await this.repository.listGenerationEdges(baseSnapshot.generationId))
       .filter((edge) => {
         // 只有文件级 import 在目标内容变化后仍成立；符号边可能指向已删除/改名的声明，
         // 沿用旧失效规则，不能随 import 修复一起保留到新的 fresh generation。
@@ -269,9 +270,15 @@ export class SourceGraphIndexer {
         parseInventoryFile(file, input.options, input.generationId, knownPaths)
       )
     );
-    const diagnostics = parsedFiles
-      .flatMap((file) => file.diagnostics)
-      .map(createSourceGraphDiagnostic);
+    // 未重解析的文件仍保留上一代的解析缺口。只汇总本轮 diagnostics 会把
+    // failed/skipped/partial 文件误报为 fresh；诊断从持久化 parseErrors 恢复，
+    // 文件被重解析或删除后自然消失，不永久继承上一代整体降级状态。
+    const diagnostics = [
+      ...(input.preservedFiles ?? []).flatMap(diagnosticsForRetainedFile),
+      ...parsedFiles.flatMap((file) => file.diagnostics),
+    ]
+      .map(createSourceGraphDiagnostic)
+      .sort((left, right) => (left.filePath ?? '').localeCompare(right.filePath ?? ''));
     const filesForReplace = [
       ...(input.preservedFiles ?? []).map((file) => ({
         ...file,
@@ -323,7 +330,7 @@ export class SourceGraphIndexer {
     });
     const files = await this.repository.listFiles(snapshot.generationId);
     const symbols = await this.repository.listSymbols(snapshot.generationId);
-    const edges = await this.repository.listEdges(snapshot.generationId);
+    const edges = await this.repository.listGenerationEdges(snapshot.generationId);
     const statusResult = createSourceGraphStatusResult({
       generationId: snapshot.generationId,
       projectRoot: snapshot.projectRoot,
@@ -783,6 +790,38 @@ function failedFile(file: SourceFileNodeInput, message: string): ParsedFile {
   };
 }
 
+function diagnosticsForRetainedFile(file: SourceFileNode): SourceGraphDiagnosticInput[] {
+  if (file.parseErrors.length === 0) {
+    return file.parseStatus === 'parsed'
+      ? []
+      : [
+          {
+            code: 'catch-up-failed',
+            message: `Retained source graph file has ${file.parseStatus} parsing coverage.`,
+            filePath: file.repoRelativePath,
+            metadata: { parseStatus: file.parseStatus },
+          },
+        ];
+  }
+  return file.parseErrors.map((error) => {
+    if (
+      error.code === 'large-file-skipped' ||
+      error.code === 'unsupported-language' ||
+      error.code === 'parser-timeout'
+    ) {
+      return { code: error.code, message: error.message, filePath: file.repoRelativePath };
+    }
+    // parse-failed 是文件级错误码；查询诊断保持 failedFile 使用的 catch-up-failed。
+    // 未知旧错误码也不能被当成已解析成功，保留原码供后续核验。
+    return {
+      code: 'catch-up-failed',
+      message: error.message,
+      filePath: file.repoRelativePath,
+      metadata: error.code ? { parseErrorCode: error.code } : undefined,
+    };
+  });
+}
+
 function extractSymbols(
   content: string,
   file: InventoryFile,
@@ -1004,12 +1043,16 @@ function resolveRelativeImport(
   const base = normalizeRepoRelative(
     path.posix.normalize(path.posix.join(path.posix.dirname(currentFile), specifier))
   );
-  const candidates = [
-    base,
-    ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${base}${extension}`),
-    ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${base}/index${extension}`),
-  ];
-  return candidates.find((candidate) => knownPaths.has(candidate));
+  return (
+    ImportPathResolver.resolveIndexedFile(base, (requestedPath) => {
+      const candidates = [
+        requestedPath,
+        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}${extension}`),
+        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}/index${extension}`),
+      ];
+      return candidates.find((candidate) => knownPaths.has(candidate));
+    }) ?? undefined
+  );
 }
 
 function edgeTouchesFiles(edge: SourceGraphEdge, impacted: Set<string>): boolean {

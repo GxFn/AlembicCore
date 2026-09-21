@@ -173,15 +173,26 @@ export class ImportPathResolver {
   }
 
   #resolveIndexedFile(requestedPath: string): string | null {
-    const exact = this.fileIndex.get(requestedPath);
+    return ImportPathResolver.resolveIndexedFile(requestedPath, (candidate) =>
+      this.fileIndex.get(candidate)
+    );
+  }
+
+  /**
+   * 共享已标准化路径的索引查找规则。调用者负责文件范围和候选优先级，
+   * 因此 SourceGraph 可复用 NodeNext 兼容路径而不启用别名或改变旧相对导入排序。
+   */
+  static resolveIndexedFile(
+    requestedPath: string,
+    lookup: (candidate: string) => string | undefined
+  ): string | null {
+    const exact = lookup(requestedPath);
     if (exact) {
       return exact;
     }
     // NodeNext 源码写输出扩展名 .js；只有真实 .js 不存在时才映射到 TS 源码。
     // 复用无扩展名索引，保留调用方 allFiles 的既有优先顺序（包括 .ts/.tsx 冲突）。
-    const source = requestedPath.endsWith('.js')
-      ? this.fileIndex.get(requestedPath.slice(0, -3))
-      : undefined;
+    const source = requestedPath.endsWith('.js') ? lookup(requestedPath.slice(0, -3)) : undefined;
     if (source && /\.tsx?$/.test(source)) {
       Logger.getInstance().debug('Import resolved JavaScript specifier to TypeScript source', {
         requestedPath,

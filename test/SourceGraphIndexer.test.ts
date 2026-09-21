@@ -78,6 +78,97 @@ describe('SourceGraphIndexer', () => {
     });
   });
 
+  it('retains every generation edge across full and unchanged incremental builds beyond query limits', async () => {
+    const edgeCount = 501;
+    const imports: string[] = [];
+    for (let index = 0; index < edgeCount; index++) {
+      const name = `dependency-${String(index).padStart(3, '0')}`;
+      imports.push(`import './${name}';`);
+      writeFixture(`src/${name}.ts`, `export const dependency${index} = ${index};\n`);
+    }
+    writeFixture('src/index.ts', `${imports.join('\n')}\n`);
+    const { sourceGraphRepository } = createAlembicRepositories(runtime.connection);
+    const indexer = new SourceGraphIndexer(sourceGraphRepository);
+    const input = {
+      projectRoot: tmpDir,
+      repoId: 'fixture',
+      projectScope: 'src',
+      includeExtensions: ['.ts'],
+    };
+
+    const full = await indexer.buildFull({ ...input, generationId: 'complete-base' });
+    const incremental = await indexer.buildIncremental({
+      ...input,
+      baseGenerationId: full.snapshot.generationId,
+      generationId: 'complete-incremental',
+    });
+
+    // 完整代际读取不能套用面向查询的默认 50 / 最大 500 条输出预算。
+    expect({
+      storedFull: full.snapshot.edgeCount,
+      returnedFull: full.edges.length,
+      storedIncremental: incremental.snapshot.edgeCount,
+      returnedIncremental: incremental.edges.length,
+    }).toEqual({
+      storedFull: edgeCount,
+      returnedFull: edgeCount,
+      storedIncremental: edgeCount,
+      returnedIncremental: edgeCount,
+    });
+    expect(incremental.changedFiles).toEqual([]);
+    expect(incremental.deletedFiles).toEqual([]);
+    expect(incremental.edges.map((edge) => edge.edgeId).sort()).toEqual(
+      full.edges.map((edge) => edge.edgeId).sort()
+    );
+    expect(incremental.status.ready).toBe(true);
+  });
+
+  it('shares NodeNext source fallback while preserving exact JavaScript and relative import precedence', async () => {
+    writeFixture(
+      'src/index.ts',
+      [
+        "import './util.js';",
+        "import './view.js';",
+        "import './exact.js';",
+        "import './choice';",
+        "import '@/util';",
+      ].join('\n')
+    );
+    for (const file of ['util.ts', 'view.tsx', 'exact.js', 'exact.ts', 'choice.js', 'choice.ts']) {
+      writeFixture(`src/${file}`, 'export const value = 1;\n');
+    }
+    const { sourceGraphRepository } = createAlembicRepositories(runtime.connection);
+    const indexer = new SourceGraphIndexer(sourceGraphRepository);
+    const input = { projectRoot: tmpDir, projectScope: 'src', repoId: 'fixture' };
+    const full = await indexer.buildFull({ ...input, generationId: 'nodenext-base' });
+    expect(full.edges.map((edge) => [edge.source, edge.toFilePath]).sort()).toEqual([
+      ['./choice', 'src/choice.ts'],
+      ['./exact.js', 'src/exact.js'],
+      ['./util.js', 'src/util.ts'],
+      ['./view.js', 'src/view.tsx'],
+    ]);
+
+    // 文件集合变化会重新解析未改动的 importer；真实 .js 出现/消失不能锁死旧TS边。
+    writeFixture('src/util.js', 'export const emitted = true;\n');
+    const emitted = await indexer.buildIncremental({
+      ...input,
+      baseGenerationId: full.snapshot.generationId,
+      generationId: 'nodenext-emitted',
+    });
+    expect(emitted.edges.find((edge) => edge.source === './util.js')?.toFilePath).toBe(
+      'src/util.js'
+    );
+    fs.unlinkSync(path.join(tmpDir, 'src/util.js'));
+    const restored = await indexer.buildIncremental({
+      ...input,
+      baseGenerationId: emitted.snapshot.generationId,
+      generationId: 'nodenext-source-restored',
+    });
+    expect(restored.edges.find((edge) => edge.source === './util.js')?.toFilePath).toBe(
+      'src/util.ts'
+    );
+  });
+
   it.each([
     'incremental',
     'inspect',
@@ -356,6 +447,68 @@ describe('SourceGraphIndexer', () => {
         (symbol) => symbol.filePath === 'src/App.swift' && symbol.displayName === 'App'
       )
     ).toBe(true);
+  });
+
+  it('retains unchanged parsing gaps and diagnostics until those files are reparsed or deleted', async () => {
+    writeFixture('src/ok.ts', 'export const ok = 1;\n');
+    writeFixture('src/broken.ts', 'SOURCE_GRAPH_PARSE_FAILURE\n');
+    writeFixture('src/legacy.rb', 'class Legacy; end\n');
+    writeFixture('src/partial.ts', `export const partial = '${'p'.repeat(60)}';\n`);
+    writeFixture('src/large.ts', `export const large = '${'l'.repeat(120)}';\n`);
+    const { sourceGraphRepository } = createAlembicRepositories(runtime.connection);
+    const indexer = new SourceGraphIndexer(sourceGraphRepository);
+    const input = {
+      projectRoot: tmpDir,
+      repoId: 'fixture',
+      projectScope: 'src',
+      includeExtensions: ['.ts', '.rb'],
+      maxFileSizeBytes: 100,
+      maxParseBytes: 40,
+    };
+    const full = await indexer.buildFull({ ...input, generationId: 'parsing-gaps-base' });
+    expect(full.snapshot.parseErrorCount).toBe(4);
+
+    const unchanged = await indexer.buildIncremental({
+      ...input,
+      baseGenerationId: full.snapshot.generationId,
+      generationId: 'parsing-gaps-unchanged',
+    });
+    writeFixture('src/ok.ts', 'export const ok = 22;\n');
+    const changed = await indexer.buildIncremental({
+      ...input,
+      baseGenerationId: unchanged.snapshot.generationId,
+      generationId: 'parsing-gaps-changed',
+      changedFiles: ['src/ok.ts'],
+    });
+
+    for (const result of [unchanged, changed]) {
+      expect(result.snapshot).toMatchObject({
+        status: 'partial',
+        parseErrorCount: 4,
+        freshness: { status: 'partial' },
+      });
+      expect(result.status.ready).toBe(false);
+      expect(result.diagnostics).toEqual(full.diagnostics);
+      expect(result.files.filter((file) => file.parseStatus !== 'parsed')).toHaveLength(4);
+    }
+
+    // 缺口真正修复/删除后才能解除旧诊断，不能永久继承上一代的降级状态。
+    for (const file of ['broken.ts', 'partial.ts', 'large.ts']) {
+      writeFixture(`src/${file}`, 'export const repaired = 1;\n');
+    }
+    fs.unlinkSync(path.join(tmpDir, 'src/legacy.rb'));
+    const repaired = await indexer.buildIncremental({
+      ...input,
+      baseGenerationId: changed.snapshot.generationId,
+      generationId: 'parsing-gaps-repaired',
+    });
+    expect(repaired.snapshot).toMatchObject({
+      status: 'indexed',
+      parseErrorCount: 0,
+      freshness: { status: 'fresh' },
+    });
+    expect(repaired.diagnostics).toEqual([]);
+    expect(repaired.status.ready).toBe(true);
   });
 
   function writeFixture(repoRelativePath: string, content: string): void {
