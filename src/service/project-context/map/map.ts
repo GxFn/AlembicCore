@@ -127,6 +127,9 @@ function createProjectMapResult(input: {
     modules: resolvedModules,
     scope: request.scope,
   });
+  const ambiguousRollups = dependencyRollups.filter((rollup) => rollup.ambiguousTargets);
+  // 歧义不是外部依赖，也不是已证实的模块边：保留定位 refs，确定图的统计和排序不使用它。
+  const unambiguousRollups = dependencyRollups.filter((rollup) => !rollup.ambiguousTargets);
   const repo = createRepoSummary({
     projectRoot: request.scope.projectRoot,
     repoId: request.scope.repoId,
@@ -134,7 +137,7 @@ function createProjectMapResult(input: {
     sourceFolder: request.scope.sourceFolder,
   });
   const mapRef = createProjectContextMapRef({
-    dependencyEdgeCount: countInternalDependencyEdges(dependencyRollups),
+    dependencyEdgeCount: countInternalDependencyEdges(unambiguousRollups),
     moduleCount: resolvedModules.length,
     parentRef: repo.ref?.id,
     projectRoot: request.scope.projectRoot,
@@ -143,31 +146,38 @@ function createProjectMapResult(input: {
     sourceFolder: request.scope.sourceFolder,
   });
   const cycles =
-    payload.includeCycles === false ? [] : createCycleSummaries(resolvedModules, dependencyRollups);
+    payload.includeCycles === false
+      ? []
+      : createCycleSummaries(resolvedModules, unambiguousRollups);
   const layers = createGlobalLayers({
     cycles,
     mapRef,
     modules: resolvedModules,
     projectRoot: request.scope.projectRoot,
     repoId: request.scope.repoId,
-    rollups: dependencyRollups,
+    rollups: unambiguousRollups,
     sourceFolder: request.scope.sourceFolder,
   });
   const hotspots =
-    payload.includeHotspots === false ? [] : createHotspots(resolvedModules, dependencyRollups);
-  const majorFlows = payload.includeMajorFlows === false ? [] : createMajorFlows(dependencyRollups);
+    payload.includeHotspots === false ? [] : createHotspots(resolvedModules, unambiguousRollups);
+  const majorFlows =
+    payload.includeMajorFlows === false ? [] : createMajorFlows(unambiguousRollups);
   const externalDependencyHotspots =
     payload.includeExternalDeps === false
       ? []
-      : createExternalDependencyHotspots(dependencyRollups);
-  const errors = [...resolution.errors];
+      : createExternalDependencyHotspots(unambiguousRollups);
+  const errors = [...resolution.errors, ...createAmbiguousDependencyErrors(ambiguousRollups)];
   if (payload.includeExternalDeps !== false) {
     errors.push(...createExternalDependencyWarnings(externalDependencyHotspots));
   }
 
+  const dependencySummary = createDependencySummary(resolvedModules, unambiguousRollups);
+  if (ambiguousRollups.length > 0) {
+    dependencySummary.notes?.push(`ambiguous-dependencies:${ambiguousRollups.length}`);
+  }
   const data: ProjectMap = {
     cycles,
-    dependencySummary: createDependencySummary(resolvedModules, dependencyRollups),
+    dependencySummary,
     externalDependencyHotspots,
     hotspots,
     layers,
@@ -190,6 +200,24 @@ function createProjectMapResult(input: {
     errors: errors.length > 0 ? dedupeErrors(errors) : undefined,
     refs: dedupeRefs([mapRef, repo.ref, ...data.nextRefs]),
   };
+}
+
+function createAmbiguousDependencyErrors(
+  rollups: readonly ProjectContextModuleDependencyRollup[]
+): ProjectContextQueryError[] {
+  return rollups.map((rollup) => {
+    const ref = rollup.relationRefs[0];
+    const candidates = (rollup.ambiguousTargets ?? []).map((module) => module.id);
+    return {
+      ...createQueryError({
+        code: 'ambiguous',
+        message: `map dependency target is ambiguous for ${rollup.from.id}: ${candidates.join(', ')}`,
+        path: ref?.scope.filePath ?? rollup.sourceRefs[0]?.scope.filePath,
+        retryable: false,
+      }),
+      ...(ref ? { ref } : {}),
+    };
+  });
 }
 
 function readMapPayload(payload: unknown): MapRequestPayload {

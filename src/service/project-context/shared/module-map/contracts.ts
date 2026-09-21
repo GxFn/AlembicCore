@@ -33,6 +33,8 @@ export interface ProjectContextModuleDependencyRollup {
   targetRefs: ProjectContextRef[];
   unresolved?: boolean;
   reason?: string;
+  /** 多个合法归属只保留候选，不参与确定依赖的聚合；仅歧义分支出现此字段。 */
+  ambiguousTargets?: ModuleSummary[];
 }
 
 export function createProjectContextModuleMapModule(input: {
@@ -56,10 +58,10 @@ export function createProjectContextModuleDependencyRollups(input: {
   modules: readonly ProjectContextModuleMapModule[];
   scope: ProjectContextScope;
 }): ProjectContextModuleDependencyRollup[] {
-  const fileToModule = new Map<string, ProjectContextModuleMapModule>();
+  const fileToModule = new Map<string, Map<string, ModuleSummary>>();
   for (const moduleRecord of input.modules) {
     for (const file of moduleRecord.ownedFiles) {
-      fileToModule.set(file.filePath, moduleRecord);
+      indexModuleCandidate(fileToModule, file.filePath, moduleRecord.module);
     }
   }
   // Track1(2026-07-10):模块名索引。Swift `import AOXFoundationKit`/ObjC
@@ -67,10 +69,10 @@ export function createProjectContextModuleDependencyRollups(input: {
   // 必然落空 → 此前全部被计成 external(BiliDili 实测 internal-edges:0 而
   // external:82,其中大半是本地 AOX* 包)。文件级解析仍然优先(JS 系不受影响),
   // 落空后按 specifier 与模块名 join(精确名,或 `Name/File.h` 的首段)。
-  const moduleByName = new Map<string, ProjectContextModuleMapModule>();
+  const moduleByName = new Map<string, Map<string, ModuleSummary>>();
   for (const moduleRecord of input.modules) {
     if (moduleRecord.module.name) {
-      moduleByName.set(moduleRecord.module.name, moduleRecord);
+      indexModuleCandidate(moduleByName, moduleRecord.module.name, moduleRecord.module);
     }
   }
 
@@ -81,27 +83,37 @@ export function createProjectContextModuleDependencyRollups(input: {
         continue;
       }
       const targetFile = readRelationTargetFilePath(relation);
-      const targetModule = targetFile ? fileToModule.get(targetFile) : undefined;
-      if (targetModule && targetModule.module.id !== sourceModule.module.id) {
+      const fileCandidates = targetFile ? moduleCandidates(fileToModule.get(targetFile)) : [];
+      if (fileCandidates.length > 1) {
+        addAmbiguousRelation(rollups, sourceModule.module, relation, fileCandidates, input.scope);
+        continue;
+      }
+      const targetModule = fileCandidates[0];
+      if (targetModule && targetModule.id !== sourceModule.module.id) {
         addRelationToRollup(rollups, {
           from: sourceModule.module,
           relation,
           relationKind: relation.kind,
           scope: input.scope,
-          to: targetModule.module,
+          to: targetModule,
         });
         continue;
       }
 
       const specifier = readRelationSpecifier(relation);
-      const namedModule = resolveModuleByImportName(specifier, moduleByName);
-      if (namedModule && namedModule.module.id !== sourceModule.module.id) {
+      const nameCandidates = resolveModuleByImportName(specifier, moduleByName);
+      if (nameCandidates.length > 1) {
+        addAmbiguousRelation(rollups, sourceModule.module, relation, nameCandidates, input.scope);
+        continue;
+      }
+      const namedModule = nameCandidates[0];
+      if (namedModule && namedModule.id !== sourceModule.module.id) {
         addRelationToRollup(rollups, {
           from: sourceModule.module,
           relation,
           relationKind: relation.kind,
           scope: input.scope,
-          to: namedModule.module,
+          to: namedModule,
         });
         continue;
       }
@@ -124,6 +136,41 @@ export function createProjectContextModuleDependencyRollups(input: {
   return [...rollups.values()].map(finalizeRollup).sort(compareRollups);
 }
 
+function indexModuleCandidate(
+  index: Map<string, Map<string, ModuleSummary>>,
+  key: string,
+  module: ModuleSummary
+): void {
+  const candidates = index.get(key) ?? new Map<string, ModuleSummary>();
+  candidates.set(module.id, module);
+  index.set(key, candidates);
+}
+
+function moduleCandidates(
+  candidates: ReadonlyMap<string, ModuleSummary> | undefined
+): ModuleSummary[] {
+  return [...(candidates?.values() ?? [])].sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function addAmbiguousRelation(
+  rollups: Map<string, MutableDependencyRollup>,
+  from: ModuleSummary,
+  relation: RelationSummary,
+  ambiguousTargets: ModuleSummary[],
+  scope: ProjectContextScope
+): void {
+  // 文件候选优先且不再按模块名猜选；共享归属也不能被折叠为任意一个确定目标。
+  addRelationToRollup(rollups, {
+    ambiguousTargets,
+    from,
+    reason: 'module-dependency-target-ambiguous',
+    relation,
+    relationKind: relation.kind,
+    scope,
+    unresolved: true,
+  });
+}
+
 /**
  * specifier → 本地模块(Track1 模块名 join)。规则刻意保守:
  * ①精确等于模块名(Swift 模块导入);②`Name/...` 首段等于模块名(ObjC 框架头
@@ -131,20 +178,20 @@ export function createProjectContextModuleDependencyRollups(input: {
  */
 function resolveModuleByImportName(
   specifier: string | undefined,
-  moduleByName: ReadonlyMap<string, ProjectContextModuleMapModule>
-): ProjectContextModuleMapModule | undefined {
+  moduleByName: ReadonlyMap<string, ReadonlyMap<string, ModuleSummary>>
+): ModuleSummary[] {
   if (!specifier || specifier.startsWith('.') || specifier.startsWith('@')) {
-    return undefined;
+    return [];
   }
   const exact = moduleByName.get(specifier);
   if (exact) {
-    return exact;
+    return moduleCandidates(exact);
   }
   const slashIndex = specifier.indexOf('/');
   if (slashIndex > 0) {
-    return moduleByName.get(specifier.slice(0, slashIndex));
+    return moduleCandidates(moduleByName.get(specifier.slice(0, slashIndex)));
   }
-  return undefined;
+  return [];
 }
 
 export function createProjectContextFileFlowRef(input: {
@@ -178,6 +225,7 @@ interface MutableDependencyRollup {
   targetRefs: ProjectContextRef[];
   unresolved?: boolean;
   reason?: string;
+  ambiguousTargets?: ModuleSummary[];
 }
 
 function addRelationToRollup(
@@ -191,6 +239,7 @@ function addRelationToRollup(
     externalName?: string;
     unresolved?: boolean;
     reason?: string;
+    ambiguousTargets?: ModuleSummary[];
   }
 ): void {
   const key = createRollupKey(input);
@@ -207,12 +256,14 @@ function addRelationToRollup(
       targetRefs: [],
       to: input.to,
       unresolved: input.unresolved,
+      ...(input.ambiguousTargets ? { ambiguousTargets: input.ambiguousTargets } : {}),
     } satisfies MutableDependencyRollup);
 
   current.refs.push(
     ...dedupeRefs([
       input.from.ref,
       input.to?.ref,
+      ...(input.ambiguousTargets ?? []).map((module) => module.ref),
       input.relation.ref,
       input.relation.sourceRef,
       input.relation.targetRef,
@@ -229,7 +280,13 @@ function addRelationToRollup(
   );
   current.relationRefs.push(...dedupeRefs([input.relation.ref]));
   current.sourceRefs.push(...dedupeRefs([input.relation.sourceRef]));
-  current.targetRefs.push(...dedupeRefs([input.relation.targetRef, input.relation.to?.ref]));
+  current.targetRefs.push(
+    ...dedupeRefs([
+      input.relation.targetRef,
+      input.relation.to?.ref,
+      ...(input.ambiguousTargets ?? []).map((module) => module.ref),
+    ])
+  );
   if (input.unresolved !== undefined) {
     current.unresolved = input.unresolved;
   }
@@ -255,6 +312,7 @@ function finalizeRollup(input: MutableDependencyRollup): ProjectContextModuleDep
     targetRefs: dedupeRefs(input.targetRefs),
     to: input.to,
     unresolved: input.unresolved,
+    ...(input.ambiguousTargets ? { ambiguousTargets: input.ambiguousTargets } : {}),
   };
 }
 
@@ -263,10 +321,13 @@ function createRollupKey(input: {
   relationKind: string;
   to?: ModuleSummary;
   externalName?: string;
+  ambiguousTargets?: ModuleSummary[];
 }): string {
   return [
     input.from.id,
-    input.to?.id ?? `external:${input.externalName ?? 'unknown'}`,
+    input.ambiguousTargets
+      ? `ambiguous:${JSON.stringify(input.ambiguousTargets.map((module) => module.id))}`
+      : (input.to?.id ?? `external:${input.externalName ?? 'unknown'}`),
     input.relationKind,
   ].join('::');
 }
@@ -335,12 +396,15 @@ function compareRollups(
   left: ProjectContextModuleDependencyRollup,
   right: ProjectContextModuleDependencyRollup
 ): number {
-  return (
+  const order =
     left.from.name.localeCompare(right.from.name) ||
     (left.to?.name ?? left.externalName ?? '').localeCompare(
       right.to?.name ?? right.externalName ?? ''
     ) ||
-    left.relationKind.localeCompare(right.relationKind)
+    left.relationKind.localeCompare(right.relationKind);
+  // 歧义集合没有单一目标名，补充稳定身份排序；普通分支仍保留既有的同分顺序。
+  return (
+    order || (left.ambiguousTargets || right.ambiguousTargets ? left.id.localeCompare(right.id) : 0)
   );
 }
 

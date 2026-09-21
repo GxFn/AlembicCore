@@ -4,10 +4,15 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type {
+  ModuleContext,
   ProjectContextUnavailableData,
   ProjectMap,
 } from '../src/domain/project-context/index.js';
 import { ProjectContext } from '../src/project-context.js';
+import {
+  createProjectContextModuleDependencyRollups,
+  createProjectContextModuleMapModule,
+} from '../src/service/project-context/shared/module-map/index.js';
 import { buildCoverageLedgerModuleAxisFromSummaries } from '../src/workflows/surfaces/coverage/index.js';
 
 describe('ProjectContext PCQ-6 project map', () => {
@@ -72,6 +77,153 @@ describe('ProjectContext PCQ-6 project map', () => {
 
       expect(left).toStrictEqual(right);
     });
+  });
+
+  it.each([
+    'file',
+    'name',
+  ] as const)('preserves ambiguous module %s owners without inventing dependencies, cycles, or ranking evidence', async (matchBy) => {
+    const owners = ['alpha', 'beta'].map((name) => ({
+      moduleName: matchBy === 'name' ? 'Shared' : name,
+      modulePath: `src/${name}`,
+      ownedFiles: [`src/${name}/index.ts`, ...(matchBy === 'file' ? ['src/shared.ts'] : [])],
+    }));
+    const consumer = {
+      moduleName: 'consumer',
+      modulePath: 'src/consumer',
+      ownedFiles: ['src/consumer/index.ts'],
+    };
+    const seeds = [...owners, consumer];
+    await withFixture(
+      {
+        'src/alpha/index.ts':
+          "import { consume } from '../consumer';\nexport const alpha = consume;\n",
+        'src/beta/index.ts':
+          "import { consume } from '../consumer';\nexport const beta = consume;\n",
+        'src/shared.ts': 'export const shared = 1;\n',
+        'src/consumer/index.ts': `import { shared } from '${matchBy === 'file' ? '../shared' : 'Shared'}';\nexport function consume() { return shared; }\n`,
+      },
+      async (projectRoot) => {
+        const scope = { projectRoot, repoId: 'core' };
+        const query = (moduleSeeds: typeof seeds) =>
+          ProjectContext.execute({
+            kind: 'map',
+            // 关闭外部包展示不能隐藏项目内部的归属歧义。
+            payload: { moduleSeeds, includeExternalDeps: false },
+            scope,
+          });
+        const envelope = await query(seeds);
+        const data = envelope.data as ProjectMap;
+        const candidateIds = data.modules
+          .filter((module) => module.name !== 'consumer')
+          .map((module) => module.id)
+          .sort();
+        const ambiguity = envelope.errors?.find((error) => error.code === 'ambiguous');
+        expect(ambiguity).toMatchObject({
+          severity: 'error',
+          retryable: false,
+          path: 'src/consumer/index.ts',
+          ref: { kind: 'relation-site' },
+        });
+        for (const candidateId of candidateIds) {
+          expect(ambiguity?.message).toContain(candidateId);
+          expect(data.nextRefs.some((ref) => ref.id === candidateId)).toBe(true);
+        }
+        expect(data.dependencySummary).toMatchObject({ edgeCount: 2 });
+        expect(data.dependencySummary.notes).toEqual(
+          expect.arrayContaining([
+            'internal-edges:2',
+            'external-dependencies:0',
+            'ambiguous-dependencies:1',
+          ])
+        );
+        expect(data.externalDependencyHotspots).toEqual([]);
+        expect(data.cycles).toEqual([]);
+        expect(data.majorFlows).toHaveLength(2);
+        expect(
+          data.majorFlows.every((flow) => flow.summary.includes(' -> consumer via imports'))
+        ).toBe(true);
+        expect(data.hotspots.map((hotspot) => hotspot.score)).toEqual([6, 2, 2]);
+        expect(data.layers[0].fileGroups).toEqual(['consumer']);
+        expect(await query([...seeds].reverse())).toStrictEqual(envelope);
+
+        // 公开 map 会预先排序种子；直接复核其真实 module 产物的汇总入口，防止换序问题被排序遮蔽。
+        const modules = await Promise.all(
+          seeds.map(async (seed) => {
+            const result = await ProjectContext.execute({ kind: 'module', payload: seed, scope });
+            return createProjectContextModuleMapModule({
+              moduleContext: result.data as ModuleContext,
+            });
+          })
+        );
+        const rollups = createProjectContextModuleDependencyRollups({
+          modules,
+          scope: { ...scope, includeGenerated: false, includeVendor: false },
+        });
+        expect(
+          createProjectContextModuleDependencyRollups({
+            modules: [...modules].reverse(),
+            scope: { ...scope, includeGenerated: false, includeVendor: false },
+          }).sort((left, right) => left.id.localeCompare(right.id))
+        ).toStrictEqual([...rollups].sort((left, right) => left.id.localeCompare(right.id)));
+        const ambiguousRollup = rollups.find((rollup) => rollup.from.name === 'consumer');
+        expect(ambiguousRollup).toMatchObject({ unresolved: true });
+        expect(ambiguousRollup?.to).toBeUndefined();
+        expect(ambiguousRollup?.externalName).toBeUndefined();
+        expect(
+          ambiguousRollup?.targetRefs
+            .filter((ref) => ref.kind === 'module')
+            .map((ref) => ref.id)
+            .sort()
+        ).toEqual(candidateIds);
+        expect(
+          ambiguousRollup?.sourceRefs.some((ref) => ref.scope.filePath === 'src/consumer/index.ts')
+        ).toBe(true);
+      }
+    );
+  });
+
+  it('orders distinct ambiguous target sets independently of relation traversal order', async () => {
+    await withFixture(
+      {
+        'src/one.ts': 'export const one = 1;\n',
+        'src/two.ts': 'export const two = 2;\n',
+        'src/consumer.ts':
+          "import { one } from './one';\nimport { two } from './two';\nexport const sum = one + two;\n",
+      },
+      async (projectRoot) => {
+        const scope = {
+          projectRoot,
+          repoId: 'core',
+          includeGenerated: false,
+          includeVendor: false,
+        };
+        const seeds = [
+          { moduleName: 'alpha', ownedFiles: ['src/one.ts'] },
+          { moduleName: 'beta', ownedFiles: ['src/one.ts', 'src/two.ts'] },
+          { moduleName: 'gamma', ownedFiles: ['src/two.ts'] },
+          { moduleName: 'consumer', ownedFiles: ['src/consumer.ts'] },
+        ];
+        const modules = await Promise.all(
+          seeds.map(async (seed) => {
+            const result = await ProjectContext.execute({ kind: 'module', payload: seed, scope });
+            return createProjectContextModuleMapModule({
+              moduleContext: result.data as ModuleContext,
+            });
+          })
+        );
+        const forward = createProjectContextModuleDependencyRollups({ modules, scope });
+        const reversed = createProjectContextModuleDependencyRollups({
+          modules: modules.map((module) => ({ ...module, outflow: [...module.outflow].reverse() })),
+          scope,
+        });
+        expect(forward).toHaveLength(2);
+        expect(
+          forward.every((rollup) => rollup.unresolved && !rollup.to && !rollup.externalName)
+        ).toBe(true);
+        expect(reversed).toStrictEqual(forward);
+      }
+    );
   });
 
   it('characterizes ProjectMap module ids against coverage ledger module axis ids', async () => {
