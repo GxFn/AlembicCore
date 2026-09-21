@@ -6,8 +6,8 @@
  * 支持: 单 Package 项目、Flutter 应用、Melos 多包工作区
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
+import { readSourceText, sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import {
   type DependencyGraph,
   type DiscoveredFile,
@@ -37,6 +37,10 @@ export class DartDiscoverer extends ProjectDiscoverer {
   #depGraph: DependencyGraph = { nodes: [], edges: [] };
   #packageName: string | null = null;
 
+  override get supportsSourceReader() {
+    return true;
+  }
+
   get id() {
     return 'dart';
   }
@@ -48,23 +52,23 @@ export class DartDiscoverer extends ProjectDiscoverer {
     let confidence = 0;
     const reasons: string[] = [];
 
-    if (existsSync(join(projectRoot, 'pubspec.yaml'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'pubspec.yaml'))) {
       confidence = 0.92;
       reasons.push('pubspec.yaml exists');
     }
-    if (existsSync(join(projectRoot, 'pubspec.lock'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'pubspec.lock'))) {
       confidence = Math.max(confidence, 0.7);
       if (confidence < 0.92) {
         confidence += 0.1;
       }
       reasons.push('pubspec.lock exists');
     }
-    if (existsSync(join(projectRoot, '.dart_tool'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, '.dart_tool'))) {
       confidence = Math.max(confidence, 0.6);
       reasons.push('.dart_tool exists');
     }
     // Melos workspace
-    if (existsSync(join(projectRoot, 'melos.yaml'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'melos.yaml'))) {
       confidence = Math.max(confidence, 0.95);
       reasons.push('melos.yaml exists (workspace)');
     }
@@ -72,12 +76,17 @@ export class DartDiscoverer extends ProjectDiscoverer {
     // 兜底: 根目录有 .dart 文件
     if (confidence === 0) {
       try {
-        const entries = readdirSync(projectRoot);
+        const entries = (await this.sourceReader.readDirectory(projectRoot)).map(
+          (entry) => entry.name
+        );
         if (entries.some((e) => e.endsWith('.dart'))) {
           confidence = 0.5;
           reasons.push('*.dart files found at root');
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -95,7 +104,7 @@ export class DartDiscoverer extends ProjectDiscoverer {
     this.#depGraph = { nodes: [], edges: [] };
 
     // 解析 pubspec.yaml
-    const pubspec = this.#parsePubspec(projectRoot);
+    const pubspec = await this.#parsePubspec(projectRoot);
     this.#packageName = pubspec?.name || basename(projectRoot);
 
     const framework = this.#detectFramework(pubspec);
@@ -119,7 +128,7 @@ export class DartDiscoverer extends ProjectDiscoverer {
 
     // bin/ — CLI 应用入口
     const binDir = join(projectRoot, 'bin');
-    if (existsSync(binDir)) {
+    if (await sourceExists(this.sourceReader, binDir)) {
       this.#targets.push({
         name: 'bin',
         path: binDir,
@@ -132,7 +141,7 @@ export class DartDiscoverer extends ProjectDiscoverer {
     // test/ — 测试目录
     for (const testDir of ['test', 'test_driver', 'integration_test']) {
       const testPath = join(projectRoot, testDir);
-      if (existsSync(testPath)) {
+      if (await sourceExists(this.sourceReader, testPath)) {
         this.#targets.push({
           name: testDir,
           path: testPath,
@@ -144,7 +153,10 @@ export class DartDiscoverer extends ProjectDiscoverer {
 
     // example/ — 示例项目
     const exampleDir = join(projectRoot, 'example');
-    if (existsSync(exampleDir) && existsSync(join(exampleDir, 'pubspec.yaml'))) {
+    if (
+      (await sourceExists(this.sourceReader, exampleDir)) &&
+      (await sourceExists(this.sourceReader, join(exampleDir, 'pubspec.yaml')))
+    ) {
       this.#targets.push({
         name: 'example',
         path: exampleDir,
@@ -155,13 +167,13 @@ export class DartDiscoverer extends ProjectDiscoverer {
     }
 
     // Melos 多包工作区
-    this.#discoverMelosPackages(projectRoot);
+    await this.#discoverMelosPackages(projectRoot);
 
     // 解析依赖图
     this.#parseDependencies(pubspec);
 
     // 解析内部 import 关系
-    this.#parseInternalImports(projectRoot);
+    await this.#parseInternalImports(projectRoot);
   }
 
   async listTargets() {
@@ -174,12 +186,12 @@ export class DartDiscoverer extends ProjectDiscoverer {
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectDartFiles(targetPath, targetPath, files);
+    await this.#collectDartFiles(targetPath, targetPath, files);
     return files;
   }
 
@@ -190,15 +202,18 @@ export class DartDiscoverer extends ProjectDiscoverer {
   // ── 内部实现 ──
 
   /** 解析 pubspec.yaml（简易 YAML 解析，不引入三方依赖） */
-  #parsePubspec(projectRoot: string) {
+  async #parsePubspec(projectRoot: string) {
     const pubspecPath = join(projectRoot, 'pubspec.yaml');
-    if (!existsSync(pubspecPath)) {
+    if (!(await sourceExists(this.sourceReader, pubspecPath))) {
       return null;
     }
     try {
-      const content = readFileSync(pubspecPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, pubspecPath);
       return this.#parseSimpleYaml(content);
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       return null;
     }
   }
@@ -295,27 +310,27 @@ export class DartDiscoverer extends ProjectDiscoverer {
   }
 
   /** 发现 Melos 多包工作区中的子包 */
-  #discoverMelosPackages(projectRoot: string) {
+  async #discoverMelosPackages(projectRoot: string) {
     const melosPath = join(projectRoot, 'melos.yaml');
-    if (!existsSync(melosPath)) {
+    if (!(await sourceExists(this.sourceReader, melosPath))) {
       return;
     }
 
     try {
-      const content = readFileSync(melosPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, melosPath);
       const _melos = this.#parseSimpleYaml(content);
 
       // Melos packages 字段（简化处理: 扫描 packages/ 目录）
       const packagesDir = join(projectRoot, 'packages');
-      if (existsSync(packagesDir)) {
-        const entries = readdirSync(packagesDir, { withFileTypes: true });
+      if (await sourceExists(this.sourceReader, packagesDir)) {
+        const entries = await this.sourceReader.readDirectory(packagesDir);
         for (const entry of entries) {
           if (!entry.isDirectory() || entry.name.startsWith('.')) {
             continue;
           }
           const pkgDir = join(packagesDir, entry.name);
-          if (existsSync(join(pkgDir, 'pubspec.yaml'))) {
-            const subPubspec = this.#parsePubspec(pkgDir);
+          if (await sourceExists(this.sourceReader, join(pkgDir, 'pubspec.yaml'))) {
+            const subPubspec = await this.#parsePubspec(pkgDir);
             const pkgName = subPubspec?.name || entry.name;
             this.#targets.push({
               name: `packages/${pkgName}`,
@@ -331,15 +346,15 @@ export class DartDiscoverer extends ProjectDiscoverer {
 
       // 也检查 apps/ 目录（部分 Melos 工作区的约定）
       const appsDir = join(projectRoot, 'apps');
-      if (existsSync(appsDir)) {
-        const entries = readdirSync(appsDir, { withFileTypes: true });
+      if (await sourceExists(this.sourceReader, appsDir)) {
+        const entries = await this.sourceReader.readDirectory(appsDir);
         for (const entry of entries) {
           if (!entry.isDirectory() || entry.name.startsWith('.')) {
             continue;
           }
           const appDir = join(appsDir, entry.name);
-          if (existsSync(join(appDir, 'pubspec.yaml'))) {
-            const subPubspec = this.#parsePubspec(appDir);
+          if (await sourceExists(this.sourceReader, join(appDir, 'pubspec.yaml'))) {
+            const subPubspec = await this.#parsePubspec(appDir);
             const appName = subPubspec?.name || entry.name;
             this.#targets.push({
               name: `apps/${appName}`,
@@ -352,7 +367,10 @@ export class DartDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }
@@ -406,9 +424,9 @@ export class DartDiscoverer extends ProjectDiscoverer {
   }
 
   /** 解析内部 Dart import 语句，构建包内模块依赖关系 */
-  #parseInternalImports(projectRoot: string) {
+  async #parseInternalImports(projectRoot: string) {
     const libDir = join(projectRoot, 'lib');
-    if (!existsSync(libDir)) {
+    if (!(await sourceExists(this.sourceReader, libDir))) {
       return;
     }
 
@@ -417,7 +435,7 @@ export class DartDiscoverer extends ProjectDiscoverer {
 
     // 收集 lib/ 下的子目录作为内部模块
     try {
-      const entries = readdirSync(libDir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(libDir);
       for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
           const moduleId = `lib/${entry.name}`;
@@ -427,22 +445,25 @@ export class DartDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
 
     // 扫描 import 语句
-    const scanDir = (dir: string) => {
+    const scanDir = async (dir: string): Promise<void> => {
       try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        const entries = await this.sourceReader.readDirectory(dir);
         for (const entry of entries) {
           if (entry.isDirectory()) {
             if (!entry.name.startsWith('.') && !EXCLUDE_DIRS.has(entry.name)) {
-              scanDir(join(dir, entry.name));
+              await scanDir(join(dir, entry.name));
             }
           } else if (entry.isFile() && entry.name.endsWith('.dart')) {
             try {
-              const content = readFileSync(join(dir, entry.name), 'utf8');
+              const content = await readSourceText(this.sourceReader, join(dir, entry.name));
               const relDir = relative(libDir, dir);
               const fromModule = relDir ? `lib/${relDir.split('/')[0]}` : (this.#packageName ?? '');
 
@@ -467,27 +488,33 @@ export class DartDiscoverer extends ProjectDiscoverer {
                   }
                 }
               }
-            } catch {
+            } catch (error) {
+              if (error instanceof Error && error.name === 'AbortError') {
+                throw error;
+              }
               /* skip */
             }
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     };
 
-    scanDir(libDir);
+    await scanDir(libDir);
   }
 
   /** 递归收集 .dart 文件 */
-  #collectDartFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectDartFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
     if (depth > 15) {
       return;
     }
 
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
           continue;
@@ -497,11 +524,11 @@ export class DartDiscoverer extends ProjectDiscoverer {
           if (EXCLUDE_DIRS.has(entry.name)) {
             continue;
           }
-          this.#collectDartFiles(join(dir, entry.name), rootDir, files, depth + 1);
+          await this.#collectDartFiles(join(dir, entry.name), rootDir, files, depth + 1);
         } else if (entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name))) {
           const fullPath = join(dir, entry.name);
           try {
-            const content = readFileSync(fullPath, 'utf8');
+            const content = await readSourceText(this.sourceReader, fullPath);
             files.push({
               name: entry.name,
               path: fullPath,
@@ -509,12 +536,18 @@ export class DartDiscoverer extends ProjectDiscoverer {
               language: 'dart',
               content,
             });
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* unreadable */
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* permission error */
     }
   }

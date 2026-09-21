@@ -1,66 +1,20 @@
-import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { canonicalHashDigest, hashCanonicalJson } from '../../../shared/canonicalJson.js';
+
+export {
+  canonicalHashDigest,
+  canonicalJsonStringify,
+  hashBytes,
+  hashCanonicalJson,
+  toCanonicalJson as toProjectFactsJson,
+} from '../../../shared/canonicalJson.js';
+
 import type {
   CanonicalSha256,
-  ProjectFactsJson,
   SourceRevisionVectorEntryV1,
   SourceRevisionVectorV1,
 } from './contracts.js';
 import { SOURCE_REVISION_VECTOR_VERSION } from './contracts.js';
-
-export function toProjectFactsJson(value: unknown): ProjectFactsJson {
-  if (value === null || typeof value === 'boolean' || typeof value === 'string') {
-    return value;
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new TypeError('Canonical JSON does not accept non-finite numbers.');
-    }
-    return Object.is(value, -0) ? 0 : value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((entry) => (entry === undefined ? null : toProjectFactsJson(entry)));
-  }
-  if (value && typeof value === 'object') {
-    const result: Record<string, ProjectFactsJson> = {};
-    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-      const entry = (value as Record<string, unknown>)[key];
-      if (entry !== undefined) {
-        // JSON 允许 __proto__ 作为普通键；直接赋值会触发 Object.prototype setter，
-        // 导致该值从规范字节/hash消失且污染返回对象原型。以自有数据属性保留全部键，
-        // 同时保留普通对象原型、原排序与普通输入的序列化字节。
-        Object.defineProperty(result, key, {
-          value: toProjectFactsJson(entry),
-          enumerable: true,
-          configurable: true,
-          writable: true,
-        });
-      }
-    }
-    return result;
-  }
-  throw new TypeError(`Canonical JSON does not accept values of type ${typeof value}.`);
-}
-
-export function canonicalJsonStringify(value: unknown): string {
-  return JSON.stringify(toProjectFactsJson(value));
-}
-
-export function hashCanonicalJson(value: unknown): CanonicalSha256 {
-  return `sha256:${createHash('sha256').update(canonicalJsonStringify(value)).digest('hex')}`;
-}
-
-export function hashBytes(value: Uint8Array): CanonicalSha256 {
-  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
-}
-
-export function canonicalHashDigest(hash: CanonicalSha256): string {
-  const match = /^sha256:([a-f0-9]{64})$/.exec(hash);
-  if (!match) {
-    throw new TypeError(`Invalid canonical SHA-256 value: ${hash}`);
-  }
-  return match[1];
-}
 
 export function normalizePortableRelativePath(value: string, fieldName = 'path'): string {
   const normalized = value.trim().replace(/\\/g, '/').replace(/^\.\//, '').replace(/\/$/, '');
@@ -81,8 +35,12 @@ export function normalizePortableRelativePath(value: string, fieldName = 'path')
 }
 
 export function buildSourceRevisionVectorV1(
-  entries: readonly SourceRevisionVectorEntryV1[]
+  entries: readonly SourceRevisionVectorEntryV1[],
+  inputClosureHash?: CanonicalSha256
 ): SourceRevisionVectorV1 {
+  if (inputClosureHash !== undefined) {
+    canonicalHashDigest(inputClosureHash);
+  }
   const normalized = entries
     .map((entry) => normalizeSourceRevisionVectorEntry(entry))
     .sort(compareSourceRevisionEntries);
@@ -98,6 +56,7 @@ export function buildSourceRevisionVectorV1(
     kind: 'SourceRevisionVectorV1' as const,
     version: SOURCE_REVISION_VECTOR_VERSION,
     entries: normalized,
+    ...(inputClosureHash === undefined ? {} : { inputClosureHash }),
   };
   return {
     ...semantic,

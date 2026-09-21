@@ -1,5 +1,3 @@
-import type { Dirent } from 'node:fs';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
   HotspotSummary,
@@ -15,13 +13,21 @@ import type {
   SourceFolderSummary,
   SpaceContext,
 } from '../../../domain/project-context/index.js';
-import type { ProjectFolderDescriptor } from '../../../shared/ProjectScope.js';
 import {
-  loadProjectScopeForFolder,
-  type ProjectDescriptor,
-  readProjectScopeRegistryDocument,
-} from '../../../shared/ProjectScope.js';
-import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
+  bindProjectSourceReader,
+  nodeProjectSourceReader,
+  sourceExists,
+} from '../../../infrastructure/io/ProjectSourceReader.js';
+import type { ProjectDescriptor, ProjectFolderDescriptor } from '../../../shared/ProjectScope.js';
+import type {
+  ProjectSourceDirectoryEntry,
+  ProjectSourceReader,
+} from '../../../types/projectSourceReader.js';
+import type {
+  ProjectContextHandlerExecutionContext as Ctx,
+  ProjectContextHandler,
+  ProjectContextHandlerResult,
+} from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import {
@@ -31,6 +37,10 @@ import {
   createProjectContextRepoSpaceRepoRef,
   createProjectContextRepoSpaceSourceFolderSummary,
 } from '../shared/repo-space/index.js';
+import {
+  readSourceControlRootScope,
+  readSourceFolderScope,
+} from '../shared/sourceConfiguration.js';
 import type { SpaceRequestPayload } from './contracts.js';
 
 const DEFAULT_TREE_NODE_LIMIT = 80;
@@ -69,6 +79,8 @@ interface SpaceResolution {
   projectScope?: ProjectDescriptor;
   projectScopeId?: string;
   rootRealpath: string;
+  /** 会话读取依赖仅留在内部解析态，不投影到 space data/ref。 */
+  sourceReader: ProjectSourceReader;
 }
 
 interface ActiveFileFact {
@@ -88,11 +100,17 @@ export const spaceProjectContextHandler: ProjectContextHandler = async (
   context
 ): Promise<ProjectContextHandlerResult> => {
   throwIfProjectContextAborted(context);
+  const sourceReader = bindProjectSourceReader(
+    context?.sourceReader ?? nodeProjectSourceReader,
+    context?.signal
+  );
+  const execution: Ctx = { ...context, sourceReader };
   const payload = readSpacePayload(request.payload);
   const resolution = await resolveSpace({
+    context: execution,
     payload,
     scope: request.scope,
-    signal: context?.signal,
+    sourceReader,
   });
   throwIfProjectContextAborted(context);
   if (!resolution.ok) {
@@ -101,10 +119,10 @@ export const spaceProjectContextHandler: ProjectContextHandler = async (
 
   const errors = [...resolution.space.errors];
   const activeFile = await resolveActiveFileFact({
+    context: execution,
     payload,
     requestScope: request.scope,
     space: resolution.space,
-    signal: context?.signal,
   });
   throwIfProjectContextAborted(context);
   errors.push(...activeFile.errors);
@@ -131,9 +149,9 @@ export const spaceProjectContextHandler: ProjectContextHandler = async (
   errors.push(...treeFacts.errors);
 
   const sourceRefFacts = await normalizeSourceRefs({
+    context: execution,
     sourceRefs: payload.sourceRefs,
     space: resolution.space,
-    signal: context?.signal,
   });
   throwIfProjectContextAborted(context);
   errors.push(...sourceRefFacts.errors);
@@ -199,17 +217,18 @@ function readSpacePayload(payload: unknown): SpaceRequestPayload {
 }
 
 async function resolveSpace(input: {
+  context?: Ctx;
   payload: SpaceRequestPayload;
   scope: ProjectContextScope;
-  signal?: AbortSignal;
+  sourceReader: ProjectSourceReader;
 }): Promise<
   | { ok: true; space: SpaceResolution }
   | { ok: false; error: ProjectContextQueryError; errors: ProjectContextQueryError[] }
 > {
   const projectRoot = path.resolve(input.scope.projectRoot);
-  throwIfProjectContextAborted(input);
-  const rootRealpath = await readRealpath(projectRoot);
-  throwIfProjectContextAborted(input);
+  throwIfProjectContextAborted(input.context);
+  const rootRealpath = await readRealpath(input.sourceReader, projectRoot);
+  throwIfProjectContextAborted(input.context);
   if (!rootRealpath) {
     const error = createQueryError({
       code: 'invalid-scope',
@@ -222,7 +241,9 @@ async function resolveSpace(input: {
 
   const errors: ProjectContextQueryError[] = [];
   const hasExplicitFolders = (input.payload.sourceFolders?.length ?? 0) > 0;
-  const projectScope = hasExplicitFolders ? null : loadProjectScopeForSpaceRoot(projectRoot);
+  const projectScope = hasExplicitFolders
+    ? null
+    : await loadProjectScopeForSpaceRoot(input.sourceReader, projectRoot);
 
   const folderInputs = hasExplicitFolders
     ? readExplicitFolderInputs(projectRoot, input.payload.sourceFolders ?? [])
@@ -240,12 +261,13 @@ async function resolveSpace(input: {
 
   const folders: SpaceFolder[] = [];
   for (const folder of folderInputs) {
-    throwIfProjectContextAborted(input);
+    throwIfProjectContextAborted(input.context);
     const resolved = await createSpaceFolder({
+      context: input.context,
       folder,
       projectRoot,
       rootRealpath,
-      signal: input.signal,
+      sourceReader: input.sourceReader,
     });
     folders.push(resolved.folder);
     errors.push(...resolved.errors);
@@ -283,21 +305,21 @@ async function resolveSpace(input: {
       projectScope: projectScope ?? undefined,
       projectScopeId: projectScope?.projectScopeId,
       rootRealpath,
+      sourceReader: input.sourceReader,
     },
   };
 }
 
-function loadProjectScopeForSpaceRoot(projectRoot: string): ProjectDescriptor | null {
-  const matchedFolderScope = loadProjectScopeForFolder(projectRoot);
+async function loadProjectScopeForSpaceRoot(
+  sourceReader: ProjectSourceReader,
+  projectRoot: string
+): Promise<ProjectDescriptor | null> {
+  // 全局 scope 的声明包含未出现在源码 inventory 的空目录/缺失目录，必须完整捕获。
+  const matchedFolderScope = await readSourceFolderScope(sourceReader, projectRoot);
   if (matchedFolderScope) {
     return matchedFolderScope;
   }
-  const normalizedProjectRoot = path.resolve(projectRoot);
-  return (
-    Object.values(readProjectScopeRegistryDocument().scopes).find(
-      (scope) => path.resolve(scope.controlRoot.path) === normalizedProjectRoot
-    ) ?? null
-  );
+  return readSourceControlRootScope(sourceReader, projectRoot);
 }
 
 function projectFolderToInput(
@@ -317,10 +339,11 @@ function projectFolderToInput(
 }
 
 async function createSpaceFolder(input: {
+  context?: Ctx;
   folder: ExplicitFolderInput;
   projectRoot: string;
   rootRealpath: string;
-  signal?: AbortSignal;
+  sourceReader: ProjectSourceReader;
 }): Promise<{ folder: SpaceFolder; errors: ProjectContextQueryError[] }> {
   const errors: ProjectContextQueryError[] = [];
   const absolutePath = path.isAbsolute(input.folder.path)
@@ -329,8 +352,8 @@ async function createSpaceFolder(input: {
   const relativePath = normalizeRelativePath(path.relative(input.projectRoot, absolutePath) || '.');
   const repoId = input.folder.repositoryId ?? input.folder.folderId;
   const displayName = input.folder.displayName ?? repoId;
-  const realpath = (await readRealpath(absolutePath)) ?? input.folder.realpath;
-  throwIfProjectContextAborted(input);
+  const realpath = (await readRealpath(input.sourceReader, absolutePath)) ?? input.folder.realpath;
+  throwIfProjectContextAborted(input.context);
   const missing = !realpath;
   const outsideSpace = Boolean(realpath && !isInsidePath(input.rootRealpath, realpath));
   if (missing) {
@@ -363,8 +386,9 @@ async function createSpaceFolder(input: {
     repoName: displayName,
     sourceFolder: relativePath,
   });
-  const childCount = missing || outsideSpace ? 0 : await countTopLevelChildren(absolutePath);
-  throwIfProjectContextAborted(input);
+  const childCount =
+    missing || outsideSpace ? 0 : await countTopLevelChildren(input.sourceReader, absolutePath);
+  throwIfProjectContextAborted(input.context);
   const sourceFolder = createProjectContextRepoSpaceSourceFolderSummary({
     displayName,
     folderId: input.folder.folderId,
@@ -477,10 +501,10 @@ function createBoundarySummaries(folders: readonly SpaceFolder[]): RepoBoundaryS
 }
 
 async function resolveActiveFileFact(input: {
+  context?: Ctx;
   payload: SpaceRequestPayload;
   requestScope: ProjectContextScope;
   space: SpaceResolution;
-  signal?: AbortSignal;
 }): Promise<ActiveFileResolution> {
   const activeFileValue =
     input.payload.activeFile ?? input.requestScope.activeFile ?? input.payload.ref?.scope.filePath;
@@ -518,8 +542,11 @@ async function resolveActiveFileFact(input: {
     };
   }
 
-  const exists = await pathExists(path.join(input.space.projectRoot, activeFile.path));
-  throwIfProjectContextAborted(input);
+  const exists = await sourceExists(
+    input.space.sourceReader,
+    path.join(input.space.projectRoot, activeFile.path)
+  );
+  throwIfProjectContextAborted(input.context);
   const ref = createProjectContextRepoSpacePathRef({
     exists,
     metadata: createProjectContextRepoSpaceMetadata({
@@ -629,14 +656,14 @@ function createProjectTreeFacts(input: {
 }
 
 async function normalizeSourceRefs(input: {
+  context?: Ctx;
   sourceRefs?: readonly string[];
   space: SpaceResolution;
-  signal?: AbortSignal;
 }): Promise<{ refs: ProjectContextRef[]; errors: ProjectContextQueryError[] }> {
   const refs: ProjectContextRef[] = [];
   const errors: ProjectContextQueryError[] = [];
   for (const sourceRef of input.sourceRefs ?? []) {
-    throwIfProjectContextAborted(input);
+    throwIfProjectContextAborted(input.context);
     const normalized = normalizeRelativePath(sourceRef.replace(/^\.\//, ''));
     const qualified = resolveQualifiedSourceRefs(normalized, input.space.folders);
     if (qualified.length === 1) {
@@ -660,12 +687,12 @@ async function normalizeSourceRefs(input: {
 
     const matches: { folder: SpaceFolder; relativePath: string }[] = [];
     for (const folder of input.space.folders.filter((candidate) => !candidate.missing)) {
-      throwIfProjectContextAborted(input);
+      throwIfProjectContextAborted(input.context);
       const absolutePath = path.join(folder.absolutePath, normalized);
-      if (await pathExists(absolutePath)) {
+      if (await sourceExists(input.space.sourceReader, absolutePath)) {
         matches.push({ folder, relativePath: normalized });
       }
-      throwIfProjectContextAborted(input);
+      throwIfProjectContextAborted(input.context);
     }
     if (matches.length === 1) {
       refs.push(
@@ -862,32 +889,32 @@ function findFolderForRelativePath(
     .sort((left, right) => right.relativePath.length - left.relativePath.length)[0];
 }
 
-async function countTopLevelChildren(absolutePath: string): Promise<number> {
-  return (await readDirectoryEntries(absolutePath)).filter(
+async function countTopLevelChildren(
+  sourceReader: ProjectSourceReader,
+  absolutePath: string
+): Promise<number> {
+  return (await readDirectoryEntries(sourceReader, absolutePath)).filter(
     (entry) => !entry.name.startsWith('.') && !TREE_EXCLUDE_DIRS.has(entry.name)
   ).length;
 }
 
-async function readDirectoryEntries(directoryPath: string): Promise<Dirent[]> {
+async function readDirectoryEntries(
+  sourceReader: ProjectSourceReader,
+  directoryPath: string
+): Promise<ProjectSourceDirectoryEntry[]> {
   try {
-    return await fs.readdir(directoryPath, { withFileTypes: true });
+    return await sourceReader.readDirectory(directoryPath);
   } catch {
     return [];
   }
 }
 
-async function pathExists(absolutePath: string): Promise<boolean> {
+async function readRealpath(
+  sourceReader: ProjectSourceReader,
+  targetPath: string
+): Promise<string | undefined> {
   try {
-    await fs.access(absolutePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readRealpath(targetPath: string): Promise<string | undefined> {
-  try {
-    return await fs.realpath(path.resolve(targetPath));
+    return await sourceReader.realpath(path.resolve(targetPath));
   } catch {
     return undefined;
   }

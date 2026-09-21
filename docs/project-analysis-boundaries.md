@@ -28,9 +28,10 @@ const facts = await withProjectContextSession(async (context) => {
 接单、排空已接收请求并清理缓存，回调异常也执行同样的清理。不能保存执行器在回调结束
 后继续使用，也不应把会话用于长期监控或无限批次。
 
-会话只缓存实际读取的源码及紧凑投影，不保留完整 AST 树/指标摘要。捕获的 inventory
-读取和终态 fence 仍独立读取真实源树。目录、manifest、偏好及导入存在性不在此缓存的
-保证范围内；它还不是完整文件系统的冻结重放协议。
+会话只缓存实际读取的源码及紧凑投影，不保留完整 AST 树/指标摘要。普通实时会话的目录、
+manifest、偏好及导入存在性仍实时读取；认证捕获通过独立 reader 记录这些输入。源码及
+提取缓存按 reader 身份隔离，捕获、重放和后续捕获不会互相复用旧事实。inventory 读取
+和终态 fence 仍独立读取真实源树。
 
 ## 发现会话
 
@@ -42,6 +43,10 @@ const facts = await withProjectContextSession(async (context) => {
 registry 也共用队列。取消排队不会越过仍在执行的前序请求，已开始的 detector 必须结束
 后才能释放对象。回调需返回投影后的值，不能返回 discoverer 供之后使用，也不要重入
 同一个旧实例的会话。直接使用旧 `detect()/getAll()` 的调用方仍须自行遵守这个会话边界。
+
+记录/重放会话要求显式工厂，并要求实例声明支持注入 reader。九类内置发现器均符合此
+约定；旧扩展实例仍可用于实时查询，但不能自动获得完整输入捕获保证。会话期间替换
+reader 或追加未确认的发现器会使该次捕获失败。
 
 ## 捕获期间的源码读取
 
@@ -64,10 +69,28 @@ UTF-8 解码后的文本重新计算。包装 Node host port 的 adapter 必须�
 旧自定义 port 仍可省略该字段，但需自行保证其查询输出与捕获输入一致。自定义 handler
 读取源码时应传递 execution context，不能只转发 AbortSignal。
 
-该检查还不是完整输入闭包：repo/discovery 内部的直接源码及 manifest 读取、目录成员、
-导入目标存在性、discoverer preference 等尚未统一绑定。历史 artifact 也不会因此获得
-新的保证。完整冻结分析需要把这些支持输入及其身份一并纳入捕获，不能用 inventory 中
-“没有这个键”推断原文件系统不存在该输入。
+## 完整分析输入记录
+
+内置 Node host port 对 Core 执行器和 `withProjectContextSession` 的执行器自动启用
+`createInputCapture`。九类发现器和九类查询共用只读输入协议，记录文件原始字节、目录
+成员与类型、stat、realpath，以及解析后的 scope/preference。已知不存在与未曾捕获的
+操作有不同含义；重放遇到遗漏会锁存失败，即使业务层的旧 catch 吞掉异常也不能发布认证。
+
+捕获先预置 inventory 字节，然后执行请求矩阵；再使用新的纯内存 reader 重算同一矩阵，
+比较规范化输出，并检查实际输入未漂移。支持输入包含清单、空目录和不存在性，独立于
+源码扩展名/排除策略。mtime 不参与输入身份，业务配置中的普通字符串也不作为文件路径
+重绑定。产物仅保存 root 标识与相对路径；支持路径只读，不用于物化或写回文件。
+
+新产物可携带 `facts.inputClosure`，其字节按 hash 复用原 chunk 池；闭包 hash 同时绑定
+manifest 和 `SourceRevisionVectorV1`。仅修改支持配置也会让旧事实版本失效。旧 artifact
+以及没有捕获 hook 的自定义 host port 沿用原协议，不自动获得这项保证。包装 Node host
+port 的 adapter 必须转发 `createInputCapture`，并透传 `executeRequest` 的完整参数。
+
+实时新鲜性检查应调用 `NodeProjectContextFoundationHostPorts.observeInputClosureHash`，
+传入产物的 closure/chunks、当前 repositories 与 controlRoot，然后将观察所得 hash 作为
+`buildSourceRevisionVectorV1(entries, inputClosureHash)` 的第二个参数。它重新检查已认证
+读集，保留不存在的观察，传播异常和取消，并统一软链接 root；不能直接复制旧 hash。
+这只判断旧输入是否仍成立，不表示新的查询结果已经重新认证。无闭包的历史产物省略该参数。
 
 ## 部分结果
 

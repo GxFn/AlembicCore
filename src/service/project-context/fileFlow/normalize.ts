@@ -1,4 +1,3 @@
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import type {
   FileSummary,
@@ -7,6 +6,8 @@ import type {
   RelationSummary,
   SymbolSummary,
 } from '../../../domain/project-context/index.js';
+import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
+import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileFlowRelationRef } from '../shared/fileFlow-moduleLayers/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
@@ -44,6 +45,7 @@ export async function normalizeFileFlow(input: {
   callSites: readonly ExtractedFileFlowCallSite[];
   symbols: readonly SymbolSummary[];
   signal?: AbortSignal;
+  sourceReader?: ProjectSourceReader;
 }): Promise<NormalizedFileFlow> {
   throwIfProjectContextAborted(input);
   const importRelations = await normalizeImports(input);
@@ -95,12 +97,18 @@ async function normalizeImports(input: {
   fileRef: ProjectContextRef;
   imports: readonly ExtractedFileFlowImport[];
   signal?: AbortSignal;
+  sourceReader?: ProjectSourceReader;
 }): Promise<{ relations: RelationSummary[]; warnings: FileFlowQueryFailure[] }> {
   const relations: RelationSummary[] = [];
   const warnings: FileFlowQueryFailure[] = [];
   for (const importRecord of input.imports) {
     throwIfProjectContextAborted(input);
-    const target = await resolveImportTarget(input.facts, importRecord, input.signal);
+    const target = await resolveImportTarget(
+      input.facts,
+      importRecord,
+      input.signal,
+      input.sourceReader ?? nodeProjectSourceReader
+    );
     throwIfProjectContextAborted(input);
     if (target.unresolved && target.reason === 'not-found') {
       warnings.push({
@@ -291,7 +299,8 @@ function createRelationSummary(input: {
 async function resolveImportTarget(
   facts: SourceSliceFileFacts,
   importRecord: ExtractedFileFlowImport,
-  signal?: AbortSignal
+  signal: AbortSignal | undefined,
+  reader: ProjectSourceReader
 ): Promise<ResolvedFileFlowImportTarget> {
   if (!isRelativeSpecifier(importRecord.specifier)) {
     return {
@@ -322,7 +331,7 @@ async function resolveImportTarget(
     if (!isContainedFilesystemPath(relativePath)) {
       continue;
     }
-    if (await isFile(absolutePath)) {
+    if (await isFile(absolutePath, reader, signal)) {
       throwIfProjectContextAborted({ signal });
       const filePath = toProjectContextPath(relativePath);
       return {
@@ -456,9 +465,13 @@ function nodeNextSourceExtensionAliases(extension: string): readonly string[] {
   }
 }
 
-async function isFile(filePath: string): Promise<boolean> {
+async function isFile(
+  filePath: string,
+  reader: ProjectSourceReader,
+  signal?: AbortSignal
+): Promise<boolean> {
   try {
-    const stat = await fs.stat(filePath);
+    const stat = await reader.stat(filePath, { signal });
     return stat.isFile();
   } catch {
     return false;

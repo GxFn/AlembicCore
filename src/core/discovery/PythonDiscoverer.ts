@@ -6,8 +6,8 @@
  * 支持: pyproject.toml (PEP 621), setup.py, src 布局, 平铺布局
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, join, relative } from 'node:path';
+import { readSourceText, sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import {
   type DependencyGraph,
   type DiscoveredFile,
@@ -31,6 +31,10 @@ export class PythonDiscoverer extends ProjectDiscoverer {
   #depGraph: DependencyGraph = { nodes: [], edges: [] };
   #projectName: string | null = null;
 
+  override get supportsSourceReader() {
+    return true;
+  }
+
   get id() {
     return 'python';
   }
@@ -42,19 +46,19 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     let confidence = 0;
     const reasons: string[] = [];
 
-    if (existsSync(join(projectRoot, 'pyproject.toml'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'pyproject.toml'))) {
       confidence = 0.9;
       reasons.push('pyproject.toml exists');
     }
-    if (existsSync(join(projectRoot, 'setup.py'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'setup.py'))) {
       confidence = Math.max(confidence, 0.8);
       reasons.push('setup.py exists');
     }
-    if (existsSync(join(projectRoot, 'setup.cfg'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'setup.cfg'))) {
       confidence = Math.max(confidence, 0.8);
       reasons.push('setup.cfg exists');
     }
-    if (existsSync(join(projectRoot, 'requirements.txt'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'requirements.txt'))) {
       confidence = Math.max(confidence, 0.6);
       reasons.push('requirements.txt exists');
     }
@@ -62,12 +66,17 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     // 检查是否有 .py 文件
     if (confidence === 0) {
       try {
-        const entries = readdirSync(projectRoot);
+        const entries = (await this.sourceReader.readDirectory(projectRoot)).map(
+          (entry) => entry.name
+        );
         if (entries.some((e) => e.endsWith('.py'))) {
           confidence = 0.4;
           reasons.push('*.py files found at root');
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -87,17 +96,17 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     // 解析 pyproject.toml（简易 TOML 解析）
     const pyprojectPath = join(projectRoot, 'pyproject.toml');
     let pyproject: Record<string, any> | null = null;
-    if (existsSync(pyprojectPath)) {
-      pyproject = this.#parsePyprojectToml(readFileSync(pyprojectPath, 'utf8'));
+    if (await sourceExists(this.sourceReader, pyprojectPath)) {
+      pyproject = this.#parsePyprojectToml(await readSourceText(this.sourceReader, pyprojectPath));
     }
 
     this.#projectName = pyproject?.project?.name || basename(projectRoot);
 
     // 发现包目录
-    const packages = this.#discoverPackages(projectRoot, pyproject);
+    const packages = await this.#discoverPackages(projectRoot, pyproject);
 
     for (const pkg of packages) {
-      const framework = this.#detectFramework(projectRoot, pyproject);
+      const framework = await this.#detectFramework(projectRoot, pyproject);
       this.#targets.push({
         name: pkg.name,
         path: pkg.path,
@@ -116,14 +125,14 @@ export class PythonDiscoverer extends ProjectDiscoverer {
         path: projectRoot,
         type: 'library',
         language: 'python',
-        framework: this.#detectFramework(projectRoot, pyproject),
+        framework: await this.#detectFramework(projectRoot, pyproject),
         metadata: { pyproject },
       });
       this.#depGraph.nodes.push(this.#projectName ?? basename(projectRoot));
     }
 
     // 解析依赖
-    this.#parseDependencies(projectRoot, pyproject);
+    await this.#parseDependencies(projectRoot, pyproject);
   }
 
   async listTargets() {
@@ -136,12 +145,12 @@ export class PythonDiscoverer extends ProjectDiscoverer {
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectPyFiles(targetPath, targetPath, files);
+    await this.#collectPyFiles(targetPath, targetPath, files);
     return files;
   }
 
@@ -151,23 +160,26 @@ export class PythonDiscoverer extends ProjectDiscoverer {
 
   // ── 内部实现 ──
 
-  #discoverPackages(projectRoot: string, pyproject: Record<string, any> | null) {
+  async #discoverPackages(projectRoot: string, pyproject: Record<string, any> | null) {
     const packages: { name: string; path: string; isTest: boolean }[] = [];
 
     // src/ 布局优先
     const srcDir = join(projectRoot, 'src');
-    if (existsSync(srcDir)) {
+    if (await sourceExists(this.sourceReader, srcDir)) {
       try {
-        const entries = readdirSync(srcDir, { withFileTypes: true });
+        const entries = await this.sourceReader.readDirectory(srcDir);
         for (const entry of entries) {
           if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
             const pkgDir = join(srcDir, entry.name);
-            if (existsSync(join(pkgDir, '__init__.py'))) {
+            if (await sourceExists(this.sourceReader, join(pkgDir, '__init__.py'))) {
               packages.push({ name: entry.name, path: pkgDir, isTest: false });
             }
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -175,17 +187,20 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     // 平铺布局: 含 __init__.py 的顶层目录
     if (packages.length === 0) {
       try {
-        const entries = readdirSync(projectRoot, { withFileTypes: true });
+        const entries = await this.sourceReader.readDirectory(projectRoot);
         for (const entry of entries) {
           if (entry.isDirectory() && !entry.name.startsWith('.') && !EXCLUDE_DIRS.has(entry.name)) {
             const pkgDir = join(projectRoot, entry.name);
-            if (existsSync(join(pkgDir, '__init__.py'))) {
+            if (await sourceExists(this.sourceReader, join(pkgDir, '__init__.py'))) {
               const isTest = /^tests?$/.test(entry.name);
               packages.push({ name: entry.name, path: pkgDir, isTest });
             }
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -193,7 +208,10 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     // 检测 tests/ 目录
     for (const testDir of ['tests', 'test']) {
       const testPath = join(projectRoot, testDir);
-      if (existsSync(testPath) && !packages.some((p) => p.name === testDir)) {
+      if (
+        (await sourceExists(this.sourceReader, testPath)) &&
+        !packages.some((p) => p.name === testDir)
+      ) {
         packages.push({ name: testDir, path: testPath, isTest: true });
       }
     }
@@ -201,8 +219,8 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     return packages;
   }
 
-  #detectFramework(projectRoot: string, pyproject: Record<string, any> | null) {
-    const deps = this.#extractDependencyNames(projectRoot, pyproject);
+  async #detectFramework(projectRoot: string, pyproject: Record<string, any> | null) {
+    const deps = await this.#extractDependencyNames(projectRoot, pyproject);
 
     if (deps.has('django')) {
       return 'django';
@@ -234,7 +252,7 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     return null;
   }
 
-  #extractDependencyNames(projectRoot: string, pyproject: Record<string, any> | null) {
+  async #extractDependencyNames(projectRoot: string, pyproject: Record<string, any> | null) {
     const names = new Set<string>();
 
     // From pyproject.toml
@@ -252,9 +270,9 @@ export class PythonDiscoverer extends ProjectDiscoverer {
 
     // From requirements.txt
     const reqPath = join(projectRoot, 'requirements.txt');
-    if (existsSync(reqPath)) {
+    if (await sourceExists(this.sourceReader, reqPath)) {
       try {
-        const content = readFileSync(reqPath, 'utf8');
+        const content = await readSourceText(this.sourceReader, reqPath);
         for (const line of content.split('\n')) {
           const trimmed = line.trim();
           if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith('-')) {
@@ -267,7 +285,10 @@ export class PythonDiscoverer extends ProjectDiscoverer {
             }
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -275,8 +296,8 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     return names;
   }
 
-  #parseDependencies(projectRoot: string, pyproject: Record<string, any> | null) {
-    const names = this.#extractDependencyNames(projectRoot, pyproject);
+  async #parseDependencies(projectRoot: string, pyproject: Record<string, any> | null) {
+    const names = await this.#extractDependencyNames(projectRoot, pyproject);
     const rootTarget = this.#targets[0]?.name;
     if (!rootTarget) {
       return;
@@ -287,12 +308,12 @@ export class PythonDiscoverer extends ProjectDiscoverer {
     }
   }
 
-  #collectPyFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectPyFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
     if (depth > 15) {
       return;
     }
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
           continue;
@@ -303,7 +324,7 @@ export class PythonDiscoverer extends ProjectDiscoverer {
 
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
-          this.#collectPyFiles(fullPath, rootDir, files, depth + 1);
+          await this.#collectPyFiles(fullPath, rootDir, files, depth + 1);
         } else if (entry.isFile() && entry.name.endsWith('.py')) {
           files.push({
             name: entry.name,
@@ -313,7 +334,10 @@ export class PythonDiscoverer extends ProjectDiscoverer {
           });
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }

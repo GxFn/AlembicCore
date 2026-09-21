@@ -8,8 +8,12 @@
  * ⚠️ 不尝试精确解析 Gradle DSL，仅用正则启发式提取关键信息
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative, resolve } from 'node:path';
+import {
+  readSourceText,
+  someSourceExists,
+  sourceExists,
+} from '../../infrastructure/io/ProjectSourceReader.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import {
   type DependencyGraph,
@@ -29,6 +33,10 @@ export class JvmDiscoverer extends ProjectDiscoverer {
   #depGraph: DependencyGraph = { nodes: [], edges: [] };
   #buildSystem: string | null = null; // 'gradle' | 'maven'
 
+  override get supportsSourceReader() {
+    return true;
+  }
+
   get id() {
     return 'jvm';
   }
@@ -42,15 +50,15 @@ export class JvmDiscoverer extends ProjectDiscoverer {
 
     // Gradle
     if (
-      existsSync(join(projectRoot, 'build.gradle')) ||
-      existsSync(join(projectRoot, 'build.gradle.kts'))
+      (await sourceExists(this.sourceReader, join(projectRoot, 'build.gradle'))) ||
+      (await sourceExists(this.sourceReader, join(projectRoot, 'build.gradle.kts')))
     ) {
       confidence = 0.9;
       reasons.push('build.gradle(.kts) exists');
     }
     if (
-      existsSync(join(projectRoot, 'settings.gradle')) ||
-      existsSync(join(projectRoot, 'settings.gradle.kts'))
+      (await sourceExists(this.sourceReader, join(projectRoot, 'settings.gradle'))) ||
+      (await sourceExists(this.sourceReader, join(projectRoot, 'settings.gradle.kts')))
     ) {
       confidence = Math.max(confidence, 0.85);
       confidence = Math.min(confidence + 0.05, 1.0);
@@ -58,7 +66,7 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     }
 
     // Maven
-    if (existsSync(join(projectRoot, 'pom.xml'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'pom.xml'))) {
       confidence = Math.max(confidence, 0.85);
       reasons.push('pom.xml exists');
     }
@@ -77,16 +85,16 @@ export class JvmDiscoverer extends ProjectDiscoverer {
 
     // 判断构建系统
     const hasGradle =
-      existsSync(join(projectRoot, 'build.gradle')) ||
-      existsSync(join(projectRoot, 'build.gradle.kts'));
-    const hasMaven = existsSync(join(projectRoot, 'pom.xml'));
+      (await sourceExists(this.sourceReader, join(projectRoot, 'build.gradle'))) ||
+      (await sourceExists(this.sourceReader, join(projectRoot, 'build.gradle.kts')));
+    const hasMaven = await sourceExists(this.sourceReader, join(projectRoot, 'pom.xml'));
 
     if (hasGradle) {
       this.#buildSystem = 'gradle';
-      this.#loadGradle(projectRoot);
+      await this.#loadGradle(projectRoot);
     } else if (hasMaven) {
       this.#buildSystem = 'maven';
-      this.#loadMaven(projectRoot);
+      await this.#loadMaven(projectRoot);
     }
   }
 
@@ -98,7 +106,7 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     const targetObj =
       typeof target === 'string' ? this.#targets.find((t) => t.name === target) : target;
 
-    if (!targetObj?.path || !existsSync(targetObj.path)) {
+    if (!targetObj?.path || !(await sourceExists(this.sourceReader, targetObj.path))) {
       return [];
     }
 
@@ -112,15 +120,15 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     ];
 
     // 也支持非标准布局 — 直接在 target 路径下搜索
-    const hasSrcDir = sourceDirs.some((d) => existsSync(d));
+    const hasSrcDir = await someSourceExists(this.sourceReader, sourceDirs);
     if (hasSrcDir) {
       for (const srcDir of sourceDirs) {
-        if (existsSync(srcDir)) {
-          this.#collectFiles(srcDir, targetObj.path, files);
+        if (await sourceExists(this.sourceReader, srcDir)) {
+          await this.#collectFiles(srcDir, targetObj.path, files);
         }
       }
     } else {
-      this.#collectFiles(targetObj.path, targetObj.path, files);
+      await this.#collectFiles(targetObj.path, targetObj.path, files);
     }
 
     return files;
@@ -132,25 +140,25 @@ export class JvmDiscoverer extends ProjectDiscoverer {
 
   // ── Gradle ──
 
-  #loadGradle(projectRoot: string) {
+  async #loadGradle(projectRoot: string) {
     // 解析 settings.gradle 找子模块
-    const submodules = this.#parseGradleSettings(projectRoot);
+    const submodules = await this.#parseGradleSettings(projectRoot);
 
     if (submodules.length > 0) {
       // 多模块 Gradle 项目
       for (const mod of submodules) {
         const modPath = resolve(projectRoot, mod.replace(/:/g, '/'));
-        if (!existsSync(modPath)) {
+        if (!(await sourceExists(this.sourceReader, modPath))) {
           continue;
         }
 
-        const framework = this.#detectGradleFramework(modPath);
-        const lang = this.#detectPrimaryLang(modPath);
+        const framework = await this.#detectGradleFramework(modPath);
+        const lang = await this.#detectPrimaryLang(modPath);
 
         this.#targets.push({
           name: mod,
           path: modPath,
-          type: this.#inferGradleTargetType(modPath, mod),
+          type: await this.#inferGradleTargetType(modPath, mod),
           language: lang,
           framework,
           metadata: { buildSystem: 'gradle', module: mod },
@@ -159,11 +167,11 @@ export class JvmDiscoverer extends ProjectDiscoverer {
       }
 
       // 提取模块间依赖
-      this.#parseGradleModuleDeps(projectRoot, submodules);
+      await this.#parseGradleModuleDeps(projectRoot, submodules);
     } else {
       // 单模块 Gradle 项目
-      const framework = this.#detectGradleFramework(projectRoot);
-      const lang = this.#detectPrimaryLang(projectRoot);
+      const framework = await this.#detectGradleFramework(projectRoot);
+      const lang = await this.#detectPrimaryLang(projectRoot);
       const name = basename(projectRoot);
 
       this.#targets.push({
@@ -178,19 +186,19 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     }
 
     // 提取外部依赖
-    this.#parseGradleExternalDeps(projectRoot);
+    await this.#parseGradleExternalDeps(projectRoot);
   }
 
-  #parseGradleSettings(projectRoot: string) {
+  async #parseGradleSettings(projectRoot: string) {
     const modules: string[] = [];
     for (const fname of ['settings.gradle', 'settings.gradle.kts']) {
       const settingsPath = join(projectRoot, fname);
-      if (!existsSync(settingsPath)) {
+      if (!(await sourceExists(this.sourceReader, settingsPath))) {
         continue;
       }
 
       try {
-        const content = readFileSync(settingsPath, 'utf8');
+        const content = await readSourceText(this.sourceReader, settingsPath);
         // include ':app', ':lib:core', ...
         const includeMatches = content.matchAll(
           /include\s*\(?\s*((?:['"][^'"]+['"](?:\s*,\s*)?)+)/g
@@ -201,21 +209,24 @@ export class JvmDiscoverer extends ProjectDiscoverer {
             modules.push(entry[1].replace(/^:/, ''));
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
     return [...new Set(modules)];
   }
 
-  #detectGradleFramework(dir: string) {
+  async #detectGradleFramework(dir: string) {
     for (const fname of ['build.gradle', 'build.gradle.kts']) {
       const buildPath = join(dir, fname);
-      if (!existsSync(buildPath)) {
+      if (!(await sourceExists(this.sourceReader, buildPath))) {
         continue;
       }
       try {
-        const content = readFileSync(buildPath, 'utf8');
+        const content = await readSourceText(this.sourceReader, buildPath);
         if (/com\.android|android\s*\{|apply.*android/.test(content)) {
           return 'android';
         }
@@ -228,28 +239,34 @@ export class JvmDiscoverer extends ProjectDiscoverer {
         if (/org\.jetbrains\.compose/.test(content)) {
           return 'compose';
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
     return null;
   }
 
-  #inferGradleTargetType(dir: string, name: string) {
+  async #inferGradleTargetType(dir: string, name: string) {
     for (const fname of ['build.gradle', 'build.gradle.kts']) {
       const buildPath = join(dir, fname);
-      if (!existsSync(buildPath)) {
+      if (!(await sourceExists(this.sourceReader, buildPath))) {
         continue;
       }
       try {
-        const content = readFileSync(buildPath, 'utf8');
+        const content = await readSourceText(this.sourceReader, buildPath);
         if (/application|com\.android\.application/.test(content)) {
           return 'app';
         }
         if (/java-library|com\.android\.library/.test(content)) {
           return 'library';
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -259,17 +276,17 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     return 'library';
   }
 
-  #parseGradleModuleDeps(projectRoot: string, submodules: string[]) {
+  async #parseGradleModuleDeps(projectRoot: string, submodules: string[]) {
     const moduleSet = new Set(submodules);
     for (const mod of submodules) {
       const modPath = resolve(projectRoot, mod.replace(/:/g, '/'));
       for (const fname of ['build.gradle', 'build.gradle.kts']) {
         const buildPath = join(modPath, fname);
-        if (!existsSync(buildPath)) {
+        if (!(await sourceExists(this.sourceReader, buildPath))) {
           continue;
         }
         try {
-          const content = readFileSync(buildPath, 'utf8');
+          const content = await readSourceText(this.sourceReader, buildPath);
           // project(':lib:core'), project(":lib:core")
           const projDeps = content.matchAll(/project\s*\(\s*['"][:.]?([^'"]+)['"]\s*\)/g);
           for (const m of projDeps) {
@@ -278,21 +295,24 @@ export class JvmDiscoverer extends ProjectDiscoverer {
               this.#depGraph.edges.push({ from: mod, to: depMod, type: 'depends_on' });
             }
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw error;
+          }
           /* skip */
         }
       }
     }
   }
 
-  #parseGradleExternalDeps(projectRoot: string) {
+  async #parseGradleExternalDeps(projectRoot: string) {
     for (const fname of ['build.gradle', 'build.gradle.kts']) {
       const buildPath = join(projectRoot, fname);
-      if (!existsSync(buildPath)) {
+      if (!(await sourceExists(this.sourceReader, buildPath))) {
         continue;
       }
       try {
-        const content = readFileSync(buildPath, 'utf8');
+        const content = await readSourceText(this.sourceReader, buildPath);
         const rootTarget = this.#targets[0]?.name;
         if (!rootTarget) {
           return;
@@ -309,7 +329,10 @@ export class JvmDiscoverer extends ProjectDiscoverer {
             this.#depGraph.edges.push({ from: rootTarget, to: depName, type: 'depends_on' });
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -317,13 +340,13 @@ export class JvmDiscoverer extends ProjectDiscoverer {
 
   // ── Maven ──
 
-  #loadMaven(projectRoot: string) {
+  async #loadMaven(projectRoot: string) {
     const pomPath = join(projectRoot, 'pom.xml');
-    if (!existsSync(pomPath)) {
+    if (!(await sourceExists(this.sourceReader, pomPath))) {
       return;
     }
 
-    const pomContent = readFileSync(pomPath, 'utf8');
+    const pomContent = await readSourceText(this.sourceReader, pomPath);
     const projectName = this.#extractXmlValue(pomContent, 'artifactId') || basename(projectRoot);
 
     // 提取子模块
@@ -332,12 +355,12 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     if (modules.length > 0) {
       for (const mod of modules) {
         const modPath = resolve(projectRoot, mod);
-        if (!existsSync(modPath)) {
+        if (!(await sourceExists(this.sourceReader, modPath))) {
           continue;
         }
 
-        const lang = this.#detectPrimaryLang(modPath);
-        const framework = this.#detectMavenFramework(modPath);
+        const lang = await this.#detectPrimaryLang(modPath);
+        const framework = await this.#detectMavenFramework(modPath);
 
         this.#targets.push({
           name: mod,
@@ -350,8 +373,8 @@ export class JvmDiscoverer extends ProjectDiscoverer {
         this.#depGraph.nodes.push(mod);
       }
     } else {
-      const lang = this.#detectPrimaryLang(projectRoot);
-      const framework = this.#detectMavenFramework(projectRoot);
+      const lang = await this.#detectPrimaryLang(projectRoot);
+      const framework = await this.#detectMavenFramework(projectRoot);
 
       this.#targets.push({
         name: projectName,
@@ -377,20 +400,23 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     return modules;
   }
 
-  #detectMavenFramework(dir: string) {
+  async #detectMavenFramework(dir: string) {
     const pomPath = join(dir, 'pom.xml');
-    if (!existsSync(pomPath)) {
+    if (!(await sourceExists(this.sourceReader, pomPath))) {
       return null;
     }
     try {
-      const content = readFileSync(pomPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, pomPath);
       if (/spring-boot|springframework/.test(content)) {
         return 'spring';
       }
       if (/android/.test(content)) {
         return 'android';
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
     return null;
@@ -419,26 +445,28 @@ export class JvmDiscoverer extends ProjectDiscoverer {
 
   // ── 共用工具 ──
 
-  #detectPrimaryLang(dir: string) {
+  async #detectPrimaryLang(dir: string) {
     let javaCount = 0;
     let kotlinCount = 0;
 
     const srcMain = join(dir, 'src', 'main');
-    if (existsSync(join(srcMain, 'kotlin'))) {
+    if (await sourceExists(this.sourceReader, join(srcMain, 'kotlin'))) {
       kotlinCount += 10;
     }
-    if (existsSync(join(srcMain, 'java'))) {
+    if (await sourceExists(this.sourceReader, join(srcMain, 'java'))) {
       javaCount += 10;
     }
 
     // 快速采样
     const srcDirs = [join(srcMain, 'java'), join(srcMain, 'kotlin'), dir];
     for (const sd of srcDirs) {
-      if (!existsSync(sd)) {
+      if (!(await sourceExists(this.sourceReader, sd))) {
         continue;
       }
       try {
-        const files = readdirSync(sd).slice(0, 20);
+        const files = (await this.sourceReader.readDirectory(sd))
+          .map((entry) => entry.name)
+          .slice(0, 20);
         for (const f of files) {
           if (f.endsWith('.kt') || f.endsWith('.kts')) {
             kotlinCount++;
@@ -447,7 +475,10 @@ export class JvmDiscoverer extends ProjectDiscoverer {
             javaCount++;
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -455,12 +486,12 @@ export class JvmDiscoverer extends ProjectDiscoverer {
     return kotlinCount > javaCount ? 'kotlin' : 'java';
   }
 
-  #collectFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
     if (depth > 15) {
       return;
     }
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
           continue;
@@ -471,7 +502,7 @@ export class JvmDiscoverer extends ProjectDiscoverer {
 
         const fullPath = join(dir, entry.name);
         if (entry.isDirectory()) {
-          this.#collectFiles(fullPath, rootDir, files, depth + 1);
+          await this.#collectFiles(fullPath, rootDir, files, depth + 1);
         } else if (entry.isFile()) {
           const ext = extname(entry.name);
           if (SOURCE_EXTENSIONS.has(ext)) {
@@ -484,7 +515,10 @@ export class JvmDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }

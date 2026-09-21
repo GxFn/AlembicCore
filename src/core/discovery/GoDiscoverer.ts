@@ -6,8 +6,8 @@
  * 支持: 单 Module 项目、Go Workspace (go.work)、标准目录布局 (cmd/ internal/ pkg/)
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
+import { readSourceText, sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import {
   type DependencyGraph,
   type DiscoveredFile,
@@ -26,6 +26,10 @@ export class GoDiscoverer extends ProjectDiscoverer {
   #depGraph: DependencyGraph = { nodes: [], edges: [] };
   #modulePath: string | null = null;
 
+  override get supportsSourceReader() {
+    return true;
+  }
+
   get id() {
     return 'go';
   }
@@ -37,18 +41,18 @@ export class GoDiscoverer extends ProjectDiscoverer {
     let confidence = 0;
     const reasons: string[] = [];
 
-    if (existsSync(join(projectRoot, 'go.mod'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'go.mod'))) {
       confidence = 0.92;
       reasons.push('go.mod exists');
     }
-    if (existsSync(join(projectRoot, 'go.sum'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'go.sum'))) {
       confidence = Math.max(confidence, 0.7);
       if (confidence < 0.92) {
         confidence += 0.1;
       }
       reasons.push('go.sum exists');
     }
-    if (existsSync(join(projectRoot, 'go.work'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'go.work'))) {
       confidence = Math.max(confidence, 0.95);
       reasons.push('go.work exists (workspace)');
     }
@@ -56,12 +60,17 @@ export class GoDiscoverer extends ProjectDiscoverer {
     // 兜底: 根目录有 .go 文件
     if (confidence === 0) {
       try {
-        const entries = readdirSync(projectRoot);
+        const entries = (await this.sourceReader.readDirectory(projectRoot)).map(
+          (entry) => entry.name
+        );
         if (entries.some((e) => e.endsWith('.go'))) {
           confidence = 0.5;
           reasons.push('*.go files found at root');
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -79,13 +88,13 @@ export class GoDiscoverer extends ProjectDiscoverer {
     this.#depGraph = { nodes: [], edges: [] };
 
     // 解析 go.mod
-    this.#modulePath = this.#parseGoMod(projectRoot);
+    this.#modulePath = await this.#parseGoMod(projectRoot);
     const projectName = this.#modulePath
       ? (this.#modulePath.split('/').pop() ?? basename(projectRoot))
       : basename(projectRoot);
 
     // 主 Target — 始终覆盖整个 module（Go 项目根目录递归收集所有 .go 文件）
-    const framework = this.#detectFramework(projectRoot);
+    const framework = await this.#detectFramework(projectRoot);
     this.#targets.push({
       name: projectName,
       path: projectRoot,
@@ -97,7 +106,7 @@ export class GoDiscoverer extends ProjectDiscoverer {
     this.#depGraph.nodes.push(projectName);
 
     // cmd/ 下的子命令作为独立 Target
-    const cmdTargets = this.#discoverCmdTargets(projectRoot);
+    const cmdTargets = await this.#discoverCmdTargets(projectRoot);
     for (const t of cmdTargets) {
       this.#targets.push(t);
       this.#depGraph.nodes.push(t.name);
@@ -106,7 +115,10 @@ export class GoDiscoverer extends ProjectDiscoverer {
     // 检测 test 目录（如果存在独立的 tests/ 或 test/）
     for (const testDir of ['test', 'tests', 'e2e']) {
       const testPath = join(projectRoot, testDir);
-      if (existsSync(testPath) && !this.#targets.some((t) => t.name === testDir)) {
+      if (
+        (await sourceExists(this.sourceReader, testPath)) &&
+        !this.#targets.some((t) => t.name === testDir)
+      ) {
         this.#targets.push({
           name: testDir,
           path: testPath,
@@ -117,13 +129,13 @@ export class GoDiscoverer extends ProjectDiscoverer {
     }
 
     // 发现内部子包（binding/, render/, internal/ 等）
-    this.#discoverInternalPackages(projectRoot);
+    await this.#discoverInternalPackages(projectRoot);
 
     // 解析 go.mod 外部依赖（同时添加为 node）
-    this.#parseDependencies(projectRoot);
+    await this.#parseDependencies(projectRoot);
 
     // 解析内部 import 关系
-    this.#parseInternalImports(projectRoot);
+    await this.#parseInternalImports(projectRoot);
   }
 
   async listTargets() {
@@ -136,12 +148,12 @@ export class GoDiscoverer extends ProjectDiscoverer {
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectGoFiles(targetPath, targetPath, files);
+    await this.#collectGoFiles(targetPath, targetPath, files);
     return files;
   }
 
@@ -152,23 +164,26 @@ export class GoDiscoverer extends ProjectDiscoverer {
   // ── 内部实现 ──
 
   /** 解析 go.mod 提取 module path */
-  #parseGoMod(projectRoot: string) {
+  async #parseGoMod(projectRoot: string) {
     const goModPath = join(projectRoot, 'go.mod');
-    if (!existsSync(goModPath)) {
+    if (!(await sourceExists(this.sourceReader, goModPath))) {
       return null;
     }
     try {
-      const content = readFileSync(goModPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, goModPath);
       const match = content.match(/^module\s+(\S+)/m);
       return match ? match[1] : null;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       return null;
     }
   }
 
   /** 发现 Go 标准约定目录: pkg/, internal/, api/ */
   // biome-ignore lint/correctness/noUnusedPrivateClassMembers: 完整复制迁移保留 Go 约定目录发现扩展点。
-  #discoverConventionDirs(projectRoot: string) {
+  async #discoverConventionDirs(projectRoot: string) {
     const dirs: DiscoveredTarget[] = [];
     const conventionNames = [
       { name: 'pkg', type: 'library' },
@@ -178,13 +193,13 @@ export class GoDiscoverer extends ProjectDiscoverer {
       { name: 'service', type: 'application' },
     ];
 
-    const framework = this.#detectFramework(projectRoot);
+    const framework = await this.#detectFramework(projectRoot);
 
     for (const conv of conventionNames) {
       const dirPath = join(projectRoot, conv.name);
-      if (existsSync(dirPath)) {
+      if (await sourceExists(this.sourceReader, dirPath)) {
         try {
-          const entries = readdirSync(dirPath, { withFileTypes: true });
+          const entries = await this.sourceReader.readDirectory(dirPath);
           const hasGoFiles = entries.some((e) => e.isFile() && e.name.endsWith('.go'));
           const hasGoSubDirs = entries.some(
             (e) => e.isDirectory() && !e.name.startsWith('.') && !EXCLUDE_DIRS.has(e.name)
@@ -199,7 +214,10 @@ export class GoDiscoverer extends ProjectDiscoverer {
               metadata: { modulePath: this.#modulePath },
             });
           }
-        } catch {
+        } catch (error) {
+          if (error instanceof Error && error.name === 'AbortError') {
+            throw error;
+          }
           /* skip */
         }
       }
@@ -209,17 +227,17 @@ export class GoDiscoverer extends ProjectDiscoverer {
   }
 
   /** 发现 cmd/ 下的子命令—每个含 main.go 的子目录为一个 binary Target */
-  #discoverCmdTargets(projectRoot: string) {
+  async #discoverCmdTargets(projectRoot: string) {
     const cmdDir = join(projectRoot, 'cmd');
-    if (!existsSync(cmdDir)) {
+    if (!(await sourceExists(this.sourceReader, cmdDir))) {
       return [];
     }
 
     const targets: DiscoveredTarget[] = [];
-    const framework = this.#detectFramework(projectRoot);
+    const framework = await this.#detectFramework(projectRoot);
 
     try {
-      const entries = readdirSync(cmdDir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(cmdDir);
       for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.')) {
           const subDir = join(cmdDir, entry.name);
@@ -233,14 +251,17 @@ export class GoDiscoverer extends ProjectDiscoverer {
           });
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
 
     // cmd/ 根目录本身有 main.go
     if (targets.length === 0) {
       try {
-        const entries = readdirSync(cmdDir);
+        const entries = (await this.sourceReader.readDirectory(cmdDir)).map((entry) => entry.name);
         if (entries.some((e) => e.endsWith('.go'))) {
           targets.push({
             name: 'cmd',
@@ -251,7 +272,10 @@ export class GoDiscoverer extends ProjectDiscoverer {
             metadata: { modulePath: this.#modulePath },
           });
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -260,14 +284,14 @@ export class GoDiscoverer extends ProjectDiscoverer {
   }
 
   /** 检测 Go Web 框架 */
-  #detectFramework(projectRoot: string) {
+  async #detectFramework(projectRoot: string) {
     const goModPath = join(projectRoot, 'go.mod');
-    if (!existsSync(goModPath)) {
+    if (!(await sourceExists(this.sourceReader, goModPath))) {
       return null;
     }
 
     try {
-      const content = readFileSync(goModPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, goModPath);
 
       if (/github\.com\/gin-gonic\/gin\b/.test(content)) {
         return 'gin';
@@ -290,7 +314,10 @@ export class GoDiscoverer extends ProjectDiscoverer {
       if (/github\.com\/go-chi\/chi\b/.test(content)) {
         return 'chi';
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
 
@@ -298,15 +325,15 @@ export class GoDiscoverer extends ProjectDiscoverer {
   }
 
   /** 发现内部子包——目录中包含 .go 文件即为一个 Go package */
-  #discoverInternalPackages(projectRoot: string) {
+  async #discoverInternalPackages(projectRoot: string) {
     const nodeSet = new Set(this.#depGraph.nodes.map((n) => (typeof n === 'string' ? n : n.id)));
 
-    const walk = (dir: string, relPath: string, depth: number) => {
+    const walk = async (dir: string, relPath: string, depth: number): Promise<void> => {
       if (depth > 6) {
         return;
       }
       try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        const entries = await this.sourceReader.readDirectory(dir);
         for (const entry of entries) {
           if (!entry.isDirectory() || entry.name.startsWith('.') || EXCLUDE_DIRS.has(entry.name)) {
             continue;
@@ -316,30 +343,38 @@ export class GoDiscoverer extends ProjectDiscoverer {
 
           // 检查目录中是否包含 .go 文件
           try {
-            const subEntries = readdirSync(subDir);
+            const subEntries = (await this.sourceReader.readDirectory(subDir)).map(
+              (entry) => entry.name
+            );
             const hasGoFiles = subEntries.some((e) => e.endsWith('.go'));
             if (hasGoFiles && !nodeSet.has(subRel)) {
               this.#depGraph.nodes.push({ id: subRel, label: subRel, type: 'internal' });
               nodeSet.add(subRel);
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* skip */
           }
 
-          walk(subDir, subRel, depth + 1);
+          await walk(subDir, subRel, depth + 1);
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     };
 
-    walk(projectRoot, '', 0);
+    await walk(projectRoot, '', 0);
   }
 
   /** 解析 go.mod 依赖到 depGraph（同时将直接依赖添加为 node） */
-  #parseDependencies(projectRoot: string) {
+  async #parseDependencies(projectRoot: string) {
     const goModPath = join(projectRoot, 'go.mod');
-    if (!existsSync(goModPath)) {
+    if (!(await sourceExists(this.sourceReader, goModPath))) {
       return;
     }
 
@@ -371,7 +406,7 @@ export class GoDiscoverer extends ProjectDiscoverer {
     };
 
     try {
-      const content = readFileSync(goModPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, goModPath);
 
       // 块 require
       const requireBlocks = content.matchAll(/require\s*\(([\s\S]*?)\)/g);
@@ -395,13 +430,16 @@ export class GoDiscoverer extends ProjectDiscoverer {
         const indirect = m[0].includes('// indirect');
         addExtDep(m[1], indirect);
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }
 
   /** 解析内部 Go import 语句，构建子包间依赖关系 */
-  #parseInternalImports(projectRoot: string) {
+  async #parseInternalImports(projectRoot: string) {
     if (!this.#modulePath) {
       return;
     }
@@ -420,15 +458,15 @@ export class GoDiscoverer extends ProjectDiscoverer {
 
     const edgeSet = new Set<string>();
 
-    const scanPkgImports = (dir: string, pkgId: string) => {
+    const scanPkgImports = async (dir: string, pkgId: string): Promise<void> => {
       try {
-        const entries = readdirSync(dir);
+        const entries = (await this.sourceReader.readDirectory(dir)).map((entry) => entry.name);
         for (const entry of entries) {
           if (!entry.endsWith('.go')) {
             continue;
           }
           try {
-            const content = readFileSync(join(dir, entry), 'utf8');
+            const content = await readSourceText(this.sourceReader, join(dir, entry));
             // 匹配 import 块和单行 import
             const importBlocks = content.matchAll(/import\s*\(([\s\S]*?)\)/g);
             for (const block of importBlocks) {
@@ -441,21 +479,27 @@ export class GoDiscoverer extends ProjectDiscoverer {
             for (const m of singleImports) {
               this.#matchInternalImport(`"${m[1]}"`, pkgId, rootNodeId, internalNodes, edgeSet);
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* skip */
           }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     };
 
     // 扫描根包
-    scanPkgImports(projectRoot, rootNodeId);
+    await scanPkgImports(projectRoot, rootNodeId);
 
     // 扫描各内部子包
     for (const pkgId of internalNodes) {
-      scanPkgImports(join(projectRoot, pkgId), pkgId);
+      await scanPkgImports(join(projectRoot, pkgId), pkgId);
     }
   }
 
@@ -508,13 +552,13 @@ export class GoDiscoverer extends ProjectDiscoverer {
   }
 
   /** 递归收集 .go 文件 */
-  #collectGoFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectGoFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
     if (depth > 15) {
       return;
     }
 
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
           continue;
@@ -524,11 +568,11 @@ export class GoDiscoverer extends ProjectDiscoverer {
           if (EXCLUDE_DIRS.has(entry.name)) {
             continue;
           }
-          this.#collectGoFiles(join(dir, entry.name), rootDir, files, depth + 1);
+          await this.#collectGoFiles(join(dir, entry.name), rootDir, files, depth + 1);
         } else if (entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name))) {
           const fullPath = join(dir, entry.name);
           try {
-            const content = readFileSync(fullPath, 'utf8');
+            const content = await readSourceText(this.sourceReader, fullPath);
             files.push({
               name: entry.name,
               path: fullPath,
@@ -536,12 +580,18 @@ export class GoDiscoverer extends ProjectDiscoverer {
               language: 'go',
               content,
             });
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* unreadable */
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* permission error */
     }
   }

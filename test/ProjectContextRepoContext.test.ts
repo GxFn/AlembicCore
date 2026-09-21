@@ -15,8 +15,18 @@ import type {
   ProjectContextUnavailableData,
   RepoContext,
 } from '../src/domain/project-context/index.js';
+import {
+  RecordingProjectSourceReader,
+  ReplayProjectSourceReader,
+} from '../src/infrastructure/io/ProjectInputSnapshot.js';
 import { ProjectContext } from '../src/project-context.js';
 import { ProjectContextCapabilities } from '../src/project-context-capabilities.js';
+import type { ProjectContextHandlerExecutionContext } from '../src/service/project-context/interface/contracts.js';
+import {
+  createProjectDescriptor,
+  createProjectScopeRegistryDocument,
+  PROJECT_SCOPE_REGISTRY_FILENAME,
+} from '../src/shared/ProjectScope.js';
 
 describe('ProjectContext PCQ-7 repo context', () => {
   beforeEach(() => {
@@ -26,6 +36,88 @@ describe('ProjectContext PCQ-7 repo context', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     resetDiscovererRegistry();
+  });
+
+  it.each([
+    'folder',
+    'control-root',
+  ] as const)('replays repo facts and %s scope from captured inputs after the source tree is removed', async (scopeKind) => {
+    const files = createRepoFixture();
+    await withFixture(
+      {
+        ...files,
+        ...Object.fromEntries(
+          Object.entries(files).map(([file, content]) => [`RepoA/${file}`, content])
+        ),
+      },
+      async (projectRoot) => {
+        const previousHome = process.env.ALEMBIC_HOME;
+        try {
+          process.env.ALEMBIC_HOME = projectRoot;
+          await fs.mkdir(path.join(projectRoot, '.asd'));
+          await fs.mkdir(path.join(projectRoot, 'RepoA', 'tests'));
+          await fs.mkdir(path.join(projectRoot, 'node_modules'));
+          const projectScope = createProjectDescriptor({
+            controlRoot: projectRoot,
+            dataRoot: path.join(projectRoot, '.asd', 'workspaces', 'fixture'),
+            displayName: 'CapturedScope',
+            folders: [
+              {
+                id: 'folder-a',
+                displayName: 'ScopeRepoA',
+                path: path.join(projectRoot, 'RepoA'),
+                repositoryId: 'repo-a',
+                role: 'primary-source',
+              },
+            ],
+            projectId: 'fixture',
+            projectScopeId: 'scope-fixture',
+          });
+          await fs.writeFile(
+            path.join(projectRoot, '.asd', PROJECT_SCOPE_REGISTRY_FILENAME),
+            JSON.stringify(createProjectScopeRegistryDocument([projectScope]))
+          );
+          const request = {
+            kind: 'repo' as const,
+            payload: { includeMapSummary: false, repoRoot: scopeKind === 'folder' ? 'RepoA' : '.' },
+            scope: { projectRoot },
+          };
+          const roots = [{ id: 'workspace', path: projectRoot }];
+          const recorder = new RecordingProjectSourceReader(roots);
+          const recordingContext: ProjectContextHandlerExecutionContext = {
+            sourceReader: recorder,
+          };
+          const recorded = await ProjectContext.execute(request, recordingContext);
+          recorder.assertComplete();
+          expect(await ProjectContext.execute(request)).toEqual(recorded);
+          expect(JSON.stringify(recorded)).not.toContain('"sourceReader"');
+          const data = recorded.data as RepoContext;
+          expect(data.commands.map((command) => command.name)).toEqual(['build', 'test']);
+          expect(data.configFiles.map((file) => file.path)).toContain('package.json');
+          if (scopeKind === 'folder') {
+            expect(data.repo).toMatchObject({ id: 'repo-a', name: 'ScopeRepoA', root: 'RepoA' });
+            expect(data.sourceRoots.map((root) => root.path)).toContain('tests');
+          }
+          const snapshot = JSON.parse(JSON.stringify(await recorder.snapshot()));
+          await fs.rm(projectRoot, { recursive: true, force: true });
+          const replay = new ReplayProjectSourceReader(snapshot, roots);
+          const replayContext: ProjectContextHandlerExecutionContext = { sourceReader: replay };
+          expect(await ProjectContext.execute(request, replayContext)).toEqual(recorded);
+          replay.assertComplete();
+          expect(snapshot.observations).toContainEqual(
+            expect.objectContaining({
+              operation: scopeKind === 'folder' ? 'scope-for-folder' : 'scope-for-control-root',
+            })
+          );
+        } finally {
+          if (previousHome === undefined) {
+            delete process.env.ALEMBIC_HOME;
+          } else {
+            process.env.ALEMBIC_HOME = previousHome;
+          }
+        }
+      }
+    );
   });
 
   it('isolates targets, dependency facts, and files when two repo requests interleave', async () => {
@@ -104,16 +196,16 @@ describe('ProjectContext PCQ-7 repo context', () => {
         const load = vi.spyOn(custom, 'load');
         const projected = Promise.withResolvers<void>();
         const release = Promise.withResolvers<void>();
-        const access = fs.access;
+        const stat = fs.stat;
         let paused = false;
         // discoverer 已完成所有读取后暂停 repo 投影，验证锁没有过早释放。
-        vi.spyOn(fs, 'access').mockImplementation(async (...args) => {
+        vi.spyOn(fs, 'stat').mockImplementation(async (...args) => {
           if (!paused && String(args[0]) === path.join(a, 'src')) {
             paused = true;
             projected.resolve();
             await release.promise;
           }
-          return access(...args);
+          return stat(...args);
         });
         const first = ProjectContext.execute({
           kind: 'repo',

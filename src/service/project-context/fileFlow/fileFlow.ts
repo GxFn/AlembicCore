@@ -39,6 +39,7 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     onSourceFileRead: context?.onSourceFileRead,
     analysis: context?.analysis,
     onSourceFileVersion: context?.onSourceFileVersion,
+    sourceReader: context?.sourceReader,
   });
   throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {
@@ -71,6 +72,7 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     imports: flowExtraction.imports,
     symbols: normalizedSymbols.symbols,
     signal: context?.signal,
+    sourceReader: context?.sourceReader,
   });
   throwIfProjectContextAborted(context);
   const errors = [

@@ -3,6 +3,10 @@
  * @description ProjectDiscoverer 系统入口 - 初始化 Registry 并注册所有 Discoverer
  */
 
+import {
+  bindProjectSourceReader,
+  nodeProjectSourceReader,
+} from '../../infrastructure/io/ProjectSourceReader.js';
 import { CustomConfigDiscoverer } from './CustomConfigDiscoverer.js';
 import { DartDiscoverer } from './DartDiscoverer.js';
 import { DiscovererRegistry } from './DiscovererRegistry.js';
@@ -10,6 +14,7 @@ import { GenericDiscoverer } from './GenericDiscoverer.js';
 import { GoDiscoverer } from './GoDiscoverer.js';
 import { JvmDiscoverer } from './JvmDiscoverer.js';
 import { NodeDiscoverer } from './NodeDiscoverer.js';
+import type { ProjectDiscoveryExecutionContext } from './ProjectDiscoverer.js';
 import { PythonDiscoverer } from './PythonDiscoverer.js';
 import { RustDiscoverer } from './RustDiscoverer.js';
 import { SpmDiscoverer } from './SpmDiscoverer.js';
@@ -21,17 +26,27 @@ export function getDiscovererRegistry() {
   if (!_registry) {
     _registry = new DiscovererRegistry();
     _registry
-      .register(new SpmDiscoverer(), () => new SpmDiscoverer())
-      .register(new NodeDiscoverer(), () => new NodeDiscoverer())
-      .register(new PythonDiscoverer(), () => new PythonDiscoverer())
-      .register(new JvmDiscoverer(), () => new JvmDiscoverer())
-      .register(new GoDiscoverer(), () => new GoDiscoverer())
-      .register(new DartDiscoverer(), () => new DartDiscoverer())
-      .register(new RustDiscoverer(), () => new RustDiscoverer())
-      .register(new CustomConfigDiscoverer(), () => new CustomConfigDiscoverer())
-      .register(new GenericDiscoverer(), () => new GenericDiscoverer());
+      .register(new SpmDiscoverer(), (context) => new SpmDiscoverer(sourceReaderFor(context)))
+      .register(new NodeDiscoverer(), (context) => new NodeDiscoverer(sourceReaderFor(context)))
+      .register(new PythonDiscoverer(), (context) => new PythonDiscoverer(sourceReaderFor(context)))
+      .register(new JvmDiscoverer(), (context) => new JvmDiscoverer(sourceReaderFor(context)))
+      .register(new GoDiscoverer(), (context) => new GoDiscoverer(sourceReaderFor(context)))
+      .register(new DartDiscoverer(), (context) => new DartDiscoverer(sourceReaderFor(context)))
+      .register(new RustDiscoverer(), (context) => new RustDiscoverer(sourceReaderFor(context)))
+      .register(
+        new CustomConfigDiscoverer(),
+        (context) => new CustomConfigDiscoverer(sourceReaderFor(context))
+      )
+      .register(
+        new GenericDiscoverer(),
+        (context) => new GenericDiscoverer(sourceReaderFor(context))
+      );
   }
   return _registry;
+}
+
+function sourceReaderFor(context?: ProjectDiscoveryExecutionContext) {
+  return bindProjectSourceReader(context?.sourceReader ?? nodeProjectSourceReader, context?.signal);
 }
 
 /** 重置 Registry（仅用于测试） */

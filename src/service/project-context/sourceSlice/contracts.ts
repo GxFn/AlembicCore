@@ -32,7 +32,7 @@ export interface SourceSliceFileFacts extends SourceSliceFileIdentity {
   language?: string;
   lineCount: number;
   lines: string[];
-  mtimeMs: number;
+  mtimeMs?: number;
   text: string;
 }
 

@@ -1,4 +1,6 @@
+import { projectSourceReaderIdentity } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
+import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
 import { extractFileFlowFromSource, getFileFlowUnavailableReason } from '../fileFlow/extract.js';
 import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
@@ -16,29 +18,51 @@ interface FileExtraction {
 /**
  * 一次查询/显式收集批次拥有一个会话。文件身份含完整 root 与逻辑 repo，缓存不跨会话；
  * 提取缓存以本会话实际读出的 facts 对象为键，不拿短 ref hash 当全局源码身份。
- * 当前只固定源码读取及 AST 摘要，不宣称 manifest/目录/导入存在性也已冻结。
+ * 会话只负责源码与 AST 缓存；manifest/目录/导入存在性由注入的 source reader 记录，
+ * live 会话仍保持实时读取语义，只有认证捕获显式启用完整输入记录和离线重放。
  */
 export class FileAnalysisSession {
-  readonly #files = new Map<string, Promise<SourceSliceFileAccessResult>>();
+  readonly #files = new Map<
+    ProjectSourceReader,
+    Map<string, Promise<SourceSliceFileAccessResult>>
+  >();
+  readonly #readers = new Set<ProjectSourceReader>();
   #extractions = new WeakMap<SourceSliceFileFacts, FileExtraction>();
   #sourceVersions = new WeakMap<SourceSliceFileFacts, SourceSliceFileFacts>();
 
   constructor(private readonly includeCallSites: boolean) {}
 
+  useReader(reader: ProjectSourceReader): void {
+    this.#readers.add(projectSourceReaderIdentity(reader));
+  }
+  assertInputsComplete(): void {
+    for (const reader of this.#readers) {
+      reader.assertComplete();
+    }
+  }
+
   async readSourceFile(
     identity: SourceSliceFileIdentity,
-    read: () => Promise<SourceSliceFileAccessResult>
+    read: () => Promise<SourceSliceFileAccessResult>,
+    reader: ProjectSourceReader
   ): Promise<SourceSliceFileAccessResult> {
     const key = JSON.stringify([identity.projectRoot, identity.absolutePath, identity.repoId]);
-    let pending = this.#files.get(key);
+    const readerIdentity = projectSourceReaderIdentity(reader);
+    // 记录与重放是不同输入视图，不能在重放验证时偷偷沿用记录阶段已计算的事实。
+    let files = this.#files.get(readerIdentity);
+    if (!files) {
+      files = new Map();
+      this.#files.set(readerIdentity, files);
+    }
+    let pending = files.get(key);
     if (!pending) {
       pending = read();
-      this.#files.set(key, pending);
+      files.set(key, pending);
       const started = pending;
       // 取消不成为下一次请求的永久缓存错误；已成功读取的事实仍是本批固定版本。
       void pending.catch(() => {
-        if (this.#files.get(key) === started) {
-          this.#files.delete(key);
+        if (files.get(key) === started) {
+          files.delete(key);
         }
       });
     }
@@ -67,6 +91,7 @@ export class FileAnalysisSession {
 
   dispose(): void {
     this.#files.clear();
+    this.#readers.clear();
     this.#extractions = new WeakMap();
     this.#sourceVersions = new WeakMap();
   }

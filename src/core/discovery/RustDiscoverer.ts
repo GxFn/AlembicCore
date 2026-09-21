@@ -6,8 +6,8 @@
  * 支持: 单 crate 项目、Cargo workspace（多 crate）、标准目录布局 (src/ tests/ benches/ examples/)
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative } from 'node:path';
+import { readSourceText, sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import {
   type DependencyGraph,
   type DiscoveredFile,
@@ -26,6 +26,10 @@ export class RustDiscoverer extends ProjectDiscoverer {
   #depGraph: DependencyGraph = { nodes: [], edges: [] };
   #crateName: string | null = null;
 
+  override get supportsSourceReader() {
+    return true;
+  }
+
   get id() {
     return 'rust';
   }
@@ -37,11 +41,11 @@ export class RustDiscoverer extends ProjectDiscoverer {
     let confidence = 0;
     const reasons: string[] = [];
 
-    if (existsSync(join(projectRoot, 'Cargo.toml'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'Cargo.toml'))) {
       confidence = 0.92;
       reasons.push('Cargo.toml exists');
     }
-    if (existsSync(join(projectRoot, 'Cargo.lock'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'Cargo.lock'))) {
       confidence = Math.max(confidence, 0.7);
       if (confidence < 0.92) {
         confidence += 0.1;
@@ -49,8 +53,8 @@ export class RustDiscoverer extends ProjectDiscoverer {
       reasons.push('Cargo.lock exists');
     }
     if (
-      existsSync(join(projectRoot, 'rust-toolchain.toml')) ||
-      existsSync(join(projectRoot, 'rust-toolchain'))
+      (await sourceExists(this.sourceReader, join(projectRoot, 'rust-toolchain.toml'))) ||
+      (await sourceExists(this.sourceReader, join(projectRoot, 'rust-toolchain')))
     ) {
       confidence = Math.max(confidence, 0.85);
       reasons.push('rust-toolchain exists');
@@ -59,12 +63,17 @@ export class RustDiscoverer extends ProjectDiscoverer {
     // 兜底: 根目录有 .rs 文件
     if (confidence === 0) {
       try {
-        const entries = readdirSync(projectRoot);
+        const entries = (await this.sourceReader.readDirectory(projectRoot)).map(
+          (entry) => entry.name
+        );
         if (entries.some((e) => e.endsWith('.rs'))) {
           confidence = 0.5;
           reasons.push('*.rs files found at root');
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     }
@@ -82,10 +91,10 @@ export class RustDiscoverer extends ProjectDiscoverer {
     this.#depGraph = { nodes: [], edges: [] };
 
     // 解析 Cargo.toml
-    const cargoInfo = this.#parseCargoToml(projectRoot);
+    const cargoInfo = await this.#parseCargoToml(projectRoot);
     this.#crateName = cargoInfo?.name || basename(projectRoot);
 
-    const framework = this.#detectFramework(projectRoot);
+    const framework = await this.#detectFramework(projectRoot);
 
     // 主 Target
     this.#targets.push({
@@ -102,21 +111,21 @@ export class RustDiscoverer extends ProjectDiscoverer {
     this.#depGraph.nodes.push(this.#crateName);
 
     // Cargo workspace — 发现成员 crate
-    const workspaceMembers = this.#discoverWorkspaceMembers(projectRoot);
+    const workspaceMembers = await this.#discoverWorkspaceMembers(projectRoot);
     for (const member of workspaceMembers) {
       this.#targets.push(member);
       this.#depGraph.nodes.push(member.name);
     }
 
     // examples/ 下的二进制示例
-    this.#discoverExamples(projectRoot, framework);
+    await this.#discoverExamples(projectRoot, framework);
 
     // benches/ 下的 benchmark
-    this.#discoverBenches(projectRoot);
+    await this.#discoverBenches(projectRoot);
 
     // tests/ 集成测试
     const testsDir = join(projectRoot, 'tests');
-    if (existsSync(testsDir)) {
+    if (await sourceExists(this.sourceReader, testsDir)) {
       this.#targets.push({
         name: 'tests',
         path: testsDir,
@@ -126,10 +135,10 @@ export class RustDiscoverer extends ProjectDiscoverer {
     }
 
     // 解析依赖
-    this.#parseDependencies(projectRoot);
+    await this.#parseDependencies(projectRoot);
 
     // 发现内部模块
-    this.#discoverInternalModules(projectRoot);
+    await this.#discoverInternalModules(projectRoot);
   }
 
   async listTargets() {
@@ -142,12 +151,12 @@ export class RustDiscoverer extends ProjectDiscoverer {
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectRsFiles(targetPath, targetPath, files);
+    await this.#collectRsFiles(targetPath, targetPath, files);
     return files;
   }
 
@@ -158,20 +167,20 @@ export class RustDiscoverer extends ProjectDiscoverer {
   // ── 内部实现 ──
 
   /** 简易解析 Cargo.toml（无 TOML 解析器，使用正则） */
-  #parseCargoToml(projectRoot: string) {
+  async #parseCargoToml(projectRoot: string) {
     const cargoPath = join(projectRoot, 'Cargo.toml');
-    if (!existsSync(cargoPath)) {
+    if (!(await sourceExists(this.sourceReader, cargoPath))) {
       return null;
     }
 
     try {
-      const content = readFileSync(cargoPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, cargoPath);
       const name = content.match(/^\s*name\s*=\s*"([^"]+)"/m)?.[1];
       const edition = content.match(/^\s*edition\s*=\s*"([^"]+)"/m)?.[1];
 
       // 判断是 bin 还是 lib
-      const hasMainRs = existsSync(join(projectRoot, 'src', 'main.rs'));
-      const hasLibRs = existsSync(join(projectRoot, 'src', 'lib.rs'));
+      const hasMainRs = await sourceExists(this.sourceReader, join(projectRoot, 'src', 'main.rs'));
+      const hasLibRs = await sourceExists(this.sourceReader, join(projectRoot, 'src', 'lib.rs'));
       const hasBinSection = /\[\[bin\]\]/.test(content);
 
       return {
@@ -180,20 +189,23 @@ export class RustDiscoverer extends ProjectDiscoverer {
         isBin: hasMainRs || hasBinSection,
         isLib: hasLibRs,
       };
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       return null;
     }
   }
 
   /** 发现 Cargo workspace 成员 */
-  #discoverWorkspaceMembers(projectRoot: string) {
+  async #discoverWorkspaceMembers(projectRoot: string) {
     const cargoPath = join(projectRoot, 'Cargo.toml');
-    if (!existsSync(cargoPath)) {
+    if (!(await sourceExists(this.sourceReader, cargoPath))) {
       return [];
     }
 
     try {
-      const content = readFileSync(cargoPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, cargoPath);
 
       // [workspace] members = ["crate_a", "crate_b", "crates/*"]
       const workspaceBlock = content.match(/\[workspace\]([\s\S]*?)(?:\n\[|\s*$)/);
@@ -217,16 +229,16 @@ export class RustDiscoverer extends ProjectDiscoverer {
           // Glob — 展开
           const prefix = pattern.replace('/*', '');
           const parentDir = join(projectRoot, prefix);
-          if (!existsSync(parentDir)) {
+          if (!(await sourceExists(this.sourceReader, parentDir))) {
             continue;
           }
           try {
-            const entries = readdirSync(parentDir, { withFileTypes: true });
+            const entries = await this.sourceReader.readDirectory(parentDir);
             for (const entry of entries) {
               if (entry.isDirectory() && !entry.name.startsWith('.')) {
                 const memberPath = join(parentDir, entry.name);
-                if (existsSync(join(memberPath, 'Cargo.toml'))) {
-                  const info = this.#parseCargoToml(memberPath);
+                if (await sourceExists(this.sourceReader, join(memberPath, 'Cargo.toml'))) {
+                  const info = await this.#parseCargoToml(memberPath);
                   members.push({
                     name: info?.name || entry.name,
                     path: memberPath,
@@ -240,13 +252,16 @@ export class RustDiscoverer extends ProjectDiscoverer {
                 }
               }
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* skip */
           }
         } else {
           const memberPath = join(projectRoot, pattern);
-          if (existsSync(join(memberPath, 'Cargo.toml'))) {
-            const info = this.#parseCargoToml(memberPath);
+          if (await sourceExists(this.sourceReader, join(memberPath, 'Cargo.toml'))) {
+            const info = await this.#parseCargoToml(memberPath);
             members.push({
               name: info?.name || basename(pattern),
               path: memberPath,
@@ -262,26 +277,29 @@ export class RustDiscoverer extends ProjectDiscoverer {
       }
 
       return members;
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       return [];
     }
   }
 
   /** 发现 examples/ 目录 */
-  #discoverExamples(projectRoot: string, framework: string | null) {
+  async #discoverExamples(projectRoot: string, framework: string | null) {
     const examplesDir = join(projectRoot, 'examples');
-    if (!existsSync(examplesDir)) {
+    if (!(await sourceExists(this.sourceReader, examplesDir))) {
       return;
     }
 
     try {
-      const entries = readdirSync(examplesDir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(examplesDir);
       for (const entry of entries) {
         if (entry.isFile() && entry.name.endsWith('.rs')) {
           // 单文件示例不作为独立 target，只记录目录
         } else if (entry.isDirectory()) {
           const subDir = join(examplesDir, entry.name);
-          if (existsSync(join(subDir, 'main.rs'))) {
+          if (await sourceExists(this.sourceReader, join(subDir, 'main.rs'))) {
             this.#targets.push({
               name: `examples/${entry.name}`,
               path: subDir,
@@ -301,20 +319,23 @@ export class RustDiscoverer extends ProjectDiscoverer {
           language: 'rust',
         });
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }
 
   /** 发现 benches/ 目录 */
-  #discoverBenches(projectRoot: string) {
+  async #discoverBenches(projectRoot: string) {
     const benchDir = join(projectRoot, 'benches');
-    if (!existsSync(benchDir)) {
+    if (!(await sourceExists(this.sourceReader, benchDir))) {
       return;
     }
 
     try {
-      const entries = readdirSync(benchDir);
+      const entries = (await this.sourceReader.readDirectory(benchDir)).map((entry) => entry.name);
       if (entries.some((e) => e.endsWith('.rs'))) {
         this.#targets.push({
           name: 'benches',
@@ -323,20 +344,23 @@ export class RustDiscoverer extends ProjectDiscoverer {
           language: 'rust',
         });
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }
 
   /** 检测 Rust Web/网络框架 */
-  #detectFramework(projectRoot: string) {
+  async #detectFramework(projectRoot: string) {
     const cargoPath = join(projectRoot, 'Cargo.toml');
-    if (!existsSync(cargoPath)) {
+    if (!(await sourceExists(this.sourceReader, cargoPath))) {
       return null;
     }
 
     try {
-      const content = readFileSync(cargoPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, cargoPath);
 
       if (/\bactix-web\b/.test(content)) {
         return 'actix-web';
@@ -371,7 +395,10 @@ export class RustDiscoverer extends ProjectDiscoverer {
       if (/\bserde\b/.test(content)) {
         return 'serde';
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
 
@@ -379,9 +406,9 @@ export class RustDiscoverer extends ProjectDiscoverer {
   }
 
   /** 解析 Cargo.toml 的 [dependencies] 到 depGraph */
-  #parseDependencies(projectRoot: string) {
+  async #parseDependencies(projectRoot: string) {
     const cargoPath = join(projectRoot, 'Cargo.toml');
-    if (!existsSync(cargoPath)) {
+    if (!(await sourceExists(this.sourceReader, cargoPath))) {
       return;
     }
 
@@ -392,7 +419,7 @@ export class RustDiscoverer extends ProjectDiscoverer {
         : this.#depGraph.nodes[0]?.id || 'root';
 
     try {
-      const content = readFileSync(cargoPath, 'utf8');
+      const content = await readSourceText(this.sourceReader, cargoPath);
 
       // 匹配 [dependencies] 和 [dev-dependencies] 块
       const depSections = content.matchAll(
@@ -433,26 +460,29 @@ export class RustDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* skip */
     }
   }
 
   /** 发现内部模块（src/ 子目录） */
-  #discoverInternalModules(projectRoot: string) {
+  async #discoverInternalModules(projectRoot: string) {
     const srcDir = join(projectRoot, 'src');
-    if (!existsSync(srcDir)) {
+    if (!(await sourceExists(this.sourceReader, srcDir))) {
       return;
     }
 
     const nodeSet = new Set(this.#depGraph.nodes.map((n) => (typeof n === 'string' ? n : n.id)));
 
-    const walk = (dir: string, relPath: string, depth: number) => {
+    const walk = async (dir: string, relPath: string, depth: number): Promise<void> => {
       if (depth > 6) {
         return;
       }
       try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        const entries = await this.sourceReader.readDirectory(dir);
         for (const entry of entries) {
           if (!entry.isDirectory() || entry.name.startsWith('.') || EXCLUDE_DIRS.has(entry.name)) {
             continue;
@@ -461,34 +491,42 @@ export class RustDiscoverer extends ProjectDiscoverer {
           const subRel = relPath ? `${relPath}/${entry.name}` : entry.name;
 
           try {
-            const subEntries = readdirSync(subDir);
+            const subEntries = (await this.sourceReader.readDirectory(subDir)).map(
+              (entry) => entry.name
+            );
             const hasRsFiles = subEntries.some((e) => e.endsWith('.rs'));
             if (hasRsFiles && !nodeSet.has(subRel)) {
               this.#depGraph.nodes.push({ id: subRel, label: subRel, type: 'internal' });
               nodeSet.add(subRel);
             }
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* skip */
           }
 
-          walk(subDir, subRel, depth + 1);
+          await walk(subDir, subRel, depth + 1);
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          throw error;
+        }
         /* skip */
       }
     };
 
-    walk(srcDir, '', 0);
+    await walk(srcDir, '', 0);
   }
 
   /** 递归收集 .rs 文件 */
-  #collectRsFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectRsFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
     if (depth > 15) {
       return;
     }
 
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
           continue;
@@ -498,11 +536,11 @@ export class RustDiscoverer extends ProjectDiscoverer {
           if (EXCLUDE_DIRS.has(entry.name)) {
             continue;
           }
-          this.#collectRsFiles(join(dir, entry.name), rootDir, files, depth + 1);
+          await this.#collectRsFiles(join(dir, entry.name), rootDir, files, depth + 1);
         } else if (entry.isFile() && SOURCE_EXTENSIONS.has(extname(entry.name))) {
           const fullPath = join(dir, entry.name);
           try {
-            const content = readFileSync(fullPath, 'utf8');
+            const content = await readSourceText(this.sourceReader, fullPath);
             files.push({
               name: entry.name,
               path: fullPath,
@@ -510,12 +548,18 @@ export class RustDiscoverer extends ProjectDiscoverer {
               language: 'rust',
               content,
             });
-          } catch {
+          } catch (error) {
+            if (error instanceof Error && error.name === 'AbortError') {
+              throw error;
+            }
             /* unreadable */
           }
         }
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw error;
+      }
       /* permission error */
     }
   }

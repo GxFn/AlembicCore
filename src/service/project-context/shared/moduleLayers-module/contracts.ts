@@ -1,7 +1,4 @@
-import type { Dirent } from 'node:fs';
-import fs from 'node:fs/promises';
 import path from 'node:path';
-
 import type {
   FileSummary,
   ProjectContextExecutionContext,
@@ -12,6 +9,11 @@ import type {
   ProjectContextRefScope,
   ProjectContextScope,
 } from '../../../../domain/project-context/index.js';
+import { nodeProjectSourceReader } from '../../../../infrastructure/io/ProjectSourceReader.js';
+import type {
+  ProjectSourceDirectoryEntry,
+  ProjectSourceReader,
+} from '../../../../types/projectSourceReader.js';
 import type { FileAnalysisSession } from '../../analysis/FileAnalysisSession.js';
 import type { ProjectContextHandlerExecutionContext } from '../../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../../interface/execution.js';
@@ -67,6 +69,7 @@ export async function resolveProjectContextModuleSeed(input: {
   signal?: AbortSignal;
   onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
   analysis?: FileAnalysisSession;
+  sourceReader?: ProjectSourceReader;
   onSourceFileVersion?: ProjectContextHandlerExecutionContext['onSourceFileVersion'];
 }): Promise<ResolveProjectContextModuleSeedResult> {
   throwIfProjectContextAborted(input);
@@ -88,6 +91,7 @@ export async function resolveProjectContextModuleSeed(input: {
       includeGenerated: input.scope.includeGenerated,
       includeVendor: input.scope.includeVendor,
       modulePath,
+      sourceReader: input.sourceReader,
       projectRoot: input.scope.projectRoot,
       signal: input.signal,
     });
@@ -121,6 +125,7 @@ export async function resolveProjectContextModuleSeed(input: {
       onSourceFileRead: input.onSourceFileRead,
       analysis: input.analysis,
       onSourceFileVersion: input.onSourceFileVersion,
+      sourceReader: input.sourceReader,
     });
     if (!fileAccess.ok) {
       errors.push(
@@ -320,6 +325,7 @@ async function readModuleDirectoryFiles(input: {
   includeGenerated: boolean;
   includeVendor: boolean;
   signal?: AbortSignal;
+  sourceReader?: ProjectSourceReader;
 }): Promise<{ files: string[]; errors: ProjectContextQueryError[] }> {
   const absoluteRoot = path.resolve(input.projectRoot);
   const absoluteModulePath = path.resolve(absoluteRoot, input.modulePath);
@@ -337,9 +343,11 @@ async function readModuleDirectoryFiles(input: {
     if (!current) {
       continue;
     }
-    let entries: Dirent[];
+    let entries: ProjectSourceDirectoryEntry[];
     try {
-      entries = await fs.readdir(current, { withFileTypes: true });
+      entries = await (input.sourceReader ?? nodeProjectSourceReader).readDirectory(current, {
+        signal: input.signal,
+      });
     } catch (error) {
       throwIfProjectContextAborted(input);
       const relativePath = toProjectContextPath(path.relative(absoluteRoot, current));

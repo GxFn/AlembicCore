@@ -2,6 +2,8 @@ import type {
   ProjectContextRequestKind,
   ProjectContextScopeInput,
 } from '../../../domain/project-context/index.js';
+import type { ProjectInputSnapshot } from '../../../infrastructure/io/ProjectInputSnapshot.js';
+import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 
 export const CERTIFIED_PROJECT_FACTS_SCHEMA_VERSION = 1 as const;
 export const SOURCE_REVISION_VECTOR_VERSION = 1 as const;
@@ -70,6 +72,8 @@ export interface SourceRevisionVectorV1 {
   kind: 'SourceRevisionVectorV1';
   version: typeof SOURCE_REVISION_VECTOR_VERSION;
   entries: SourceRevisionVectorEntryV1[];
+  /** 仅完整输入闭包捕获时存在；旧 vector 不新增空字段或改变 hash。 */
+  inputClosureHash?: CanonicalSha256;
   sourceVectorHash: CanonicalSha256;
 }
 
@@ -431,7 +435,22 @@ export interface ProjectContextFoundationCaptureInputV2
   requestMatrix: ProjectContextRequestMatrixV2;
 }
 
+/** 一次事实捕获拥有的运行时输入读取会话；reader 和绝对 roots 不进入 artifact。 */
+export interface ProjectContextFoundationInputCapture {
+  reader: ProjectSourceReader;
+  snapshot(): Promise<ProjectInputSnapshot>;
+  verify(options?: { signal?: AbortSignal }): Promise<void>;
+  createReplay(snapshot: ProjectInputSnapshot): ProjectSourceReader;
+}
+
 export interface ProjectContextFoundationHostPorts {
+  /** 旧自定义 port 可缺省；只有实际支持录制和离线重放的实现才声明闭包能力。 */
+  createInputCapture?(input: {
+    repositories: ProjectContextFoundationRepositoryInput[];
+    controlRoot?: string;
+    files: { repoId: string; relativePath: string; content: Uint8Array }[];
+    signal?: AbortSignal;
+  }): Promise<ProjectContextFoundationInputCapture | undefined>;
   observeRevision(input: {
     repository: ProjectContextFoundationRepositoryInput;
     signal?: AbortSignal;
@@ -460,6 +479,8 @@ export interface ProjectContextFoundationHostPorts {
   executeRequest(input: {
     repository: ProjectContextFoundationRepositoryInput;
     plan: ProjectContextRequestAuditPlan;
+    /** Runtime-only：普通执行、录制和重放必须读取调用方指定的同一组输入。 */
+    sourceReader?: ProjectSourceReader;
     signal?: AbortSignal;
   }): Promise<ProjectContextRequestExecutionResult>;
 }
@@ -543,11 +564,21 @@ export interface CertifiedProjectFactsProjectionV1 {
   projectionContentHash: CanonicalSha256;
 }
 
+export interface ProjectContextInputClosureV1 {
+  version: 1;
+  /** 字节复用 artifact 的 chunk 池，闭包只保存引用与长度。 */
+  snapshot: Omit<ProjectInputSnapshot, 'blobs'> & {
+    blobs: { hash: CanonicalSha256; byteLength: number }[];
+  };
+  replayOutputHash: CanonicalSha256;
+}
+
 export interface CertifiedProjectFactsV1 {
   inventory: ProjectFactsInventoryPlaneV1;
   detail: ProjectFactsDetailPlaneV1;
   requestOutcomes: ProjectContextRequestOutcomeV1[];
   legacyEntries: ProjectContextLegacyEntryAuditRowV1[];
+  inputClosure?: ProjectContextInputClosureV1;
 }
 
 export interface CertifiedProjectFactsManifestV1 {
@@ -558,6 +589,7 @@ export interface CertifiedProjectFactsManifestV1 {
   factsContentHash: CanonicalSha256;
   sourceRevisionVector: SourceRevisionVectorV1;
   sourceVectorHash: CanonicalSha256;
+  inputClosureHash?: CanonicalSha256;
   inventoryManifestHash: CanonicalSha256;
   detailManifestHash: CanonicalSha256;
   fullChunkManifestHash: CanonicalSha256;

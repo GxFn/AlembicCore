@@ -10,14 +10,24 @@
 
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { analyzeFile, analyzeProject, isAvailable } from '../src/core/AstAnalyzer.js';
 import { CallGraphAnalyzer } from '../src/core/analysis/CallGraphAnalyzer.js';
 import { ImportPathResolver } from '../src/core/analysis/ImportPathResolver.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
 import ProjectGraph from '../src/core/ast/ProjectGraph.js';
+import { GenericDiscoverer } from '../src/core/discovery/GenericDiscoverer.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from '../src/core/discovery/index.js';
+import { NodeDiscoverer } from '../src/core/discovery/NodeDiscoverer.js';
+import type { ProjectDiscoverer } from '../src/core/discovery/ProjectDiscoverer.js';
+import { SpmDiscoverer } from '../src/core/discovery/SpmDiscoverer.js';
+import {
+  RecordingProjectSourceReader,
+  ReplayProjectSourceReader,
+} from '../src/infrastructure/io/ProjectInputSnapshot.js';
+import { nodeProjectSourceReader } from '../src/infrastructure/io/ProjectSourceReader.js';
+import type { ProjectSourceReader } from '../src/types/projectSourceReader.js';
 
 beforeAll(async () => {
   // Load the packaged tree-sitter WASM grammars before AST analysis (mirrors the
@@ -294,6 +304,203 @@ describe('built-in project discoverers (RIC-4b — was RealProjectDiscovery/Boot
     }
     return root;
   }
+
+  async function inspectDiscovery(discoverer: ProjectDiscoverer, root: string) {
+    const detection = await discoverer.detect(root);
+    await discoverer.load(root);
+    const targets = await discoverer.listTargets();
+    const files = [];
+    for (const target of targets) {
+      files.push({ target: target.name, files: await discoverer.getTargetFiles(target) });
+    }
+    return { detection, targets, files, graph: await discoverer.getDependencyGraph() };
+  }
+
+  async function captureAndReplayDiscovery(
+    root: string,
+    create: (reader: ProjectSourceReader) => ProjectDiscoverer
+  ) {
+    const roots = [{ id: 'fixture', path: root }];
+    const recorder = new RecordingProjectSourceReader(roots);
+    const discoverer = create(recorder);
+    expect(discoverer.supportsSourceReader).toBe(true);
+    const result = await inspectDiscovery(discoverer, root);
+    recorder.assertComplete();
+    const snapshot = await recorder.snapshot();
+    // 真目录删除后必须仅靠输入记录完成同一流程，不能把捕获缺口当成空结果。
+    rmSync(root, { recursive: true, force: true });
+    const replay = new ReplayProjectSourceReader(snapshot, roots);
+    expect(await inspectDiscovery(create(replay), root)).toEqual(result);
+    replay.assertComplete();
+    return { result, snapshot };
+  }
+
+  it.each([
+    'npm',
+    'pnpm',
+    'lerna',
+  ] as const)('reads %s workspace manifests, empty directories and marker existence through its reader', async (workspaceKind) => {
+    const root = makeProject(`node-reader-${workspaceKind}`, {
+      'package.json': JSON.stringify({
+        name: 'workspace',
+        ...(workspaceKind === 'npm' ? { workspaces: { packages: ['packages/*'] } } : {}),
+      }),
+      'tsconfig.json': '{}',
+      ...(workspaceKind === 'pnpm'
+        ? { 'pnpm-workspace.yaml': "packages:\n  - 'packages/*'\n" }
+        : {}),
+      ...(workspaceKind === 'lerna' ? { 'lerna.json': '{"packages":["packages/*"]}' } : {}),
+      'packages/app/package.json': '{"name":"app","dependencies":{"lib":"workspace:*"}}',
+      'packages/app/src/index.ts': 'export const app = 1;',
+      'packages/lib/package.json': '{"name":"lib"}',
+      'packages/lib/lib.ts': 'export const lib = 1;',
+    });
+    mkdirSync(join(root, 'node_modules'));
+    mkdirSync(join(root, 'packages/empty'));
+    const { result, snapshot } = await captureAndReplayDiscovery(
+      root,
+      (reader) => new NodeDiscoverer(reader)
+    );
+    const reads = new Set(
+      snapshot.observations.map((entry) => `${entry.operation}:${entry.path.relativePath}`)
+    );
+    expect(result.detection.confidence).toBe(1);
+    expect(result.targets.map((target) => target.name).sort()).toEqual(['app', 'empty', 'lib']);
+    expect(result.files.find((entry) => entry.target === 'empty')?.files).toEqual([]);
+    expect(result.files.find((entry) => entry.target === 'app')?.files).toMatchObject([
+      { relativePath: 'src/index.ts', language: 'typescript' },
+    ]);
+    expect(result.graph.edges).toEqual([{ from: 'app', to: 'lib', type: 'depends_on' }]);
+    expect([...reads]).toEqual(
+      expect.arrayContaining([
+        'file:package.json',
+        'file:packages/app/package.json',
+        'file:packages/lib/package.json',
+        'stat:node_modules',
+        'stat:packages/empty',
+        'directory:packages',
+        'directory:packages/empty',
+      ])
+    );
+    if (workspaceKind !== 'npm') {
+      expect(
+        reads.has(`file:${workspaceKind === 'pnpm' ? 'pnpm-workspace.yaml' : 'lerna.json'}`)
+      ).toBe(true);
+    }
+  });
+
+  it('reads SPM packages, explicit target paths and local dependency names through its reader', async () => {
+    const root = makeProject('spm-reader', {
+      'Package.swift':
+        'import PackageDescription\nlet package = Package(name: "AppPackage", dependencies: [.package(path: "Local")], targets: [.target(name: "App", dependencies: ["Shared"], path: "CustomSources")])',
+      'CustomSources/App.swift': 'public struct App {}',
+      'Local/Package.swift':
+        'import PackageDescription\nlet package = Package(name: "LocalPackage", targets: [.target(name: "Shared")])',
+      'Local/Sources/Shared/Shared.swift': 'public struct Shared {}',
+    });
+    const { result, snapshot } = await captureAndReplayDiscovery(
+      root,
+      (reader) => new SpmDiscoverer(reader)
+    );
+    expect(result.detection.confidence).toBe(0.95);
+    expect(result.files.find((entry) => entry.target === 'App')?.files).toMatchObject([
+      { relativePath: 'App.swift', language: 'swift' },
+    ]);
+    expect(result.files.find((entry) => entry.target === 'Shared')?.files).toMatchObject([
+      { relativePath: 'Shared.swift', language: 'swift' },
+    ]);
+    expect(result.graph.edges).toContainEqual({
+      from: 'AppPackage',
+      to: 'LocalPackage',
+      type: 'depends_on',
+    });
+    expect(
+      snapshot.observations
+        .filter((entry) => entry.operation === 'file')
+        .map((entry) => entry.path.relativePath)
+    ).toEqual(expect.arrayContaining(['Package.swift', 'Local/Package.swift']));
+  });
+
+  it('reads Generic source and empty target directories through its reader', async () => {
+    const root = makeProject('generic-reader', {
+      'src/main.ts': 'export const value = 1;',
+      'node_modules/ignored/main.py': 'print("ignored")',
+    });
+    mkdirSync(join(root, 'tests'));
+    const { result, snapshot } = await captureAndReplayDiscovery(
+      root,
+      (reader) => new GenericDiscoverer(reader)
+    );
+    expect(result.targets).toMatchObject([
+      { name: 'src', language: 'typescript' },
+      { name: 'tests', language: 'typescript', type: 'test' },
+    ]);
+    expect(result.files).toMatchObject([
+      { target: 'src', files: [{ relativePath: 'main.ts' }] },
+      { target: 'tests', files: [] },
+    ]);
+    expect(
+      snapshot.observations
+        .filter((entry) => entry.operation === 'directory')
+        .map((entry) => entry.path.relativePath)
+    ).toEqual(['.', 'src', 'tests']);
+  });
+
+  it('keeps Node marker probes sequential and stops after the first Ruby marker', async () => {
+    const root = makeProject('node-marker-order', {
+      'package.json': '{"name":"tools"}',
+      Gemfile: '',
+      Rakefile: '',
+      'Cargo.toml': '',
+    });
+    const probes: string[] = [];
+    const reader: ProjectSourceReader = {
+      ...nodeProjectSourceReader,
+      async stat(file, options) {
+        probes.push(relative(root, file));
+        return nodeProjectSourceReader.stat(file, options);
+      },
+    };
+    const result = await new NodeDiscoverer(reader).detect(root);
+    expect(result.confidence).toBeCloseTo(0.045);
+    expect(probes).toEqual(['package.json', 'tsconfig.json', 'node_modules', 'Gemfile']);
+  });
+
+  it('keeps the SPM file count and size budgets when replaying stat observations', async () => {
+    const root = makeProject('spm-file-budget', {
+      'Package.swift':
+        'import PackageDescription\nlet package = Package(name: "Budget", targets: [.target(name: "Budget")])',
+      'Sources/Budget/000-too-large.swift': 'x'.repeat(512 * 1024 + 1),
+      'Sources/Budget/.hidden.swift': 'struct Hidden {}',
+      'Sources/Budget/build/Ignored.swift': 'struct Ignored {}',
+      ...Object.fromEntries(
+        Array.from({ length: 301 }, (_, index) => [
+          `Sources/Budget/File${String(index).padStart(3, '0')}.swift`,
+          `struct File${index} {}`,
+        ])
+      ),
+    });
+    const { result } = await captureAndReplayDiscovery(root, (reader) => new SpmDiscoverer(reader));
+    expect(result.files[0].files.map((file) => file.name)).toEqual(
+      Array.from({ length: 300 }, (_, index) => `File${String(index).padStart(3, '0')}.swift`)
+    );
+  });
+
+  it('preserves Generic cancellation after an awaited directory read', async () => {
+    const root = makeProject('generic-reader-cancel', { 'src/main.ts': 'export const value = 1;' });
+    const controller = new AbortController();
+    const reader: ProjectSourceReader = {
+      ...nodeProjectSourceReader,
+      async readDirectory(directory, options) {
+        const entries = await nodeProjectSourceReader.readDirectory(directory, options);
+        controller.abort(new Error('cancel directory scan'));
+        return entries;
+      },
+    };
+    await expect(
+      new GenericDiscoverer(reader).load(root, { signal: controller.signal })
+    ).rejects.toMatchObject({ name: 'AbortError', message: 'cancel directory scan' });
+  });
 
   interface DiscovererCase {
     id: string;

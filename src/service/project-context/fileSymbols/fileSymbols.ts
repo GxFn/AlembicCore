@@ -39,6 +39,7 @@ export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
     onSourceFileRead: context?.onSourceFileRead,
     analysis: context?.analysis,
     onSourceFileVersion: context?.onSourceFileVersion,
+    sourceReader: context?.sourceReader,
   });
   throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {

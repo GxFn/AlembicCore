@@ -1,5 +1,8 @@
 import path from 'node:path';
 import { PROJECT_CONTEXT_REQUEST_KIND_VALUES } from '../../../domain/project-context/index.js';
+import { ProjectSourceInputDriftError } from '../../../infrastructure/io/ProjectInputSnapshot.js';
+import Logger from '../../../infrastructure/logging/Logger.js';
+import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import {
   buildSourceRevisionVectorV1,
   canonicalHashDigest,
@@ -29,6 +32,7 @@ import {
   type ProjectContextFoundationFileDescriptor,
   type ProjectContextFoundationHostPorts,
   type ProjectContextFoundationRepositoryInput,
+  type ProjectContextInputClosureV1,
   type ProjectContextRepositoryRevisionObservation,
   type ProjectContextRequestAuditPlan,
   type ProjectContextRequestAuditPlanV2,
@@ -45,6 +49,10 @@ import {
   type ProjectFactsJson,
   type SourceRevisionVectorEntryV1,
 } from './contracts.js';
+import {
+  freezeProjectContextInputClosure,
+  hydrateProjectContextInputClosure,
+} from './inputClosure.js';
 import {
   normalizeProjectContextInventoryOwnersV2,
   validateProjectContextInventoryOwnersV2,
@@ -69,6 +77,8 @@ interface CapturedRepository {
 interface StrictV2CaptureContext {
   projectScopeManifest: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
   requestMatrixHash: CanonicalSha256;
+  /** 仅用于绑定本次读取根；不进入可移植认证产物。 */
+  controlRoot?: string;
 }
 
 export class ProjectContextSourceStateDriftError extends Error {
@@ -129,7 +139,77 @@ async function captureCertifiedProjectFactsInternal(
     includeExcludePolicyHash
   );
   const { detail, chunks } = buildDetailPlane(repositories, input.detailPolicy, Boolean(strictV2));
-  const requestOutcomes = await captureRequestOutcomes(input, repositories, ports, strictV2);
+  const inputCapture = await ports.createInputCapture?.({
+    repositories: repositories.map((repository) => repository.input),
+    files: repositories.flatMap((repository) =>
+      [...repository.contents].map(([relativePath, content]) => ({
+        repoId: repository.input.repoId,
+        relativePath,
+        content,
+      }))
+    ),
+    controlRoot: strictV2?.controlRoot,
+    signal: input.signal,
+  });
+  const requestOutcomes = await captureRequestOutcomes(
+    input,
+    repositories,
+    ports,
+    strictV2,
+    inputCapture?.reader
+  );
+  let inputClosure: ProjectContextInputClosureV1 | undefined;
+  if (inputCapture) {
+    inputCapture.reader.assertComplete();
+    const snapshot = await inputCapture.snapshot();
+    // 使用新 reader 身份重新计算，防止同一 session 的 AST/cache 把 replay 变成结果复用。
+    const replay = inputCapture.createReplay(snapshot);
+    const replayOutcomes = await captureRequestOutcomes(
+      input,
+      repositories,
+      ports,
+      strictV2,
+      replay
+    );
+    replay.assertComplete();
+    const replayOutputHash = hashCanonicalJson(replayOutcomes);
+    if (replayOutputHash !== hashCanonicalJson(requestOutcomes)) {
+      throw new TypeError(
+        'Project context input replay did not reproduce the captured request outcomes.'
+      );
+    }
+    try {
+      await inputCapture.verify({ signal: input.signal });
+    } catch (error) {
+      if (error instanceof ProjectSourceInputDriftError) {
+        throw new ProjectContextSourceStateDriftError('analysis-inputs', error);
+      }
+      throw error;
+    }
+    const frozen = freezeProjectContextInputClosure(snapshot, replayOutputHash);
+    inputClosure = frozen.closure;
+    const chunksByHash = new Map(chunks.map((chunk) => [chunk.blobHash, chunk]));
+    for (const chunk of frozen.chunks) {
+      chunksByHash.set(chunk.blobHash, chunk);
+    }
+    chunks.splice(
+      0,
+      chunks.length,
+      ...[...chunksByHash.values()].sort((a, b) => a.blobHash.localeCompare(b.blobHash))
+    );
+    assertPortableSemanticJson(toProjectFactsJson(inputClosure), 'input closure');
+    Logger.debug('ProjectContext capture reproduced from recorded inputs', {
+      snapshotHash: snapshot.snapshotHash,
+      observations: snapshot.observations.length,
+      requests: replayOutcomes.length,
+      replayOutputHash,
+    });
+  } else {
+    Logger.debug('ProjectContext capture uses the legacy source verification boundary', {
+      reason: 'host-has-no-input-capture',
+      repositories: repositories.length,
+    });
+  }
   await assertSourceStateStable(
     { ...input, inventoryPolicy: includeExcludePolicy },
     ports,
@@ -146,6 +226,7 @@ async function captureCertifiedProjectFactsInternal(
     detail,
     requestOutcomes,
     legacyEntries,
+    ...(inputClosure ? { inputClosure } : {}),
   };
   const factsContentHash = hashCanonicalJson(facts);
   const readiness = buildCaptureReadinessSummary(
@@ -155,8 +236,10 @@ async function captureCertifiedProjectFactsInternal(
     strictV2
   );
   const projections = buildProjections(input.projections);
+  const inputClosureHash = inputClosure ? hashCanonicalJson(inputClosure) : undefined;
   const sourceRevisionVector = buildSourceRevisionVectorV1(
-    repositories.map((repository) => repository.revisionEntry)
+    repositories.map((repository) => repository.revisionEntry),
+    inputClosureHash
   );
   const manifest = buildManifest({
     chunks,
@@ -168,6 +251,7 @@ async function captureCertifiedProjectFactsInternal(
     projections,
     requestOutcomes,
     sourceRevisionVector,
+    ...(inputClosureHash ? { inputClosureHash } : {}),
     ...(strictV2
       ? {
           projectScopeManifest: strictV2.projectScopeManifest,
@@ -245,6 +329,7 @@ export async function captureCertifiedProjectFactsV2(
   const strictV2: StrictV2CaptureContext = {
     projectScopeManifest: projectScope.manifest,
     requestMatrixHash: requestMatrix.matrixHash,
+    controlRoot: projectScope.controlRoot,
   };
   const artifact = await captureCertifiedProjectFactsInternal(captureInput, ports, strictV2);
   const matrixResult = evaluateProjectContextRequestMatrixV2(
@@ -349,12 +434,40 @@ export function verifyCertifiedProjectFactsArtifact(
   if (artifact.factsContentHash !== artifact.manifest.factsContentHash) {
     throw new TypeError('Certified facts content hash does not match its manifest.');
   }
-  const rebuiltVector = buildSourceRevisionVectorV1(artifact.manifest.sourceRevisionVector.entries);
+  const rebuiltVector = buildSourceRevisionVectorV1(
+    artifact.manifest.sourceRevisionVector.entries,
+    artifact.manifest.sourceRevisionVector.inputClosureHash
+  );
   if (rebuiltVector.sourceVectorHash !== artifact.sourceVectorHash) {
     throw new TypeError('Certified facts SourceRevisionVectorV1 is not canonical.');
   }
   if (hashCanonicalJson(artifact.facts) !== artifact.factsContentHash) {
     throw new TypeError('Certified facts content hash does not match the facts payload.');
+  }
+  const closureSignals = [
+    artifact.facts.inputClosure !== undefined,
+    artifact.manifest.inputClosureHash !== undefined,
+    artifact.manifest.sourceRevisionVector.inputClosureHash !== undefined,
+  ];
+  if (closureSignals.some(Boolean) && !closureSignals.every(Boolean)) {
+    throw new TypeError(
+      'Certified input closure and its source vector binding must be present atomically.'
+    );
+  }
+  if (artifact.facts.inputClosure) {
+    const closure = artifact.facts.inputClosure;
+    if (
+      hashCanonicalJson(closure) !== artifact.manifest.inputClosureHash ||
+      artifact.manifest.inputClosureHash !==
+        artifact.manifest.sourceRevisionVector.inputClosureHash ||
+      closure.replayOutputHash !== hashCanonicalJson(artifact.facts.requestOutcomes)
+    ) {
+      throw new TypeError(
+        'Certified input closure does not match its manifest, source vector or replay output.'
+      );
+    }
+    hydrateProjectContextInputClosure(closure, artifact.chunks);
+    assertPortableSemanticJson(toProjectFactsJson(closure), 'input closure');
   }
   if (
     hashCanonicalJson(artifact.facts.inventory) !== artifact.manifest.inventoryManifestHash ||
@@ -1131,7 +1244,8 @@ async function captureRequestOutcomes(
   input: ProjectContextFoundationCaptureInput,
   repositories: CapturedRepository[],
   ports: ProjectContextFoundationHostPorts,
-  strictV2?: StrictV2CaptureContext
+  strictV2?: StrictV2CaptureContext,
+  sourceReader?: ProjectSourceReader
 ): Promise<ProjectContextRequestOutcomeV1[]> {
   const outcomes: ProjectContextRequestOutcomeV1[] = [];
   const sourceHashes = new Map(
@@ -1177,7 +1291,9 @@ async function captureRequestOutcomes(
         repository: repository.input,
         plan,
         signal: input.signal,
+        ...(sourceReader ? { sourceReader } : {}),
       });
+      sourceReader?.assertComplete();
       // 前后文件树相同并不证明分析期间读到相同内容（ABA）。校验每一次实际源码读取，
       // 在产生可认证结果之前拒绝不同版本或未捕获文件；不能用最终 refs 代替完整读取记录。
       for (const read of result.sourceFileReads ?? []) {
@@ -1228,6 +1344,8 @@ async function captureRequestOutcomes(
         ...strictIdentity,
       });
     } catch (error) {
+      // 内置发现器可吞掉普通读取失败；严格 reader 的遗漏/失败锁存不得降级为可认证结果。
+      sourceReader?.assertComplete();
       if (input.signal?.aborted || error instanceof ProjectContextSourceStateDriftError) {
         throw error;
       }
@@ -1295,6 +1413,7 @@ function buildManifest(input: {
   chunks: CertifiedProjectFactsChunkV1[];
   projectScopeManifest?: NonNullable<CertifiedProjectFactsManifestV1['projectScopeManifest']>;
   requestMatrixHash?: CanonicalSha256;
+  inputClosureHash?: CanonicalSha256;
 }): CertifiedProjectFactsManifestV1 {
   const blobTable = input.chunks
     .map((chunk) => ({ blobHash: chunk.blobHash, byteLength: chunk.byteLength }))
@@ -1323,6 +1442,7 @@ function buildManifest(input: {
     factsContentHash: input.factsContentHash,
     sourceRevisionVector: input.sourceRevisionVector,
     sourceVectorHash: input.sourceRevisionVector.sourceVectorHash,
+    ...(input.inputClosureHash ? { inputClosureHash: input.inputClosureHash } : {}),
     inventoryManifestHash: hashCanonicalJson(input.inventory),
     detailManifestHash: hashCanonicalJson(input.detail),
     fullChunkManifestHash: hashCanonicalJson(blobTable),

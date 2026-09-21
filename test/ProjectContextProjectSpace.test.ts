@@ -4,7 +4,12 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import type { SpaceContext } from '../src/domain/project-context/index.js';
+import {
+  RecordingProjectSourceReader,
+  ReplayProjectSourceReader,
+} from '../src/infrastructure/io/ProjectInputSnapshot.js';
 import { ProjectContext } from '../src/project-context.js';
+import type { ProjectContextHandlerExecutionContext } from '../src/service/project-context/interface/contracts.js';
 import {
   createProjectDescriptor,
   createProjectScopeRegistryDocument,
@@ -25,6 +30,63 @@ interface NativeScopeFixture {
 }
 
 describe('ProjectContext PCQ-8 project space', () => {
+  it('replays global scope declarations and path facts from captured inputs after the source tree is removed', async () => {
+    await withFixture(
+      createWorkspaceFixture(),
+      async (projectRoot) => {
+        await fs.mkdir(path.join(projectRoot, 'Empty'));
+        const request = {
+          kind: 'space' as const,
+          payload: {
+            sourceRefs: ['src/index.ts', 'src/shared.ts', 'RepoB/src/index.ts', 'missing.ts'],
+          },
+          scope: { activeFile: 'RepoB/src/index.ts', projectRoot },
+        };
+        const roots = [{ id: 'workspace', path: projectRoot }];
+        const recorder = new RecordingProjectSourceReader(roots);
+        const recordingContext: ProjectContextHandlerExecutionContext = { sourceReader: recorder };
+        const recorded = await ProjectContext.execute(request, recordingContext);
+        recorder.assertComplete();
+        expect(await ProjectContext.execute(request)).toEqual(recorded);
+        expect(JSON.stringify(recorded)).not.toContain('"sourceReader"');
+        const data = recorded.data as SpaceContext;
+        expect(data.sourceFolders.map((folder) => folder.path)).toEqual([
+          'RepoA',
+          'RepoB',
+          'Empty',
+          'Missing',
+        ]);
+        expect(data.repos).toContainEqual(expect.objectContaining({ root: 'Empty' }));
+        expect(data.sourceFolders.find((folder) => folder.path === 'Missing')?.missing).toBe(true);
+        expect(data.activeRepo?.scope.repoId).toBe('repo-b');
+        expect(recorded.errors).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ code: 'ambiguous', path: 'src/index.ts' }),
+            expect.objectContaining({ code: 'not-found', path: 'Missing' }),
+            expect.objectContaining({ code: 'not-found', path: 'missing.ts' }),
+          ])
+        );
+        const snapshot = JSON.parse(JSON.stringify(await recorder.snapshot()));
+        await fs.rm(projectRoot, { recursive: true, force: true });
+        const replay = new ReplayProjectSourceReader(snapshot, roots);
+        const replayContext: ProjectContextHandlerExecutionContext = { sourceReader: replay };
+        expect(await ProjectContext.execute(request, replayContext)).toEqual(recorded);
+        replay.assertComplete();
+        expect(snapshot.observations).toContainEqual(
+          expect.objectContaining({ operation: 'scope-for-control-root' })
+        );
+      },
+      {
+        ...createRepoABScope(),
+        folders: [
+          ...createRepoABScope().folders,
+          { displayName: 'Empty' },
+          { displayName: 'Missing' },
+        ],
+      }
+    );
+  });
+
   it('reports duplicate display-name source refs as ambiguous while preserving explicit folder IDs', async () => {
     await withFixture(createWorkspaceFixture(), async (projectRoot) => {
       const sourceFolders = [

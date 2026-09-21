@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
-
 import type { ProjectContextExecutionContext } from '../../../domain/project-context/index.js';
+import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import { computeContentHash } from '../../../shared/contentHash.js';
+import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { FileAnalysisSession } from '../analysis/FileAnalysisSession.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
@@ -26,6 +26,7 @@ export async function loadSourceSliceFile(input: {
   onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
   analysis?: FileAnalysisSession;
   onSourceFileVersion?: ProjectContextHandlerExecutionContext['onSourceFileVersion'];
+  sourceReader?: ProjectSourceReader;
 }): Promise<SourceSliceFileAccessResult> {
   throwIfProjectContextAborted(input);
   const identity = resolveSourceSliceFileIdentity(input);
@@ -33,10 +34,11 @@ export async function loadSourceSliceFile(input: {
     return identity;
   }
 
-  const read = () => readSourceSliceFile(input, identity.identity);
+  const reader = input.sourceReader ?? nodeProjectSourceReader;
+  const read = () => readSourceSliceFile(input, identity.identity, reader);
   // 路径校验必须先于缓存命中，不能让含 '..' 的非法别名复用合法文件的缓存。
   const result = await (input.analysis
-    ? input.analysis.readSourceFile(identity.identity, read)
+    ? input.analysis.readSourceFile(identity.identity, read, reader)
     : read());
   throwIfProjectContextAborted(input);
   if (result.ok) {
@@ -53,9 +55,10 @@ async function readSourceSliceFile(
     signal?: AbortSignal;
     onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
   },
-  identity: SourceSliceFileIdentity
+  identity: SourceSliceFileIdentity,
+  reader: ProjectSourceReader
 ): Promise<SourceSliceFileAccessResult> {
-  const rootRealpath = await readRealpath(input.projectRoot);
+  const rootRealpath = await readRealpath(input.projectRoot, reader);
   throwIfProjectContextAborted(input);
   if (!rootRealpath) {
     return {
@@ -69,7 +72,7 @@ async function readSourceSliceFile(
     };
   }
 
-  const fileRealpath = await readRealpath(identity.absolutePath);
+  const fileRealpath = await readRealpath(identity.absolutePath, reader);
   throwIfProjectContextAborted(input);
   if (!fileRealpath) {
     return {
@@ -95,7 +98,7 @@ async function readSourceSliceFile(
   }
 
   try {
-    const stat = await fs.stat(identity.absolutePath);
+    const stat = await reader.stat(identity.absolutePath, { signal: input.signal });
     throwIfProjectContextAborted(input);
     if (!stat.isFile()) {
       return {
@@ -109,11 +112,11 @@ async function readSourceSliceFile(
       };
     }
 
-    const content = await fs.readFile(identity.absolutePath, {
+    const content = await reader.readFile(identity.absolutePath, {
       signal: input.signal,
     });
     throwIfProjectContextAborted(input);
-    const text = content.toString('utf8');
+    const text = Buffer.from(content).toString('utf8');
     const blobSha256 = `sha256:${createHash('sha256').update(content).digest('hex')}` as const;
     // 原始 blob 与兼容短 hash 各司其职；UTF-8 解码替换字符不能改变捕获校验的依据。
     input.onSourceFileRead?.({
@@ -130,7 +133,7 @@ async function readSourceSliceFile(
         language: inferLanguage(identity.filePath),
         lineCount: Math.max(1, lines.length),
         lines,
-        mtimeMs: Math.trunc(stat.mtimeMs),
+        mtimeMs: stat.mtimeMs === undefined ? undefined : Math.trunc(stat.mtimeMs),
         text,
       },
       ok: true,
@@ -234,9 +237,12 @@ function isInsidePath(parent: string, child: string): boolean {
   return relative === '' || isContainedRelativePath(relative);
 }
 
-async function readRealpath(targetPath: string): Promise<string | undefined> {
+async function readRealpath(
+  targetPath: string,
+  reader: ProjectSourceReader
+): Promise<string | undefined> {
   try {
-    return await fs.realpath(path.resolve(targetPath));
+    return await reader.realpath(path.resolve(targetPath));
   } catch {
     return undefined;
   }

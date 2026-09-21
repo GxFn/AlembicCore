@@ -7,8 +7,8 @@
  * 按顶层目录分 Target。
  */
 
-import fs from 'node:fs/promises';
 import { basename, extname, join, relative } from 'node:path';
+import { sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import {
   type DiscoveredFile,
@@ -33,6 +33,9 @@ export class GenericDiscoverer extends ProjectDiscoverer {
   }
   get displayName() {
     return 'Generic (directory scan)';
+  }
+  override get supportsSourceReader() {
+    return true;
   }
 
   async detect(projectRoot: string, context?: ProjectDiscoveryExecutionContext) {
@@ -66,7 +69,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
     let foundTargets = false;
 
     try {
-      const entries = await fs.readdir(projectRoot, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(projectRoot, context);
       throwIfProjectDiscoveryAborted(context);
       for (const entry of entries) {
         throwIfProjectDiscoveryAborted(context);
@@ -118,7 +121,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !(await pathExists(targetPath))) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
@@ -146,7 +149,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
       return; // 限制深度, 只采样
     }
     try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir, context);
       throwIfProjectDiscoveryAborted(context);
       for (const entry of entries) {
         throwIfProjectDiscoveryAborted(context);
@@ -187,7 +190,7 @@ export class GenericDiscoverer extends ProjectDiscoverer {
       return;
     }
     try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir, context);
       throwIfProjectDiscoveryAborted(context);
       for (const entry of entries) {
         throwIfProjectDiscoveryAborted(context);
@@ -220,14 +223,5 @@ export class GenericDiscoverer extends ProjectDiscoverer {
       }
       /* skip */
     }
-  }
-}
-
-async function pathExists(targetPath: string): Promise<boolean> {
-  try {
-    await fs.access(targetPath);
-    return true;
-  } catch {
-    return false;
   }
 }

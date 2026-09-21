@@ -9,10 +9,22 @@ import type {
   ProjectContextQueryError,
   ProjectContextResult,
 } from '../../../domain/project-context/index.js';
+import { loadProjectDiscovererPreference } from '../../../infrastructure/config/DiscovererPreferenceStore.js';
+import {
+  type ProjectInputRootBinding,
+  RecordingProjectSourceReader,
+  ReplayProjectSourceReader,
+} from '../../../infrastructure/io/ProjectInputSnapshot.js';
+import Logger from '../../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
+import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
-import { ProjectContext } from '../ProjectContextService.js';
+import { ProjectContext, supportsProjectContextSourceReader } from '../ProjectContextService.js';
 import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
+import {
+  readSourceControlRootScope,
+  readSourceFolderScope,
+} from '../shared/sourceConfiguration.js';
 import {
   hashBytes,
   hashCanonicalJson,
@@ -21,12 +33,15 @@ import {
 } from './canonical.js';
 import type {
   CanonicalSha256,
+  CertifiedProjectFactsChunkV1,
   ProjectContextDependencyOwnershipEntryV1,
   ProjectContextDependencyOwnershipV1,
   ProjectContextDependencyResolutionV1,
   ProjectContextFoundationFileDescriptor,
   ProjectContextFoundationHostPorts,
+  ProjectContextFoundationInputCapture,
   ProjectContextFoundationRepositoryInput,
+  ProjectContextInputClosureV1,
   ProjectContextInventoryPolicyV1,
   ProjectContextRequestAuditPlan,
   ProjectContextRequestDiagnosticV1,
@@ -40,6 +55,10 @@ import {
   PROJECT_CONTEXT_DEPENDENCY_OWNERSHIP_VERSION,
   PROJECT_CONTEXT_SNAPSHOT_PROTOCOL_VERSION,
 } from './contracts.js';
+import {
+  freezeProjectContextInputClosure,
+  hydrateProjectContextInputClosure,
+} from './inputClosure.js';
 
 const execFileAsync = promisify(execFile);
 const VOLATILE_SEMANTIC_KEYS = new Set([
@@ -154,6 +173,116 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     this.#dependencyOwnership = options.dependencyOwnership
       ? validateDependencyOwnership(options.dependencyOwnership)
       : undefined;
+  }
+
+  async createInputCapture(
+    input: Parameters<NonNullable<ProjectContextFoundationHostPorts['createInputCapture']>>[0]
+  ): Promise<ProjectContextFoundationInputCapture | undefined> {
+    if (!supportsProjectContextSourceReader(this.#projectContext)) {
+      Logger.debug('ProjectContext keeps legacy capture for an unregistered executor', {
+        reason: 'source-reader-capability-not-declared',
+        repositoryCount: input.repositories.length,
+      });
+      return undefined;
+    }
+    const roots = await createInputCaptureRootBindings(input);
+    const reader = new RecordingProjectSourceReader(roots);
+    for (const file of input.files) {
+      throwIfAborted(input.signal);
+      const repository = input.repositories.find((entry) => entry.repoId === file.repoId);
+      if (!repository) {
+        throw new TypeError(`Captured file has no repository: ${file.repoId}.`);
+      }
+      await reader.seedFile(
+        path.resolve(repository.sourceRoot, normalizePortableRelativePath(file.relativePath)),
+        file.content
+      );
+    }
+    return {
+      reader,
+      snapshot: () => reader.snapshot(),
+      verify: (options) => reader.verify(options),
+      createReplay: (snapshot) => new ReplayProjectSourceReader(snapshot, roots),
+    };
+  }
+
+  /** 重新观察已认证读集的新鲜度；保留原输出身份，不把本次观察冒充重新认证。 */
+  async observeInputClosureHash(input: {
+    closure: ProjectContextInputClosureV1;
+    chunks: readonly CertifiedProjectFactsChunkV1[];
+    repositories: ProjectContextFoundationRepositoryInput[];
+    controlRoot?: string;
+    signal?: AbortSignal;
+  }): Promise<CanonicalSha256> {
+    throwIfAborted(input.signal);
+    const snapshot = hydrateProjectContextInputClosure(input.closure, input.chunks);
+    const roots = await createInputCaptureRootBindings(input);
+    const reader = new RecordingProjectSourceReader(roots);
+    const rootsById = new Map(roots.map((root) => [root.id, root.path]));
+    if (
+      snapshot.roots.length !== roots.length ||
+      snapshot.roots.some((root) => !rootsById.has(root.id))
+    ) {
+      throw new TypeError('Project input closure roots do not match the current repositories.');
+    }
+    let missingCount = 0;
+    for (const observation of snapshot.observations) {
+      throwIfAborted(input.signal);
+      const root = rootsById.get(observation.path.rootId);
+      if (!root) {
+        throw new TypeError('Project input observation has no current root binding.');
+      }
+      const absolutePath = path.resolve(root, ...observation.path.relativePath.split('/'));
+      try {
+        switch (observation.operation) {
+          case 'file':
+            await reader.readFile(absolutePath, { signal: input.signal });
+            break;
+          case 'directory':
+            await reader.readDirectory(absolutePath, { signal: input.signal });
+            break;
+          case 'stat':
+            await reader.stat(absolutePath, { signal: input.signal });
+            break;
+          case 'realpath':
+            await reader.realpath(absolutePath, { signal: input.signal });
+            break;
+          case 'scope-for-folder':
+            await readSourceFolderScope(reader, absolutePath);
+            break;
+          case 'scope-for-control-root':
+            await readSourceControlRootScope(reader, absolutePath);
+            break;
+          case 'discoverer-preference':
+            await loadProjectDiscovererPreference(absolutePath, reader);
+            break;
+        }
+      } catch (error) {
+        throwIfAborted(input.signal);
+        if (
+          !(error instanceof Error) ||
+          !('code' in error) ||
+          !['ENOENT', 'ENOTDIR'].includes(String(error.code))
+        ) {
+          throw error;
+        }
+        // 缺失也是输入事实：reader 已记录普通不存在；成功↔缺失会自然改变新 hash。
+        missingCount += 1;
+      }
+    }
+    throwIfAborted(input.signal);
+    reader.assertComplete();
+    const freshSnapshot = await reader.snapshot();
+    throwIfAborted(input.signal);
+    const fresh = freezeProjectContextInputClosure(freshSnapshot, input.closure.replayOutputHash);
+    const inputClosureHash = hashCanonicalJson(fresh.closure);
+    Logger.debug('ProjectContext reobserved certified input freshness', {
+      observationCount: snapshot.observations.length,
+      missingCount,
+      changed: inputClosureHash !== hashCanonicalJson(input.closure),
+      authority: 'input-freshness-only',
+    });
+    return inputClosureHash;
   }
 
   async observeRevision(input: {
@@ -466,6 +595,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     repository: ProjectContextFoundationRepositoryInput;
     plan: ProjectContextRequestAuditPlan;
     signal?: AbortSignal;
+    sourceReader?: ProjectSourceReader;
   }): Promise<ProjectContextRequestExecutionResult> {
     throwIfAborted(input.signal);
     const sourceFileReads = new Map<
@@ -483,6 +613,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     };
     const execution: ProjectContextHandlerExecutionContext = {
       signal: input.signal,
+      sourceReader: input.sourceReader,
       // 保留自定义 ProjectContext 的旧物理读取回调；内置 reader 另通知缓存版本消费。
       onSourceFileRead: ({ projectRoot, filePath, content }) =>
         recordSourceVersion({ projectRoot, filePath, blobSha256: hashBytes(content) }),
@@ -512,7 +643,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           envelope,
           input.repository,
           input.plan,
-          await this.#resolvePortableRoots(input.repository),
+          await this.#resolvePortableRoots(input.repository, input.sourceReader),
           this.#dependencyOwnership
         ),
         sourceFileReads: [...sourceFileReads.values()].sort(
@@ -546,7 +677,8 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
   }
 
   async #resolvePortableRoots(
-    repository: ProjectContextFoundationRepositoryInput
+    repository: ProjectContextFoundationRepositoryInput,
+    reader?: ProjectSourceReader
   ): Promise<ResolvedPortableRoot[]> {
     const inputs = [
       {
@@ -561,7 +693,9 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     for (const input of inputs) {
       const portableId = requirePortableId(input.portableId);
       const roots = [
-        (await fs.realpath(input.sourceRoot)).replace(/\\/g, '/'),
+        (
+          await (reader ? reader.realpath(input.sourceRoot) : fs.realpath(input.sourceRoot))
+        ).replace(/\\/g, '/'),
         path.resolve(input.sourceRoot).replace(/\\/g, '/'),
       ];
       for (const root of roots) {
@@ -582,6 +716,51 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
         left.portableId.localeCompare(right.portableId)
     );
   }
+}
+
+/** 捕获与新鲜度观察必须使用同一 repo/control-root 命名规则，避免把路径映射差异当内容漂移。 */
+async function createInputCaptureRootBindings(input: {
+  repositories: readonly ProjectContextFoundationRepositoryInput[];
+  controlRoot?: string;
+  signal?: AbortSignal;
+}): Promise<ProjectInputRootBinding[]> {
+  const canonicalRoot = async (root: string): Promise<string> => {
+    throwIfAborted(input.signal);
+    const resolved = path.resolve(root);
+    try {
+      return await fs.realpath(resolved);
+    } catch (error) {
+      if (
+        !(error instanceof Error) ||
+        !('code' in error) ||
+        !['ENOENT', 'ENOTDIR'].includes(String(error.code))
+      ) {
+        throw error;
+      }
+      // 新鲜度检查仍需记录已删除的根；存在的 /var 或软链接别名则与捕获时的 real root 对齐。
+      Logger.debug('ProjectContext input root is missing during binding', {
+        root: resolved,
+        code: error.code,
+      });
+      return resolved;
+    }
+  };
+  const roots = await Promise.all(
+    input.repositories.map(async (repository) => ({
+      id: repository.repoId,
+      path: await canonicalRoot(repository.sourceRoot),
+    }))
+  );
+  const controlRoot = input.controlRoot ? await canonicalRoot(input.controlRoot) : undefined;
+  throwIfAborted(input.signal);
+  if (controlRoot && !roots.some((root) => root.path === controlRoot)) {
+    let id = 'capture-control-root';
+    while (roots.some((root) => root.id === id)) {
+      id += '-';
+    }
+    roots.push({ id, path: controlRoot });
+  }
+  return roots;
 }
 
 export function createProjectContextRequestAuditPlans(input: {

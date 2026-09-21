@@ -1,5 +1,3 @@
-import type { Dirent } from 'node:fs';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 import {
   type ConflictResult,
@@ -20,7 +18,6 @@ import type {
   PackageSummary,
   PackageSystemSummary,
   PathSummary,
-  ProjectContextExecutionContext,
   ProjectContextJson,
   ProjectContextMetadata,
   ProjectContextQueryError,
@@ -36,15 +33,21 @@ import type {
   RepoSummary,
   TargetSummary,
 } from '../../../domain/project-context/index.js';
-import { LanguageService } from '../../../shared/LanguageService.js';
 import {
-  loadProjectScopeForFolder,
-  type ProjectDescriptor,
-  readProjectScopeRegistryDocument,
-  resolveProjectScopeForFolder,
-} from '../../../shared/ProjectScope.js';
+  bindProjectSourceReader,
+  nodeProjectSourceReader,
+  readSourceText,
+  sourceExists,
+} from '../../../infrastructure/io/ProjectSourceReader.js';
+import { LanguageService } from '../../../shared/LanguageService.js';
+import { resolveProjectScopeForFolder } from '../../../shared/ProjectScope.js';
+import type {
+  ProjectSourceDirectoryEntry,
+  ProjectSourceReader,
+} from '../../../types/projectSourceReader.js';
 import type {
   CanonicalProjectContextRequest,
+  ProjectContextHandlerExecutionContext as Ctx,
   ProjectContextHandler,
   ProjectContextHandlerResult,
 } from '../interface/contracts.js';
@@ -57,6 +60,10 @@ import {
 } from '../shared/map-repo/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import { createProjectContextRepoSpaceRepoRef } from '../shared/repo-space/index.js';
+import {
+  readSourceControlRootScope,
+  readSourceFolderScope,
+} from '../shared/sourceConfiguration.js';
 import { createProjectContextFileRef } from '../shared/sourceSlice-fileSymbols/index.js';
 import type { RepoRequestPayload } from './contracts.js';
 
@@ -129,6 +136,8 @@ interface RepoIdentity {
   repoId: string;
   repoName: string;
   sourceFolder?: string;
+  /** 仅供本次分析读取；投影到 RepoContext 时不得携带运行时依赖。 */
+  sourceReader: ProjectSourceReader;
 }
 
 interface RepoManifestFacts {
@@ -188,12 +197,18 @@ export const repoProjectContextHandler: ProjectContextHandler = async (
   context
 ): Promise<ProjectContextHandlerResult> => {
   throwIfProjectContextAborted(context);
+  const sourceReader = bindProjectSourceReader(
+    context?.sourceReader ?? nodeProjectSourceReader,
+    context?.signal
+  );
+  const execution: Ctx = { ...context, sourceReader };
   const payload = readRepoPayload(request.payload);
   const repoIdentity = await resolveRepoIdentity({
     payload,
     projectRoot: request.scope.projectRoot,
     repoId: request.scope.repoId,
     sourceFolder: request.scope.sourceFolder,
+    sourceReader,
   });
   throwIfProjectContextAborted(context);
   if (!repoIdentity.ok) {
@@ -203,7 +218,7 @@ export const repoProjectContextHandler: ProjectContextHandler = async (
   // 旧自定义 discoverer 可能返回内部可变数组，使用权持续到 repo 投影完成再释放。
   return getDiscovererRegistry().withSession(async (registry) => {
     const facts = await collectRepoContextFacts({
-      context,
+      context: execution,
       initialErrors: repoIdentity.errors,
       payload,
       project: request.project,
@@ -219,11 +234,11 @@ export const repoProjectContextHandler: ProjectContextHandler = async (
       errors: facts.errors.length > 0 ? dedupeErrors(facts.errors) : undefined,
       refs: dedupeRefs([facts.repo.repo.ref, ...data.nextRefs]),
     };
-  }, context);
+  }, execution);
 };
 
 async function collectRepoContextFacts(input: {
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
   initialErrors: readonly ProjectContextQueryError[];
   payload: RepoRequestPayload;
   project: CanonicalProjectContextRequest['project'];
@@ -326,7 +341,7 @@ async function collectRepoSourceFacts(input: {
   registry: DiscovererRegistry;
   repo: RepoIdentity;
   maxFiles?: number;
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
 }): Promise<{
   discovery: DiscoveryFacts;
   errors: ProjectContextQueryError[];
@@ -418,12 +433,13 @@ async function resolveRepoIdentity(input: {
   sourceFolder?: string;
   repoId?: string;
   payload: RepoRequestPayload;
+  sourceReader: ProjectSourceReader;
 }): Promise<
   | { ok: true; identity: RepoIdentity; errors: ProjectContextQueryError[] }
   | { ok: false; error: ProjectContextQueryError; errors: ProjectContextQueryError[] }
 > {
   const projectRoot = path.resolve(input.projectRoot);
-  const projectRootRealpath = await readRealpath(projectRoot);
+  const projectRootRealpath = await readRealpath(input.sourceReader, projectRoot);
   if (!projectRootRealpath) {
     const error = createQueryError({
       code: 'invalid-scope',
@@ -452,7 +468,7 @@ async function resolveRepoIdentity(input: {
   }
 
   const absoluteRoot = path.resolve(projectRoot, normalizedRepoRoot.path);
-  const rootRealpath = await readRealpath(absoluteRoot);
+  const rootRealpath = await readRealpath(input.sourceReader, absoluteRoot);
   if (!rootRealpath) {
     const error = createQueryError({
       code: 'not-found',
@@ -472,8 +488,10 @@ async function resolveRepoIdentity(input: {
     return { error, errors: [], ok: false };
   }
 
+  // scope 是独立于源码清单的接受输入；重放不能重查宿主全局 registry。
   const projectScope =
-    loadProjectScopeForFolder(absoluteRoot) ?? loadProjectScopeForControlRoot(projectRoot);
+    (await readSourceFolderScope(input.sourceReader, absoluteRoot)) ??
+    (await readSourceControlRootScope(input.sourceReader, projectRoot));
   const scopeResolution = projectScope
     ? resolveProjectScopeForFolder(projectScope, absoluteRoot, { folderRealpath: rootRealpath })
     : null;
@@ -526,30 +544,22 @@ async function resolveRepoIdentity(input: {
       repoId,
       repoName,
       sourceFolder: normalizedRepoRoot.path === '.' ? input.sourceFolder : normalizedRepoRoot.path,
+      sourceReader: input.sourceReader,
     },
     ok: true,
   };
 }
 
-function loadProjectScopeForControlRoot(projectRoot: string): ProjectDescriptor | null {
-  const normalizedProjectRoot = path.resolve(projectRoot);
-  return (
-    Object.values(readProjectScopeRegistryDocument().scopes).find(
-      (scope) => path.resolve(scope.controlRoot.path) === normalizedProjectRoot
-    ) ?? null
-  );
-}
-
 async function readRepoManifestFacts(
   repo: RepoIdentity,
-  context?: ProjectContextExecutionContext
+  context?: Ctx
 ): Promise<RepoManifestFacts> {
   const configFiles: ConfigFileSummary[] = [];
   const errors: ProjectContextQueryError[] = [];
   for (const [filePath, kind] of Object.entries(CONFIG_FILE_KINDS)) {
     throwIfProjectContextAborted(context);
     const absolutePath = path.join(repo.absoluteRoot, filePath);
-    if (!(await pathExists(absolutePath))) {
+    if (!(await sourceExists(repo.sourceReader, absolutePath))) {
       continue;
     }
     configFiles.push({
@@ -566,7 +576,11 @@ async function readRepoManifestFacts(
 
   const packageJsonRef = configFiles.find((file) => file.path === 'package.json')?.ref;
   const packageJsonPath = path.join(repo.absoluteRoot, 'package.json');
-  const packageJsonResult = await readJsonObject(packageJsonPath, 'package.json');
+  const packageJsonResult = await readJsonObject(
+    repo.sourceReader,
+    packageJsonPath,
+    'package.json'
+  );
   if (packageJsonResult.error) {
     errors.push(packageJsonResult.error);
   }
@@ -583,7 +597,7 @@ async function collectDiscoveryFacts(input: {
   registry: DiscovererRegistry;
   repo: RepoIdentity;
   maxFiles: number;
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
 }): Promise<DiscoveryFacts> {
   const registry = input.registry;
   const errors: ProjectContextQueryError[] = [];
@@ -718,11 +732,11 @@ async function collectDiscoveryFacts(input: {
  */
 async function readDiscovererDependencyGraph(
   discoverer: {
-    getDependencyGraph(context?: ProjectContextExecutionContext): Promise<unknown>;
+    getDependencyGraph(context?: Ctx): Promise<unknown>;
     id: string;
   },
   errors: ProjectContextQueryError[],
-  context?: ProjectContextExecutionContext
+  context?: Ctx
 ): Promise<RepoDependencyGraphSummary | undefined> {
   try {
     const raw = (await discoverer.getDependencyGraph(context)) as {
@@ -797,11 +811,11 @@ async function readDiscovererDependencyGraph(
 
 async function readDiscovererTargets(
   discoverer: {
-    listTargets(context?: ProjectContextExecutionContext): Promise<DiscoveredTarget[]>;
+    listTargets(context?: Ctx): Promise<DiscoveredTarget[]>;
     id: string;
   },
   errors: ProjectContextQueryError[],
-  context?: ProjectContextExecutionContext
+  context?: Ctx
 ): Promise<DiscoveredTarget[]> {
   try {
     const targets = await discoverer.listTargets(context);
@@ -826,15 +840,12 @@ async function readDiscovererTargets(
 
 async function readTargetFiles(
   discoverer: {
-    getTargetFiles(
-      target: DiscoveredTarget,
-      context?: ProjectContextExecutionContext
-    ): Promise<DiscoveredFile[]>;
+    getTargetFiles(target: DiscoveredTarget, context?: Ctx): Promise<DiscoveredFile[]>;
     id: string;
   },
   target: DiscoveredTarget,
   errors: ProjectContextQueryError[],
-  context?: ProjectContextExecutionContext
+  context?: Ctx
 ): Promise<DiscoveredFile[]> {
   try {
     const files = await discoverer.getTargetFiles(target, context);
@@ -889,7 +900,9 @@ async function createSourceRootSummaries(input: {
 }): Promise<PathSummary[]> {
   const paths = new Set<string>();
   for (const candidate of SOURCE_ROOT_CANDIDATES) {
-    if (await pathExists(path.join(input.repo.absoluteRoot, candidate))) {
+    if (
+      await sourceExists(input.repo.sourceReader, path.join(input.repo.absoluteRoot, candidate))
+    ) {
       paths.add(candidate);
     }
   }
@@ -900,7 +913,7 @@ async function createSourceRootSummaries(input: {
     }
     const sourceChild = path.join(input.repo.absoluteRoot, targetPath, 'src');
     paths.add(
-      (await pathExists(sourceChild))
+      (await sourceExists(input.repo.sourceReader, sourceChild))
         ? normalizeRelativePath(path.join(targetPath, 'src'))
         : targetPath
     );
@@ -919,7 +932,7 @@ async function collectFallbackSourceFiles(input: {
   repo: RepoIdentity;
   sourceRoots: readonly PathSummary[];
   maxFiles?: number;
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
 }): Promise<{ files: SourceFileFact[]; errors: ProjectContextQueryError[] }> {
   const maxFiles = input.maxFiles ?? DEFAULT_MAX_FILES;
   const files: SourceFileFact[] = [];
@@ -932,6 +945,7 @@ async function collectFallbackSourceFiles(input: {
       maxFiles,
       repoRoot: input.repo.absoluteRoot,
       context: input.context,
+      sourceReader: input.repo.sourceReader,
     });
     if (files.length >= maxFiles) {
       return {
@@ -954,7 +968,8 @@ async function collectSourceFilesUnder(input: {
   repoRoot: string;
   files: SourceFileFact[];
   maxFiles: number;
-  context?: ProjectContextExecutionContext;
+  sourceReader: ProjectSourceReader;
+  context?: Ctx;
 }): Promise<void> {
   const pending = [input.absoluteRoot];
   while (pending.length > 0 && input.files.length < input.maxFiles) {
@@ -963,7 +978,7 @@ async function collectSourceFilesUnder(input: {
     if (!current) {
       continue;
     }
-    const entries = await readDirectoryEntries(current);
+    const entries = await readDirectoryEntries(input.sourceReader, current);
     throwIfProjectContextAborted(input.context);
     for (const entry of entries) {
       throwIfProjectContextAborted(input.context);
@@ -1176,7 +1191,7 @@ function createLocalPackageSummaries(input: {
 async function createEntrypointSummaries(input: {
   repo: RepoIdentity;
   manifestFacts: RepoManifestFacts;
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
 }): Promise<EntrypointSummary[]> {
   const entrypoints: EntrypointSummary[] = [];
   const packageJson = input.manifestFacts.packageJson;
@@ -1219,7 +1234,9 @@ async function createEntrypointSummaries(input: {
 
   for (const filePath of HIGH_PRIORITY_ENTRY_FILES) {
     throwIfProjectContextAborted(input.context);
-    if (!(await pathExists(path.join(input.repo.absoluteRoot, filePath)))) {
+    if (
+      !(await sourceExists(input.repo.sourceReader, path.join(input.repo.absoluteRoot, filePath)))
+    ) {
       continue;
     }
     entrypoints.push(
@@ -1275,7 +1292,7 @@ async function createTopAreaSummaries(input: {
   targets: readonly TargetSummary[];
   localPackages: readonly PackageSummary[];
   configFiles: readonly ConfigFileSummary[];
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
 }): Promise<PathSummary[]> {
   const priorityPaths = [
     ...input.sourceRoots.map((item) => ({ path: item.path, role: 'source-root' })),
@@ -1288,7 +1305,10 @@ async function createTopAreaSummaries(input: {
       .map((pathValue) => ({ path: pathValue, role: 'local-package' })),
     ...input.configFiles.map((item) => ({ path: item.path, role: 'config' })),
   ];
-  const directoryEntries = await readDirectoryEntries(input.repo.absoluteRoot);
+  const directoryEntries = await readDirectoryEntries(
+    input.repo.sourceReader,
+    input.repo.absoluteRoot
+  );
   throwIfProjectContextAborted(input.context);
   for (const entry of directoryEntries) {
     throwIfProjectContextAborted(input.context);
@@ -1311,6 +1331,7 @@ async function createTopAreaSummaries(input: {
       createPathSummary({
         metadata: {
           fileCount: await countTopAreaFiles(
+            input.repo.sourceReader,
             path.join(input.repo.absoluteRoot, item.path),
             input.context
           ),
@@ -1326,7 +1347,7 @@ async function createTopAreaSummaries(input: {
 }
 
 async function createRepoMapFacts(input: {
-  context?: ProjectContextExecutionContext;
+  context?: Ctx;
   payload: RepoRequestPayload;
   project: CanonicalProjectContextRequest['project'];
   repo: RepoIdentity;
@@ -1571,14 +1592,15 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 async function readJsonObject(
+  sourceReader: ProjectSourceReader,
   absolutePath: string,
   relativePath: string
 ): Promise<{ value?: PackageJsonRecord; error?: ProjectContextQueryError }> {
-  if (!(await pathExists(absolutePath))) {
+  if (!(await sourceExists(sourceReader, absolutePath))) {
     return {};
   }
   try {
-    const parsed = JSON.parse(await fs.readFile(absolutePath, 'utf8')) as unknown;
+    const parsed = JSON.parse(await readSourceText(sourceReader, absolutePath)) as unknown;
     if (isRecord(parsed)) {
       return { value: parsed };
     }
@@ -1603,11 +1625,12 @@ async function readJsonObject(
 }
 
 async function countTopAreaFiles(
+  sourceReader: ProjectSourceReader,
   absolutePath: string,
-  context?: ProjectContextExecutionContext
+  context?: Ctx
 ): Promise<number> {
   throwIfProjectContextAborted(context);
-  const stat = await readStat(absolutePath);
+  const stat = await readStat(sourceReader, absolutePath);
   throwIfProjectContextAborted(context);
   if (!stat) {
     return 0;
@@ -1626,7 +1649,7 @@ async function countTopAreaFiles(
     if (!current) {
       continue;
     }
-    const entries = await readDirectoryEntries(current);
+    const entries = await readDirectoryEntries(sourceReader, current);
     throwIfProjectContextAborted(context);
     for (const entry of entries) {
       throwIfProjectContextAborted(context);
@@ -1645,35 +1668,33 @@ async function countTopAreaFiles(
 }
 
 async function readStat(
+  sourceReader: ProjectSourceReader,
   absolutePath: string
 ): Promise<{ isFile(): boolean; isDirectory(): boolean } | undefined> {
   try {
-    return await fs.stat(absolutePath);
+    return await sourceReader.stat(absolutePath);
   } catch {
     return undefined;
   }
 }
 
-async function readDirectoryEntries(directoryPath: string): Promise<Dirent[]> {
+async function readDirectoryEntries(
+  sourceReader: ProjectSourceReader,
+  directoryPath: string
+): Promise<ProjectSourceDirectoryEntry[]> {
   try {
-    return await fs.readdir(directoryPath, { withFileTypes: true });
+    return await sourceReader.readDirectory(directoryPath);
   } catch {
     return [];
   }
 }
 
-async function pathExists(absolutePath: string): Promise<boolean> {
+async function readRealpath(
+  sourceReader: ProjectSourceReader,
+  targetPath: string
+): Promise<string | undefined> {
   try {
-    await fs.access(absolutePath);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function readRealpath(targetPath: string): Promise<string | undefined> {
-  try {
-    return await fs.realpath(path.resolve(targetPath));
+    return await sourceReader.realpath(path.resolve(targetPath));
   } catch {
     return undefined;
   }

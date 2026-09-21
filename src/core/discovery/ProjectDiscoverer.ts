@@ -6,6 +6,9 @@
  * Bootstrap Phase 1 通过 DiscovererRegistry 自动选择匹配的实现。
  */
 
+import { nodeProjectSourceReader } from '../../infrastructure/io/ProjectSourceReader.js';
+import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
+
 export interface DiscoveredTarget {
   name: string;
   path: string;
@@ -67,6 +70,7 @@ export interface DependencyGraph {
 
 export interface ProjectDiscoveryExecutionContext {
   signal?: AbortSignal;
+  sourceReader?: ProjectSourceReader;
 }
 
 export function throwIfProjectDiscoveryAborted(context?: ProjectDiscoveryExecutionContext): void {
@@ -83,6 +87,13 @@ export function throwIfProjectDiscoveryAborted(context?: ProjectDiscoveryExecuti
 }
 
 export class ProjectDiscoverer {
+  constructor(protected readonly sourceReader: ProjectSourceReader = nodeProjectSourceReader) {}
+
+  /** 内置实现完成所有项目输入读取接线后显式声明；旧扩展仍可使用 live 模式。 */
+  get supportsSourceReader(): boolean {
+    return false;
+  }
+
   /** 检测此 Discoverer 是否适用于给定项目 */
   async detect(
     projectRoot: string,

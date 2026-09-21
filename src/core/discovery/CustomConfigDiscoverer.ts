@@ -12,11 +12,16 @@
  *  - XcodeGen (project.yml)
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, extname, join, relative, sep } from 'node:path';
-import { getProjectSpecPath } from '../../infrastructure/config/Paths.js';
+import {
+  everySourceExists,
+  readSourceText,
+  someSourceExists,
+  sourceExists,
+} from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../shared/LanguageService.js';
+import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
 import {
   type DependencyGraph,
   type DependencyGraphLayer,
@@ -24,6 +29,7 @@ import {
   type DiscoveredTarget,
   ProjectDiscoverer,
 } from './ProjectDiscoverer.js';
+import { locateProjectSpec } from './ProjectSpecLocator.js';
 import { parseCMakeProject } from './parsers/CMakeParser.js';
 import { inferConventionRole, parseGradleProject } from './parsers/GradleDslParser.js';
 import {
@@ -271,14 +277,17 @@ const SOURCE_EXTENSIONS = new Set(['.m', '.h', '.swift', '.mm', '.c', '.cpp', '.
  * ```
  * 或数组形式支持多个自定义系统。
  */
-function loadUserCustomSystems(projectRoot: string): CustomSystemProfile[] {
+async function loadUserCustomSystems(
+  projectRoot: string,
+  sourceReader: ProjectSourceReader
+): Promise<CustomSystemProfile[]> {
   try {
-    const specPath = getProjectSpecPath(projectRoot);
-    if (!existsSync(specPath)) {
+    const specPath = await locateProjectSpec(projectRoot, sourceReader);
+    if (!(await sourceExists(sourceReader, specPath))) {
       return [];
     }
 
-    const raw = JSON.parse(readFileSync(specPath, 'utf-8'));
+    const raw = JSON.parse(await readSourceText(sourceReader, specPath));
     const custom = raw?.customDiscoverer;
     if (!custom) {
       return [];
@@ -318,7 +327,8 @@ function loadUserCustomSystems(projectRoot: string): CustomSystemProfile[] {
     }
 
     return results;
-  } catch {
+  } catch (error) {
+    throwIfSourceControlError(sourceReader, error);
     return [];
   }
 }
@@ -327,8 +337,11 @@ function loadUserCustomSystems(projectRoot: string): CustomSystemProfile[] {
  * 获取合并后的系统配置表：用户自定义 + 内置
  * 用户自定义系统优先匹配
  */
-function getEffectiveSystemProfiles(projectRoot: string): readonly CustomSystemProfile[] {
-  const userSystems = loadUserCustomSystems(projectRoot);
+async function getEffectiveSystemProfiles(
+  projectRoot: string,
+  sourceReader: ProjectSourceReader
+): Promise<readonly CustomSystemProfile[]> {
+  const userSystems = await loadUserCustomSystems(projectRoot, sourceReader);
   if (userSystems.length === 0) {
     return KNOWN_CUSTOM_SYSTEMS;
   }
@@ -345,6 +358,10 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
   #targets: DiscoveredTarget[] = [];
   #dependencyEdges: DependencyGraph['edges'] = [];
 
+  override get supportsSourceReader(): boolean {
+    return true;
+  }
+
   get id() {
     return 'customConfig';
   }
@@ -360,10 +377,16 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   async detect(projectRoot: string) {
     // Level 1: 已知自研工具指纹匹配（含用户自定义系统）
-    const systems = getEffectiveSystemProfiles(projectRoot);
+    const systems = await getEffectiveSystemProfiles(projectRoot, this.sourceReader);
     for (const system of systems) {
       // antiMarkers 排除检查
-      if (system.antiMarkers?.some((am) => existsSync(join(projectRoot, am)))) {
+      if (
+        system.antiMarkers &&
+        (await someSourceExists(
+          this.sourceReader,
+          system.antiMarkers.map((am) => join(projectRoot, am))
+        ))
+      ) {
         continue;
       }
 
@@ -371,10 +394,16 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
       let markerFound = false;
 
       if (strategy === 'any') {
-        markerFound = system.markers.some((marker) => existsSync(join(projectRoot, marker)));
+        markerFound = await someSourceExists(
+          this.sourceReader,
+          system.markers.map((marker) => join(projectRoot, marker))
+        );
       } else {
         // 'all' 和 'ordered' 都要求所有 markers 存在（ordered 未来可扩展）
-        markerFound = system.markers.every((marker) => existsSync(join(projectRoot, marker)));
+        markerFound = await everySourceExists(
+          this.sourceReader,
+          system.markers.map((marker) => join(projectRoot, marker))
+        );
       }
 
       if (markerFound) {
@@ -391,7 +420,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     const signals: string[] = [];
 
     try {
-      const entries = readdirSync(projectRoot, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(projectRoot);
 
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
@@ -407,7 +436,10 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
             // 对 module-dir 类型，要求目录内有多个子目录
             if (signal.type === 'module-dir' && entry.isDirectory()) {
-              const subCount = countSubdirsWithSpecs(join(projectRoot, entry.name));
+              const subCount = await countSubdirsWithSpecs(
+                join(projectRoot, entry.name),
+                this.sourceReader
+              );
               if (subCount < 2) {
                 continue;
               }
@@ -418,7 +450,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
 
@@ -447,16 +480,28 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
     // 确定匹配的系统（含用户自定义系统）
     this.#matchedSystem = null;
-    const systems = getEffectiveSystemProfiles(projectRoot);
+    const systems = await getEffectiveSystemProfiles(projectRoot, this.sourceReader);
     for (const system of systems) {
-      if (system.antiMarkers?.some((am) => existsSync(join(projectRoot, am)))) {
+      if (
+        system.antiMarkers &&
+        (await someSourceExists(
+          this.sourceReader,
+          system.antiMarkers.map((am) => join(projectRoot, am))
+        ))
+      ) {
         continue;
       }
       const strategy = system.markerStrategy ?? 'all';
       const markerFound =
         strategy === 'any'
-          ? system.markers.some((marker) => existsSync(join(projectRoot, marker)))
-          : system.markers.every((marker) => existsSync(join(projectRoot, marker)));
+          ? await someSourceExists(
+              this.sourceReader,
+              system.markers.map((marker) => join(projectRoot, marker))
+            )
+          : await everySourceExists(
+              this.sourceReader,
+              system.markers.map((marker) => join(projectRoot, marker))
+            );
       if (markerFound) {
         this.#matchedSystem = system;
         break;
@@ -464,31 +509,31 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     }
 
     if (!this.#matchedSystem) {
-      this.#loadHeuristic(projectRoot);
+      await this.#loadHeuristic(projectRoot);
       return;
     }
 
     switch (this.#matchedSystem.parser) {
       case 'ruby-dsl':
-        this.#loadRubyDsl(projectRoot);
+        await this.#loadRubyDsl(projectRoot);
         break;
       case 'yaml':
-        this.#loadYaml(projectRoot);
+        await this.#loadYaml(projectRoot);
         break;
       case 'starlark':
-        this.#loadStarlark(projectRoot);
+        await this.#loadStarlark(projectRoot);
         break;
       case 'gradle-dsl':
-        this.#loadGradleDsl(projectRoot);
+        await this.#loadGradleDsl(projectRoot);
         break;
       case 'cmake':
-        this.#loadCMake(projectRoot);
+        await this.#loadCMake(projectRoot);
         break;
       case 'json-config':
-        this.#loadJsonConfig(projectRoot);
+        await this.#loadJsonConfig(projectRoot);
         break;
       default:
-        this.#loadHeuristic(projectRoot);
+        await this.#loadHeuristic(projectRoot);
     }
   }
 
@@ -504,7 +549,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     const targetPath =
       typeof target === 'string' ? this.#targets.find((t) => t.name === target)?.path : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
@@ -515,13 +560,13 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     let sourceDir = targetPath;
     if (spec?.sources) {
       const specSourceDir = join(targetPath, spec.sources);
-      if (existsSync(specSourceDir)) {
+      if (await sourceExists(this.sourceReader, specSourceDir)) {
         sourceDir = specSourceDir;
       }
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectSourceFiles(sourceDir, targetPath, files);
+    await this.#collectSourceFiles(sourceDir, targetPath, files);
     return files;
   }
 
@@ -644,17 +689,18 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: Ruby DSL 加载 ─────────────────────────
 
-  #loadRubyDsl(projectRoot: string) {
+  async #loadRubyDsl(projectRoot: string) {
     // 读取 Boxfile
     const boxfilePath = join(projectRoot, 'Boxfile');
-    if (!existsSync(boxfilePath)) {
+    if (!(await sourceExists(this.sourceReader, boxfilePath))) {
       return;
     }
 
     let content: string;
     try {
-      content = readFileSync(boxfilePath, 'utf8');
-    } catch {
+      content = await readSourceText(this.sourceReader, boxfilePath);
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       return;
     }
 
@@ -662,7 +708,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     this.#parsedConfig = parseBoxfile(content);
 
     // 尝试合并 Boxfile.local 覆盖
-    this.#mergeLocalOverrides(projectRoot);
+    await this.#mergeLocalOverrides(projectRoot);
 
     // 遍历本地模块，解析 spec 文件
     const allModules = [
@@ -676,39 +722,40 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
       }
 
       const modulePath = join(projectRoot, mod.localPath);
-      if (!existsSync(modulePath)) {
+      if (!(await sourceExists(this.sourceReader, modulePath))) {
         continue;
       }
 
       // 查找 spec 文件
-      const specPath = this.#findSpecFile(modulePath, mod.name);
+      const specPath = await this.#findSpecFile(modulePath, mod.name);
       if (specPath) {
         try {
-          const specContent = readFileSync(specPath, 'utf8');
+          const specContent = await readSourceText(this.sourceReader, specPath);
           const spec = parseModuleSpec(specContent);
           this.#moduleSpecs.set(mod.name, spec);
-        } catch {
+        } catch (error) {
+          throwIfSourceControlError(this.sourceReader, error);
           /* skip unreadable spec */
         }
       }
     }
 
     // 构建 targets（仅 local 模块 + 宿主应用）
-    this.#buildTargets(projectRoot);
+    await this.#buildTargets(projectRoot);
   }
 
   /**
    * 合并 Boxfile.local 中的覆盖配置
    * Boxfile.local 中 :path 覆盖可以将远程依赖切换为本地源码
    */
-  #mergeLocalOverrides(projectRoot: string) {
+  async #mergeLocalOverrides(projectRoot: string) {
     const localPath = join(projectRoot, 'Boxfile.local');
-    if (!existsSync(localPath)) {
+    if (!(await sourceExists(this.sourceReader, localPath))) {
       return;
     }
 
     try {
-      const localContent = readFileSync(localPath, 'utf8');
+      const localContent = await readSourceText(this.sourceReader, localPath);
       const localConfig = parseBoxfile(localContent);
 
       if (!this.#parsedConfig) {
@@ -733,7 +780,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           }
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
   }
@@ -742,24 +790,27 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
    * 在模块目录中查找 spec 文件
    * 查找顺序: ModuleName.boxspec → ModuleName.podspec → 任意 *.boxspec → 任意 *.podspec
    */
-  #findSpecFile(modulePath: string, moduleName: string): string | null {
+  async #findSpecFile(modulePath: string, moduleName: string): Promise<string | null> {
     // 精确匹配
     for (const ext of ['.boxspec', '.podspec']) {
       const exactPath = join(modulePath, `${moduleName}${ext}`);
-      if (existsSync(exactPath)) {
+      if (await sourceExists(this.sourceReader, exactPath)) {
         return exactPath;
       }
     }
 
     // 模糊匹配
     try {
-      const entries = readdirSync(modulePath);
+      const entries = (await this.sourceReader.readDirectory(modulePath)).map(
+        (entry) => entry.name
+      );
       for (const entry of entries) {
         if (entry.endsWith('.boxspec') || entry.endsWith('.podspec')) {
           return join(modulePath, entry);
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
 
@@ -770,7 +821,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
    * 从解析结果构建 Target 列表
    * 仅包含本地模块和宿主应用（有源码可收集的目标）
    */
-  #buildTargets(projectRoot: string) {
+  async #buildTargets(projectRoot: string) {
     if (!this.#parsedConfig) {
       return;
     }
@@ -781,7 +832,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     // 宿主应用
     if (config.hostApp) {
       const hostDir = join(projectRoot, config.hostApp.name);
-      if (existsSync(hostDir)) {
+      if (await sourceExists(this.sourceReader, hostDir)) {
         this.#targets.push({
           name: config.hostApp.name,
           path: hostDir,
@@ -803,7 +854,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
         }
 
         const modulePath = join(projectRoot, mod.localPath);
-        if (!existsSync(modulePath)) {
+        if (!(await sourceExists(this.sourceReader, modulePath))) {
           continue;
         }
 
@@ -829,7 +880,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
       }
 
       const modulePath = join(projectRoot, mod.localPath);
-      if (!existsSync(modulePath)) {
+      if (!(await sourceExists(this.sourceReader, modulePath))) {
         continue;
       }
 
@@ -854,31 +905,32 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: YAML 加载 (XcodeGen) ──────────────────
 
-  #loadYaml(projectRoot: string) {
+  async #loadYaml(projectRoot: string) {
     const system = this.#matchedSystem!;
 
     // 查找可用的 YAML 配置文件
     let yamlContent: string | null = null;
     for (const marker of system.markers) {
       const markerPath = join(projectRoot, marker);
-      if (existsSync(markerPath)) {
+      if (await sourceExists(this.sourceReader, markerPath)) {
         try {
-          yamlContent = readFileSync(markerPath, 'utf-8');
+          yamlContent = await readSourceText(this.sourceReader, markerPath);
           break;
-        } catch {
+        } catch (error) {
+          throwIfSourceControlError(this.sourceReader, error);
           /* 跳过不可读文件 */
         }
       }
     }
 
     if (!yamlContent) {
-      this.#loadHeuristic(projectRoot);
+      await this.#loadHeuristic(projectRoot);
       return;
     }
 
     // Melos 项目走专用加载路径
     if (system.id === 'melos') {
-      this.#loadMelos(projectRoot, yamlContent);
+      await this.#loadMelos(projectRoot, yamlContent);
       return;
     }
 
@@ -929,11 +981,11 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: Melos 加载 ──────────────────────────────
 
-  #loadMelos(projectRoot: string, yamlContent: string) {
+  async #loadMelos(projectRoot: string, yamlContent: string) {
     const melos = parseMelosProject(yamlContent);
 
     // 使用 glob 模式扫描 pubspec.yaml 文件
-    const pubspecFiles = this.#findBuildFiles(projectRoot, ['pubspec.yaml']);
+    const pubspecFiles = await this.#findBuildFiles(projectRoot, ['pubspec.yaml']);
 
     for (const pf of pubspecFiles) {
       // 排除根目录 pubspec
@@ -942,7 +994,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
       }
 
       try {
-        const content = readFileSync(pf, 'utf-8');
+        const content = await readSourceText(this.sourceReader, pf);
         const nameMatch = content.match(/^name:\s*(\S+)/m);
         if (nameMatch) {
           const modDir = join(pf, '..');
@@ -960,7 +1012,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             },
           });
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(this.sourceReader, error);
         /* skip */
       }
     }
@@ -968,19 +1021,19 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: Starlark 加载 (Bazel/Buck2/Pants) ──────
 
-  #loadStarlark(projectRoot: string) {
+  async #loadStarlark(projectRoot: string) {
     const system = this.#matchedSystem!;
     const specPattern = system.moduleSpecPattern ?? 'BUILD';
     const buildFileNames = specPattern === 'BUCK' ? ['BUCK'] : ['BUILD.bazel', 'BUILD'];
 
     // 扫描所有 BUILD 文件
-    const buildFiles = this.#findBuildFiles(projectRoot, buildFileNames);
+    const buildFiles = await this.#findBuildFiles(projectRoot, buildFileNames);
     const allTargets: { target: ParsedBuildFile['targets'][number]; packagePath: string }[] = [];
     const detectedLanguages = new Set<string>();
 
     for (const buildFile of buildFiles) {
       try {
-        const content = readFileSync(buildFile, 'utf-8');
+        const content = await readSourceText(this.sourceReader, buildFile);
         const parsed = parseStarlarkBuildFile(content);
 
         // 根BUILD也属于其父目录；对无斜杠的文件名做replace会错误留下BUILD自身。
@@ -1011,7 +1064,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             },
           });
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(this.sourceReader, error);
         /* skip unreadable BUILD files */
       }
     }
@@ -1063,13 +1117,13 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     }
   }
 
-  #findBuildFiles(dir: string, names: string[], depth = 0): string[] {
+  async #findBuildFiles(dir: string, names: string[], depth = 0): Promise<string[]> {
     if (depth > 8) {
       return [];
     }
     const results: string[] = [];
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.') || EXCLUDE_DIRS.has(entry.name)) {
           continue;
@@ -1078,10 +1132,11 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
         if (entry.isFile() && names.includes(entry.name)) {
           results.push(fullPath);
         } else if (entry.isDirectory()) {
-          results.push(...this.#findBuildFiles(fullPath, names, depth + 1));
+          results.push(...(await this.#findBuildFiles(fullPath, names, depth + 1)));
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
     return results;
@@ -1089,23 +1144,24 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: Gradle DSL 加载 ─────────────────────────
 
-  #loadGradleDsl(projectRoot: string) {
+  async #loadGradleDsl(projectRoot: string) {
     // 查找 settings.gradle.kts 或 settings.gradle
     let settingsContent: string | null = null;
     for (const name of ['settings.gradle.kts', 'settings.gradle']) {
       const settingsPath = join(projectRoot, name);
-      if (existsSync(settingsPath)) {
+      if (await sourceExists(this.sourceReader, settingsPath)) {
         try {
-          settingsContent = readFileSync(settingsPath, 'utf-8');
+          settingsContent = await readSourceText(this.sourceReader, settingsPath);
           break;
-        } catch {
+        } catch (error) {
+          throwIfSourceControlError(this.sourceReader, error);
           /* skip */
         }
       }
     }
 
     if (!settingsContent) {
-      this.#loadHeuristic(projectRoot);
+      await this.#loadHeuristic(projectRoot);
       return;
     }
 
@@ -1116,22 +1172,23 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     // 解析每个模块的 build.gradle.kts
     for (const mod of project.includedModules) {
       const modulePath = join(projectRoot, mod.directory);
-      if (!existsSync(modulePath)) {
+      if (!(await sourceExists(this.sourceReader, modulePath))) {
         continue;
       }
 
       // 读取 build.gradle.kts 获取 dependencies 和 plugins
       for (const buildName of ['build.gradle.kts', 'build.gradle']) {
         const buildPath = join(modulePath, buildName);
-        if (existsSync(buildPath)) {
+        if (await sourceExists(this.sourceReader, buildPath)) {
           try {
-            const buildContent = readFileSync(buildPath, 'utf-8');
+            const buildContent = await readSourceText(this.sourceReader, buildPath);
             const updatedMod = parseGradleProject(buildContent, mod);
             // 更新 module 的 convention plugin 和 dependencies
             mod.conventionPlugin =
               updatedMod.includedModules[0]?.conventionPlugin ?? mod.conventionPlugin;
             mod.dependencies = updatedMod.includedModules[0]?.dependencies ?? mod.dependencies;
-          } catch {
+          } catch (error) {
+            throwIfSourceControlError(this.sourceReader, error);
             /* skip */
           }
           break;
@@ -1169,17 +1226,18 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: CMake 加载 ──────────────────────────────
 
-  #loadCMake(projectRoot: string) {
+  async #loadCMake(projectRoot: string) {
     const cmakePath = join(projectRoot, 'CMakeLists.txt');
-    if (!existsSync(cmakePath)) {
-      this.#loadHeuristic(projectRoot);
+    if (!(await sourceExists(this.sourceReader, cmakePath))) {
+      await this.#loadHeuristic(projectRoot);
       return;
     }
 
     let content: string;
     try {
-      content = readFileSync(cmakePath, 'utf-8');
-    } catch {
+      content = await readSourceText(this.sourceReader, cmakePath);
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       return;
     }
 
@@ -1212,12 +1270,12 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
     for (const subdir of project.subdirectories) {
       const subdirPath = join(projectRoot, subdir);
       const subdirCmakePath = join(subdirPath, 'CMakeLists.txt');
-      if (!existsSync(subdirCmakePath)) {
+      if (!(await sourceExists(this.sourceReader, subdirCmakePath))) {
         continue;
       }
 
       try {
-        const subcontent = readFileSync(subdirCmakePath, 'utf-8');
+        const subcontent = await readSourceText(this.sourceReader, subdirCmakePath);
         const subproject = parseCMakeProject(subcontent);
 
         for (const target of subproject.targets) {
@@ -1240,7 +1298,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             }))
           );
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(this.sourceReader, error);
         /* skip */
       }
     }
@@ -1249,37 +1308,37 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
   // ── Private: JSON Config 加载 (Nx/Flutter/RN) ────────
 
-  #loadJsonConfig(projectRoot: string) {
+  async #loadJsonConfig(projectRoot: string) {
     const system = this.#matchedSystem!;
 
     switch (system.id) {
       case 'nx-monorepo':
-        this.#loadNx(projectRoot);
+        await this.#loadNx(projectRoot);
         break;
       case 'flutter-add-to-app':
-        this.#loadFlutterAddToApp(projectRoot);
+        await this.#loadFlutterAddToApp(projectRoot);
         break;
       case 'react-native-hybrid':
-        this.#loadReactNative(projectRoot);
+        await this.#loadReactNative(projectRoot);
         break;
       default:
-        this.#loadHeuristic(projectRoot);
+        await this.#loadHeuristic(projectRoot);
     }
   }
 
-  #loadNx(projectRoot: string) {
+  async #loadNx(projectRoot: string) {
     const nxJsonPath = join(projectRoot, 'nx.json');
-    if (!existsSync(nxJsonPath)) {
+    if (!(await sourceExists(this.sourceReader, nxJsonPath))) {
       return;
     }
 
     // 扫描所有 project.json 文件
-    const projectJsonFiles = this.#findBuildFiles(projectRoot, ['project.json']);
+    const projectJsonFiles = await this.#findBuildFiles(projectRoot, ['project.json']);
     const projects: Array<{ name: string; root: string; projectType: string; tags: string[] }> = [];
 
     for (const pjFile of projectJsonFiles) {
       try {
-        const content = readFileSync(pjFile, 'utf-8');
+        const content = await readSourceText(this.sourceReader, pjFile);
         const parsed = parseNxWorkspace(content);
         for (const proj of parsed.projects) {
           projects.push(proj);
@@ -1296,18 +1355,19 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             },
           });
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(this.sourceReader, error);
         /* skip */
       }
     }
   }
 
-  #loadFlutterAddToApp(projectRoot: string) {
+  async #loadFlutterAddToApp(projectRoot: string) {
     // 解析 .flutter-plugins-dependencies
     const depsPath = join(projectRoot, '.flutter-plugins-dependencies');
-    if (existsSync(depsPath)) {
+    if (await sourceExists(this.sourceReader, depsPath)) {
       try {
-        const content = readFileSync(depsPath, 'utf-8');
+        const content = await readSourceText(this.sourceReader, depsPath);
         const parsed = parseFlutterPluginsDeps(content);
 
         for (const plugin of parsed.plugins) {
@@ -1322,13 +1382,14 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             },
           });
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(this.sourceReader, error);
         /* skip */
       }
     }
 
     // 查找嵌入的 pubspec.yaml
-    const pubspecFiles = this.#findBuildFiles(projectRoot, ['pubspec.yaml']);
+    const pubspecFiles = await this.#findBuildFiles(projectRoot, ['pubspec.yaml']);
     for (const pf of pubspecFiles) {
       // 排除根目录的 pubspec（交给 DartDiscoverer 处理）
       if (pf === join(projectRoot, 'pubspec.yaml')) {
@@ -1336,7 +1397,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
       }
 
       try {
-        const content = readFileSync(pf, 'utf-8');
+        const content = await readSourceText(this.sourceReader, pf);
         const nameMatch = content.match(/^name:\s*(\S+)/m);
         if (nameMatch) {
           const modDir = join(pf, '..');
@@ -1350,20 +1411,21 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             },
           });
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(this.sourceReader, error);
         /* skip */
       }
     }
   }
 
-  #loadReactNative(projectRoot: string) {
+  async #loadReactNative(projectRoot: string) {
     const pkgJsonPath = join(projectRoot, 'package.json');
-    if (!existsSync(pkgJsonPath)) {
+    if (!(await sourceExists(this.sourceReader, pkgJsonPath))) {
       return;
     }
 
     try {
-      const content = readFileSync(pkgJsonPath, 'utf-8');
+      const content = await readSourceText(this.sourceReader, pkgJsonPath);
       const parsed = parseReactNativeProject(content);
 
       if (parsed.isReactNative) {
@@ -1378,17 +1440,18 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           },
         });
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
   }
 
   // ── Private: 启发式加载 ────────────────────────────
 
-  #loadHeuristic(projectRoot: string) {
+  async #loadHeuristic(projectRoot: string) {
     // 扫描根目录中可能包含模块的目录
     try {
-      const entries = readdirSync(projectRoot, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(projectRoot);
 
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith('.') || EXCLUDE_DIRS.has(entry.name)) {
@@ -1397,10 +1460,11 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 
         // 检查是否是模块容器目录
         if (/^(Local)?Modules?$|^Packages$/i.test(entry.name)) {
-          this.#scanModuleDirectory(join(projectRoot, entry.name));
+          await this.#scanModuleDirectory(join(projectRoot, entry.name));
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
   }
@@ -1408,9 +1472,9 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
   /**
    * 扫描模块容器目录，每个有 spec 文件或源码的子目录视为一个模块
    */
-  #scanModuleDirectory(containerDir: string) {
+  async #scanModuleDirectory(containerDir: string) {
     try {
-      const entries = readdirSync(containerDir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(containerDir);
 
       for (const entry of entries) {
         if (!entry.isDirectory() || entry.name.startsWith('.')) {
@@ -1420,19 +1484,20 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
         const modulePath = join(containerDir, entry.name);
 
         // 查找 spec 文件
-        const specPath = this.#findSpecFile(modulePath, entry.name);
+        const specPath = await this.#findSpecFile(modulePath, entry.name);
         if (specPath) {
           try {
-            const specContent = readFileSync(specPath, 'utf8');
+            const specContent = await readSourceText(this.sourceReader, specPath);
             const spec = parseModuleSpec(specContent);
             this.#moduleSpecs.set(entry.name, spec);
-          } catch {
+          } catch (error) {
+            throwIfSourceControlError(this.sourceReader, error);
             /* skip */
           }
         }
 
         // 检查目录是否包含源码文件
-        if (specPath || this.#hasSourceFiles(modulePath)) {
+        if (specPath || (await this.#hasSourceFiles(modulePath))) {
           this.#targets.push({
             name: entry.name,
             path: modulePath,
@@ -1442,7 +1507,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           });
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
   }
@@ -1452,13 +1518,13 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
   /**
    * 递归收集源码文件
    */
-  #collectSourceFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectSourceFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
     if (depth > 15 || files.length >= 500) {
       return;
     }
 
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
 
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
@@ -1471,7 +1537,7 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
         const fullPath = join(dir, entry.name);
 
         if (entry.isDirectory()) {
-          this.#collectSourceFiles(fullPath, rootDir, files, depth + 1);
+          await this.#collectSourceFiles(fullPath, rootDir, files, depth + 1);
         } else if (entry.isFile()) {
           const ext = extname(entry.name);
           if (SOURCE_EXTENSIONS.has(ext) || LanguageService.sourceExts.has(ext)) {
@@ -1489,7 +1555,8 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
           return;
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
   }
@@ -1497,13 +1564,13 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
   /**
    * 检查目录中是否存在源码文件（浅层检查）
    */
-  #hasSourceFiles(dir: string, depth = 0): boolean {
+  async #hasSourceFiles(dir: string, depth = 0): Promise<boolean> {
     if (depth > 3) {
       return false;
     }
 
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
 
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
@@ -1516,12 +1583,13 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
             return true;
           }
         } else if (entry.isDirectory() && !EXCLUDE_DIRS.has(entry.name)) {
-          if (this.#hasSourceFiles(join(dir, entry.name), depth + 1)) {
+          if (await this.#hasSourceFiles(join(dir, entry.name), depth + 1)) {
             return true;
           }
         }
       }
-    } catch {
+    } catch (error) {
+      throwIfSourceControlError(this.sourceReader, error);
       /* skip */
     }
 
@@ -1534,26 +1602,45 @@ export class CustomConfigDiscoverer extends ProjectDiscoverer {
 /**
  * 计算目录下包含 spec 文件的子目录数量
  */
-function countSubdirsWithSpecs(containerDir: string): number {
+async function countSubdirsWithSpecs(
+  containerDir: string,
+  sourceReader: ProjectSourceReader
+): Promise<number> {
   let count = 0;
   try {
-    const entries = readdirSync(containerDir, { withFileTypes: true });
+    const entries = await sourceReader.readDirectory(containerDir);
     for (const entry of entries) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) {
         continue;
       }
       try {
-        const subEntries = readdirSync(join(containerDir, entry.name));
+        const subEntries = (await sourceReader.readDirectory(join(containerDir, entry.name))).map(
+          (entry) => entry.name
+        );
         const hasSpec = subEntries.some((e) => e.endsWith('.boxspec') || e.endsWith('.podspec'));
         if (hasSpec) {
           count++;
         }
-      } catch {
+      } catch (error) {
+        throwIfSourceControlError(sourceReader, error);
         /* skip */
       }
     }
-  } catch {
+  } catch (error) {
+    throwIfSourceControlError(sourceReader, error);
     /* skip */
   }
   return count;
+}
+
+/** 普通不可读输入保留旧降级；取消与缺失的重放记录不能被既有 catch 伪装成空结果。 */
+function throwIfSourceControlError(reader: ProjectSourceReader, error: unknown): void {
+  if (
+    error instanceof Error &&
+    (error.name === 'AbortError' ||
+      ('code' in error && error.code === 'PROJECT_SOURCE_INPUT_UNCAPTURED'))
+  ) {
+    throw error;
+  }
+  reader.assertComplete();
 }

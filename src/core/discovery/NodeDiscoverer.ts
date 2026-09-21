@@ -6,8 +6,12 @@
  * 支持: 单包、Monorepo (npm/pnpm/yarn workspaces, lerna)
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, extname, join, relative, resolve } from 'node:path';
+import {
+  readSourceText,
+  someSourceExists,
+  sourceExists,
+} from '../../infrastructure/io/ProjectSourceReader.js';
 import { LanguageService } from '../../shared/LanguageService.js';
 import {
   type DependencyGraph,
@@ -41,21 +45,24 @@ export class NodeDiscoverer extends ProjectDiscoverer {
   get displayName() {
     return 'Node.js (npm/pnpm/yarn)';
   }
+  override get supportsSourceReader() {
+    return true;
+  }
 
   async detect(projectRoot: string) {
     let confidence = 0;
     const reasons: string[] = [];
 
-    if (existsSync(join(projectRoot, 'package.json'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'package.json'))) {
       confidence = 0.9;
       reasons.push('package.json exists');
     }
-    if (existsSync(join(projectRoot, 'tsconfig.json'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'tsconfig.json'))) {
       confidence = Math.max(confidence, 0.9);
       confidence += 0.05;
       reasons.push('tsconfig.json exists');
     }
-    if (existsSync(join(projectRoot, 'node_modules'))) {
+    if (await sourceExists(this.sourceReader, join(projectRoot, 'node_modules'))) {
       confidence += 0.05;
       reasons.push('node_modules/ exists');
     }
@@ -67,7 +74,10 @@ export class NodeDiscoverer extends ProjectDiscoverer {
       // 即使有 tsconfig.json 也只是说明前端构建链使用 TS（Ember/React），
       // 主语言仍然是 Ruby，因此始终重度降级
       const rubyMarkers = ['Gemfile', 'Rakefile'];
-      const hasRubyMarker = rubyMarkers.some((f) => existsSync(join(projectRoot, f)));
+      const hasRubyMarker = await someSourceExists(
+        this.sourceReader,
+        rubyMarkers.map((f) => join(projectRoot, f))
+      );
       if (hasRubyMarker) {
         confidence *= 0.05;
         reasons.push('Ruby marker found (Gemfile/Rakefile) — confidence heavily reduced');
@@ -78,8 +88,16 @@ export class NodeDiscoverer extends ProjectDiscoverer {
           { files: ['go.mod'], lang: 'Go' },
         ];
         for (const marker of otherMarkers) {
-          if (marker.files.some((f) => existsSync(join(projectRoot, f)))) {
-            const hasTsConfig = existsSync(join(projectRoot, 'tsconfig.json'));
+          if (
+            await someSourceExists(
+              this.sourceReader,
+              marker.files.map((f) => join(projectRoot, f))
+            )
+          ) {
+            const hasTsConfig = await sourceExists(
+              this.sourceReader,
+              join(projectRoot, 'tsconfig.json')
+            );
             if (hasTsConfig) {
               confidence *= 0.5;
               reasons.push(
@@ -109,9 +127,9 @@ export class NodeDiscoverer extends ProjectDiscoverer {
 
     // 读取 package.json
     const pkgPath = join(projectRoot, 'package.json');
-    if (existsSync(pkgPath)) {
+    if (await sourceExists(this.sourceReader, pkgPath)) {
       try {
-        this.#packageJson = JSON.parse(readFileSync(pkgPath, 'utf8'));
+        this.#packageJson = JSON.parse(await readSourceText(this.sourceReader, pkgPath));
       } catch {
         this.#packageJson = {};
       }
@@ -120,20 +138,20 @@ export class NodeDiscoverer extends ProjectDiscoverer {
     }
 
     // 检测 monorepo workspaces
-    const workspacePaths = this.#resolveWorkspaces(projectRoot);
+    const workspacePaths = await this.#resolveWorkspaces(projectRoot);
 
     if (workspacePaths.length > 0) {
       // Monorepo 模式: 每个 workspace 是一个 Target
       for (const wsPath of workspacePaths) {
         const wsAbsPath = resolve(projectRoot, wsPath);
-        if (!existsSync(wsAbsPath)) {
+        if (!(await sourceExists(this.sourceReader, wsAbsPath))) {
           continue;
         }
         const wsPkgPath = join(wsAbsPath, 'package.json');
         let wsPkg: Record<string, any> = {};
-        if (existsSync(wsPkgPath)) {
+        if (await sourceExists(this.sourceReader, wsPkgPath)) {
           try {
-            wsPkg = JSON.parse(readFileSync(wsPkgPath, 'utf8'));
+            wsPkg = JSON.parse(await readSourceText(this.sourceReader, wsPkgPath));
           } catch {
             /* skip */
           }
@@ -187,12 +205,12 @@ export class NodeDiscoverer extends ProjectDiscoverer {
         ? this.#targets.find((t) => t.name === target)?.path || this.#projectRoot
         : target.path;
 
-    if (!targetPath || !existsSync(targetPath)) {
+    if (!targetPath || !(await sourceExists(this.sourceReader, targetPath))) {
       return [];
     }
 
     const files: DiscoveredFile[] = [];
-    this.#collectFiles(targetPath, targetPath, files);
+    await this.#collectFiles(targetPath, targetPath, files);
     return files;
   }
 
@@ -202,7 +220,7 @@ export class NodeDiscoverer extends ProjectDiscoverer {
 
   // ── 内部实现 ──
 
-  #resolveWorkspaces(projectRoot: string) {
+  async #resolveWorkspaces(projectRoot: string) {
     const paths: string[] = [];
 
     // npm/yarn workspaces (from package.json)
@@ -214,9 +232,9 @@ export class NodeDiscoverer extends ProjectDiscoverer {
         if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
           const dir = pattern.replace(/\/\*\*?$/, '');
           const absDir = resolve(projectRoot, dir);
-          if (existsSync(absDir)) {
+          if (await sourceExists(this.sourceReader, absDir)) {
             try {
-              const entries = readdirSync(absDir, { withFileTypes: true });
+              const entries = await this.sourceReader.readDirectory(absDir);
               for (const entry of entries) {
                 if (entry.isDirectory() && !entry.name.startsWith('.')) {
                   paths.push(join(dir, entry.name));
@@ -234,18 +252,18 @@ export class NodeDiscoverer extends ProjectDiscoverer {
 
     // pnpm-workspace.yaml
     const pnpmWsPath = join(projectRoot, 'pnpm-workspace.yaml');
-    if (paths.length === 0 && existsSync(pnpmWsPath)) {
+    if (paths.length === 0 && (await sourceExists(this.sourceReader, pnpmWsPath))) {
       try {
-        const content = readFileSync(pnpmWsPath, 'utf8');
+        const content = await readSourceText(this.sourceReader, pnpmWsPath);
         const pkgMatches = content.matchAll(/^\s*-\s*['"]?([^'"#\n]+)['"]?/gm);
         for (const m of pkgMatches) {
           const pattern = m[1].trim();
           if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
             const dir = pattern.replace(/\/\*\*?$/, '');
             const absDir = resolve(projectRoot, dir);
-            if (existsSync(absDir)) {
+            if (await sourceExists(this.sourceReader, absDir)) {
               try {
-                const entries = readdirSync(absDir, { withFileTypes: true });
+                const entries = await this.sourceReader.readDirectory(absDir);
                 for (const entry of entries) {
                   if (entry.isDirectory() && !entry.name.startsWith('.')) {
                     paths.push(join(dir, entry.name));
@@ -266,17 +284,17 @@ export class NodeDiscoverer extends ProjectDiscoverer {
 
     // lerna.json
     const lernaPath = join(projectRoot, 'lerna.json');
-    if (paths.length === 0 && existsSync(lernaPath)) {
+    if (paths.length === 0 && (await sourceExists(this.sourceReader, lernaPath))) {
       try {
-        const lerna = JSON.parse(readFileSync(lernaPath, 'utf8'));
+        const lerna = JSON.parse(await readSourceText(this.sourceReader, lernaPath));
         const patterns = lerna.packages || ['packages/*'];
         for (const pattern of patterns) {
           if (pattern.endsWith('/*') || pattern.endsWith('/**')) {
             const dir = pattern.replace(/\/\*\*?$/, '');
             const absDir = resolve(projectRoot, dir);
-            if (existsSync(absDir)) {
+            if (await sourceExists(this.sourceReader, absDir)) {
               try {
-                const entries = readdirSync(absDir, { withFileTypes: true });
+                const entries = await this.sourceReader.readDirectory(absDir);
                 for (const entry of entries) {
                   if (entry.isDirectory() && !entry.name.startsWith('.')) {
                     paths.push(join(dir, entry.name));
@@ -373,12 +391,17 @@ export class NodeDiscoverer extends ProjectDiscoverer {
     return 'library';
   }
 
-  #collectFiles(dir: string, rootDir: string, files: DiscoveredFile[], depth = 0) {
+  async #collectFiles(
+    dir: string,
+    rootDir: string,
+    files: DiscoveredFile[],
+    depth = 0
+  ): Promise<void> {
     if (depth > 15) {
       return; // 防止过深递归
     }
     try {
-      const entries = readdirSync(dir, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(dir);
       for (const entry of entries) {
         if (entry.name.startsWith('.')) {
           continue;
@@ -390,7 +413,7 @@ export class NodeDiscoverer extends ProjectDiscoverer {
         const fullPath = join(dir, entry.name);
 
         if (entry.isDirectory()) {
-          this.#collectFiles(fullPath, rootDir, files, depth + 1);
+          await this.#collectFiles(fullPath, rootDir, files, depth + 1);
         } else if (entry.isFile()) {
           const ext = extname(entry.name);
           if (SOURCE_EXTENSIONS.has(ext)) {

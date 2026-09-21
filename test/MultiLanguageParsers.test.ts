@@ -1,11 +1,16 @@
 /**
  * 多语言解析器 + CustomConfigDiscoverer 扩展 单元测试
  */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { CustomConfigDiscoverer } from '../src/core/discovery/CustomConfigDiscoverer.js';
+import { DartDiscoverer } from '../src/core/discovery/DartDiscoverer.js';
+import { GoDiscoverer } from '../src/core/discovery/GoDiscoverer.js';
+import { JvmDiscoverer } from '../src/core/discovery/JvmDiscoverer.js';
+import type { ProjectDiscoverer } from '../src/core/discovery/ProjectDiscoverer.js';
+import { PythonDiscoverer } from '../src/core/discovery/PythonDiscoverer.js';
 import { parseCMakeProject } from '../src/core/discovery/parsers/CMakeParser.js';
 import {
   inferConventionRole,
@@ -21,6 +26,171 @@ import {
   RULE_TO_LANGUAGE,
 } from '../src/core/discovery/parsers/StarlarkParser.js';
 import { parseMelosProject } from '../src/core/discovery/parsers/YamlConfigParser.js';
+import { RustDiscoverer } from '../src/core/discovery/RustDiscoverer.js';
+import {
+  RecordingProjectSourceReader,
+  ReplayProjectSourceReader,
+} from '../src/infrastructure/io/ProjectInputSnapshot.js';
+import type { ProjectSourceReader } from '../src/types/projectSourceReader.js';
+
+describe('built-in discoverers read project inputs through the supplied reader', () => {
+  const fixtures: {
+    name: string;
+    Discoverer: new (reader?: ProjectSourceReader) => ProjectDiscoverer;
+    files: Record<string, string>;
+  }[] = [
+    {
+      name: 'Python src layout and requirements',
+      Discoverer: PythonDiscoverer,
+      files: {
+        'pyproject.toml': '[project]\nname = "fixture-python"\ndependencies = ["django>=5"]\n',
+        'requirements.txt': 'flask>=3\n# ignored\n-r other.txt\n',
+        'src/pkg/__init__.py': '',
+        'src/pkg/model.py': 'class Model: pass\n',
+        'src/pkg/.hidden/ignored.py': 'ignored = True',
+        'tests/test_model.py': 'def test_model(): pass\n',
+      },
+    },
+    {
+      name: 'Python flat layout',
+      Discoverer: PythonDiscoverer,
+      files: {
+        'setup.py': '# setup marker\n',
+        'requirements.txt': 'fastapi>=0.1\n',
+        'package/__init__.py': '',
+        'package/main.py': 'value = 1\n',
+        'test/__init__.py': '',
+        'test/test_main.py': 'value = 2\n',
+      },
+    },
+    {
+      name: 'JVM Gradle modules and language sampling',
+      Discoverer: JvmDiscoverer,
+      files: {
+        'build.gradle':
+          "plugins { id 'org.springframework.boot' }\nimplementation 'group:remote:1'\n",
+        'settings.gradle.kts': 'include(":app", ":core")\n',
+        'app/build.gradle.kts': 'plugins { application }\nimplementation(project(":core"))\n',
+        'app/src/main/kotlin/Main.kt': 'class Main',
+        'app/src/test/kotlin/Test.kt': 'class Test',
+        'core/build.gradle': "plugins { id 'java-library' }\n",
+        'core/src/main/java/Core.java': 'class Core {}',
+        'core/src/main/java/build/Ignored.java': 'class Ignored {}',
+      },
+    },
+    {
+      name: 'JVM Maven modules',
+      Discoverer: JvmDiscoverer,
+      files: {
+        'pom.xml':
+          '<project><artifactId>root</artifactId><modules><module>child</module></modules><dependency><groupId>group</groupId><artifactId>remote</artifactId></dependency></project>',
+        'child/pom.xml':
+          '<project><artifactId>child</artifactId><dependency>spring-boot</dependency></project>',
+        'child/Main.java': 'class Main {}',
+      },
+    },
+    {
+      name: 'Go commands, source contents, and internal imports',
+      Discoverer: GoDiscoverer,
+      files: {
+        'go.mod':
+          'module example.org/app\nrequire (\n github.com/gin-gonic/gin v1.0.0\n example.org/indirect v1.0.0 // indirect\n)\nrequire example.org/single v1.0.0\n',
+        'go.work': 'go 1.22\nuse .\n',
+        'main.go': 'package app\nimport "example.org/app/internal/core"\n',
+        'cmd/cli/main.go': 'package main\nimport "example.org/app/internal/core"\n',
+        'internal/core/core.go': 'package core\n',
+        'tests/app_test.go': 'package tests\n',
+        'vendor/ignored.go': 'package ignored',
+        'testdata/ignored.go': 'package ignored',
+      },
+    },
+    {
+      name: 'Rust workspace, examples, benches, and source contents',
+      Discoverer: RustDiscoverer,
+      files: {
+        'Cargo.toml':
+          '[package]\nname = "root-crate"\nedition = "2021"\n[dependencies]\naxum = "0.7"\n[dev-dependencies]\ntest-helper = "1"\n[workspace]\nmembers = ["crates/*", "extra"]\n',
+        'src/main.rs': 'fn main() {}\n',
+        'src/model/value.rs': 'pub struct Value;\n',
+        'crates/child/Cargo.toml': '[package]\nname = "child-crate"\nedition = "2021"\n',
+        'crates/child/src/lib.rs': 'pub struct Child;\n',
+        'extra/Cargo.toml': '[package]\nname = "extra-crate"\n',
+        'extra/src/main.rs': 'fn main() {}\n',
+        'examples/demo/main.rs': 'fn main() {}\n',
+        'examples/flat.rs': 'fn main() {}\n',
+        'benches/bench.rs': 'fn bench() {}\n',
+        'tests/test.rs': 'fn test() {}\n',
+        'target/ignored.rs': 'struct Ignored;',
+      },
+    },
+    {
+      name: 'Dart Melos packages, apps, SDK filtering, and internal imports',
+      Discoverer: DartDiscoverer,
+      files: {
+        'pubspec.yaml':
+          'name: fixture_dart\nenvironment:\n  sdk: ">=3.0.0"\ndependencies:\n  flutter: sdk\n  provider: ^6.0\ndev_dependencies:\n  flutter_test: sdk\n  mockito: ^5.0\n',
+        'melos.yaml': 'name: workspace\npackages:\n  - packages/*\n',
+        'lib/main.dart': "import 'package:fixture_dart/model/model.dart';\nvoid main() {}\n",
+        'lib/model/model.dart': 'class Model {}\n',
+        'lib/.hidden/ignored.dart': 'class Ignored {}',
+        'bin/cli.dart': 'void main() {}',
+        'test/main_test.dart': 'void main() {}',
+        'example/pubspec.yaml': 'name: example\n',
+        'example/lib/main.dart': 'void main() {}',
+        'packages/child/pubspec.yaml': 'name: child\n',
+        'packages/child/lib/child.dart': 'class Child {}',
+        'apps/mobile/pubspec.yaml': 'name: mobile\n',
+        'apps/mobile/lib/main.dart': 'void main() {}',
+        'ios/ignored.dart': 'class Ignored {}',
+      },
+    },
+  ];
+
+  it.each(fixtures)('replays $name after the project directory is removed', async ({
+    Discoverer,
+    files,
+  }) => {
+    const root = mkdtempSync(join(tmpdir(), 'discovery-reader-'));
+    try {
+      for (const [file, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(root, file)), { recursive: true });
+        writeFileSync(join(root, file), content);
+      }
+      const live = await inspectDiscoverer(new Discoverer(), root);
+      expect(live.detect.match).toBe(true);
+      expect(live.targets.length).toBeGreaterThan(0);
+      expect(live.files.some((targetFiles) => targetFiles.length > 0)).toBe(true);
+      const roots = [{ id: 'project', path: root }];
+      const recording = new RecordingProjectSourceReader(roots);
+      const recorded = await inspectDiscoverer(new Discoverer(recording), root);
+      recording.assertComplete();
+      expect(recorded).toStrictEqual(live);
+      const serialized = JSON.stringify(await recording.snapshot());
+      expect(serialized).not.toContain(root);
+
+      rmSync(root, { recursive: true, force: true });
+      // 正式 portable snapshot 经 JSON 往返后重放；项目已删除，不能从 live fs 补读。
+      const replay = new ReplayProjectSourceReader(JSON.parse(serialized), roots);
+      const replayed = await inspectDiscoverer(new Discoverer(replay), root);
+      replay.assertComplete();
+      expect(replayed).toStrictEqual(live);
+      expect(new Discoverer(replay).supportsSourceReader).toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+async function inspectDiscoverer(discoverer: ProjectDiscoverer, root: string) {
+  const detect = await discoverer.detect(root);
+  await discoverer.load(root);
+  const targets = await discoverer.listTargets();
+  const files = [];
+  for (const target of targets) {
+    files.push(await discoverer.getTargetFiles(target));
+  }
+  return structuredClone({ detect, targets, files, graph: await discoverer.getDependencyGraph() });
+}
 
 it('accumulates repeated CMake target_link_libraries declarations in source order', () => {
   const project = parseCMakeProject(

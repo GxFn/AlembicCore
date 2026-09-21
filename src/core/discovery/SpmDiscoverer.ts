@@ -7,9 +7,10 @@
  * 检测: 项目根或子目录存在 Package.swift
  */
 
-import { existsSync, readdirSync, readFileSync, type Stats, statSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
+import { readSourceText, sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import { LanguageService } from '../../shared/LanguageService.js';
+import type { ProjectSourceStat } from '../../types/projectSourceReader.js';
 import { ProjectDiscoverer } from './ProjectDiscoverer.js';
 import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
@@ -39,18 +40,23 @@ export class SpmDiscoverer extends ProjectDiscoverer {
   get displayName() {
     return 'Swift Package Manager (SPM)';
   }
+  override get supportsSourceReader() {
+    return true;
+  }
 
   async detect(projectRoot: string) {
-    const hasRoot = existsSync(join(projectRoot, 'Package.swift'));
+    const hasRoot = await sourceExists(this.sourceReader, join(projectRoot, 'Package.swift'));
     if (hasRoot) {
       return { match: true, confidence: 0.95, reason: 'Package.swift found at project root' };
     }
 
     try {
-      const entries = readdirSync(projectRoot, { withFileTypes: true });
+      const entries = await this.sourceReader.readDirectory(projectRoot);
       for (const entry of entries) {
         if (entry.isDirectory() && !entry.name.startsWith('.')) {
-          if (existsSync(join(projectRoot, entry.name, 'Package.swift'))) {
+          if (
+            await sourceExists(this.sourceReader, join(projectRoot, entry.name, 'Package.swift'))
+          ) {
             return {
               match: true,
               confidence: 0.85,
@@ -70,10 +76,10 @@ export class SpmDiscoverer extends ProjectDiscoverer {
     this.#projectRoot = projectRoot;
     this.#parsedPackages = [];
 
-    const allPaths = this.#findAllPackageSwifts(projectRoot);
+    const allPaths = await this.#findAllPackageSwifts(projectRoot);
     for (const pkgPath of allPaths) {
       try {
-        const parsed = this.#parsePackageSwift(pkgPath);
+        const parsed = await this.#parsePackageSwift(pkgPath);
         if (parsed) {
           this.#parsedPackages.push({ pkgPath, parsed });
         }
@@ -132,7 +138,7 @@ export class SpmDiscoverer extends ProjectDiscoverer {
         );
         candidates.push(join(pkgDir, targetName));
         for (const dir of candidates) {
-          if (existsSync(dir)) {
+          if (await sourceExists(this.sourceReader, dir)) {
             sourcesDir = dir;
             break;
           }
@@ -145,14 +151,14 @@ export class SpmDiscoverer extends ProjectDiscoverer {
 
     if (!sourcesDir) {
       const fallback = join(this.#projectRoot!, 'Sources', targetName);
-      if (existsSync(fallback)) {
+      if (await sourceExists(this.sourceReader, fallback)) {
         sourcesDir = fallback;
       } else {
         return [];
       }
     }
 
-    return this.#walkSourceFiles(sourcesDir).map((f) => ({
+    return (await this.#walkSourceFiles(sourcesDir)).map((f) => ({
       name: f.name,
       path: f.path,
       relativePath: f.relativePath,
@@ -233,9 +239,9 @@ export class SpmDiscoverer extends ProjectDiscoverer {
       for (const dep of parsed.dependencies || []) {
         if (dep.type === 'local' && 'path' in dep && dep.path) {
           const depPkgSwift = join(parsed._dir, dep.path, 'Package.swift');
-          if (existsSync(depPkgSwift)) {
+          if (await sourceExists(this.sourceReader, depPkgSwift)) {
             try {
-              const depParsed = this.#parsePackageSwift(depPkgSwift);
+              const depParsed = await this.#parsePackageSwift(depPkgSwift);
               if (!umbrellaNames.has(depParsed.name)) {
                 edges.push({ from: parsed.name, to: depParsed.name, type: 'depends_on' });
               }
@@ -273,21 +279,21 @@ export class SpmDiscoverer extends ProjectDiscoverer {
   // ─────────────── Private Helpers ───────────────
 
   /** 向下递归扫描所有 Package.swift（支持多 Package 项目） */
-  #findAllPackageSwifts(rootDir: string): string[] {
+  async #findAllPackageSwifts(rootDir: string): Promise<string[]> {
     const results: string[] = [];
 
-    const scan = (dir: string, depth = 0) => {
+    const scan = async (dir: string, depth = 0): Promise<void> => {
       if (depth > 5) {
         return;
       }
       try {
-        const entries = readdirSync(dir, { withFileTypes: true });
+        const entries = await this.sourceReader.readDirectory(dir);
         for (const entry of entries) {
           if (entry.isDirectory()) {
             if (SKIP_DIRS.has(entry.name)) {
               continue;
             }
-            scan(join(dir, entry.name), depth + 1);
+            await scan(join(dir, entry.name), depth + 1);
           } else if (entry.name === 'Package.swift') {
             results.push(join(dir, entry.name));
           }
@@ -297,17 +303,17 @@ export class SpmDiscoverer extends ProjectDiscoverer {
       }
     };
 
-    scan(rootDir);
+    await scan(rootDir);
     return results;
   }
 
   /** 简易解析 Package.swift（无 Swift 编译器，使用正则） */
-  #parsePackageSwift(packagePath: string): ParsedPackage {
-    if (!packagePath || !existsSync(packagePath)) {
+  async #parsePackageSwift(packagePath: string): Promise<ParsedPackage> {
+    if (!packagePath || !(await sourceExists(this.sourceReader, packagePath))) {
       throw new Error(`Package.swift not found: ${packagePath}`);
     }
 
-    const content = readFileSync(packagePath, 'utf-8');
+    const content = await readSourceText(this.sourceReader, packagePath);
     return {
       path: packagePath,
       name: this.#extractName(content),
@@ -469,7 +475,7 @@ export class SpmDiscoverer extends ProjectDiscoverer {
     return platforms;
   }
 
-  #walkSourceFiles(dir: string) {
+  async #walkSourceFiles(dir: string) {
     const CODE_EXTS = new Set(['.swift', '.m', '.h', '.c', '.cpp', '.mm']);
     const SKIP_DIRS = new Set([
       'node_modules',
@@ -484,13 +490,14 @@ export class SpmDiscoverer extends ProjectDiscoverer {
     const MAX_FILES = 300;
     const files: { name: string; path: string; relativePath: string }[] = [];
 
-    const walk = (d: string, rel = '') => {
+    const walk = async (d: string, rel = ''): Promise<void> => {
       if (files.length >= MAX_FILES) {
         return;
       }
       let entries: string[];
       try {
-        entries = readdirSync(d);
+        // 原遍历逐项 stat（会跟随符号链接）；只替换读取入口，不改目录判定和预算。
+        entries = (await this.sourceReader.readDirectory(d)).map((entry) => entry.name);
       } catch {
         return;
       }
@@ -503,15 +510,15 @@ export class SpmDiscoverer extends ProjectDiscoverer {
         }
         const full = join(d, entry);
         const relPath = rel ? `${rel}/${entry}` : entry;
-        let st: Stats;
+        let st: ProjectSourceStat;
         try {
-          st = statSync(full);
+          st = await this.sourceReader.stat(full);
         } catch {
           continue;
         }
         if (st.isDirectory()) {
           if (!SKIP_DIRS.has(entry)) {
-            walk(full, relPath);
+            await walk(full, relPath);
           }
         } else if (CODE_EXTS.has(extname(entry).toLowerCase())) {
           if (st.size <= 512 * 1024) {
@@ -520,7 +527,7 @@ export class SpmDiscoverer extends ProjectDiscoverer {
         }
       }
     };
-    walk(dir);
+    await walk(dir);
     return files;
   }
 

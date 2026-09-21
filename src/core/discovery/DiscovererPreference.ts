@@ -1,24 +1,11 @@
-/**
- * @module DiscovererPreference
- * @description Discoverer 用户偏好持久化 + 冲突检测
- *
- * Headless boundary: when multiple discoverers match with close confidence,
- * detectConflict() returns an ambiguous ConflictResult; the host layer owns
- * any user confirmation (Core performs no interactive I/O) and persists the
- * confirmed choice via savePreference().
- */
-
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-
-// ── Types ───────────────────────────────────────────
-
-export interface DiscovererPreferenceData {
-  selectedDiscoverer: string;
-  selectedAt: string;
-  alternatives: string[];
-  userConfirmed: boolean;
-}
+/** Discoverer 冲突判定；偏好持久化由 infrastructure 的独立入口承担。 */
+// 保留现有 discovery 包入口，宿主无需改变 load/save 消费方式。
+export {
+  type DiscovererPreferenceData,
+  loadPreference,
+  loadProjectDiscovererPreference,
+  savePreference,
+} from '../../infrastructure/config/DiscovererPreferenceStore.js';
 
 export interface DetectMatch {
   discovererId: string;
@@ -34,8 +21,6 @@ export interface ConflictResult {
 }
 
 // ── Constants ───────────────────────────────────────
-
-const PREFERENCE_FILE = 'discoverer-preference.json';
 
 /** 两个 Discoverer confidence 差值低于此阈值视为模糊 */
 const AMBIGUITY_THRESHOLD = 0.1;
@@ -88,68 +73,4 @@ export function detectConflict(matches: DetectMatch[]): ConflictResult {
   }
 
   return { ambiguous: false, matches, recommended: top };
-}
-
-// ── Preference Persistence ──────────────────────────
-
-/**
- * 获取偏好文件路径
- * @param root dataRoot（Ghost 模式下为外置工作区）或 projectRoot
- */
-function getPreferencePath(root: string): string {
-  return join(root, '.asd', PREFERENCE_FILE);
-}
-
-/**
- * 加载已保存的 Discoverer 偏好
- * @param dataRoot dataRoot（Ghost 模式下为外置工作区）或 projectRoot
- * @returns 偏好数据，或 null（无偏好/文件不存在/损坏）
- */
-export function loadPreference(dataRoot: string): DiscovererPreferenceData | null {
-  const prefPath = getPreferencePath(dataRoot);
-
-  if (!existsSync(prefPath)) {
-    return null;
-  }
-
-  try {
-    const content = readFileSync(prefPath, 'utf8');
-    const data = JSON.parse(content) as DiscovererPreferenceData;
-
-    // 基本结构校验
-    if (typeof data.selectedDiscoverer !== 'string' || typeof data.userConfirmed !== 'boolean') {
-      return null;
-    }
-
-    return data;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * 保存 Discoverer 偏好
- * @param dataRoot dataRoot（Ghost 模式下为外置工作区）或 projectRoot
- */
-export function savePreference(
-  dataRoot: string,
-  discovererId: string,
-  alternatives: string[],
-  userConfirmed: boolean
-): void {
-  const prefPath = getPreferencePath(dataRoot);
-  const prefDir = join(dataRoot, '.asd');
-
-  if (!existsSync(prefDir)) {
-    mkdirSync(prefDir, { recursive: true });
-  }
-
-  const data: DiscovererPreferenceData = {
-    selectedDiscoverer: discovererId,
-    selectedAt: new Date().toISOString(),
-    alternatives,
-    userConfirmed,
-  };
-
-  writeFileSync(prefPath, JSON.stringify(data, null, 2), 'utf8');
 }

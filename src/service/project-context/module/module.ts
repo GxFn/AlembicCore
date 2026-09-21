@@ -31,6 +31,7 @@ export const moduleProjectContextHandler: ProjectContextHandler = async (
     onSourceFileRead: context?.onSourceFileRead,
     analysis: context?.analysis,
     onSourceFileVersion: context?.onSourceFileVersion,
+    sourceReader: context?.sourceReader,
   });
   throwIfProjectContextAborted(context);
   if (!seedResult.ok) {

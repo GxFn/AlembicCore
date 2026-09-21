@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as AstAnalyzer from '../src/core/AstAnalyzer.js';
+import { ReplayProjectSourceReader } from '../src/infrastructure/io/ProjectInputSnapshot.js';
 import { withProjectContextSession } from '../src/project-context.js';
 import {
   buildProjectContextRequestMatrixV2,
@@ -45,6 +46,7 @@ import {
   verifyProjectContextRequestMatrixV2,
   verifyProjectScopeManifestV1,
 } from '../src/projectContextFoundation.js';
+import { hydrateProjectContextInputClosure } from '../src/service/project-context/foundation/inputClosure.js';
 import { ProjectContext } from '../src/service/project-context/ProjectContextService.js';
 
 const temporaryRoots: string[] = [];
@@ -606,10 +608,17 @@ describe('ProjectContext certified facts foundation', () => {
     }
   });
 
-  it('rejects cached source facts when a later capture in the same session binds a new inventory', async () => {
+  it('keeps the legacy stale-session guard when a host has no input capture hook', async () => {
     const fixture = await createNodeCaptureFixture();
     await withProjectContextSession(async (session) => {
-      const ports = new NodeProjectContextFoundationHostPorts(session);
+      const base = new NodeProjectContextFoundationHostPorts(session);
+      const ports: ProjectContextFoundationHostPorts = {
+        enumerateEligibleFiles: (input) => base.enumerateEligibleFiles(input),
+        observeRevision: (input) => base.observeRevision(input),
+        readFile: (input) => base.readFile(input),
+        verifySnapshot: (input) => base.verifySnapshot(input),
+        executeRequest: (input) => base.executeRequest(input),
+      };
       const first = await captureCertifiedProjectFactsV2(fixture.input, ports);
       expect(first.readiness.verdict).toBe('passed');
       await fs.writeFile(fixture.sourcePath, 'export const value = "Changed";\n');
@@ -617,6 +626,230 @@ describe('ProjectContext certified facts foundation', () => {
         code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
       });
     });
+  });
+
+  it('gives each certified capture a fresh input view within the same analysis session', async () => {
+    const fixture = await createNodeCaptureFixture();
+    await withProjectContextSession(async (session) => {
+      const ports = new NodeProjectContextFoundationHostPorts(session);
+      const first = await captureCertifiedProjectFactsV2(fixture.input, ports);
+      await fs.writeFile(fixture.sourcePath, 'export const value = "Changed";\n');
+      const second = await captureCertifiedProjectFactsV2(fixture.input, ports);
+      expect(first.facts.inputClosure).toBeDefined();
+      expect(second.facts.inputClosure).toBeDefined();
+      expect(second.readiness.verdict).toBe('passed');
+      expect(second.sourceVectorHash).not.toBe(first.sourceVectorHash);
+      expect(JSON.stringify(second.facts.requestOutcomes)).toContain('Changed');
+    });
+  });
+
+  it('reads inventoried manifests from captured bytes through a temporary live mutation', async () => {
+    const fixture = await createNodeCaptureFixture();
+    const manifestPath = path.join(fixture.repository.sourceRoot, 'package.json');
+    const original = await fs.readFile(manifestPath);
+    const execute = fixture.ports.executeRequest.bind(fixture.ports);
+    const spy = vi.spyOn(fixture.ports, 'executeRequest').mockImplementation(async (input) => {
+      await fs.writeFile(manifestPath, '{"name":"transient-manifest","version":"1.0.0"}');
+      try {
+        return await execute(input);
+      } finally {
+        await fs.writeFile(manifestPath, original);
+      }
+    });
+    try {
+      const artifact = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+      expect(artifact.readiness.verdict).toBe('passed');
+      expect(JSON.stringify(artifact.facts.requestOutcomes)).not.toContain('transient-manifest');
+      expect(artifact.facts.inputClosure).toBeDefined();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('binds supporting manifests into the source vector without expanding the source inventory', async () => {
+    const fixture = await createNodeCaptureFixture();
+    fixture.input.inventoryPolicy.includeExtensions = ['.ts'];
+    fixture.input.requestMatrix = buildProjectContextRequestMatrixV2(
+      fixture.input.projectScope.manifest,
+      createProjectContextRequestAuditPlansV2({
+        repository: fixture.repository,
+        eligibleFiles: await fixture.ports.enumerateEligibleFiles({
+          repository: fixture.repository,
+          policy: fixture.input.inventoryPolicy,
+        }),
+        projectScopeManifest: fixture.input.projectScope.manifest,
+      })
+    );
+    const first = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    await fs.writeFile(
+      path.join(fixture.repository.sourceRoot, 'package.json'),
+      '{"name":"changed-supporting-manifest","version":"1.0.0"}'
+    );
+    const second = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    expect(second.facts.inventory).toEqual(first.facts.inventory);
+    expect(second.manifest.sourceRevisionVector.entries).toEqual(
+      first.manifest.sourceRevisionVector.entries
+    );
+    expect(second.sourceVectorHash).not.toBe(first.sourceVectorHash);
+    expect(second.manifest.inputClosureHash).toBe(hashCanonicalJson(second.facts.inputClosure));
+  });
+
+  it('replays every certified request from serialized inputs after removing the source tree', async () => {
+    const fixture = await createNodeCaptureFixture();
+    const artifact = deserializeCertifiedProjectFactsArtifact(
+      serializeCertifiedProjectFactsArtifact(
+        await captureCertifiedProjectFactsV2(fixture.input, fixture.ports)
+      )
+    );
+    expect(artifact.facts.inputClosure).toBeDefined();
+    const snapshot = hydrateProjectContextInputClosure(
+      artifact.facts.inputClosure!,
+      artifact.chunks
+    );
+    const roots = [{ id: 'core', path: fixture.repository.sourceRoot }];
+    const replay = new ReplayProjectSourceReader(snapshot, roots);
+    await fs.rm(fixture.repository.sourceRoot, { recursive: true });
+    for (const plan of fixture.input.requestMatrix.plans) {
+      if (plan.applicability === 'not-applicable') {
+        continue;
+      }
+      const expected = artifact.facts.requestOutcomes.find(
+        (row) =>
+          row.repoId === plan.repoId &&
+          row.kind === plan.kind &&
+          hashCanonicalJson(row.selector) === hashCanonicalJson(plan.selector)
+      )!;
+      const result = await fixture.ports.executeRequest({
+        repository: fixture.repository,
+        plan,
+        sourceReader: replay,
+      });
+      expect(hashCanonicalJson(result.output), plan.kind).toBe(expected.outputHash);
+      expect(result.terminalStatus, plan.kind).toBe(expected.terminalStatus);
+    }
+    replay.assertComplete();
+    // 重放遗漏是认证缺陷，不能经 repo/space 既有 catch 降级成“空项目”。
+    const { snapshotHash: _hash, ...partial } = structuredClone(snapshot);
+    partial.observations = partial.observations.filter((row) => row.operation !== 'directory');
+    const incomplete = new ReplayProjectSourceReader(
+      {
+        ...partial,
+        snapshotHash: hashCanonicalJson({
+          ...partial,
+          blobs: partial.blobs.map(({ dataBase64: _bytes, ...ref }) => ref),
+        }),
+      },
+      roots
+    );
+    const repoPlan = fixture.input.requestMatrix.plans.find((plan) => plan.kind === 'repo')!;
+    await expect(
+      fixture.ports.executeRequest({
+        repository: fixture.repository,
+        plan: repoPlan,
+        sourceReader: incomplete,
+      })
+    ).rejects.toMatchObject({ code: 'PROJECT_SOURCE_INPUT_UNCAPTURED' });
+    expect(() => incomplete.assertComplete()).toThrow();
+  });
+
+  it('rejects supporting-input drift before certifying and retains deduplicated source blobs', async () => {
+    const fixture = await createNodeCaptureFixture();
+    const capture = fixture.ports.createInputCapture.bind(fixture.ports);
+    const spy = vi.spyOn(fixture.ports, 'createInputCapture').mockImplementation(async (input) => {
+      const reader = (await capture(input))!;
+      return {
+        ...reader,
+        verify: async (options) => {
+          await fs.mkdir(path.join(fixture.repository.sourceRoot, 'new-empty-directory'));
+          return reader.verify(options);
+        },
+      };
+    });
+    try {
+      await expect(
+        captureCertifiedProjectFactsV2(fixture.input, fixture.ports)
+      ).rejects.toMatchObject({
+        code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+        retryable: true,
+      });
+    } finally {
+      spy.mockRestore();
+    }
+    const artifact = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    expect(
+      artifact.chunks.filter((chunk) => chunk.blobHash === hashBytes(fixture.sourceBytes))
+    ).toHaveLength(1);
+    const malformed = structuredClone(artifact);
+    delete malformed.manifest.inputClosureHash;
+    // 仅重算 manifest ID，仍不能把 closure 从 source vector 单独剥离。
+    malformed.artifactId = `cpf-v1:${hashCanonicalJson(malformed.manifest).slice('sha256:'.length)}`;
+    expect(() => verifyCertifiedProjectFactsArtifact(malformed)).toThrow(/atomically/);
+  });
+
+  it('reobserves the certified input closure for live freshness without reusing its old hash', async () => {
+    const fixture = await createNodeCaptureFixture();
+    const artifact = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    const observation = {
+      closure: artifact.facts.inputClosure!,
+      chunks: artifact.chunks,
+      repositories: [fixture.repository],
+      controlRoot: fixture.input.projectScope.controlRoot,
+    };
+    expect(await fixture.ports.observeInputClosureHash(observation)).toBe(
+      artifact.manifest.inputClosureHash
+    );
+    const aliasParent = await fs.mkdtemp(path.join(os.tmpdir(), 'project-input-alias-'));
+    temporaryRoots.push(aliasParent);
+    const aliasRoot = path.join(aliasParent, path.basename(fixture.repository.sourceRoot));
+    await fs.symlink(fixture.repository.sourceRoot, aliasRoot, 'dir');
+    expect(
+      await fixture.ports.observeInputClosureHash({
+        ...observation,
+        repositories: [{ ...fixture.repository, sourceRoot: aliasRoot }],
+        controlRoot: aliasRoot,
+      })
+    ).toBe(artifact.manifest.inputClosureHash);
+    // 空目录不影响原有 eligible inventory，但会改变 repo/space 的事实输入。
+    await fs.mkdir(path.join(fixture.repository.sourceRoot, 'freshness-empty-directory'));
+    expect(await fixture.ports.observeInputClosureHash(observation)).not.toBe(
+      artifact.manifest.inputClosureHash
+    );
+    await fs.rm(path.join(fixture.repository.sourceRoot, 'freshness-empty-directory'), {
+      recursive: true,
+    });
+    expect(await fixture.ports.observeInputClosureHash(observation)).toBe(
+      artifact.manifest.inputClosureHash
+    );
+    const abort = new AbortController();
+    abort.abort();
+    await expect(
+      fixture.ports.observeInputClosureHash({ ...observation, signal: abort.signal })
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    await fs.rm(fixture.repository.sourceRoot, { recursive: true });
+    expect(await fixture.ports.observeInputClosureHash(observation)).not.toBe(
+      artifact.manifest.inputClosureHash
+    );
+  });
+
+  it('preserves the capture drift error while a shared session releases its latched reader', async () => {
+    const fixture = await createNodeCaptureFixture();
+    await expect(
+      withProjectContextSession(async (session) => {
+        const ports = new NodeProjectContextFoundationHostPorts(session);
+        const capture = ports.createInputCapture.bind(ports);
+        vi.spyOn(ports, 'createInputCapture').mockImplementation(async (input) => {
+          const recording = (await capture(input))!;
+          return {
+            ...recording,
+            verify: async (options) => {
+              await fs.mkdir(path.join(fixture.repository.sourceRoot, 'drift-in-shared-session'));
+              await recording.verify(options);
+            },
+          };
+        });
+        return captureCertifiedProjectFactsV2(fixture.input, ports);
+      })
+    ).rejects.toMatchObject({ code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT', retryable: true });
   });
 
   it('does not let a later source read erase a different version read within the same request', async () => {
