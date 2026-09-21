@@ -28,6 +28,7 @@ export const moduleProjectContextHandler: ProjectContextHandler = async (
     payload: request.payload,
     scope: request.scope,
     signal: context?.signal,
+    onSourceFileRead: context?.onSourceFileRead,
   });
   throwIfProjectContextAborted(context);
   if (!seedResult.ok) {

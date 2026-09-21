@@ -53,6 +53,16 @@ export interface ProjectContextRequest<TPayload = unknown> {
 /** Non-serialized execution controls. This object never enters request JSON or refs. */
 export interface ProjectContextExecutionContext {
   signal?: AbortSignal;
+  /**
+   * 观察本次分析实际读取的源码字节，用于捕获时校验 ABA 漂移。
+   * 这不是完整文件系统快照：目录、导入存在性和构建配置仍由各自能力负责。
+   * 聚合查询必须把同一个 context 传给叶子读取，不能只审计最终显示的 refs。
+   */
+  onSourceFileRead?: (input: {
+    projectRoot: string;
+    filePath: string;
+    content: Uint8Array;
+  }) => void;
 }
 
 export interface ProjectContextEnvelope<T = ProjectContextResult> {

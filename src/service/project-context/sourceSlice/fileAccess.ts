@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+import type { ProjectContextExecutionContext } from '../../../domain/project-context/index.js';
 import { computeContentHash } from '../../../shared/contentHash.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceQueryFailure } from './contracts.js';
@@ -15,6 +16,7 @@ export async function loadSourceSliceFile(input: {
   repoId?: string;
   sourceFolder?: string;
   signal?: AbortSignal;
+  onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
 }): Promise<SourceSliceFileAccessResult> {
   throwIfProjectContextAborted(input);
   const identity = resolveSourceSliceFileIdentity(input);
@@ -76,11 +78,17 @@ export async function loadSourceSliceFile(input: {
       };
     }
 
-    const text = await fs.readFile(identity.identity.absolutePath, {
-      encoding: 'utf8',
+    const content = await fs.readFile(identity.identity.absolutePath, {
       signal: input.signal,
     });
     throwIfProjectContextAborted(input);
+    const text = content.toString('utf8');
+    // 原始 blob 与兼容短 hash 各司其职；UTF-8 解码替换字符不能改变捕获校验的依据。
+    input.onSourceFileRead?.({
+      projectRoot: identity.identity.projectRoot,
+      filePath: identity.identity.filePath,
+      content,
+    });
     const lines = splitSourceTextLines(text);
     return {
       facts: {

@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   ModuleContext,
@@ -80,6 +80,51 @@ describe('ProjectContext PCQ-5 module-layers and module', () => {
       expect(data.nextRefs.some((ref) => ref.kind === 'file-symbol')).toBe(true);
       expect(data.nextRefs.some((ref) => ref.kind === 'relation-site')).toBe(true);
     });
+  });
+
+  it.each([
+    'src/blocked',
+    'src',
+  ])('reports unreadable module directories at %s without treating them as empty', async (blockedPath) => {
+    await withFixture(
+      {
+        'src/good.ts': 'export class Good {}',
+        'src/blocked/hidden.ts': 'export class Hidden {}',
+      },
+      async (projectRoot) => {
+        const readDirectory = fs.readdir;
+        const spy = vi.spyOn(fs, 'readdir').mockImplementation(async (...args) => {
+          if (String(args[0]) === path.join(projectRoot, blockedPath)) {
+            throw Object.assign(new Error('fixture access denied'), { code: 'EACCES' });
+          }
+          return Reflect.apply(readDirectory, fs, args);
+        });
+        try {
+          const envelope = await ProjectContext.execute({
+            kind: 'module',
+            payload: { moduleName: 'fixture', modulePath: 'src' },
+            scope: { projectRoot },
+          });
+          expect(envelope.errors).toContainEqual(
+            expect.objectContaining({
+              code: 'query-unavailable',
+              path: blockedPath,
+              severity: 'error',
+              message: expect.stringContaining('EACCES'),
+            })
+          );
+          if (blockedPath === 'src/blocked') {
+            expect(
+              (envelope.data as ModuleContext).ownedFiles.map((file) => file.filePath)
+            ).toEqual(['src/good.ts']);
+          } else {
+            expect((envelope.data as ProjectContextUnavailableData).available).toBe(false);
+          }
+        } finally {
+          spy.mockRestore();
+        }
+      }
+    );
   });
 
   it('stays deterministic and reports ordinary errors for missing module seeds', async () => {

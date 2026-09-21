@@ -1134,6 +1134,12 @@ async function captureRequestOutcomes(
   strictV2?: StrictV2CaptureContext
 ): Promise<ProjectContextRequestOutcomeV1[]> {
   const outcomes: ProjectContextRequestOutcomeV1[] = [];
+  const sourceHashes = new Map(
+    repositories.map((repository) => [
+      repository.input.repoId,
+      new Map(repository.files.map((file) => [file.relativePath, file.blobSha256])),
+    ])
+  );
   for (const plan of [...input.requestPlans].sort(compareRequestPlans)) {
     throwIfAborted(input.signal);
     const repository = repositories.find((candidate) => candidate.input.repoId === plan.repoId);
@@ -1172,6 +1178,22 @@ async function captureRequestOutcomes(
         plan,
         signal: input.signal,
       });
+      // 前后文件树相同并不证明分析期间读到相同内容（ABA）。校验每一次实际源码读取，
+      // 在产生可认证结果之前拒绝不同版本或未捕获文件；不能用最终 refs 代替完整读取记录。
+      for (const read of result.sourceFileReads ?? []) {
+        const capturedHash = sourceHashes.get(plan.repoId)?.get(read.relativePath);
+        if (!capturedHash || capturedHash !== read.blobSha256) {
+          throw new ProjectContextSourceStateDriftError(
+            repository.input.repoId,
+            new Error(
+              `Request ${plan.kind} read ${read.relativePath} at ${read.blobSha256}; ` +
+                (capturedHash
+                  ? `captured source hash is ${capturedHash}.`
+                  : 'source file is outside the captured inventory.')
+            )
+          );
+        }
+      }
       const output = toProjectFactsJson(result.output);
       const sourceRanges = (result.sourceRanges ?? []).map(normalizeSourceRange);
       outcomes.push({
@@ -1206,7 +1228,7 @@ async function captureRequestOutcomes(
         ...strictIdentity,
       });
     } catch (error) {
-      if (input.signal?.aborted) {
+      if (input.signal?.aborted || error instanceof ProjectContextSourceStateDriftError) {
         throw error;
       }
       const message = error instanceof Error ? error.message : String(error);

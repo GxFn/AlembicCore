@@ -467,6 +467,10 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     signal?: AbortSignal;
   }): Promise<ProjectContextRequestExecutionResult> {
     throwIfAborted(input.signal);
+    const sourceFileReads = new Map<
+      string,
+      { relativePath: string; blobSha256: CanonicalSha256 }
+    >();
     try {
       const envelope = await this.#projectContext.execute(
         {
@@ -484,15 +488,33 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           },
           payload: input.plan.selector,
         },
-        { signal: input.signal }
+        {
+          signal: input.signal,
+          onSourceFileRead: ({ projectRoot, filePath, content }) => {
+            const relativePath = path
+              .relative(input.repository.sourceRoot, path.resolve(projectRoot, filePath))
+              .split(path.sep)
+              .join('/');
+            const blobSha256 = hashBytes(content);
+            // 聚合查询会重复读同一文件。只合并相同版本，不能让末次读取覆盖中途的漂移。
+            sourceFileReads.set(`${relativePath}\u0000${blobSha256}`, { relativePath, blobSha256 });
+          },
+        }
       );
-      return projectContextEnvelopeToAuditResult(
-        envelope,
-        input.repository,
-        input.plan,
-        await this.#resolvePortableRoots(input.repository),
-        this.#dependencyOwnership
-      );
+      return {
+        ...projectContextEnvelopeToAuditResult(
+          envelope,
+          input.repository,
+          input.plan,
+          await this.#resolvePortableRoots(input.repository),
+          this.#dependencyOwnership
+        ),
+        sourceFileReads: [...sourceFileReads.values()].sort(
+          (left, right) =>
+            left.relativePath.localeCompare(right.relativePath) ||
+            left.blobSha256.localeCompare(right.blobSha256)
+        ),
+      };
     } catch (error) {
       if (isAbortError(error) || input.signal?.aborted) {
         return {

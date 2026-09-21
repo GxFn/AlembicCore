@@ -6,7 +6,6 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-
 import {
   buildProjectContextRequestMatrixV2,
   buildProjectScopeManifestV1,
@@ -43,6 +42,7 @@ import {
   verifyProjectContextRequestMatrixV2,
   verifyProjectScopeManifestV1,
 } from '../src/projectContextFoundation.js';
+import { ProjectContext } from '../src/service/project-context/ProjectContextService.js';
 
 const temporaryRoots: string[] = [];
 const execFileAsync = promisify(execFile);
@@ -521,6 +521,107 @@ describe('ProjectContext certified facts foundation', () => {
       verdict: 'failed',
       errors: expect.arrayContaining(['module-owner-coverage:core/module']),
     });
+  });
+
+  it.each([
+    'source-slice',
+    'module',
+    'map',
+  ] as const)('rejects %s facts read from temporarily changed source even after the source is restored', async (kind) => {
+    const fixture = await createNodeCaptureFixture();
+    let observed = false;
+    const ports: ProjectContextFoundationHostPorts = {
+      enumerateEligibleFiles: (input) => fixture.ports.enumerateEligibleFiles(input),
+      observeRevision: (input) => fixture.ports.observeRevision(input),
+      readFile: (input) => fixture.ports.readFile(input),
+      verifySnapshot: (input) => fixture.ports.verifySnapshot(input),
+      executeRequest: async (input) => {
+        if (input.plan.kind !== kind) {
+          return fixture.ports.executeRequest(input);
+        }
+        observed = true;
+        await fs.writeFile(fixture.sourcePath, 'export const value = "New";\n');
+        try {
+          return await fixture.ports.executeRequest(input);
+        } finally {
+          await fs.writeFile(fixture.sourcePath, fixture.sourceBytes);
+        }
+      },
+    };
+    // 真 NodePorts / ProjectContext / 文件系统链路；不能用 terminal fence 的再次读取代替本次读取证据。
+    await expect(captureCertifiedProjectFactsV2(fixture.input, ports)).rejects.toMatchObject({
+      code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+      retryable: true,
+    });
+    expect(observed).toBe(true);
+    expect(await fs.readFile(fixture.sourcePath)).toEqual(fixture.sourceBytes);
+  });
+
+  it('does not let a later source read erase a different version read within the same request', async () => {
+    const fixture = await createNodeCaptureFixture();
+    const ports = new NodeProjectContextFoundationHostPorts({
+      execute: async (request, context) => {
+        if (request.kind === 'source-slice') {
+          await fs.writeFile(fixture.sourcePath, 'export const value = "Transient";\n');
+          try {
+            await ProjectContext.execute(request, context);
+          } finally {
+            await fs.writeFile(fixture.sourcePath, fixture.sourceBytes);
+          }
+        }
+        return ProjectContext.execute(request, context);
+      },
+    });
+    await expect(captureCertifiedProjectFactsV2(fixture.input, ports)).rejects.toMatchObject({
+      code: 'PROJECT_CONTEXT_SOURCE_STATE_DRIFT',
+    });
+  });
+
+  it('records raw source byte hashes through all file and aggregate requests without changing short refs', async () => {
+    const fixture = await createNodeCaptureFixture();
+    // 无效 UTF-8 与 CRLF 不能经 text 重编码后再冒充原始 blob 的 hash。
+    const bytes = Buffer.concat([
+      Buffer.from('// '),
+      Buffer.from([0xff]),
+      Buffer.from('\r\nexport const value = 1;\r\n'),
+    ]);
+    await fs.writeFile(fixture.sourcePath, bytes);
+    const sourceKinds = [
+      'source-slice',
+      'file-symbols',
+      'file-flow',
+      'anchor-range',
+      'module',
+      'module-layers',
+      'map',
+    ];
+    for (const kind of sourceKinds) {
+      const plan = fixture.input.requestMatrix.plans.find(
+        (plan) =>
+          plan.kind === kind &&
+          plan.applicability === 'applicable' &&
+          JSON.stringify(plan.selector).includes('src/index.ts')
+      )!;
+      const result = await fixture.ports.executeRequest({ repository: fixture.repository, plan });
+      expect(result.sourceFileReads, kind).toContainEqual({
+        relativePath: 'src/index.ts',
+        blobSha256: hashBytes(bytes),
+      });
+      expect(
+        new Set(result.sourceFileReads?.map((read) => `${read.relativePath}:${read.blobSha256}`))
+          .size
+      ).toBe(result.sourceFileReads?.length);
+      expect(JSON.stringify(result.output), kind).toContain(
+        createHash('sha256').update(bytes.toString('utf8')).digest('hex').slice(0, 16)
+      );
+    }
+    const artifact = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    expect(
+      evaluateCertifiedProjectFactsReadinessV2(artifact, {
+        acceptedScopeManifest: fixture.input.projectScope.manifest,
+        requestMatrix: fixture.input.requestMatrix,
+      })
+    ).toEqual({ errors: [], ok: true });
   });
 
   it('fails closed for add, delete, modify, clean-to-dirty, and dirty-content capture drift', async () => {
@@ -3029,6 +3130,49 @@ function createHostPorts(
       return content;
     },
   };
+}
+
+async function createNodeCaptureFixture() {
+  const root = await fs.realpath(
+    await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-source-read-'))
+  );
+  temporaryRoots.push(root);
+  const sourcePath = path.join(root, 'src/index.ts');
+  const sourceBytes = Buffer.from('export const value = "Old";\n');
+  await fs.mkdir(path.dirname(sourcePath), { recursive: true });
+  await fs.writeFile(sourcePath, sourceBytes);
+  await fs.writeFile(
+    path.join(root, 'package.json'),
+    '{"name":"source-read-fixture","version":"1.0.0"}'
+  );
+  const projectScope = buildProjectScopeManifestV1({
+    acceptedScope: {
+      projectMode: 'source-read-fixture',
+      projectIdentity: { projectId: 'source-read', scopeId: 'source-read' },
+      repositories: [{ repoId: 'core', relativeRoot: '.' }],
+    },
+    controlRoot: root,
+    sourceRoots: [{ repoId: 'core', sourceRoot: root }],
+  });
+  const repository = projectScope.repositories[0]!;
+  const ports = new NodeProjectContextFoundationHostPorts();
+  const inventoryPolicy = {
+    version: 'source-read-fixture',
+    includeExtensions: ['.ts', '.json'],
+    excludeDirectories: ['.git', 'node_modules'],
+  };
+  const plans = createProjectContextRequestAuditPlansV2({
+    repository,
+    eligibleFiles: await ports.enumerateEligibleFiles({ repository, policy: inventoryPolicy }),
+    projectScopeManifest: projectScope.manifest,
+  });
+  const input = {
+    ...createCaptureInput(),
+    projectScope,
+    inventoryPolicy,
+    requestMatrix: buildProjectContextRequestMatrixV2(projectScope.manifest, plans),
+  };
+  return { input, ports, repository, sourceBytes, sourcePath };
 }
 
 function createAuthorityV2Fixture() {

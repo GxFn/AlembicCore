@@ -36,6 +36,7 @@ export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
     repoId: request.scope.repoId,
     sourceFolder: request.scope.sourceFolder,
     signal: context?.signal,
+    onSourceFileRead: context?.onSourceFileRead,
   });
   throwIfProjectContextAborted(context);
   if (!fileAccess.ok) {

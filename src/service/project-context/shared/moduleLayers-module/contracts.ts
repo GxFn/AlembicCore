@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import type {
   FileSummary,
+  ProjectContextExecutionContext,
   ProjectContextJson,
   ProjectContextMetadata,
   ProjectContextQueryError,
@@ -62,6 +63,7 @@ export async function resolveProjectContextModuleSeed(input: {
   payload: unknown;
   scope: ProjectContextScope;
   signal?: AbortSignal;
+  onSourceFileRead?: ProjectContextExecutionContext['onSourceFileRead'];
 }): Promise<ResolveProjectContextModuleSeedResult> {
   throwIfProjectContextAborted(input);
   const payload = isRecord(input.payload) ? input.payload : {};
@@ -75,32 +77,34 @@ export async function resolveProjectContextModuleSeed(input: {
     ...readOwnedFilePaths(payload.ownedFiles),
     ...readMetadataStringArray(metadata, 'ownedFiles'),
   ]);
-  const ownedFilePaths =
-    requestedOwnedFiles.length > 0
-      ? requestedOwnedFiles
-      : modulePath
-        ? await readModuleDirectoryFiles({
-            includeGenerated: input.scope.includeGenerated,
-            includeVendor: input.scope.includeVendor,
-            modulePath,
-            projectRoot: input.scope.projectRoot,
-            signal: input.signal,
-          })
-        : [];
+  const errors: ProjectContextQueryError[] = [];
+  let ownedFilePaths = requestedOwnedFiles;
+  if (ownedFilePaths.length === 0 && modulePath) {
+    const scan = await readModuleDirectoryFiles({
+      includeGenerated: input.scope.includeGenerated,
+      includeVendor: input.scope.includeVendor,
+      modulePath,
+      projectRoot: input.scope.projectRoot,
+      signal: input.signal,
+    });
+    ownedFilePaths = scan.files;
+    errors.push(...scan.errors);
+  }
 
   if (ownedFilePaths.length === 0) {
     return {
-      error: createQueryError({
-        code: 'invalid-scope',
-        message: 'module payload.ownedFiles or payload.modulePath is required.',
-        retryable: false,
-      }),
-      errors: [],
+      error:
+        errors[0] ??
+        createQueryError({
+          code: 'invalid-scope',
+          message: 'module payload.ownedFiles or payload.modulePath is required.',
+          retryable: false,
+        }),
+      errors: errors.slice(1),
       ok: false,
     };
   }
 
-  const errors: ProjectContextQueryError[] = [];
   const ownedFiles: FileSummary[] = [];
   for (const filePath of ownedFilePaths) {
     throwIfProjectContextAborted(input);
@@ -110,6 +114,7 @@ export async function resolveProjectContextModuleSeed(input: {
       repoId: input.scope.repoId,
       sourceFolder: input.scope.sourceFolder,
       signal: input.signal,
+      onSourceFileRead: input.onSourceFileRead,
     });
     if (!fileAccess.ok) {
       errors.push(
@@ -309,15 +314,16 @@ async function readModuleDirectoryFiles(input: {
   includeGenerated: boolean;
   includeVendor: boolean;
   signal?: AbortSignal;
-}): Promise<string[]> {
+}): Promise<{ files: string[]; errors: ProjectContextQueryError[] }> {
   const absoluteRoot = path.resolve(input.projectRoot);
   const absoluteModulePath = path.resolve(absoluteRoot, input.modulePath);
   const relativeModulePath = path.relative(absoluteRoot, absoluteModulePath);
   if (!isContainedRelativePath(relativeModulePath)) {
-    return [];
+    return { files: [], errors: [] };
   }
 
   const files: string[] = [];
+  const errors: ProjectContextQueryError[] = [];
   const pending = [absoluteModulePath];
   while (pending.length > 0) {
     throwIfProjectContextAborted(input);
@@ -325,7 +331,23 @@ async function readModuleDirectoryFiles(input: {
     if (!current) {
       continue;
     }
-    const entries = await readDirectoryEntries(current);
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(current, { withFileTypes: true });
+    } catch (error) {
+      throwIfProjectContextAborted(input);
+      const relativePath = toProjectContextPath(path.relative(absoluteRoot, current));
+      const code = error instanceof Error && 'code' in error ? String(error.code) : 'unknown';
+      // 已读取的文件仍可用于诊断，但不可把权限/IO失败的子树冒充空目录或完整模块。
+      errors.push({
+        code: 'query-unavailable',
+        message: `module directory scan failed (${code}): ${relativePath}`,
+        path: relativePath,
+        retryable: false,
+        severity: 'error',
+      });
+      continue;
+    }
     throwIfProjectContextAborted(input);
     for (const entry of entries) {
       throwIfProjectContextAborted(input);
@@ -343,15 +365,7 @@ async function readModuleDirectoryFiles(input: {
       }
     }
   }
-  return files.sort();
-}
-
-async function readDirectoryEntries(directoryPath: string): Promise<Dirent[]> {
-  try {
-    return await fs.readdir(directoryPath, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  return { files: files.sort(), errors };
 }
 
 function normalizeProjectPath(value: string | undefined, projectRoot: string): string | undefined {
