@@ -80,6 +80,8 @@ function _walkTSNode(node: any, ctx: any, parentClassName: any) {
         ctx.classes.push({
           name,
           kind: 'type',
+          declarationKind: 'type_alias',
+          declarationRange: astNodeRange(child),
           line: child.startPosition.row + 1,
           endLine: child.endPosition.row + 1,
         });
@@ -92,6 +94,8 @@ function _walkTSNode(node: any, ctx: any, parentClassName: any) {
         ctx.classes.push({
           name,
           kind: 'enum',
+          declarationKind: 'enum',
+          declarationRange: astNodeRange(child),
           line: child.startPosition.row + 1,
           endLine: child.endPosition.row + 1,
         });
@@ -156,6 +160,8 @@ function _walkTSClassBody(body: any, ctx: any, className: any) {
         ctx.methods.push({
           name,
           className,
+          declarationKind: 'method',
+          declarationRange: astNodeRange(child),
           line: child.startPosition.row + 1,
           kind: 'declaration',
         });
@@ -168,6 +174,8 @@ function _walkTSClassBody(body: any, ctx: any, className: any) {
         ctx.properties.push({
           name,
           className,
+          declarationKind: 'property',
+          declarationRange: astNodeRange(child),
           line: child.startPosition.row + 1,
         });
         break;
@@ -216,6 +224,8 @@ function _parseTSClass(node: any) {
   return {
     name,
     kind: 'class',
+    declarationKind: 'class',
+    declarationRange: astNodeRange(node),
     superclass,
     protocols,
     decorators,
@@ -238,7 +248,13 @@ function _parseTSInterface(node: any) {
     }
   }
 
-  return { name, inherits, line: node.startPosition.row + 1 };
+  return {
+    name,
+    inherits,
+    line: node.startPosition.row + 1,
+    declarationKind: 'interface',
+    declarationRange: astNodeRange(node),
+  };
 }
 
 function _parseTSFunction(node: any, className: any) {
@@ -254,6 +270,8 @@ function _parseTSFunction(node: any, className: any) {
   return {
     name,
     className,
+    declarationKind: 'function',
+    declarationRange: astNodeRange(node),
     isClassMethod: false,
     isAsync,
     bodyLines,
@@ -284,6 +302,8 @@ function _parseTSMethod(node: any, className: any) {
     name,
     nameIsPlaceholder: !nameNode,
     matchingRange: astNodeRange(node),
+    declarationKind: name === 'constructor' ? 'constructor' : 'method',
+    declarationRange: astNodeRange(node),
     className,
     isClassMethod: isStatic,
     isAsync,
@@ -320,6 +340,8 @@ function _parseTSProperty(node: any, className: any) {
     className,
     isStatic,
     isReadonly,
+    declarationKind: 'property',
+    declarationRange: astNodeRange(node),
     typeAnnotation,
     decorators: decorators.length > 0 ? decorators : undefined,
     line: node.startPosition.row + 1,
@@ -407,6 +429,8 @@ function _extractTSConstructorProperties(constructorNode: any, className: any) {
     properties.push({
       name,
       className,
+      declarationKind: 'property',
+      declarationRange: astNodeRange(param),
       isStatic: false,
       isReadonly: hasReadonly,
       typeAnnotation,
@@ -420,6 +444,11 @@ function _extractTSConstructorProperties(constructorNode: any, className: any) {
 }
 
 function _parseTSVariableDecl(node: any, ctx: any, parentClassName: any) {
+  // 真实关键字来自当前声明节点；不从SDK function种类或函数正文猜测绑定方式。
+  const declarationKind = node.children.find(
+    (child: { type: string }) =>
+      child.type === 'const' || child.type === 'let' || child.type === 'var'
+  )?.type;
   for (const child of node.namedChildren) {
     if (child.type === 'variable_declarator') {
       const nameNode = child.namedChildren.find((c: any) => c.type === 'identifier');
@@ -431,6 +460,8 @@ function _parseTSVariableDecl(node: any, ctx: any, parentClassName: any) {
         ctx.methods.push({
           name: nameNode.text,
           matchingRange: astNodeRange(valueNode),
+          declarationKind,
+          declarationRange: astNodeRange(child),
           className: parentClassName,
           isClassMethod: false,
           bodyLines: body ? body.endPosition.row - body.startPosition.row + 1 : 0,

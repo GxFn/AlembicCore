@@ -24,6 +24,39 @@ const SOURCE_GRAPH_RESULT = {
 };
 
 describe('buildEvidenceStarters sourceGraphInventory(决策④ eval 开关注入)', () => {
+  it.each([
+    'partial',
+    'degraded',
+    'stale',
+    'unavailable',
+  ])('keeps %s inventory counts from becoming a ready-evidence claim', (status) => {
+    const starter = buildEvidenceStarters(ARCHITECTURE_DIM, {
+      sourceGraphResult: {
+        ...SOURCE_GRAPH_RESULT,
+        freshness: { status },
+        status: { ready: false },
+      },
+    })?.sourceGraphInventory;
+    expect(starter?.hint).not.toContain('已就绪');
+    expect(starter?.data).toMatchObject({
+      files: 180,
+      symbols: 2285,
+      freshness: status,
+      ready: false,
+    });
+  });
+
+  it('marks inventory ready only with explicit fresh and ready evidence', () => {
+    const starter = buildEvidenceStarters(ARCHITECTURE_DIM, {
+      sourceGraphResult: {
+        ...SOURCE_GRAPH_RESULT,
+        freshness: { status: 'fresh' },
+        status: { ready: true },
+      },
+    })?.sourceGraphInventory;
+    expect(starter?.hint).toContain('已就绪');
+    expect(starter?.data).toMatchObject({ freshness: 'fresh', ready: true });
+  });
   it('生产默认(不传 sourceGraphResult)不产出 starter,行为零变化', () => {
     const starters = buildEvidenceStarters(ARCHITECTURE_DIM, {});
     expect(starters?.sourceGraphInventory).toBeUndefined();

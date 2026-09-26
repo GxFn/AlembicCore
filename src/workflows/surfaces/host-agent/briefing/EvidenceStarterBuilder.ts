@@ -24,6 +24,8 @@ export interface EvidenceStarterOpts {
    */
   sourceGraphResult?: {
     action?: string;
+    freshness?: { status: string; reason?: string };
+    status?: { ready: boolean };
     durableTables?: {
       source_graph_files?: number;
       source_graph_symbols?: number;
@@ -444,12 +446,17 @@ export function buildEvidenceStarters(
       dimKeywords.includes('structure') ||
       dimKeywords.includes('architecture'))
   ) {
+    const freshness = sourceGraphResult.freshness?.status;
+    const ready = freshness === 'fresh' && sourceGraphResult.status?.ready === true;
+    // 库存计数不证明覆盖完整；旧计数型调用方仍保留数据形状，但不再冒称就绪。
+    const coverage = ready ? '已就绪' : freshness ? `覆盖未就绪(${freshness})` : '完整性尚未确认';
     starters.sourceGraphInventory = {
-      hint: `source-graph 实体索引已就绪(${sourceGraphResult.action ?? 'built'}):可按符号级证据核对命名/结构断言`,
+      hint: `source-graph 实体索引${coverage}(${sourceGraphResult.action ?? 'built'}):核对命名/结构断言时需确认具体源码证据`,
       data: {
         files: sourceGraphResult.durableTables?.source_graph_files ?? 0,
         symbols: sourceGraphSymbols,
         edges: sourceGraphResult.durableTables?.source_graph_edges ?? 0,
+        ...(freshness ? { freshness, ready } : {}),
       },
     };
   }

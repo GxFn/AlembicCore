@@ -32,7 +32,7 @@ export class SourceGraphLifecycleService {
 
   async buildColdStartIndex(input: SourceGraphIndexOptions): Promise<SourceGraphLifecycleResult> {
     const build = await this.#service.buildFullIndex(input);
-    return lifecycleFromBuild('cold-start', 'built-full', build);
+    return lifecycleFromBuild('cold-start', build);
   }
 
   async catchUpOnStartup(input: SourceGraphIndexOptions): Promise<SourceGraphLifecycleResult> {
@@ -40,7 +40,7 @@ export class SourceGraphLifecycleService {
     const inspection = await this.#service.inspectFreshness(inspectionInput);
     if (!inspection.snapshot) {
       const build = await this.#service.buildFullIndex(input);
-      return lifecycleFromBuild('startup-catch-up', 'built-full', build);
+      return lifecycleFromBuild('startup-catch-up', build);
     }
     if (
       inspection.freshness.status === 'stale' ||
@@ -54,7 +54,7 @@ export class SourceGraphLifecycleService {
         changedFiles: inspection.changedFiles,
         deletedFiles: inspection.deletedFiles,
       });
-      return lifecycleFromBuild('startup-catch-up', 'built-incremental', build);
+      return lifecycleFromBuild('startup-catch-up', build);
     }
     return lifecycleFromInspection('startup-catch-up', 'fresh-noop', inspection, input);
   }
@@ -63,7 +63,7 @@ export class SourceGraphLifecycleService {
     input: SourceGraphIncrementalIndexOptions
   ): Promise<SourceGraphLifecycleResult> {
     const build = await this.#service.buildIncrementalIndex(input);
-    return lifecycleFromBuild('file-change', 'built-incremental', build);
+    return lifecycleFromBuild('file-change', build);
   }
 
   async inspect(input: SourceGraphIndexOptions): Promise<SourceGraphLifecycleResult> {
@@ -74,9 +74,11 @@ export class SourceGraphLifecycleService {
 
 function lifecycleFromBuild(
   reason: SourceGraphLifecycleReason,
-  action: SourceGraphLifecycleAction,
   build: SourceGraphIndexBuildResult
 ): SourceGraphLifecycleResult {
+  // 增量请求在身份变化/无base时会实际全量重建；动作必须反映已持久化的真实路径。
+  const action =
+    build.snapshot.metadata.mode === 'incremental' ? 'built-incremental' : 'built-full';
   return {
     operation: 'source-graph-lifecycle',
     reason,

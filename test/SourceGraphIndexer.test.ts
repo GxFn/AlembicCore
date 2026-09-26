@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import os from 'node:os';
@@ -5,6 +6,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
+import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
 import { pathGuard } from '../src/io.js';
 import { createAlembicRepositories } from '../src/repositories.js';
 import {
@@ -12,6 +14,7 @@ import {
   SourceGraphIndexer,
   SourceGraphService,
 } from '../src/service/source-graph/index.js';
+import { SourceGraphLifecycleService } from '../src/service/source-graph/SourceGraphLifecycle.js';
 import { createProjectDescriptor } from '../src/shared/ProjectScope.js';
 
 describe('SourceGraphIndexer', () => {
@@ -28,6 +31,7 @@ describe('SourceGraphIndexer', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     runtime.close();
     if (oldQuiet === undefined) {
       delete process.env.ALEMBIC_QUIET;
@@ -35,6 +39,233 @@ describe('SourceGraphIndexer', () => {
       process.env.ALEMBIC_QUIET = oldQuiet;
     }
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('persists actual SDK declarations without comment symbols, lost collisions or a replaced module anchor', async () => {
+    const content = [
+      'import {',
+      '  helper,',
+      "} from './util.js';",
+      "// import './ghost';",
+      '// export class Phantom {}',
+      'const text = "export class StringGhost {}";',
+      'export const load = () => helper();',
+      'export class A { get value() { return 1; } set value(input: number) {} run() {} }',
+      'export class B { run() {} }',
+      'export const module = 1;',
+    ].join('\n');
+    writeFixture('src/index.ts', content);
+    writeFixture('src/util.ts', 'export function helper() { return 1; }');
+    writeFixture('src/ghost.ts', 'export const ghost = 1;');
+    const { sourceGraphRepository } = createAlembicRepositories(runtime.connection);
+    const dataRoot = path.join(tmpDir, 'private');
+    const runtimeRoot = path.join(dataRoot, '.asd/codegraph-sessions');
+    const originalReplace = sourceGraphRepository.replaceGeneration.bind(sourceGraphRepository);
+    const publish = vi
+      .spyOn(sourceGraphRepository, 'replaceGeneration')
+      .mockImplementation(async (input) => {
+        // 最后一条符号不是提交点；SDK scope 必须先关闭，清理失败不能事后留下成功generation。
+        expect(fs.readdirSync(runtimeRoot)).toEqual([]);
+        return originalReplace(input);
+      });
+    const result = await new SourceGraphIndexer(sourceGraphRepository).buildFull({
+      projectRoot: tmpDir,
+      projectScope: 'src',
+      generationId: 'sdk-declarations',
+      codeGraph: { dataRoot },
+    });
+    expect(publish).toHaveBeenCalledOnce();
+    expect(result.status.ready).toBe(true);
+    expect(result.files.find((file) => file.repoRelativePath === 'src/index.ts')?.contentHash).toBe(
+      crypto.createHash('sha256').update(content).digest('hex')
+    );
+    const symbols = result.symbols.filter((symbol) => symbol.filePath === 'src/index.ts');
+    expect(symbols.map((symbol) => symbol.displayName)).not.toEqual(
+      expect.arrayContaining(['Phantom'])
+    );
+    expect(symbols.some((symbol) => symbol.displayName === 'StringGhost')).toBe(false);
+    expect(symbols.find((symbol) => symbol.symbolId === 'src/index.ts#load')).toMatchObject({
+      kind: 'variable',
+      metadata: { declarationKind: 'const' },
+    });
+    expect(symbols.map((symbol) => symbol.symbolId)).toEqual(
+      expect.arrayContaining(['src/index.ts#A', 'src/index.ts#A.run', 'src/index.ts#B.run'])
+    );
+    expect(symbols.find((symbol) => symbol.symbolId === 'src/index.ts#module')?.kind).toBe(
+      'module'
+    );
+    expect(symbols.find((symbol) => symbol.displayName === 'module')?.symbolId).not.toBe(
+      'src/index.ts#module'
+    );
+    expect(symbols.filter((symbol) => symbol.qualifiedName === 'A.value')).toHaveLength(2);
+    expect(new Set(symbols.map((symbol) => symbol.symbolId)).size).toBe(symbols.length);
+    expect(result.edges.map((edge) => [edge.fromFilePath, edge.toFilePath])).toEqual([
+      ['src/index.ts', 'src/util.ts'],
+    ]);
+    expect(result.edges[0].fromSymbolId).toBe('src/index.ts#module');
+  });
+
+  it('rebuilds a legacy generation with the actual SDK identity then reuses only the matching generation', async () => {
+    writeFixture('src/index.ts', 'export class App { run() { return 1; } }');
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const lifecycle = new SourceGraphLifecycleService(repository);
+    const input = { projectRoot: tmpDir, projectScope: 'src' };
+    const legacy = await lifecycle.catchUpOnStartup({
+      ...input,
+      generationId: 'legacy',
+      now: 1000,
+    });
+    expect(legacy.build?.symbols.some((symbol) => symbol.symbolId === 'src/index.ts#App.run')).toBe(
+      false
+    );
+    const sdkInput = { ...input, codeGraph: { dataRoot: path.join(tmpDir, 'private') } };
+    const sdk = await lifecycle.catchUpOnStartup({ ...sdkInput, generationId: 'sdk', now: 2000 });
+    expect(sdk.action).toBe('built-full');
+    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v1:');
+    expect(sdk.build?.symbols.some((symbol) => symbol.symbolId === 'src/index.ts#App.run')).toBe(
+      true
+    );
+    expect((await repository.getSnapshot('legacy'))?.extractionVersion).toBe(
+      'source-graph-indexer-v1'
+    );
+    const reopen = new SourceGraphLifecycleService(repository);
+    expect((await reopen.catchUpOnStartup({ ...sdkInput, now: 3000 })).action).toBe('fresh-noop');
+    writeFixture('src/index.ts', 'export class App { next() { return 22; } }');
+    const incremental = await reopen.catchUpOnStartup({
+      ...sdkInput,
+      generationId: 'sdk-next',
+      now: 4000,
+    });
+    expect(incremental.action).toBe('built-incremental');
+    expect(incremental.build?.symbols.map((symbol) => symbol.symbolId)).toContain(
+      'src/index.ts#App.next'
+    );
+    expect(incremental.build?.symbols.map((symbol) => symbol.symbolId)).not.toContain(
+      'src/index.ts#App.run'
+    );
+  });
+
+  it('uses one source text for SDK symbols and hashes even when the live file changes after the read', async () => {
+    const source = 'export const boundVersion = 1;';
+    writeFixture('src/index.mts', source);
+    const filePath = path.join(tmpDir, 'src/index.mts');
+    const read = fsPromises.readFile.bind(fsPromises);
+    let reads = 0;
+    vi.spyOn(fsPromises, 'readFile').mockImplementation(async (...args) => {
+      const result = await read(...args);
+      if (args[0] === filePath) {
+        reads += 1;
+        fs.writeFileSync(filePath, 'export const laterVersion = 2;');
+      }
+      return result;
+    });
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const result = await new SourceGraphIndexer(repository).buildFull({
+      projectRoot: tmpDir,
+      projectScope: 'src',
+      codeGraph: { dataRoot: path.join(tmpDir, 'private') },
+    });
+    expect(reads).toBe(1);
+    expect(result.files[0]).toMatchObject({
+      language: 'typescript',
+      contentHash: crypto.createHash('sha256').update(source).digest('hex'),
+    });
+    expect(result.symbols.map((symbol) => symbol.displayName)).toContain('boundVersion');
+    expect(result.symbols.map((symbol) => symbol.displayName)).not.toContain('laterVersion');
+  });
+
+  it.each([
+    'abort',
+    'failure',
+  ])('does not publish a generation when SDK cleanup ends with %s', async (mode) => {
+    writeFixture('src/index.ts', 'export const value = 1;');
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const indexer = new SourceGraphIndexer(repository);
+    const input = { projectRoot: tmpDir, projectScope: 'src' };
+    await indexer.buildFull({ ...input, generationId: 'prior' });
+    const controller = new AbortController();
+    const dataRoot = path.join(tmpDir, 'private');
+    const close = CodeGraphProcess.prototype.close;
+    const reason = new DOMException('Cancelled before generation publication', 'AbortError');
+    vi.spyOn(CodeGraphProcess.prototype, 'close').mockImplementation(async function (...args) {
+      await close.apply(this, args);
+      if (mode === 'abort') {
+        controller.abort(reason);
+      } else {
+        throw new Error('SDK cleanup failed');
+      }
+    });
+    await expect(
+      indexer.buildFull({
+        ...input,
+        generationId: 'cancelled',
+        codeGraph: { dataRoot },
+        signal: controller.signal,
+      })
+    ).rejects.toMatchObject({ message: mode === 'abort' ? reason.message : 'SDK cleanup failed' });
+    expect(await repository.getSnapshot('cancelled')).toBeNull();
+    expect(await repository.getSnapshot('prior')).not.toBeNull();
+    expect(fs.readdirSync(path.join(dataRoot, '.asd/codegraph-sessions'))).toEqual([]);
+  });
+
+  it('excludes the shared private runtime with custom exclusions and leaves another session untouched', async () => {
+    writeFixture('src/index.ts', 'export const value = 1;');
+    writeFixture('.asd/codegraph-sessions/other/config.json', '{}');
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const lifecycle = new SourceGraphLifecycleService(repository);
+    const input = { projectRoot: tmpDir, ignoreDirectories: [], codeGraph: { dataRoot: tmpDir } };
+    const result = await lifecycle.catchUpOnStartup(input);
+    expect(result.build?.files.map((file) => file.repoRelativePath)).toEqual(['src/index.ts']);
+    expect(result.freshness.status).toBe('fresh');
+    expect(fs.readdirSync(path.join(tmpDir, '.asd/codegraph-sessions'))).toEqual(['other']);
+    expect((await lifecycle.catchUpOnStartup(input)).action).toBe('fresh-noop');
+  });
+
+  it.each([
+    false,
+    true,
+  ])('does not treat an empty declared ProjectScope as permission to scan its control root (SDK=%s)', async (sdk) => {
+    writeFixture('loose.ts', 'export const outsideDeclaredScope = 1;');
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const dataRoot = path.join(tmpDir, 'private');
+    const projectScopeDescriptor = createProjectDescriptor({
+      controlRoot: tmpDir,
+      dataRoot,
+      folders: [],
+    });
+    await expect(
+      new SourceGraphIndexer(repository).buildFull({
+        projectRoot: tmpDir,
+        generationId: 'empty-declared-scope',
+        projectScopeDescriptor,
+        ...(sdk ? { codeGraph: { dataRoot } } : {}),
+      })
+    ).rejects.toThrow('source folder');
+    expect(await repository.getSnapshot('empty-declared-scope')).toBeNull();
+    expect(fs.existsSync(path.join(dataRoot, '.asd/codegraph-sessions'))).toBe(false);
+  });
+
+  it('reports real syntax and SDK coverage failures while a parser-marker string remains valid source', async () => {
+    writeFixture('src/broken.ts', 'export class Broken {');
+    writeFixture('src/namespace.ts', 'export namespace Models { export class Box {} }');
+    writeFixture('src/valid.ts', 'export const marker = "SOURCE_GRAPH_PARSE_FAILURE";');
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const result = await new SourceGraphIndexer(repository).buildFull({
+      projectRoot: tmpDir,
+      projectScope: 'src',
+      codeGraph: { dataRoot: path.join(tmpDir, 'private') },
+    });
+    expect(result.snapshot.status).toBe('partial');
+    expect(result.status.ready).toBe(false);
+    expect(result.files.map((file) => [file.repoRelativePath, file.parseStatus])).toEqual([
+      ['src/broken.ts', 'failed'],
+      ['src/namespace.ts', 'failed'],
+      ['src/valid.ts', 'parsed'],
+    ]);
+    expect(result.symbols.map((symbol) => symbol.displayName)).toContain('marker');
+    expect(result.diagnostics.every((diagnostic) => diagnostic.code === 'catch-up-failed')).toBe(
+      true
+    );
   });
 
   it('builds a full source graph generation with file inventory, symbols, imports, and fresh status', async () => {

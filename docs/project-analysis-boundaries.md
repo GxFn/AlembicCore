@@ -79,8 +79,41 @@ this 属性。普通SDK声明丢失时明确返回不可用，不以全量旧结
 
 1.6.0 对匿名默认声明、namespace 的投影不完整，本入口按真实 AST 形态返回明确的覆盖
 不可用；语法错误也不能因 SDK `errors=[]` 被认证为空成功。导出标志、已有非碰撞范围与
-类别保留兼容语义。imports/exports/call metadata、非JS语言、Guard和SourceGraph索引
-目前继续使用原生产方；不得把本入口描述成全部AST或完整图索引已经迁移。
+类别保留兼容语义。imports/exports/call metadata、非JS语言和Guard目前继续使用原生产方。
+SourceGraph的JS/TS符号可按下节显式接入；不得把这些入口描述成全部AST或完整图索引已迁移。
+
+## SourceGraph 索引接入
+
+已有 `SourceGraphLifecycleService` 接受
+`{ projectRoot, projectScopeDescriptor, codeGraph: { dataRoot }, signal }`。
+`dataRoot` 是宿主的绝对私有数据目录；传完整ProjectScope时，projectRoot应锚到它的
+controlRoot，保证各成员的文件路径相对于同一个根。未传codeGraph的旧入口保留原默认
+扫描范围和Node 22.0兼容；显式SDK入口需要Node 22.5+，并支持.mts/.cts。
+明确声明的ProjectScope没有源码folder时直接报告错误，不回退扫描controlRoot，也不发布
+空壳generation。未声明descriptor的旧单目录调用仍以projectRoot作为来源。
+
+ProjectContext和SourceGraph共用内部CodeGraph符号提取作用域，不重复维护worker生命周期。
+SourceGraph文件分析只读一次文本，符号、导入关系和裸SHA256文本hash都从该版本产生；
+它不借公共ProjectContext envelope重新读取live文件，也不创建第二份活动SDK源码数据库。
+导入证据复用Core已有多行/comment-aware生产方及ImportPathResolver，未引入SDK调用关系的
+猜测值。JS/TS按worker的串行处理节奏读取，避免把全仓文本同时排入IPC。
+
+普通符号ID保持path#name，新成员使用qualifiedName；真正碰撞才增加声明kind和真实范围。
+文件的#module锚点保留给库存/导入边，用户同名变量另行消歧。变量箭头绑定仍保持既有
+SourceGraph的variable类别。内部声明kind/range不进入ProjectContext公开SymbolSummary/ref。
+
+索引器、文件分析、配置身份分别负责代际编排、文本生产、继承判定。身份包含实际SDK
+engineHash、SourceGraph自身投影版本、有效scope/roots、扫描配置和解析预算。旧快照缺少
+完整身份，或任一策略变化时，必须全量重提取；禁止保留旧符号却给新快照换版本标签。
+旧generation仍可读取，查询/分页预算和SQLite同步事务不变。
+
+SDK作用域完全关闭、owner取消检查通过后才能提交generation；关闭失败或取消不得发布
+新代际。固定私有runtime父目录始终排除，即使调用方自定义ignoreDirectories；不会删除
+同目录中其它会话的资源。SDK覆盖缺口和真实语法失败会持久化为明确解析诊断。
+
+SourceGraph是live辅助观测，不自动继承certified input closure的保证。下游库存计数提示
+同时表达freshness/ready；部分覆盖不能被计数误称为完整就绪。旧默认提取分支的退出条件
+是所有公开lifecycle消费方明确提供私有目录，并统一Core最低Node版本后完成兼容迁移。
 
 ## 捕获期间的源码读取
 

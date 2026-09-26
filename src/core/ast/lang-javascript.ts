@@ -85,6 +85,8 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
         name,
         nameIsPlaceholder: !nameNode,
         matchingRange: astNodeRange(child),
+        declarationKind: name === 'constructor' ? 'constructor' : 'method',
+        declarationRange: astNodeRange(child),
         className,
         isClassMethod: isStatic,
         bodyLines,
@@ -100,6 +102,8 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
         ctx.properties.push({
           name,
           className,
+          declarationKind: 'property',
+          declarationRange: astNodeRange(child),
           isStatic,
           isConstant: false,
           line: child.startPosition.row + 1,
@@ -153,6 +157,8 @@ function _walkForThisAssignments(node: any, ctx: any, className: any, seen: Set<
             ctx.properties.push({
               name: prop.text,
               className,
+              declarationKind: 'property',
+              declarationRange: astNodeRange(child),
               // 此属性来自真实constructor this赋值，供CodeGraph兼容补充判别，不靠显示文本猜测。
               isConstructorAssignment: true,
               isStatic: false,
@@ -191,6 +197,8 @@ function _parseJSClass(node: any) {
   return {
     name,
     kind: 'class',
+    declarationKind: 'class',
+    declarationRange: astNodeRange(node),
     superclass,
     protocols: [],
     line: node.startPosition.row + 1,
@@ -206,6 +214,8 @@ function _parseJSFunction(node: any, className: any) {
   return {
     name,
     className,
+    declarationKind: 'function',
+    declarationRange: astNodeRange(node),
     isClassMethod: false,
     isAsync,
     bodyLines: body ? body.endPosition.row - body.startPosition.row + 1 : 0,
@@ -217,6 +227,10 @@ function _parseJSFunction(node: any, className: any) {
 }
 
 function _parseJSVariableDecl(node: any, ctx: any, parentClassName: any) {
+  const declarationKind = node.children.find(
+    (child: { type: string }) =>
+      child.type === 'const' || child.type === 'let' || child.type === 'var'
+  )?.type;
   for (const child of node.namedChildren) {
     if (child.type === 'variable_declarator') {
       const nameNode = child.namedChildren.find((c: any) => c.type === 'identifier');
@@ -228,6 +242,8 @@ function _parseJSVariableDecl(node: any, ctx: any, parentClassName: any) {
         ctx.methods.push({
           name: nameNode.text,
           matchingRange: astNodeRange(valueNode),
+          declarationKind,
+          declarationRange: astNodeRange(child),
           className: parentClassName,
           isClassMethod: false,
           bodyLines: body ? body.endPosition.row - body.startPosition.row + 1 : 0,

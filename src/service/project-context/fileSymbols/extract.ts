@@ -17,6 +17,8 @@ interface AstSymbolRecord {
   isConstructorAssignment?: unknown;
   matchingRange?: { startLine: number; endLine: number; startColumn?: number; endColumn?: number };
   nameIsPlaceholder?: boolean;
+  declarationKind?: unknown;
+  declarationRange?: ExtractedFileSymbol['range'];
 }
 
 interface AstFileSummaryLike {
@@ -86,6 +88,7 @@ function collectExtractedSymbols(input: {
     }
     const kind = normalizeClassKind(record.kind);
     symbols.push({
+      ...declarationEvidence(record),
       exported: isExported(name, range.startLine, input.lines, exportedNames),
       filePath: input.filePath,
       kind,
@@ -107,6 +110,7 @@ function collectExtractedSymbols(input: {
       continue;
     }
     symbols.push({
+      ...declarationEvidence(record),
       exported: isExported(name, range.startLine, input.lines, exportedNames),
       filePath: input.filePath,
       kind: 'interface',
@@ -131,6 +135,7 @@ function collectExtractedSymbols(input: {
     const container = readString(record.className);
     const kind = container ? (name === 'constructor' ? 'constructor' : 'method') : 'function';
     symbols.push({
+      ...declarationEvidence(record),
       container,
       ...(record.matchingRange ? { matchingRange: { ...record.matchingRange } } : {}),
       ...(record.nameIsPlaceholder ? { nameIsPlaceholder: true } : {}),
@@ -159,6 +164,7 @@ function collectExtractedSymbols(input: {
     }
     const container = readString(record.className);
     symbols.push({
+      ...declarationEvidence(record),
       container,
       ...(record.isConstructorParam === true
         ? { compatibilitySource: 'constructor-parameter-property' as const }
@@ -176,6 +182,16 @@ function collectExtractedSymbols(input: {
   }
 
   return symbols;
+}
+
+function declarationEvidence(
+  record: AstSymbolRecord
+): Pick<ExtractedFileSymbol, 'declarationKind' | 'declarationRange'> {
+  const declarationKind = readString(record.declarationKind);
+  return {
+    ...(declarationKind ? { declarationKind } : {}),
+    ...(record.declarationRange ? { declarationRange: { ...record.declarationRange } } : {}),
+  };
 }
 
 function normalizeClassKind(value: unknown): string {

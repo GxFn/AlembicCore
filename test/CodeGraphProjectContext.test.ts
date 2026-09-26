@@ -2,14 +2,18 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadPlugins } from '../src/core/ast/index.js';
 import type { FileSymbolContext } from '../src/domain/project-context/index.js';
 import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
 import { ProjectContext } from '../src/project-context.js';
 import { NodeProjectContextFoundationHostPorts } from '../src/projectContextFoundation.js';
+import { withCodeGraphSymbolExtractor } from '../src/service/code-analysis/withCodeGraphSymbolExtractor.js';
+import { readProjectContextAst } from '../src/service/project-context/analysis/astFacts.js';
 import {
   getCodeGraphProjectContextIdentity,
   withCodeGraphProjectContextSession,
 } from '../src/service/project-context/analysis/codeGraphSession.js';
+import { extractFileSymbolsFromSource } from '../src/service/project-context/fileSymbols/extract.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -28,6 +32,113 @@ async function fixture(text = 'export class Input {}') {
 }
 
 describe('CodeGraph ProjectContext production backend', () => {
+  it.each([
+    ['ts', 'const'],
+    ['ts', 'let'],
+    ['ts', 'var'],
+    ['js', 'const'],
+    ['js', 'let'],
+    ['js', 'var'],
+  ])(
+    'retains actual %s %s arrow binding evidence apart from the compatible display range',
+    async (extension, keyword) => {
+      const declaration = `/* 汉😀 */ export ${keyword} handler =`;
+      const initializer = '  (value) => value;';
+      const text = `${declaration}\r\n${initializer}\r\n`;
+      const result = await declarationEvidence(text, `binding.${extension}`);
+      expect(result.unavailableReason).toBeUndefined();
+      expect(result.symbols).toEqual([
+        expect.objectContaining({
+          name: 'handler',
+          kind: 'function',
+          declarationKind: keyword,
+          range: { startLine: 1, endLine: 1 },
+          matchingRange: {
+            startLine: 2,
+            startColumn: 2,
+            endLine: 2,
+            endColumn: initializer.length - 1,
+          },
+          declarationRange: {
+            startLine: 1,
+            startColumn: declaration.indexOf('handler'),
+            endLine: 2,
+            endColumn: initializer.length - 1,
+          },
+        }),
+      ]);
+    },
+    30_000
+  );
+
+  it('retains SDK-only variable and type declaration evidence without guessing let versus var', async () => {
+    const result = await declarationEvidence(
+      [
+        'const fixed = 1;',
+        'let mutable = 2;',
+        'var classic = 3;',
+        'export enum State { Ready }',
+        'export interface Shape { value: string }',
+      ].join('\r\n'),
+      'declarations.ts'
+    );
+    expect(result.unavailableReason).toBeUndefined();
+    for (const [name, declarationKind, line, column, endColumn] of [
+      ['fixed', 'constant', 1, 6, 15],
+      ['mutable', 'variable', 2, 4, 15],
+      ['classic', 'variable', 3, 4, 15],
+      ['State', 'enum', 4, 7, 27],
+      ['Shape', 'interface', 5, 7, 40],
+    ] as const) {
+      expect(result.symbols.find((symbol) => symbol.name === name)).toMatchObject({
+        declarationKind,
+        declarationRange: { startLine: line, endLine: line, startColumn: column, endColumn },
+      });
+    }
+  }, 30_000);
+
+  it('carries true declaration ranges for proven SDK compatibility supplements', async () => {
+    const declaration = 'export declare class Ambient { run(value: string): void; }';
+    const constructorText = 'export class Service { constructor(public name: string) {} }';
+    const result = await declarationEvidence(
+      `${declaration}\n${constructorText}`,
+      'supplements.ts'
+    );
+    expect(result.unavailableReason).toBeUndefined();
+    expect(result.symbols.find((symbol) => symbol.qualifiedName === 'Ambient.run')).toMatchObject({
+      declarationKind: 'method',
+      // method_signature的真实grammar节点不包含尾部分号。
+      declarationRange: {
+        startLine: 1,
+        endLine: 1,
+        startColumn: declaration.indexOf('run('),
+        endColumn: declaration.indexOf(';'),
+      },
+    });
+    expect(result.symbols.find((symbol) => symbol.qualifiedName === 'Service.name')).toMatchObject({
+      declarationKind: 'property',
+      declarationRange: {
+        startLine: 2,
+        endLine: 2,
+        startColumn: constructorText.indexOf('public name'),
+        endColumn: constructorText.indexOf(')'),
+      },
+    });
+    const javascript = 'class Example { constructor() { this.state = 1; } }';
+    const jsResult = await declarationEvidence(javascript, 'supplement.js');
+    expect(
+      jsResult.symbols.find((symbol) => symbol.qualifiedName === 'Example.state')
+    ).toMatchObject({
+      declarationKind: 'property',
+      declarationRange: {
+        startLine: 1,
+        endLine: 1,
+        startColumn: javascript.indexOf('this.state'),
+        endColumn: javascript.indexOf(';') + 1,
+      },
+    });
+  }, 30_000);
+
   it('extracts supplied text repeatedly and closes the actual SDK process and scratch', async () => {
     const input = await fixture('export class DiskOnly {}');
     const process = await CodeGraphProcess.open({ dataRoot: input.dataRoot });
@@ -296,6 +407,8 @@ describe('CodeGraph ProjectContext production backend', () => {
       ).toEqual(['Cache.#read', 'Cache.unknown']);
       expect(JSON.stringify(result)).not.toContain('nameIsPlaceholder');
       expect(JSON.stringify(result)).not.toContain('matchingRange');
+      expect(JSON.stringify(result)).not.toContain('declarationKind');
+      expect(JSON.stringify(result)).not.toContain('declarationRange');
     });
   }, 30_000);
 
@@ -588,3 +701,14 @@ describe('CodeGraph ProjectContext production backend', () => {
     expect(await fs.readdir(process.runtimeRoot)).toEqual([]);
   }, 30_000);
 });
+
+async function declarationEvidence(text: string, filePath: string) {
+  const { dataRoot } = await fixture();
+  await loadPlugins();
+  const input = { text, filePath, lineCount: text.split(/\r\n|\n|\r/).length };
+  const ast = readProjectContextAst(input, false);
+  const legacy = extractFileSymbolsFromSource(input, ast);
+  return withCodeGraphSymbolExtractor({ dataRoot }, (extractor) =>
+    extractor.extractSymbols(input, legacy)
+  );
+}

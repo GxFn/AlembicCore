@@ -34,6 +34,9 @@ export interface ExtractedFileSymbol {
   /** 真实AST位置仅用于不同生产方的对应；兼容输出仍使用原range。 */
   matchingRange?: SourceRangeSummary;
   nameIsPlaceholder?: boolean;
+  /** 内部声明证据：SourceGraph可保留变量绑定种类；不改变公开SymbolSummary或ref。 */
+  declarationKind?: string;
+  declarationRange?: SourceRangeSummary;
   /** 内部兼容证据，由真实AST节点生产，不进入公开SymbolSummary或ref。 */
   compatibilitySource?:
     | 'method-declaration'

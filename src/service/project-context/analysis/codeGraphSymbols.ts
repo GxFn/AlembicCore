@@ -58,7 +58,7 @@ export function normalizeCodeGraphSymbols(
           ? symbol.container === container && hasMatchingPosition(node, symbol)
           : symbol.name === node.name &&
             (symbol.qualifiedName ?? symbol.name) === qualifiedName &&
-            (symbol.matchingRange
+            (symbol.matchingRange || symbol.declarationRange
               ? hasMatchingPosition(node, symbol)
               : symbol.range.startLine === node.startLine)) &&
         (symbol.kind === projectedKind ||
@@ -89,6 +89,17 @@ export function normalizeCodeGraphSymbols(
         signature: sourceSignature(lines, node),
       };
     }
+    // 公开range保留兼容投影；声明位置供SourceGraph等内部消费者使用真实UTF16坐标。
+    // SDK的variable不能证明let/var，保留原kind，不制造不存在的关键字证据。
+    symbol.declarationKind = previous?.declarationKind ?? node.kind;
+    symbol.declarationRange = previous?.declarationRange
+      ? { ...previous.declarationRange }
+      : {
+          startLine: node.startLine,
+          endLine: node.endLine,
+          ...(node.startColumn === undefined ? {} : { startColumn: node.startColumn }),
+          ...(node.endColumn === undefined ? {} : { endColumn: node.endColumn }),
+        };
     mapped.push({ node, symbol });
   }
 
@@ -213,12 +224,14 @@ function selectEquivalentLegacy(
       symbol.exported,
       symbol.signature,
       symbol.compatibilitySource,
+      symbol.declarationKind,
+      symbol.declarationRange,
     ]);
   return candidates.every((symbol) => identity(symbol) === identity(first)) ? first : undefined;
 }
 
 function hasMatchingPosition(node: CodeGraphNode, previous: ExtractedFileSymbol): boolean {
-  const range = previous.matchingRange;
+  const range = previous.matchingRange ?? previous.declarationRange;
   // 使用真实AST节点/initializer范围，不再从泛型或声明文本猜测同一绑定。
   return (
     !!range &&

@@ -2,10 +2,6 @@ import crypto from 'node:crypto';
 import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import '../../core/ast/index.js';
-import { analyzeFile, isAvailable as isAstAvailable } from '../../core/AstAnalyzer.js';
-import { ImportPathResolver } from '../../core/analysis/ImportPathResolver.js';
-import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
 import {
   createSourceGraphDiagnostic,
   createSourceGraphFreshness,
@@ -13,9 +9,7 @@ import {
   type SourceFileNode,
   type SourceFileNodeInput,
   type SourceGraphDiagnostic,
-  type SourceGraphDiagnosticInput,
   type SourceGraphEdge,
-  type SourceGraphEdgeInput,
   type SourceGraphFreshness,
   type SourceGraphSnapshotStatus,
   type SourceSymbolNode,
@@ -24,129 +18,46 @@ import type {
   SourceGraphFreshnessReport,
   SourceGraphIndexBuildResult,
 } from '../../domain/source-graph/SourceGraphContracts.js';
+import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
+import { withCodeGraphSymbolExtractor } from '../code-analysis/withCodeGraphSymbolExtractor.js';
+import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
 import {
-  listProjectScopeFolders,
-  type ProjectDescriptor,
-  type ProjectFolderDescriptor,
-} from '../../shared/ProjectScope.js';
+  diagnosticsForRetainedFile,
+  type InventoryFile,
+  type ParsedFile,
+  parseInventoryFile,
+} from './SourceGraphFileAnalyzer.js';
+import { compareSourceGraphIndexIdentity } from './SourceGraphIndexIdentity.js';
 import {
-  JS_FAMILY_LANGUAGES,
-  resolveAstParserLanguage,
-} from '../project-context/shared/parserLanguage.js';
+  CODEGRAPH_PARSABLE_EXTENSIONS,
+  type NormalizedIndexOptions,
+  normalizeExtension,
+  normalizeIndexOptions,
+  normalizeRepoRelative,
+  PARSABLE_EXTENSIONS,
+  type SourceGraphFreshnessOptions,
+  type SourceGraphIncrementalIndexOptions,
+  type SourceGraphIndexOptions,
+} from './SourceGraphIndexOptions.js';
 
-export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v1';
-
-export interface SourceGraphIndexOptions {
-  projectRoot: string;
-  repoId?: string;
-  projectScope?: string;
-  projectScopeDescriptor?: ProjectDescriptor | null;
-  generationId?: string;
-  extractorVersion?: string;
-  now?: number;
-  includeExtensions?: string[];
-  ignoreDirectories?: string[];
-  maxFileSizeBytes?: number;
-  maxParseBytes?: number;
-}
-
-export interface SourceGraphIncrementalIndexOptions extends SourceGraphIndexOptions {
-  baseGenerationId?: string;
-  changedFiles?: string[];
-  deletedFiles?: string[];
-}
-
-// W4 批A(T1):IndexBuildResult/FreshnessReport 本体下沉 domain/source-graph 契约家;re-export 保表面。
 export type {
   SourceGraphFreshnessReport,
   SourceGraphIndexBuildResult,
 } from '../../domain/source-graph/SourceGraphContracts.js';
-
-export interface SourceGraphFreshnessOptions extends SourceGraphIndexOptions {
-  generationId?: string;
-}
-
-interface NormalizedIndexOptions {
-  projectRoot: string;
-  repoId: string;
-  projectScope?: string;
-  graphRoot: string;
-  graphRoots: string[];
-  extractorVersion: string;
-  now: number;
-  includeExtensions: Set<string>;
-  ignoreDirectories: Set<string>;
-  maxFileSizeBytes: number;
-  maxParseBytes: number;
-}
-
-interface InventoryFile {
-  absolutePath: string;
-  repoRelativePath: string;
-  language: string;
-  classification: SourceFileNodeInput['classification'];
-  sizeBytes: number;
-  mtimeMs: number;
-  extension: string;
-}
-
-interface ParsedFile {
-  file: SourceFileNodeInput;
-  symbols: SourceSymbolNode[];
-  edges: SourceGraphEdgeInput[];
-  diagnostics: SourceGraphDiagnosticInput[];
-}
-
-interface SourceGraphSourceRoots {
-  graphRoots: string[];
-  projectScope?: string;
-}
-
-const DEFAULT_INCLUDE_EXTENSIONS = [
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
-  '.json',
-  '.md',
-  '.mdx',
-  '.yml',
-  '.yaml',
-  '.swift',
-  '.py',
-  '.rb',
-  '.java',
-  '.kt',
-  '.go',
-  '.rs',
-  '.toml',
-];
-
-// Track2 激活真机复核(2026-07-10 BiliDili):私有排除表漏 '.build'(SPM 检出物),
-// 首次全量 1408 文件里 87% 是 .build 依赖源码——与 ReDoS 事故同源的污染入口。
-// 改为对齐共享排除家族(COMMON_SOURCE_SCAN_EXCLUDE_DIRS:含 .build/Pods/
-// DerivedData/Carthage 等),叠加本索引器的 workspace 运行时目录。
-const DEFAULT_IGNORE_DIRECTORIES = [
-  ...COMMON_SOURCE_SCAN_EXCLUDE_DIRS,
-  '.workspace-active',
-  '.workspace-local',
-  '.asd',
-  '.swiftpm',
-];
-
-const PARSABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-const DEFAULT_MAX_FILE_SIZE_BYTES = 512 * 1024;
-const DEFAULT_MAX_PARSE_BYTES = 256 * 1024;
+export type {
+  SourceGraphFreshnessOptions,
+  SourceGraphIncrementalIndexOptions,
+  SourceGraphIndexOptions,
+} from './SourceGraphIndexOptions.js';
+export { SOURCE_GRAPH_INDEXER_VERSION } from './SourceGraphIndexOptions.js';
 
 export class SourceGraphIndexer {
   constructor(private readonly repository: SourceGraphRepositoryImpl) {}
 
   async buildFull(input: SourceGraphIndexOptions): Promise<SourceGraphIndexBuildResult> {
-    const options = normalizeIndexOptions(input);
+    const options = await normalizeIndexOptions(input);
     const inventory = await collectInventory(options);
     return this.buildGeneration({
       options,
@@ -161,12 +72,28 @@ export class SourceGraphIndexer {
   async buildIncremental(
     input: SourceGraphIncrementalIndexOptions
   ): Promise<SourceGraphIndexBuildResult> {
-    const options = normalizeIndexOptions(input);
+    const options = await normalizeIndexOptions(input);
     const baseSnapshot = input.baseGenerationId
       ? await this.repository.getSnapshot(input.baseGenerationId)
       : await this.repository.getLatestSnapshot(options.projectRoot, options.repoId);
+    throwIfSourceReadAborted(options);
 
     if (!baseSnapshot) {
+      return this.buildFull(input);
+    }
+    const identityChange = compareSourceGraphIndexIdentity(baseSnapshot, options.indexIdentity);
+    if (identityChange) {
+      // 内容未变不等于事实可继承；同一次重建不能给旧符号/旧解析预算盖上新引擎身份。
+      Logger.getInstance().info(
+        'Source graph index identity changed; rebuilding the complete generation',
+        {
+          projectRoot: options.projectRoot,
+          baseGenerationId: baseSnapshot.generationId,
+          previousExtractorVersion: baseSnapshot.extractionVersion,
+          extractorVersion: options.extractorVersion,
+          reason: identityChange,
+        }
+      );
       return this.buildFull(input);
     }
 
@@ -193,7 +120,9 @@ export class SourceGraphIndexer {
         ? inventory
             .filter(
               (file) =>
-                PARSABLE_EXTENSIONS.has(file.extension) &&
+                (options.codeGraph ? CODEGRAPH_PARSABLE_EXTENSIONS : PARSABLE_EXTENSIONS).has(
+                  file.extension
+                ) &&
                 !changedSet.has(file.repoRelativePath) &&
                 !deletedSet.has(file.repoRelativePath)
             )
@@ -265,11 +194,57 @@ export class SourceGraphIndexer {
       ...input.inventory.map((file) => file.repoRelativePath),
       ...(input.preservedFiles ?? []).map((file) => file.repoRelativePath),
     ]);
-    const parsedFiles = await Promise.all(
-      input.inventory.map((file) =>
-        parseInventoryFile(file, input.options, input.generationId, knownPaths)
-      )
+    const parseFiles = async (extractor?: ProjectContextSymbolExtractor) => {
+      if (!extractor) {
+        return Promise.all(
+          input.inventory.map((file) =>
+            parseInventoryFile(file, input.options, input.generationId, knownPaths)
+          )
+        );
+      }
+      const parsed: ParsedFile[] = [];
+      // 单个SDK worker本来按序提取；逐文件读取避免同时把整仓文本堆入宿主/IPC队列。
+      for (const file of input.inventory) {
+        throwIfSourceReadAborted(input.options);
+        parsed.push(
+          await parseInventoryFile(file, input.options, input.generationId, knownPaths, extractor)
+        );
+      }
+      return parsed;
+    };
+    const codeGraph = input.options.codeGraph;
+    const hasEligibleFiles = input.inventory.some(
+      (file) =>
+        CODEGRAPH_PARSABLE_EXTENSIONS.has(file.extension) &&
+        file.sizeBytes <= input.options.maxParseBytes &&
+        file.sizeBytes <= input.options.maxFileSizeBytes
     );
+    let parsedFiles: ParsedFile[];
+    if (codeGraph && hasEligibleFiles) {
+      parsedFiles = await withCodeGraphSymbolExtractor(
+        { ...codeGraph, signal: input.options.signal },
+        async (extractor, runtime) => {
+          if (runtime.engineHash !== input.options.engineHash) {
+            throw new Error('Source graph CodeGraph identity changed before extraction.');
+          }
+          return parseFiles(extractor);
+        }
+      );
+    } else {
+      if (codeGraph) {
+        Logger.debug(
+          'Source graph does not open SDK without eligible JavaScript or TypeScript files',
+          {
+            generationId: input.generationId,
+            files: input.inventory.length,
+            reason: 'no-eligible-sdk-input',
+          }
+        );
+      }
+      parsedFiles = await parseFiles();
+    }
+    // worker真实退出后才提交SQLite；取消或清理失败不能留下一个“成功”的新generation。
+    throwIfSourceReadAborted(input.options);
     // 未重解析的文件仍保留上一代的解析缺口。只汇总本轮 diagnostics 会把
     // failed/skipped/partial 文件误报为 fresh；诊断从持久化 parseErrors 恢复，
     // 文件被重解析或删除后自然消失，不永久继承上一代整体降级状态。
@@ -302,6 +277,7 @@ export class SourceGraphIndexer {
       ...parsedFiles.flatMap((file) => file.edges),
     ];
     const status = chooseSnapshotStatus(filesForReplace, diagnostics);
+    throwIfSourceReadAborted(input.options);
     const snapshot = await this.repository.replaceGeneration({
       snapshot: {
         generationId: input.generationId,
@@ -322,6 +298,7 @@ export class SourceGraphIndexer {
           changedFiles: input.changedFiles,
           deletedFiles: input.deletedFiles,
           extractorVersion: input.options.extractorVersion,
+          indexIdentity: input.options.indexIdentity,
         },
       },
       files: filesForReplace,
@@ -357,10 +334,11 @@ export class SourceGraphFreshnessService {
   constructor(private readonly repository: SourceGraphRepositoryImpl) {}
 
   async inspect(input: SourceGraphFreshnessOptions): Promise<SourceGraphFreshnessReport> {
-    const options = normalizeIndexOptions(input);
+    const options = await normalizeIndexOptions(input);
     const snapshot = input.generationId
       ? await this.repository.getSnapshot(input.generationId)
       : await this.repository.getLatestSnapshot(options.projectRoot, options.repoId);
+    throwIfSourceReadAborted(options);
 
     if (!snapshot) {
       const freshness = createSourceGraphFreshness({
@@ -390,10 +368,54 @@ export class SourceGraphFreshnessService {
       };
     }
 
+    const identityChange = compareSourceGraphIndexIdentity(snapshot, options.indexIdentity);
+    if (identityChange) {
+      const reason =
+        'Source graph extraction identity or indexing policy changed; a full rebuild is required.';
+      Logger.getInstance().info(reason, {
+        generationId: snapshot.generationId,
+        previousExtractorVersion: snapshot.extractionVersion,
+        extractorVersion: options.extractorVersion,
+        reason: identityChange,
+      });
+      const freshness = createSourceGraphFreshness({
+        status: 'stale',
+        checkedAt: options.now,
+        generationId: snapshot.generationId,
+        indexedAt: snapshot.indexedAt,
+        reason,
+        nextAction: 'rebuild_source_graph',
+      });
+      const diagnostics = [
+        createSourceGraphDiagnostic({
+          code: 'source-ref-unproven',
+          message: reason,
+          nextAction: 'rebuild_source_graph',
+          metadata: { reason: identityChange, expectedIdentity: options.indexIdentity.hash },
+        }),
+      ];
+      return {
+        snapshot,
+        freshness,
+        diagnostics,
+        changedFiles: [],
+        deletedFiles: [],
+        status: createSourceGraphStatusResult({
+          generationId: snapshot.generationId,
+          projectRoot: snapshot.projectRoot,
+          repoId: snapshot.repoId,
+          freshness,
+          snapshot,
+          diagnostics,
+        }),
+      };
+    }
+
     const inventory = await collectInventory(options);
     const currentByPath = new Map(inventory.map((file) => [file.repoRelativePath, file]));
     const baseFiles = await this.repository.listFiles(snapshot.generationId);
     const detected = await detectChangedFiles(options, baseFiles, currentByPath);
+    throwIfSourceReadAborted(options);
     const isStale = detected.changedFiles.length > 0 || detected.deletedFiles.length > 0;
     const freshness = isStale
       ? createSourceGraphFreshness({
@@ -443,57 +465,8 @@ export class SourceGraphFreshnessService {
   }
 }
 
-function normalizeIndexOptions(input: SourceGraphIndexOptions): NormalizedIndexOptions {
-  const projectRoot = path.resolve(input.projectRoot);
-  const projectScope = normalizeProjectScope(input.projectScope);
-  const sourceRoots = resolveSourceGraphSourceRoots(projectRoot, input, projectScope);
-  const graphRoot = projectScope ? path.join(projectRoot, projectScope) : projectRoot;
-  return {
-    projectRoot,
-    repoId: input.repoId?.trim() || 'default',
-    projectScope: projectScope ?? sourceRoots.projectScope,
-    graphRoot,
-    graphRoots: sourceRoots.graphRoots,
-    extractorVersion: input.extractorVersion?.trim() || SOURCE_GRAPH_INDEXER_VERSION,
-    now: input.now ?? Date.now(),
-    includeExtensions: new Set(
-      (input.includeExtensions ?? DEFAULT_INCLUDE_EXTENSIONS).map(normalizeExtension)
-    ),
-    ignoreDirectories: new Set(input.ignoreDirectories ?? DEFAULT_IGNORE_DIRECTORIES),
-    maxFileSizeBytes: input.maxFileSizeBytes ?? DEFAULT_MAX_FILE_SIZE_BYTES,
-    maxParseBytes: input.maxParseBytes ?? DEFAULT_MAX_PARSE_BYTES,
-  };
-}
-
-function resolveSourceGraphSourceRoots(
-  projectRoot: string,
-  input: SourceGraphIndexOptions,
-  projectScope: string | undefined
-): SourceGraphSourceRoots {
-  if (projectScope) {
-    return { graphRoots: [path.join(projectRoot, projectScope)], projectScope };
-  }
-
-  const explicitFolders = activeProjectScopeFolders(input.projectScopeDescriptor);
-  if (explicitFolders.length > 0) {
-    return {
-      graphRoots: explicitFolders.map((folder) => folder.path),
-      projectScope: input.projectScopeDescriptor?.projectScopeId,
-    };
-  }
-
-  return { graphRoots: [projectRoot], projectScope: undefined };
-}
-
-function activeProjectScopeFolders(
-  projectScope: ProjectDescriptor | null | undefined
-): ProjectFolderDescriptor[] {
-  return projectScope
-    ? listProjectScopeFolders(projectScope).filter((folder) => folder.state === 'active')
-    : [];
-}
-
 async function collectInventory(options: NormalizedIndexOptions): Promise<InventoryFile[]> {
+  throwIfSourceReadAborted(options);
   const files: InventoryFile[] = [];
   for (const graphRoot of options.graphRoots) {
     await walkDirectory(graphRoot, options, files);
@@ -506,8 +479,19 @@ async function walkDirectory(
   options: NormalizedIndexOptions,
   files: InventoryFile[]
 ): Promise<void> {
+  throwIfSourceReadAborted(options);
   let entries: Dirent[];
   try {
+    if (
+      options.privateRuntimeRoot &&
+      (await fs.realpath(directory)) === options.privateRuntimeRoot
+    ) {
+      Logger.debug('Source graph excludes its private SDK runtime directory', {
+        directory,
+        reason: 'codegraph-runtime',
+      });
+      return;
+    }
     entries = await fs.readdir(directory, { withFileTypes: true });
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
@@ -522,6 +506,7 @@ async function walkDirectory(
     throw error;
   }
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    throwIfSourceReadAborted(options);
     const absolutePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
       if (!options.ignoreDirectories.has(entry.name)) {
@@ -549,410 +534,6 @@ async function walkDirectory(
   }
 }
 
-async function parseInventoryFile(
-  file: InventoryFile,
-  options: NormalizedIndexOptions,
-  generationId: string,
-  knownPaths: Set<string>
-): Promise<ParsedFile> {
-  const content = await fs.readFile(file.absolutePath, 'utf8');
-  const contentHash = crypto.createHash('sha256').update(content).digest('hex');
-  const lineCount = countLines(content);
-  const baseFile: SourceFileNodeInput = {
-    generationId,
-    projectRoot: options.projectRoot,
-    repoRelativePath: file.repoRelativePath,
-    language: file.language,
-    contentHash,
-    sizeBytes: file.sizeBytes,
-    mtimeMs: file.mtimeMs,
-    indexedAt: options.now,
-    classification: file.classification,
-    parseStatus: 'parsed',
-    lineCount,
-    metadata: {
-      extractorVersion: options.extractorVersion,
-    },
-  };
-
-  if (file.sizeBytes > options.maxFileSizeBytes) {
-    return skippedFile(
-      baseFile,
-      'large-file-skipped',
-      'File exceeded source graph index size limit.'
-    );
-  }
-  if (!PARSABLE_EXTENSIONS.has(file.extension)) {
-    // Track2-b(2026-07-11 决策③生态补全):非 JS 系但 AstAnalyzer 支持的语言
-    // (swift/objectivec/kotlin/python/go/rust/dart…)走 AST 符号抽取——此前一律
-    // skipped,BiliDili(纯 Swift)source_graph 恒 0 实体。预算闸(maxParseBytes)
-    // 对 AST 路径同样生效;AST 不可用/解析失败按 failed 降级,files 行保留。
-    const astLanguage = resolveAstParserLanguage(file.repoRelativePath, file.language);
-    if (astLanguage && !JS_FAMILY_LANGUAGES.has(astLanguage)) {
-      if (file.sizeBytes > options.maxParseBytes) {
-        return partialFile(baseFile, 'parser-timeout', 'File exceeded source graph parser budget.');
-      }
-      return parseAstFile(content, baseFile, file, generationId, options, lineCount, astLanguage);
-    }
-    return skippedFile(
-      baseFile,
-      'unsupported-language',
-      `Unsupported source graph language: ${file.language}.`
-    );
-  }
-  if (file.sizeBytes > options.maxParseBytes) {
-    return partialFile(baseFile, 'parser-timeout', 'File exceeded source graph parser budget.');
-  }
-  if (content.includes('SOURCE_GRAPH_PARSE_FAILURE')) {
-    return failedFile(baseFile, 'Source graph parser failed for this file.');
-  }
-
-  const symbols = extractSymbols(content, file, generationId, options.extractorVersion, lineCount);
-  const edges = extractImportEdges(content, file, generationId, knownPaths);
-  return {
-    file: baseFile,
-    symbols,
-    edges,
-    diagnostics: [],
-  };
-}
-
-/** AstAnalyzer 的 summary 记录最小读取形态(与 fileSymbols 适配层同源语义)。 */
-interface AstSymbolRecordLike {
-  name?: unknown;
-  kind?: unknown;
-  line?: unknown;
-  endLine?: unknown;
-  className?: unknown;
-}
-
-interface AstSummaryLike {
-  classes?: AstSymbolRecordLike[];
-  protocols?: AstSymbolRecordLike[];
-  methods?: AstSymbolRecordLike[];
-  properties?: AstSymbolRecordLike[];
-  imports?: Array<{ specifier?: unknown } | string>;
-}
-
-/**
- * Track2-b:AST 语言的符号/导入抽取。产出契约与正则版 extractSymbols 完全同型
- * (symbolId=path#name/range/provenance),消费方(仓储/查询)零改动。
- * Swift 等模块名导入解析不到仓内文件(与 JS 相对导入语义不同),本期不产伪 file
- * 边——imports 证据留待模块名 join 需求(与 Track1 同语义)单独立项。
- */
-function parseAstFile(
-  content: string,
-  baseFile: SourceFileNodeInput,
-  file: InventoryFile,
-  generationId: string,
-  options: NormalizedIndexOptions,
-  lineCount: number,
-  astLanguage: string
-): ParsedFile {
-  if (!isAstAvailable()) {
-    return failedFile(baseFile, `AST runtime unavailable for language ${astLanguage}.`);
-  }
-  let summary: AstSummaryLike | null = null;
-  try {
-    summary = analyzeFile(content, astLanguage, { extractCallSites: false }) as AstSummaryLike;
-  } catch (error) {
-    return failedFile(
-      baseFile,
-      `AST parse failed for ${astLanguage}: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-  if (!summary) {
-    return failedFile(baseFile, `AST parser returned no summary for ${astLanguage}.`);
-  }
-
-  const symbols: SourceSymbolNode[] = [
-    moduleSymbolFromInventory(file, generationId, options.extractorVersion, lineCount),
-  ];
-  const pushSymbol = (record: AstSymbolRecordLike, kind: string) => {
-    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : null;
-    if (!name) {
-      return;
-    }
-    const startLine =
-      typeof record.line === 'number' && record.line >= 1 ? Math.trunc(record.line) : 1;
-    const endLine =
-      typeof record.endLine === 'number' && record.endLine >= startLine
-        ? Math.trunc(record.endLine)
-        : startLine;
-    const container =
-      typeof record.className === 'string' && record.className.trim()
-        ? record.className.trim()
-        : null;
-    symbols.push({
-      generationId,
-      symbolId: `${file.repoRelativePath}#${container ? `${container}.` : ''}${name}`,
-      displayName: name,
-      qualifiedName: container ? `${container}.${name}` : name,
-      kind,
-      filePath: file.repoRelativePath,
-      range: { startLine, startColumn: 0, endLine, endColumn: 0 },
-      exported: false,
-      imported: false,
-      metadata: {
-        extractorVersion: options.extractorVersion,
-        declarationKind: kind,
-        astLanguage,
-      },
-      provenance: {
-        extractor: 'source-graph-ast-symbols',
-      },
-    });
-  };
-  for (const record of summary.classes ?? []) {
-    pushSymbol(record, 'class');
-  }
-  for (const record of summary.protocols ?? []) {
-    pushSymbol(record, 'interface');
-  }
-  for (const record of summary.methods ?? []) {
-    pushSymbol(record, 'function');
-  }
-  for (const record of summary.properties ?? []) {
-    pushSymbol(record, 'variable');
-  }
-
-  return {
-    file: baseFile,
-    symbols,
-    edges: [],
-    diagnostics: [],
-  };
-}
-
-function skippedFile(
-  file: SourceFileNodeInput,
-  code: 'large-file-skipped' | 'unsupported-language',
-  message: string
-): ParsedFile {
-  return {
-    file: {
-      ...file,
-      parseStatus: 'skipped',
-      parseErrors: [{ message, severity: 'warning', code }],
-    },
-    symbols: [],
-    edges: [],
-    diagnostics: [
-      {
-        code,
-        message,
-        filePath: file.repoRelativePath,
-      },
-    ],
-  };
-}
-
-function partialFile(
-  file: SourceFileNodeInput,
-  code: 'parser-timeout',
-  message: string
-): ParsedFile {
-  return {
-    file: {
-      ...file,
-      parseStatus: 'partial',
-      parseErrors: [{ message, severity: 'warning', code }],
-    },
-    symbols: [moduleSymbol(file, 1)],
-    edges: [],
-    diagnostics: [
-      {
-        code,
-        message,
-        filePath: file.repoRelativePath,
-      },
-    ],
-  };
-}
-
-function failedFile(file: SourceFileNodeInput, message: string): ParsedFile {
-  return {
-    file: {
-      ...file,
-      parseStatus: 'failed',
-      parseErrors: [{ message, severity: 'error', code: 'parse-failed' }],
-    },
-    symbols: [],
-    edges: [],
-    diagnostics: [
-      {
-        code: 'catch-up-failed',
-        message,
-        filePath: file.repoRelativePath,
-        metadata: { parseErrorCode: 'parse-failed' },
-      },
-    ],
-  };
-}
-
-function diagnosticsForRetainedFile(file: SourceFileNode): SourceGraphDiagnosticInput[] {
-  if (file.parseErrors.length === 0) {
-    return file.parseStatus === 'parsed'
-      ? []
-      : [
-          {
-            code: 'catch-up-failed',
-            message: `Retained source graph file has ${file.parseStatus} parsing coverage.`,
-            filePath: file.repoRelativePath,
-            metadata: { parseStatus: file.parseStatus },
-          },
-        ];
-  }
-  return file.parseErrors.map((error) => {
-    if (
-      error.code === 'large-file-skipped' ||
-      error.code === 'unsupported-language' ||
-      error.code === 'parser-timeout'
-    ) {
-      return { code: error.code, message: error.message, filePath: file.repoRelativePath };
-    }
-    // parse-failed 是文件级错误码；查询诊断保持 failedFile 使用的 catch-up-failed。
-    // 未知旧错误码也不能被当成已解析成功，保留原码供后续核验。
-    return {
-      code: 'catch-up-failed',
-      message: error.message,
-      filePath: file.repoRelativePath,
-      metadata: error.code ? { parseErrorCode: error.code } : undefined,
-    };
-  });
-}
-
-function extractSymbols(
-  content: string,
-  file: InventoryFile,
-  generationId: string,
-  extractorVersion: string,
-  lineCount: number
-): SourceSymbolNode[] {
-  const symbols: SourceSymbolNode[] = [
-    moduleSymbolFromInventory(file, generationId, extractorVersion, lineCount),
-  ];
-  const lines = content.split(/\r\n|\n|\r/);
-  const symbolPattern =
-    /\b(export\s+)?(?:abstract\s+)?(class|interface|enum|function|type|const|let|var)\s+([A-Za-z_$][\w$]*)/g;
-  for (const [index, line] of lines.entries()) {
-    for (const match of line.matchAll(symbolPattern)) {
-      const kind = symbolKindForDeclaration(match[2]);
-      const displayName = match[3];
-      symbols.push({
-        generationId,
-        symbolId: `${file.repoRelativePath}#${displayName}`,
-        displayName,
-        qualifiedName: displayName,
-        kind,
-        filePath: file.repoRelativePath,
-        range: {
-          startLine: index + 1,
-          startColumn: match.index ?? 0,
-          endLine: index + 1,
-          endColumn: (match.index ?? 0) + match[0].length,
-        },
-        exported: Boolean(match[1]),
-        imported: false,
-        metadata: {
-          extractorVersion,
-          declarationKind: match[2],
-        },
-        provenance: {
-          extractor: 'source-graph-regex-symbols',
-        },
-      });
-    }
-  }
-  return symbols;
-}
-
-function moduleSymbolFromInventory(
-  file: InventoryFile,
-  generationId: string,
-  extractorVersion: string,
-  lineCount: number
-): SourceSymbolNode {
-  return {
-    generationId,
-    symbolId: `${file.repoRelativePath}#module`,
-    displayName: path.basename(file.repoRelativePath),
-    qualifiedName: file.repoRelativePath,
-    kind: 'module',
-    filePath: file.repoRelativePath,
-    range: { startLine: 1, startColumn: 0, endLine: Math.max(1, lineCount), endColumn: 0 },
-    exported: true,
-    imported: false,
-    metadata: {
-      extractorVersion,
-      language: file.language,
-    },
-    provenance: {
-      extractor: 'source-graph-file-inventory',
-    },
-  };
-}
-
-function moduleSymbol(file: SourceFileNodeInput, lineCount: number): SourceSymbolNode {
-  return {
-    generationId: file.generationId,
-    symbolId: `${file.repoRelativePath}#module`,
-    displayName: path.basename(file.repoRelativePath),
-    qualifiedName: file.repoRelativePath,
-    kind: 'module',
-    filePath: file.repoRelativePath,
-    range: { startLine: 1, startColumn: 0, endLine: Math.max(1, lineCount), endColumn: 0 },
-    exported: true,
-    imported: false,
-    metadata: {
-      language: file.language,
-    },
-    provenance: {
-      extractor: 'source-graph-file-inventory',
-    },
-  };
-}
-
-function extractImportEdges(
-  content: string,
-  file: InventoryFile,
-  generationId: string,
-  knownPaths: Set<string>
-): SourceGraphEdgeInput[] {
-  const lines = content.split(/\r\n|\n|\r/);
-  const edges: SourceGraphEdgeInput[] = [];
-  const importPattern =
-    /\bimport\s+(?:type\s+)?(?:[^'"()]*?\s+from\s+)?['"]([^'"]+)['"]|\brequire\(\s*['"]([^'"]+)['"]\s*\)/g;
-  for (const [index, line] of lines.entries()) {
-    for (const match of line.matchAll(importPattern)) {
-      const specifier = match[1] ?? match[2];
-      const target = resolveRelativeImport(file.repoRelativePath, specifier, knownPaths);
-      if (!target) {
-        continue;
-      }
-      edges.push({
-        generationId,
-        edgeId: `${file.repoRelativePath}:imports:${target}`,
-        kind: 'imports',
-        fromSymbolId: `${file.repoRelativePath}#module`,
-        fromFilePath: file.repoRelativePath,
-        toFilePath: target,
-        siteFilePath: file.repoRelativePath,
-        site: {
-          startLine: index + 1,
-          startColumn: match.index ?? 0,
-          endLine: index + 1,
-          endColumn: (match.index ?? 0) + match[0].length,
-        },
-        provenance: 'deterministic',
-        confidence: 1,
-        source: specifier,
-      });
-    }
-  }
-  return edges;
-}
-
 async function detectChangedFiles(
   options: NormalizedIndexOptions,
   baseFiles: SourceFileNode[],
@@ -963,13 +544,17 @@ async function detectChangedFiles(
   const baseByPath = new Map(baseFiles.map((file) => [file.repoRelativePath, file]));
 
   for (const baseFile of baseFiles) {
+    throwIfSourceReadAborted(options);
     const current = currentByPath.get(baseFile.repoRelativePath);
     if (!current) {
       deletedFiles.add(baseFile.repoRelativePath);
       continue;
     }
     if (current.sizeBytes !== baseFile.sizeBytes || current.mtimeMs !== baseFile.mtimeMs) {
-      const content = await fs.readFile(current.absolutePath, 'utf8');
+      const content = await fs.readFile(current.absolutePath, {
+        encoding: 'utf8',
+        signal: options.signal,
+      });
       const hash = crypto.createHash('sha256').update(content).digest('hex');
       if (hash !== baseFile.contentHash) {
         changedFiles.add(current.repoRelativePath);
@@ -1032,29 +617,6 @@ function summarizeDegradedReason(diagnostics: SourceGraphDiagnostic[]): string |
   return Array.from(new Set(diagnostics.map((diagnostic) => diagnostic.code))).join(',');
 }
 
-function resolveRelativeImport(
-  currentFile: string,
-  specifier: string,
-  knownPaths: Set<string>
-): string | undefined {
-  if (!specifier.startsWith('.')) {
-    return undefined;
-  }
-  const base = normalizeRepoRelative(
-    path.posix.normalize(path.posix.join(path.posix.dirname(currentFile), specifier))
-  );
-  return (
-    ImportPathResolver.resolveIndexedFile(base, (requestedPath) => {
-      const candidates = [
-        requestedPath,
-        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}${extension}`),
-        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}/index${extension}`),
-      ];
-      return candidates.find((candidate) => knownPaths.has(candidate));
-    }) ?? undefined
-  );
-}
-
 function edgeTouchesFiles(edge: SourceGraphEdge, impacted: Set<string>): boolean {
   return (
     (edge.fromFilePath !== undefined && impacted.has(edge.fromFilePath)) ||
@@ -1075,29 +637,16 @@ function normalizeInputPath(input: string, projectRoot: string): string {
   return normalizeRepoRelative(trimmed);
 }
 
-function normalizeProjectScope(scope: string | undefined): string | undefined {
-  if (!scope?.trim()) {
-    return undefined;
-  }
-  return normalizeRepoRelative(scope);
-}
-
 function toRepoRelative(projectRoot: string, absolutePath: string): string {
   return normalizeRepoRelative(path.relative(projectRoot, absolutePath));
-}
-
-function normalizeRepoRelative(value: string): string {
-  return value.replaceAll(path.sep, '/').replace(/^\.\//, '');
-}
-
-function normalizeExtension(extension: string): string {
-  return extension.startsWith('.') ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
 }
 
 function languageForExtension(extension: string): string {
   switch (extension) {
     case '.ts':
     case '.tsx':
+    case '.mts':
+    case '.cts':
       return 'typescript';
     case '.js':
     case '.jsx':
@@ -1152,31 +701,6 @@ function classificationForPath(filePath: string): SourceFileNodeInput['classific
     return 'generated';
   }
   return 'source';
-}
-
-function symbolKindForDeclaration(kind: string): SourceSymbolNode['kind'] {
-  switch (kind) {
-    case 'class':
-      return 'class';
-    case 'interface':
-      return 'interface';
-    case 'enum':
-      return 'enum';
-    case 'function':
-      return 'function';
-    case 'type':
-      return 'type';
-    case 'const':
-    case 'let':
-    case 'var':
-      return 'variable';
-    default:
-      return 'unknown';
-  }
-}
-
-function countLines(content: string): number {
-  return Math.max(1, content.split(/\r\n|\n|\r/).length);
 }
 
 function createGenerationId(repoId: string, now: number): string {
