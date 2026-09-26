@@ -12,8 +12,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { analyzeFile, analyzeProject, isAvailable } from '../src/core/AstAnalyzer.js';
+import { analyzeFile, analyzeProject, isAvailable, parseToTree } from '../src/core/AstAnalyzer.js';
 import { CallGraphAnalyzer } from '../src/core/analysis/CallGraphAnalyzer.js';
+import { type CallSiteInfo, extractCallSitesTS } from '../src/core/analysis/CallSiteExtractor.js';
 import { ImportPathResolver } from '../src/core/analysis/ImportPathResolver.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
 import ProjectGraph from '../src/core/ast/ProjectGraph.js';
@@ -36,6 +37,203 @@ beforeAll(async () => {
 });
 
 describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/GoSupport)', () => {
+  it('assigns nested named function calls to the actual inner owner', () => {
+    const source =
+      'function outer() { function inner() { target(); } inner(); register(() => later()); }';
+    const { callSites } = callEvidence(source);
+    expect(callSites.find((call) => call.callee === 'target')).toMatchObject({
+      callerMethod: 'inner',
+      callerClass: null,
+      callerQualifiedName: 'outer.inner',
+      callerRange: {
+        startLine: 1,
+        startColumn: source.indexOf('function inner'),
+        endLine: 1,
+        endColumn: source.indexOf('} inner') + 1,
+      },
+    });
+    expect(callSites.find((call) => call.callee === 'inner')).toMatchObject({
+      callerMethod: 'outer',
+      callerQualifiedName: 'outer',
+    });
+    expect(callSites.find((call) => call.callee === 'later')).toMatchObject({
+      callerMethod: '<anonymous>',
+      callerQualifiedName: 'outer.<anonymous>',
+    });
+  });
+
+  it('walks callee chains and arguments exactly once with actual expression ranges', () => {
+    const source = 'function run() { factory().send(inner()); foo().foo(); }';
+    const { callSites } = callEvidence(source);
+    expect(callSites.map((call) => call.calleeExpression)).toEqual([
+      'factory().send',
+      'factory',
+      'inner',
+      'foo().foo',
+      'foo',
+    ]);
+    expect(callSites).toHaveLength(5);
+    const callsAtFactory = callSites.filter(
+      (call) => call.matchingRange?.startColumn === source.indexOf('factory')
+    );
+    expect(callsAtFactory.map((call) => call.matchingRange?.endColumn)).toEqual([
+      source.indexOf(';'),
+      source.indexOf('factory') + 'factory()'.length,
+    ]);
+    expect(callSites.filter((call) => call.calleeExpression === 'factory')).toHaveLength(1);
+  });
+
+  it('keeps await through parentheses and counts syntax arguments without comments', () => {
+    const { callSites } = callEvidence(
+      'async function run() { await (send(/* note */ inner(), ...rest)); }'
+    );
+    expect(callSites.find((call) => call.callee === 'send')).toMatchObject({
+      isAwait: true,
+      argCount: 2,
+    });
+    expect(callSites.find((call) => call.callee === 'inner')).toMatchObject({
+      isAwait: false,
+      argCount: 0,
+    });
+  });
+
+  it.each([
+    { expression: '(helper)', callee: 'helper', receiver: null, callType: 'function' },
+    { expression: '(client.send)', callee: 'send', receiver: 'client', callType: 'method' },
+  ])('unwraps the actual parenthesized callee $expression without rewriting its expression evidence', ({
+    expression,
+    callee,
+    receiver,
+    callType,
+  }) => {
+    const source = `function run() { ${expression}(1); }`;
+    const { callSites } = callEvidence(source);
+    expect(callSites).toHaveLength(1);
+    expect(callSites[0]).toMatchObject({
+      callee,
+      receiver,
+      callType,
+      calleeExpression: expression,
+      argCount: 1,
+    });
+  });
+
+  it('records receiver syntax from literal AST nodes without claiming a project target', () => {
+    const { callSites } = callEvidence('function run() { ["x"].includes("x"); /x/.test("x"); }');
+    expect(callSites).toMatchObject([
+      { callee: 'includes', receiver: '["x"]', receiverSyntax: 'array' },
+      { callee: 'test', receiver: '/x/', receiverSyntax: 'regex' },
+    ]);
+    expect(callSites.every((call) => call.calleeQualifiedName === undefined)).toBe(true);
+  });
+
+  it('records top-level and class-arrow calls with real program and declaration owners', () => {
+    const source =
+      'bootstrap();\nconst run = () => top();\nclass Service { field = () => member(); run() { inside(); } }\n';
+    const { callSites } = callEvidence(source);
+    expect(callSites.map((call) => call.callee)).toEqual(['bootstrap', 'top', 'member', 'inside']);
+    expect(callSites[0]).toMatchObject({
+      callerMethod: '<module>',
+      callerClass: null,
+      callerQualifiedName: '<module>',
+      callerRange: { startLine: 1, startColumn: 0, endLine: 4, endColumn: 0 },
+    });
+    expect(callSites.find((call) => call.callee === 'member')).toMatchObject({
+      callerMethod: 'field',
+      callerClass: 'Service',
+      callerQualifiedName: 'Service.field',
+      callerRange: { startLine: 3, startColumn: 16 },
+    });
+  });
+
+  it('keeps same-line owners and UTF16 positions distinct across CRLF text', () => {
+    const source = '/* 汉😀 */ class A { run() { first(); } } class B { run() { second(); } }\r\n';
+    const { callSites } = callEvidence(source);
+    expect(callSites.map((call) => call.callerQualifiedName)).toEqual(['A.run', 'B.run']);
+    for (const [index, callee] of ['first', 'second'].entries()) {
+      const startColumn = source.indexOf(`${callee}()`);
+      expect(callSites[index]).toMatchObject({
+        callee,
+        callerMethod: 'run',
+        argCount: 0,
+        isAwait: false,
+        syntaxKind: 'call',
+        matchingRange: {
+          startLine: 1,
+          startColumn,
+          endLine: 1,
+          endColumn: startColumn + callee.length + 2,
+        },
+      });
+      expect(startColumn).not.toBe(Buffer.byteLength(source.slice(0, startColumn)));
+    }
+  });
+
+  it('retains noise and JSX syntax evidence while keeping the existing filtered call list', () => {
+    const source = 'function View() { console.log(1); return <Widget value={load()} />; }';
+    const result = callEvidence(source, 'tsx');
+    expect(result.callSites.map((call) => call.callee)).toEqual(['Widget', 'load']);
+    expect(result.legacyCallSites.map((call) => call.callee)).toEqual(['Widget', 'load']);
+    expect(Object.keys(result.legacyCallSites[0]).sort()).toEqual([
+      'argCount',
+      'callType',
+      'callee',
+      'callerClass',
+      'callerMethod',
+      'isAwait',
+      'line',
+      'receiver',
+      'receiverType',
+    ]);
+    expect(result.callSiteEvidence).toHaveLength(3);
+    expect(result.callSiteEvidence[0]).toMatchObject({
+      callee: 'log',
+      receiver: 'console',
+      syntaxKind: 'call',
+      omissionReason: 'noise-receiver',
+    });
+    expect(result.callSiteEvidence[1]).toMatchObject({
+      callee: 'Widget',
+      syntaxKind: 'jsx',
+      callType: 'constructor',
+      argCount: 1,
+      calleeExpression: 'Widget',
+    });
+    expect(result.callSiteEvidence[1].matchingRange?.startColumn).toBe(source.indexOf('<Widget'));
+  });
+
+  it('proves parameter shadowing and exact nested lexical function bindings', () => {
+    const source =
+      'function target() {} function run(target) { target(); } function outer() { function target() {} target(); }';
+    const { callSites } = callEvidence(source);
+    expect(callSites.find((call) => call.callerMethod === 'run')).toMatchObject({
+      callee: 'target',
+      calleeShadowed: true,
+    });
+    expect(
+      callSites.find((call) => call.callerMethod === 'run')?.calleeQualifiedName
+    ).toBeUndefined();
+    expect(callSites.find((call) => call.callerMethod === 'outer')).toMatchObject({
+      callee: 'target',
+      calleeQualifiedName: 'outer.target',
+      calleeBindingRange: { startLine: 1, startColumn: source.lastIndexOf('function target') },
+    });
+  });
+
+  it('keeps block bindings local and does not resolve a parameter receiver as a global class', () => {
+    const source =
+      'class Service { static run() {} }\nfunction use(Service) { Service.run(); }\nfunction local() { { let target; target(); } target(); }\nfunction target() {}';
+    const { callSites } = callEvidence(source);
+    expect(callSites.find((call) => call.callerMethod === 'use')).toMatchObject({
+      callee: 'run',
+      receiver: 'Service',
+      calleeShadowed: true,
+    });
+    const targets = callSites.filter((call) => call.callee === 'target');
+    expect(targets[0]).toMatchObject({ calleeShadowed: true });
+    expect(targets[1]).toMatchObject({ calleeQualifiedName: 'target' });
+  });
+
   it('keeps Python module paths and aliases for comma-separated and aliased imports', () => {
     const result = analyzeFile(
       'import os as operating, sys, xml.sax\nfrom os import path as p, sep\n',
@@ -283,6 +481,27 @@ describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/G
     expect(result.fileSummaries).toEqual([]);
   });
 });
+
+function callEvidence(source: string, language = 'typescript') {
+  const parsed = parseToTree(source, language);
+  if (!parsed) {
+    throw new Error(`grammar unavailable: ${language}`);
+  }
+  const context: { callSites: CallSiteInfo[]; callSiteEvidence: CallSiteInfo[] } = {
+    callSites: [],
+    callSiteEvidence: [],
+  };
+  try {
+    extractCallSitesTS(parsed.rootNode, context, language);
+    return {
+      callSites: context.callSiteEvidence.filter((call) => !call.omissionReason),
+      callSiteEvidence: context.callSiteEvidence,
+      legacyCallSites: context.callSites,
+    };
+  } finally {
+    parsed.tree.delete();
+  }
+}
 
 describe('built-in project discoverers (RIC-4b — was RealProjectDiscovery/Bootstrap/GoSupport)', () => {
   const tmpDirs: string[] = [];

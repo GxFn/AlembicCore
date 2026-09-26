@@ -9,7 +9,10 @@ import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
 import { readProjectContextAst } from './astFacts.js';
-import type { ProjectContextSymbolExtractor } from './SymbolExtractor.js';
+import type {
+  ProjectContextFileAnalysis,
+  ProjectContextSymbolExtractor,
+} from './SymbolExtractor.js';
 
 interface FileExtraction {
   symbols: FileSymbolsExtractionResult;
@@ -160,25 +163,56 @@ export class FileAnalysisSession {
     throwIfProjectContextAborted(context);
     const includesCalls = includeCalls && !getFileFlowUnavailableReason(facts);
     const ast = readProjectContextAst(facts, includesCalls);
-    const legacy = extractFileSymbolsFromSource(facts, ast);
-    const symbols = this.symbolExtractor
-      ? await this.symbolExtractor.extractSymbols(
-          {
-            text: facts.text,
-            filePath: facts.filePath,
-            language: facts.language,
-            lineCount: facts.lineCount,
-          },
-          legacy,
-          context ? { signal: context.signal } : undefined
-        )
-      : legacy;
-    throwIfProjectContextAborted(context);
-    // 只缓存真实消费的紧凑投影；不把完整 AST 指标/模式摘要留在整个批次中。
-    return {
-      // 生产方也可能复用可变结果；缓存拥有独立投影，后端的后续修改不能重写已读事实。
-      symbols: this.symbolExtractor ? structuredClone(symbols) : symbols,
+    const legacy = {
+      symbols: extractFileSymbolsFromSource(facts, ast),
       flow: includeCalls ? extractFileFlowFromSource(facts, ast) : undefined,
     };
+    const input = {
+      text: facts.text,
+      filePath: facts.filePath,
+      language: facts.language,
+      lineCount: facts.lineCount,
+    };
+    let extraction: ProjectContextFileAnalysis = legacy;
+    // 后端只接收取消控制；运行时context还含reader/analysis，不能越过旧注入接口边界。
+    const controls = context ? { signal: context.signal } : undefined;
+    if (this.symbolExtractor?.analyzeFile) {
+      // 同一个后端请求同时返回符号/调用观察，不为flow再打开或查询一次SDK。
+      extraction = await this.symbolExtractor.analyzeFile(input, legacy, controls);
+    } else if (this.symbolExtractor) {
+      Logger.debug('ProjectContext uses a symbol-only extension with the existing flow producer', {
+        filePath: facts.filePath,
+        reason: 'symbol-extractor-compatibility',
+      });
+      extraction = {
+        ...legacy,
+        symbols: await this.symbolExtractor.extractSymbols(input, legacy.symbols, controls),
+      };
+    }
+    throwIfProjectContextAborted(context);
+    if (legacy.flow && !extraction.flow) {
+      // 可选组合接口不能让缺失flow变成成功缓存或下游TypeError；保留已验证模块语法，明确缺失调用观察。
+      const reason =
+        'ProjectContext analysis backend did not return requested file-flow observations.';
+      Logger.warn(reason, { filePath: facts.filePath });
+      extraction = {
+        ...extraction,
+        flow: { ...legacy.flow, callSites: [], unavailableReason: reason },
+      };
+    }
+    // 只缓存真实消费的紧凑投影；不把完整 AST 指标/模式摘要留在整个批次中。
+    // 生产方也可能复用可变结果；缓存拥有独立投影，后端的后续修改不能重写已读事实。
+    const compact: FileExtraction = {
+      symbols: extraction.symbols,
+      flow: extraction.flow
+        ? {
+            callSites: extraction.flow.callSites,
+            imports: extraction.flow.imports,
+            exports: extraction.flow.exports,
+            unavailableReason: extraction.flow.unavailableReason,
+          }
+        : undefined,
+    };
+    return this.symbolExtractor ? structuredClone(compact) : compact;
   }
 }

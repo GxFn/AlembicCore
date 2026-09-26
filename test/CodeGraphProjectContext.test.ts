@@ -3,16 +3,18 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadPlugins } from '../src/core/ast/index.js';
-import type { FileSymbolContext } from '../src/domain/project-context/index.js';
+import type { FileFlowContext, FileSymbolContext } from '../src/domain/project-context/index.js';
 import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
 import { ProjectContext } from '../src/project-context.js';
 import { NodeProjectContextFoundationHostPorts } from '../src/projectContextFoundation.js';
-import { withCodeGraphSymbolExtractor } from '../src/service/code-analysis/withCodeGraphSymbolExtractor.js';
+import { normalizeCodeGraphFlow } from '../src/service/code-analysis/CodeGraphFlow.js';
+import { withCodeGraphAnalysis } from '../src/service/code-analysis/withCodeGraphAnalysis.js';
 import { readProjectContextAst } from '../src/service/project-context/analysis/astFacts.js';
 import {
   getCodeGraphProjectContextIdentity,
   withCodeGraphProjectContextSession,
 } from '../src/service/project-context/analysis/codeGraphSession.js';
+import { extractFileFlowFromSource } from '../src/service/project-context/fileFlow/extract.js';
 import { extractFileSymbolsFromSource } from '../src/service/project-context/fileSymbols/extract.js';
 
 const roots: string[] = [];
@@ -32,6 +34,173 @@ async function fixture(text = 'export class Input {}') {
 }
 
 describe('CodeGraph ProjectContext production backend', () => {
+  it('shares one actual SDK extraction across symbol and flow requests while preserving source call evidence', async () => {
+    const input = [
+      'function helper(value?: number) { return value; }',
+      'export async function run(client: any) {',
+      '  helper();',
+      '  await (helper(/* comment */ 2));',
+      '  client.send(1, "x");',
+      '  const instance = new Client(/* comment */ 1);',
+      '}',
+    ].join('\n');
+    const { projectRoot, dataRoot } = await fixture(input);
+    const extract = vi.spyOn(CodeGraphProcess.prototype, 'extract');
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      await context.execute({
+        kind: 'file-symbols',
+        scope: { projectRoot },
+        payload: { filePath: 'sample.ts' },
+      });
+      const flow = await context.execute({
+        kind: 'file-flow',
+        scope: { projectRoot },
+        payload: { filePath: 'sample.ts' },
+      });
+      expect(flow.errors ?? []).toEqual([]);
+      expect((flow.data as FileFlowContext).callers).toHaveLength(4);
+      expect(extract).toHaveBeenCalledTimes(1);
+    });
+    const result = await flowEvidence(input);
+    expect(result.flow?.unavailableReason).toBeUndefined();
+    expect(result.flow?.callSites.find((site) => site.range.startLine === 3)?.argCount).toBe(0);
+    expect(result.flow?.callSites.find((site) => site.range.startLine === 4)).toMatchObject({
+      argCount: 1,
+      isAwait: true,
+    });
+    expect(result.flow?.callSites.find((site) => site.callee === 'send')).toMatchObject({
+      receiver: 'client',
+      argCount: 2,
+    });
+  });
+
+  it('uses equivalent SDK reference multiplicity for nested chains and keeps distinct same-line occurrences', async () => {
+    const input =
+      'export function run() { factory().send(); foo().foo(); repeat(1); repeat(2, 3); }';
+    const result = await flowEvidence(input);
+    expect(result.flow?.unavailableReason).toBeUndefined();
+    expect(result.flow?.callSites).toHaveLength(6);
+    const nested = result.flow?.callSites.filter((site) => site.callee === 'foo');
+    expect(nested).toHaveLength(2);
+    expect(new Set(nested?.map((site) => site.matchingRange?.endColumn)).size).toBe(2);
+    expect(
+      result.flow?.callSites.filter((site) => site.callee === 'repeat').map((site) => site.argCount)
+    ).toEqual([1, 2]);
+  });
+
+  it('keeps JSX as explicit syntax-backed compatibility and attributes callback calls to their own scope', async () => {
+    const input = 'export function View() { return <Widget onClick={() => submit()} />; }';
+    const result = await flowEvidence(input, 'sample.tsx');
+    expect(result.flow?.unavailableReason).toBeUndefined();
+    expect(result.flow?.callSites.find((site) => site.callee === 'Widget')).toMatchObject({
+      syntaxKind: 'jsx',
+    });
+    expect(result.flow?.callSites.find((site) => site.callee === 'submit')?.callerMethod).not.toBe(
+      'View'
+    );
+  });
+
+  it('connects nested callers only when actual SDK symbols prove their own declaration ranges', async () => {
+    const { projectRoot, dataRoot } = await fixture(
+      [
+        'function target() {}',
+        'export function outer() {',
+        '  function inner() { target(); }',
+        '  (inner)();',
+        '}',
+      ].join('\n')
+    );
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const result = await context.execute({
+        kind: 'file-flow',
+        scope: { projectRoot },
+        payload: { filePath: 'sample.ts' },
+      });
+      expect(result.errors ?? []).toEqual([]);
+      const calls = (result.data as FileFlowContext).callers;
+      const inner = calls.find((call) => call.to?.symbol === 'target');
+      expect(inner?.from).toMatchObject({
+        qualifiedName: 'outer.inner',
+        ref: { kind: 'file-symbol' },
+      });
+      expect(inner?.unresolved).toBe(false);
+      const outer = calls.find((call) => call.to?.symbol === 'inner');
+      expect(outer?.from).toMatchObject({ qualifiedName: 'outer', ref: { kind: 'file-symbol' } });
+      expect(outer?.to?.ref).toEqual(inner?.from?.ref);
+    });
+  });
+
+  it('refuses non-equivalent same-point SDK candidates rather than assigning by traversal order', async () => {
+    const text = 'function run() { foo().foo(); }';
+    const { dataRoot } = await fixture(text);
+    const worker = await CodeGraphProcess.open({ dataRoot });
+    try {
+      const input = { text, filePath: 'sample.ts', lineCount: 1 };
+      const ast = readProjectContextAst(input, true);
+      const legacy = extractFileFlowFromSource(input, ast);
+      const extracted = await worker.extract(input.filePath, text);
+      if (!extracted.references?.[0]) {
+        throw new Error('Missing real SDK call evidence');
+      }
+      extracted.references[0].evidenceHash = `sha256:${'0'.repeat(64)}`;
+      const result = normalizeCodeGraphFlow(input, extracted, legacy);
+      expect(result.callSites).toEqual([]);
+      expect(result.unavailableReason).toContain('could not be matched');
+    } finally {
+      await worker.close();
+    }
+  });
+
+  it('preserves syntax-proven literal receiver observations that the SDK deliberately omits', async () => {
+    const input = [
+      'function includes() {}',
+      'export function run(values: string[]) {',
+      "  ['x'].includes('x');",
+      "  /x/.test('x');",
+      "  'x'.trim();",
+      '  `x`.trim();',
+      "  values.includes('x');",
+      '}',
+    ].join('\n');
+    const result = await flowEvidence(input);
+    expect(result.flow?.unavailableReason).toBeUndefined();
+    expect(result.flow?.callSites).toHaveLength(5);
+    const { projectRoot, dataRoot } = await fixture(input);
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const flow = await context.execute({
+        kind: 'file-flow',
+        scope: { projectRoot },
+        payload: { filePath: 'sample.ts' },
+      });
+      expect(flow.errors ?? []).toEqual([]);
+      const calls = (flow.data as FileFlowContext).callers;
+      expect(calls).toHaveLength(5);
+      expect(calls.every((call) => call.unresolved && !call.to?.ref)).toBe(true);
+    });
+  });
+  it('transports real call candidates, including repeated points, without converting them to resolved edges', async () => {
+    const input = 'function run() { foo(1); foo(2, 3); foo().foo(); }';
+    const { dataRoot } = await fixture(input);
+    const worker = await CodeGraphProcess.open({ dataRoot });
+    try {
+      const result = await worker.extract('sample.ts', input);
+      expect(result.references).toHaveLength(4);
+      expect(result.references?.map((ref) => ref.referenceKind)).toEqual([
+        'calls',
+        'calls',
+        'calls',
+        'calls',
+      ]);
+      const repeated = result.references?.filter(
+        (ref) => ref.column === input.indexOf('foo().foo')
+      );
+      expect(repeated).toHaveLength(2);
+      expect(new Set(repeated?.map((ref) => ref.evidenceHash)).size).toBe(1);
+      expect(result.references?.every((ref) => ref.evidenceHash.startsWith('sha256:'))).toBe(true);
+    } finally {
+      await worker.close();
+    }
+  });
   it.each([
     ['ts', 'const'],
     ['ts', 'let'],
@@ -708,7 +877,23 @@ async function declarationEvidence(text: string, filePath: string) {
   const input = { text, filePath, lineCount: text.split(/\r\n|\n|\r/).length };
   const ast = readProjectContextAst(input, false);
   const legacy = extractFileSymbolsFromSource(input, ast);
-  return withCodeGraphSymbolExtractor({ dataRoot }, (extractor) =>
+  return withCodeGraphAnalysis({ dataRoot }, (extractor) =>
     extractor.extractSymbols(input, legacy)
   );
+}
+
+async function flowEvidence(text: string, filePath = 'sample.ts') {
+  await loadPlugins();
+  const { dataRoot } = await fixture(text);
+  return withCodeGraphAnalysis({ dataRoot }, async (backend) => {
+    const input = { text, filePath, lineCount: text.split(/\r\n|\n|\r/).length };
+    const ast = readProjectContextAst(input, true);
+    if (!backend.analyzeFile) {
+      throw new Error('CodeGraph must provide complete file analysis');
+    }
+    return backend.analyzeFile(input, {
+      symbols: extractFileSymbolsFromSource(input, ast),
+      flow: extractFileFlowFromSource(input, ast),
+    });
+  });
 }

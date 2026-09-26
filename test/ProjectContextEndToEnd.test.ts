@@ -115,6 +115,41 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
     }
   });
 
+  it('reports missing combined-backend flow without losing verified imports or crashing the handler', async () => {
+    await withFixture(
+      {
+        'model.ts': "import './dep'; export function run() { target(); }",
+        'dep.ts': 'export const value = 1;',
+      },
+      async (projectRoot) => {
+        const symbolExtractor: ProjectContextSymbolExtractor = {
+          async extractSymbols(_input, legacy) {
+            return legacy;
+          },
+          async analyzeFile(_input, legacy, controls) {
+            expect(Object.keys(controls ?? {})).toEqual(['signal']);
+            return { symbols: legacy.symbols };
+          },
+        };
+        await withProjectContextSession(
+          async (context) => {
+            const result = await context.execute({
+              kind: 'file-flow',
+              scope: { projectRoot },
+              payload: { filePath: 'model.ts' },
+            });
+            expect(result.errors).toEqual(
+              expect.arrayContaining([expect.objectContaining({ code: 'query-unavailable' })])
+            );
+            expect((result.data as FileFlowContext).callers).toEqual([]);
+            expect((result.data as FileFlowContext).imports).toHaveLength(1);
+          },
+          { symbolExtractor }
+        );
+      }
+    );
+  });
+
   it('uses one async symbol extraction across real symbol, flow and nested module queries', async () => {
     const filePath = 'src/model.ts';
     const source = 'export class Model { run() { return this.help(); } help() { return 1; } }';

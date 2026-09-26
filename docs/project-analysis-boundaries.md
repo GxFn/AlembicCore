@@ -48,7 +48,7 @@ registry 也共用队列。取消排队不会越过仍在执行的前序请求�
 约定；旧扩展实例仍可用于实时查询，但不能自动获得完整输入捕获保证。会话期间替换
 reader 或追加未确认的发现器会使该次捕获失败。
 
-## CodeGraph 符号生产
+## CodeGraph 文件分析
 
 宿主可通过 `withCodeGraphProjectContextSession({ dataRoot, signal }, callback)` 创建
 真实 SDK 分析作用域。回调拿到原生 ProjectContext 执行器和 `{ engineHash, engine,
@@ -72,15 +72,32 @@ runtimeRoot }`；它保留完整输入记录能力，不能再包成未声明读
 认证 producer 应使用实际 engineHash 作为 parserHash。改变规范化或 AST 补充策略时，
 必须更新对应策略版本并复核兼容矩阵，不能沿用旧身份假称新引擎结果。
 
-首片覆盖 JS 家族的具名符号。CodeGraph 节点提供事实，Alembic继续生成既有refs；同行
+JS 家族的具名符号由CodeGraph节点提供事实，Alembic继续生成既有refs；同行
 同名节点不能按 SDK id 去重，确有碰撞时使用已验证的 UTF-16 列区分。AST通过真实节点位置
 对应跨行箭头绑定、私有方法占位；仅补已证实的声明方法、构造参数属性与 JS constructor
 this 属性。普通SDK声明丢失时明确返回不可用，不以全量旧结果掩盖。
 
 1.6.0 对匿名默认声明、namespace 的投影不完整，本入口按真实 AST 形态返回明确的覆盖
 不可用；语法错误也不能因 SDK `errors=[]` 被认证为空成功。导出标志、已有非碰撞范围与
-类别保留兼容语义。imports/exports/call metadata、非JS语言和Guard目前继续使用原生产方。
+类别保留兼容语义。非JS语言和Guard目前继续使用原生产方。
 SourceGraph的JS/TS符号可按下节显式接入；不得把这些入口描述成全部AST或完整图索引已迁移。
+
+file-flow从同一次SDK提取取得未解析的calls/instantiates候选，AST为同一文本位置提供
+实际调用范围、参数数量、await、receiver与词法owner。符号与flow共享内部完整文件分析
+入口；原有只符号的注入接口仍可用。SDK节点ID不能证明调用者身份：同行方法可能共用ID，
+匿名回调也可能归在SDK外层节点。完全等价的重复候选只有在AST位置和重数一致时才能采用，
+不能按遍历顺序配对；观察缺失或不一致时返回明确不可用。SDK 1.6未表达的JSX标签、主动
+省略的字面量receiver调用（例如数组的includes）仅通过对应AST语法形态补充，保留既有
+噪声策略；字面量调用也不能按方法裸名连到项目函数。
+
+调用关系只在同文件声明、词法绑定和实际范围足以证明时连接到symbol ref。未知receiver、
+参数遮蔽或歧义保留unresolved；真实顶层owner连接已有file ref。普通关系保留行级ref，
+同一ref对应多个真实调用位置时才附列消歧。callers/callees是同一文件观察的不同排序，
+不能视为跨文件反向调用索引，也不代表静态分析已证明运行时分派。
+
+JS/TS imports/exports从同一棵已解析AST的模块语法节点生成，替代原文本扫描器。
+注释、字符串与模板正文不构成依赖；模板插值中的真实调用仍可提取。该投影不改变旧
+AstFileSummary或ImportRecord序列化形态，保留原解析预算与非JS生产方。
 
 ## SourceGraph 索引接入
 
@@ -92,10 +109,10 @@ controlRoot，保证各成员的文件路径相对于同一个根。未传codeGr
 明确声明的ProjectScope没有源码folder时直接报告错误，不回退扫描controlRoot，也不发布
 空壳generation。未声明descriptor的旧单目录调用仍以projectRoot作为来源。
 
-ProjectContext和SourceGraph共用内部CodeGraph符号提取作用域，不重复维护worker生命周期。
+ProjectContext和SourceGraph共用内部CodeGraph分析作用域，不重复维护worker生命周期。
 SourceGraph文件分析只读一次文本，符号、导入关系和裸SHA256文本hash都从该版本产生；
 它不借公共ProjectContext envelope重新读取live文件，也不创建第二份活动SDK源码数据库。
-导入证据复用Core已有多行/comment-aware生产方及ImportPathResolver，未引入SDK调用关系的
+SDK路径的导入证据复用上述模块语法投影及ImportPathResolver，未引入SDK调用关系的
 猜测值。JS/TS按worker的串行处理节奏读取，避免把全仓文本同时排入IPC。
 
 普通符号ID保持path#name，新成员使用qualifiedName；真正碰撞才增加声明kind和真实范围。

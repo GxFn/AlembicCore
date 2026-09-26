@@ -61,7 +61,7 @@ process.on('message', (message) => {
         }
         const language = sdk.detectLanguage(message.filePath, message.source);
         if (!['typescript', 'tsx', 'javascript', 'jsx'].includes(language)) {
-          throw new Error(`CodeGraph symbol route does not support ${language ?? 'unknown'}.`);
+          throw new Error(`CodeGraph analysis route does not support ${language ?? 'unknown'}.`);
         }
         const result = graph.extractFromSource(message.filePath, message.source);
         await send({
@@ -81,6 +81,18 @@ process.on('message', (message) => {
               endColumn: node.endColumn,
               isExported: node.isExported,
             })),
+            // 这里只传未解析调用观察，绝不把SDK候选或contains边包装成确定调用图。
+            references: result.unresolvedReferences
+              .filter((reference) => ['calls', 'instantiates'].includes(reference.referenceKind))
+              .map((reference) => ({
+                fromNodeId: reference.fromNodeId,
+                referenceName: reference.referenceName,
+                referenceKind: reference.referenceKind,
+                line: reference.line,
+                column: reference.column,
+                // 完整原始记录参与等价证明；保持worker自包含，源码测试不依赖旧dist。
+                evidenceHash: `sha256:${createHash('sha256').update(JSON.stringify(reference)).digest('hex')}`,
+              })),
             errors: result.errors.map((error) =>
               typeof error === 'string' ? error : String(error.message ?? error)
             ),

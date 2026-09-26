@@ -1,5 +1,7 @@
 import '../../../core/ast/index.js';
 import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
+import type { CallSiteInfo } from '../../../core/analysis/CallSiteExtractor.js';
+import type { ModuleSyntaxFacts } from '../../../core/analysis/ModuleSyntaxCollector.js';
 import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
 
 export interface ProjectContextAstInput {
@@ -20,6 +22,9 @@ export type ProjectContextAstFacts =
       summary: NonNullable<ReturnType<typeof analyzeFile>>;
       syntaxValid?: boolean;
       syntaxFeatures?: string[];
+      moduleSyntax?: ModuleSyntaxFacts;
+      callSiteEvidence?: CallSiteInfo[];
+      callSitesComplete?: boolean;
     }
   | { status: 'unsupported' }
   | { status: 'runtime-unavailable' | 'empty' | 'failed'; parserLanguage: string };
@@ -42,15 +47,34 @@ export function readProjectContextAst(
   try {
     let syntaxValid: boolean | undefined;
     let syntaxFeatures: string[] = [];
+    let moduleSyntax: ModuleSyntaxFacts | undefined;
+    let callSiteEvidence: CallSiteInfo[] | undefined;
+    let callSitesComplete: boolean | undefined;
     const summary = analyzeFile(input.text, parserLanguage, {
       extractCallSites,
       onSyntaxValidity: (valid, features) => {
         syntaxValid = valid;
         syntaxFeatures = [...features];
       },
+      onModuleSyntax: (facts) => {
+        moduleSyntax = facts;
+      },
+      onCallSiteEvidence: (facts) => {
+        callSiteEvidence = facts.callSites;
+        callSitesComplete = facts.complete;
+      },
     });
     return summary
-      ? { status: 'ready', parserLanguage, summary, syntaxValid, syntaxFeatures }
+      ? {
+          status: 'ready',
+          parserLanguage,
+          summary,
+          syntaxValid,
+          syntaxFeatures,
+          moduleSyntax,
+          callSiteEvidence,
+          callSitesComplete,
+        }
       : { status: 'empty', parserLanguage };
   } catch {
     return { status: 'failed', parserLanguage };

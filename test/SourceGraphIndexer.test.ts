@@ -47,6 +47,12 @@ describe('SourceGraphIndexer', () => {
       '  helper,',
       "} from './util.js';",
       "// import './ghost';",
+      'const requireExample = "require(\'./ghost\')";',
+      'const importExample = `',
+      "import './ghost';",
+      "export * from './ghost';",
+      '`;',
+      "object.import('./ghost');",
       '// export class Phantom {}',
       'const text = "export class StringGhost {}";',
       'export const load = () => helper();',
@@ -99,7 +105,9 @@ describe('SourceGraphIndexer', () => {
     );
     expect(symbols.filter((symbol) => symbol.qualifiedName === 'A.value')).toHaveLength(2);
     expect(new Set(symbols.map((symbol) => symbol.symbolId)).size).toBe(symbols.length);
-    expect(result.edges.map((edge) => [edge.fromFilePath, edge.toFilePath])).toEqual([
+    // 验证实际SQLite代际，不只校验构建器返回值；正文/模板/同名成员不能持久化成伪import。
+    const persistedEdges = await sourceGraphRepository.listGenerationEdges('sdk-declarations');
+    expect(persistedEdges.map((edge) => [edge.fromFilePath, edge.toFilePath])).toEqual([
       ['src/index.ts', 'src/util.ts'],
     ]);
     expect(result.edges[0].fromSymbolId).toBe('src/index.ts#module');

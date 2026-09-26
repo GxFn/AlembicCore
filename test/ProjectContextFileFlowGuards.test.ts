@@ -13,7 +13,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { analyzeFile, registerLanguage } from '../src/core/AstAnalyzer.js';
+import type { ModuleSyntaxFacts } from '../src/core/analysis/ModuleSyntaxCollector.js';
+import { plugin as typescriptPlugin } from '../src/core/ast/lang-typescript.js';
 import { ProjectContext } from '../src/project-context.js';
+import { readProjectContextAst } from '../src/service/project-context/analysis/astFacts.js';
 import type {
   FileFlowContext,
   ModuleContext,
@@ -115,6 +119,218 @@ describe('fileFlow 病态输入防线(ReDoS 回归)', () => {
       });
       expect(Date.now() - startedAt).toBeLessThan(2_000);
     });
+  });
+});
+
+describe('fileFlow JS 模块语法事实', () => {
+  it.each([
+    {
+      name: 'does not turn a require example in a string into an import',
+      source: `const text = "const loader = require('./ghost')";\n`,
+      imports: [],
+      exports: [],
+    },
+    {
+      name: 'does not turn multiline template contents into imports or exports',
+      source: [
+        'const template = `',
+        "import './ghost';",
+        'export const Phantom = 1;',
+        '`;',
+        'export function real() {}',
+      ].join('\n'),
+      imports: [],
+      exports: ['real'],
+    },
+    {
+      name: 'does not treat a method named import as a dynamic import',
+      source: "const object = { import(value) { return value; } };\nobject.import('./ghost');\n",
+      imports: [],
+      exports: [],
+    },
+    {
+      name: 'keeps both static imports on the same source line',
+      source: "import './a'; import './b';\n",
+      imports: ['src/a.ts', 'src/b.ts'],
+      exports: [],
+    },
+    {
+      name: 'keeps a valid multiline named import beyond the old clause regex limit',
+      source: `import {\n${Array.from({ length: 32 }, (_, index) => `  Binding${index}`).join(',\n')}\n} from './dep';\n`,
+      imports: ['src/dep.ts'],
+      exports: [],
+    },
+    {
+      name: 'keeps consecutive semicolon-free export declarations separate',
+      source: 'export const a = 1\nexport const b = 2\n',
+      imports: [],
+      exports: ['a', 'b'],
+    },
+    {
+      name: 'preserves a namespace re-export',
+      source: "export * as api from './dep';\n",
+      imports: [],
+      exports: ['api'],
+    },
+  ])('$name', async ({ source, imports, exports }) => {
+    await withFixture(
+      {
+        'src/example.ts': source,
+        'src/ghost.ts': 'export const real = 1;',
+        'src/a.ts': 'export const a = 1;',
+        'src/b.ts': 'export const b = 1;',
+        'src/dep.ts': 'export const dependency = 1;',
+      },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const data = envelope.data as FileFlowContext;
+        expect(data.imports.map((relation) => relation.to?.label)).toEqual(imports);
+        expect(
+          data.outflow
+            .filter((relation) => relation.kind === 'exports')
+            .map((relation) => relation.label?.split(' exports ')[1])
+        ).toEqual(exports);
+        expect(envelope.errors).toBeUndefined();
+      }
+    );
+  });
+
+  it('keeps same-line export aliases distinct without changing ordinary import line refs', async () => {
+    await withFixture(
+      {
+        'src/example.ts':
+          "import { value } from './dep';\nexport { value as first, value as second };\n",
+        'src/dep.ts': 'export const value = 1;',
+      },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const flow = data as FileFlowContext;
+        expect(flow.imports[0].range).toEqual({ startLine: 1, endLine: 1 });
+        const exports = flow.outflow.filter((relation) => relation.kind === 'exports');
+        expect(exports.map((relation) => relation.label)).toEqual([
+          'src/example.ts exports first',
+          'src/example.ts exports second',
+        ]);
+        expect(new Set(exports.map((relation) => relation.ref?.id)).size).toBe(2);
+        expect(exports.map((relation) => relation.range?.startColumn)).toEqual([9, 25]);
+      }
+    );
+  });
+
+  it('preserves escaped literal specifiers when replacing the dynamic-import scanner', async () => {
+    await withFixture(
+      {
+        'src/example.ts': "export async function load() { return import('./quo\\'te'); }\n",
+        "src/quo'te.ts": 'export const value = 1;',
+      },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        expect(
+          (envelope.data as FileFlowContext).imports.map((relation) => relation.to?.label)
+        ).toEqual(["src/quo'te.ts"]);
+        expect(envelope.errors).toBeUndefined();
+      }
+    );
+  });
+
+  it('observes detached module facts while preserving the AST summary and unrequested call evidence', () => {
+    const source = "import type { Port } from './dep';\nexport function run() {}\n";
+    const baseline = analyzeFile(source, 'typescript', { extractCallSites: false });
+    let syntax: ModuleSyntaxFacts | undefined;
+    let callEvidenceObserved = false;
+    const summary = analyzeFile(source, 'typescript', {
+      extractCallSites: false,
+      onModuleSyntax: (facts) => {
+        syntax = facts;
+      },
+      onCallSiteEvidence: () => {
+        callEvidenceObserved = true;
+      },
+    });
+    expect(JSON.stringify(summary)).toBe(JSON.stringify(baseline));
+    expect(JSON.parse(JSON.stringify(summary)).imports).toEqual(['./dep']);
+    expect(callEvidenceObserved).toBe(false);
+    // analyzeFile 已释放树；这里访问和序列化的只能是独立 plain 值。
+    expect(JSON.parse(JSON.stringify(syntax))).toMatchObject({
+      imports: [{ specifier: './dep', kind: 'named', symbols: ['Port'], typeOnly: true }],
+      exports: [{ name: 'run', kind: 'function' }],
+    });
+  });
+
+  it('reports an incomplete optional call pass while keeping the real grammar summary available', () => {
+    registerLanguage('typescript', {
+      ...typescriptPlugin,
+      extractCallSites() {
+        throw new Error('controlled call evidence failure');
+      },
+    });
+    try {
+      const facts = readProjectContextAst(
+        {
+          text: 'export function run() { helper(); }',
+          filePath: 'src/example.ts',
+          language: 'typescript',
+          lineCount: 1,
+        },
+        true
+      );
+      expect(facts.status).toBe('ready');
+      if (facts.status !== 'ready') {
+        throw new Error('Expected the real AST summary.');
+      }
+      expect(facts.summary.methods.map((method) => method.name)).toContain('run');
+      expect(facts.callSitesComplete).toBe(false);
+      expect(facts.callSiteEvidence).toEqual([]);
+    } finally {
+      registerLanguage('typescript', typescriptPlugin);
+    }
+  });
+
+  it('does not let a call evidence observer mutate the legacy AST summary', () => {
+    // Python 仍走没有独立 evidence 数组的旧语言 producer，明确覆盖 callback fallback。
+    const source = 'def run():\n    helper()\n';
+    const baseline = analyzeFile(source, 'python');
+    const summary = analyzeFile(source, 'python', {
+      onCallSiteEvidence({ callSites }) {
+        if (callSites[0]) {
+          callSites[0].callee = 'observer-mutated';
+        }
+        callSites.splice(0);
+      },
+    });
+    expect(summary?.callSites).toEqual(baseline?.callSites);
+  });
+
+  it.each([
+    "const loaded = require(/* dependency */ './dep');",
+    "const loaded = import(/* webpackChunkName: 'dep' */ './dep');",
+  ])('keeps the real literal argument after a call comment: %s', async (source) => {
+    await withFixture(
+      { 'src/example.ts': source, 'src/dep.ts': 'export const value = 1;' },
+      async (projectRoot) => {
+        const envelope = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        expect(
+          (envelope.data as FileFlowContext).imports.map((relation) => relation.to?.label)
+        ).toEqual(['src/dep.ts']);
+        expect(envelope.errors).toBeUndefined();
+      }
+    );
   });
 });
 

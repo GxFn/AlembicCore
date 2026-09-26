@@ -19,6 +19,7 @@ import {
   defaultExtractCallSites,
   getCallSiteExtractor,
 } from './analysis/CallSiteExtractor.js';
+import { collectModuleSyntax, type ModuleSyntaxFacts } from './analysis/ModuleSyntaxCollector.js';
 import { getParserClass, isParserReady } from './ast/parserInit.js';
 
 // ── Type Definitions ────────────────────────────────────────────
@@ -62,6 +63,7 @@ interface AstWalkerContext {
   imports: string[];
   exports: string[];
   callSites: CallSiteInfo[];
+  callSiteEvidence: CallSiteInfo[];
   references: AstReferenceRecord[];
   [key: string]: unknown;
 }
@@ -192,6 +194,10 @@ interface AnalyzeFileOptions {
   extractCallSites?: boolean;
   /** 独立观察真实语法完整性，保留既有摘要字段与持久化形态。 */
   onSyntaxValidity?: (valid: boolean | undefined, features: readonly string[]) => void;
+  /** 树内投影的模块事实，不改变 AstFileSummary 的既有 JSON/持久化形态。 */
+  onModuleSyntax?: (facts: ModuleSyntaxFacts) => void;
+  /** 与过滤后的 callSites 分离；未执行调用点 pass 时不回调，不能伪装为完整空集。 */
+  onCallSiteEvidence?: (facts: { callSites: CallSiteInfo[]; complete: boolean }) => void;
 }
 
 interface AnalyzeProjectOptions {
@@ -314,20 +320,46 @@ function analyzeFile(
       exports: [],
       // ─── Phase 5 新增 ───
       callSites: [],
+      callSiteEvidence: [],
       references: [],
     };
 
     plugin.walk(root, ctx);
 
+    if (options.onModuleSyntax && ['typescript', 'javascript', 'tsx', 'jsx'].includes(lang)) {
+      options.onModuleSyntax(collectModuleSyntax(root));
+    }
+
     // Phase 5: 可选的 call site 提取 pass (post-walk extraction)
     if (options.extractCallSites !== false) {
       const extractor =
         plugin.extractCallSites || getCallSiteExtractor(lang) || defaultExtractCallSites;
+      let complete = extractor !== defaultExtractCallSites;
+      if (!complete && options.onCallSiteEvidence) {
+        Logger.getInstance().debug('[AstAnalyzer] call-site evidence unavailable', {
+          language: lang,
+          reason: 'no-language-call-site-producer',
+        });
+      }
       try {
         extractor(root, ctx, lang);
-      } catch (_e: unknown) {
-        // Call site extraction failure is non-fatal — degrade gracefully
+      } catch (error: unknown) {
+        complete = false;
+        // 旧摘要仍宽容返回已提取部分；观察者必须知道 calls 未完成，不能把空数组当成覆盖证明。
+        Logger.getInstance().warn('[AstAnalyzer] call-site extraction incomplete', {
+          language: lang,
+          reason: error instanceof Error ? error.message : String(error),
+          callSiteCount: ctx.callSites.length,
+          evidenceCount: ctx.callSiteEvidence.length,
+        });
       }
+      options.onCallSiteEvidence?.({
+        // observer 拥有独立 plain 观察值，尤其旧语言 fallback 不能把原摘要数组交给回调修改。
+        callSites: structuredClone(
+          ctx.callSiteEvidence.length > 0 ? ctx.callSiteEvidence : ctx.callSites
+        ),
+        complete,
+      });
     }
 
     // 构建继承图谱

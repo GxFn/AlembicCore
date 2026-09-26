@@ -4,7 +4,7 @@ import {
   type CodeGraphProcessOptions,
   getCodeGraphProjectContextIdentity,
 } from '../../../infrastructure/analysis/CodeGraphProcess.js';
-import { withCodeGraphSymbolExtractor } from '../../code-analysis/withCodeGraphSymbolExtractor.js';
+import { withCodeGraphAnalysis } from '../../code-analysis/withCodeGraphAnalysis.js';
 import { withProjectContextSession } from '../ProjectContextService.js';
 
 export { getCodeGraphProjectContextIdentity };
@@ -19,7 +19,7 @@ export async function withCodeGraphProjectContextSession<T>(
   options: CodeGraphProjectContextOptions,
   collect: (context: ProjectContext, runtime: CodeGraphProjectContextRuntime) => Promise<T>
 ): Promise<T> {
-  return withCodeGraphSymbolExtractor(options, (symbolExtractor, runtime) =>
+  return withCodeGraphAnalysis(options, (symbolExtractor, runtime) =>
     withProjectContextSession((context) => collect(context, runtime), {
       symbolExtractor,
       signal: options.signal,

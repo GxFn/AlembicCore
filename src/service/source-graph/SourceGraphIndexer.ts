@@ -21,7 +21,7 @@ import type {
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
-import { withCodeGraphSymbolExtractor } from '../code-analysis/withCodeGraphSymbolExtractor.js';
+import { withCodeGraphAnalysis } from '../code-analysis/withCodeGraphAnalysis.js';
 import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
 import {
   diagnosticsForRetainedFile,
@@ -221,7 +221,7 @@ export class SourceGraphIndexer {
     );
     let parsedFiles: ParsedFile[];
     if (codeGraph && hasEligibleFiles) {
-      parsedFiles = await withCodeGraphSymbolExtractor(
+      parsedFiles = await withCodeGraphAnalysis(
         { ...codeGraph, signal: input.options.signal },
         async (extractor, runtime) => {
           if (runtime.engineHash !== input.options.engineHash) {

@@ -9,7 +9,7 @@ import Logger from '../logging/Logger.js';
 
 const workerFile = path.join(RESOURCES_DIR, 'codegraph', 'worker.mjs');
 const require = createRequire(import.meta.url);
-const NORMALIZER_VERSION = 'alembic-codegraph-symbols-v1';
+const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v2';
 
 export interface CodeGraphNode {
   id: string;
@@ -25,6 +25,16 @@ export interface CodeGraphNode {
 export interface CodeGraphExtraction {
   nodes: CodeGraphNode[];
   errors: string[];
+  references?: CodeGraphCallReference[];
+}
+export interface CodeGraphCallReference {
+  fromNodeId: string;
+  referenceName: string;
+  referenceKind: 'calls' | 'instantiates';
+  line: number;
+  column: number;
+  /** 完整SDK参考记录的序列化hash；同点位等价组不能忽略未投影的候选信息。 */
+  evidenceHash: `sha256:${string}`;
 }
 export interface CodeGraphIdentity {
   engineHash: `sha256:${string}`;
@@ -391,12 +401,31 @@ function isExtraction(value: unknown): value is CodeGraphExtraction {
     !('nodes' in value) ||
     !Array.isArray(value.nodes) ||
     !('errors' in value) ||
-    !Array.isArray(value.errors)
+    !Array.isArray(value.errors) ||
+    !('references' in value) ||
+    !Array.isArray(value.references)
   ) {
     return false;
   }
   return (
     value.errors.every((error) => typeof error === 'string') &&
+    value.references.every((reference: unknown) => {
+      if (!reference || typeof reference !== 'object') {
+        return false;
+      }
+      const ref = reference as Record<string, unknown>;
+      return (
+        typeof ref.fromNodeId === 'string' &&
+        typeof ref.referenceName === 'string' &&
+        ['calls', 'instantiates'].includes(String(ref.referenceKind)) &&
+        Number.isInteger(ref.line) &&
+        Number(ref.line) > 0 &&
+        Number.isInteger(ref.column) &&
+        Number(ref.column) >= 0 &&
+        typeof ref.evidenceHash === 'string' &&
+        /^sha256:[a-f0-9]{64}$/.test(ref.evidenceHash)
+      );
+    }) &&
     value.nodes.every((node: unknown) => {
       if (!node || typeof node !== 'object') {
         return false;

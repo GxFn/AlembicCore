@@ -12,6 +12,227 @@ import { ProjectContext } from '../src/project-context.js';
 import { computeContentHash } from '../src/shared/contentHash.js';
 
 describe('ProjectContext PCQ-3 file-flow', () => {
+  it('does not bind an unknown receiver to a same-name local function', async () => {
+    const source = [
+      'function target() {}',
+      'export function run(client: { target(): void }) {',
+      '  client.target();',
+      '  target();',
+      '}',
+    ].join('\n');
+    await withFixture({ 'src/example.ts': source }, async (projectRoot) => {
+      const { data } = await ProjectContext.execute({
+        kind: 'file-flow',
+        payload: { filePath: 'src/example.ts' },
+        scope: { projectRoot },
+      });
+      const calls = (data as FileFlowContext).callees;
+      const unknown = calls.find((relation) => relation.range?.startLine === 3);
+      expect(unknown).toMatchObject({
+        unresolved: true,
+        reason: expect.stringContaining('receiver'),
+      });
+      expect(unknown?.to?.ref).toBeUndefined();
+      const local = calls.find((relation) => relation.range?.startLine === 4);
+      expect(local).toMatchObject({
+        unresolved: false,
+        from: { qualifiedName: 'run' },
+        to: { qualifiedName: 'target', ref: { scope: { range: { startLine: 1 } } } },
+        range: { startLine: 4, endLine: 4 },
+      });
+      expect(local?.range?.startColumn).toBeUndefined();
+      expect(local?.ref?.id).toContain(':L4-L4:');
+    });
+  });
+
+  it('does not give a nested ordinary function the lexical this binding of an arrow', async () => {
+    const source = [
+      'export class Worker {',
+      '  target() {}',
+      '  run() {',
+      '    function dynamic() { this.target(); }',
+      '    const lexical = () => this.target();',
+      '  }',
+      '}',
+    ].join('\n');
+    await withFixture({ 'src/example.ts': source }, async (projectRoot) => {
+      const { data } = await ProjectContext.execute({
+        kind: 'file-flow',
+        payload: { filePath: 'src/example.ts' },
+        scope: { projectRoot },
+      });
+      const calls = (data as FileFlowContext).callees;
+      const dynamic = calls.find((relation) => relation.range?.startLine === 4);
+      expect(dynamic).toMatchObject({
+        unresolved: true,
+        reason: expect.stringContaining('receiver'),
+      });
+      expect(dynamic?.to?.ref).toBeUndefined();
+      const lexical = calls.find((relation) => relation.range?.startLine === 5);
+      expect(lexical?.to).toMatchObject({
+        qualifiedName: 'Worker.target',
+        ref: { scope: { range: { startLine: 2 } } },
+      });
+    });
+  });
+
+  it('does not fall back from a missing this member to a global function', async () => {
+    await withFixture(
+      {
+        'src/example.ts': 'function target() {}\nexport class Worker { run() { this.target(); } }',
+      },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const call = (data as FileFlowContext).callees.find(
+          (relation) => relation.range?.startLine === 2
+        );
+        expect(call).toMatchObject({ unresolved: true, reason: 'callee-unresolved' });
+        expect(call?.to?.ref).toBeUndefined();
+      }
+    );
+  });
+
+  it('does not bind a shadowing parameter to the same-name global function', async () => {
+    await withFixture(
+      {
+        'src/example.ts':
+          'function target() {}\nexport function run(target: () => void) {\n  target();\n}',
+      },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const call = (data as FileFlowContext).callees.find(
+          (relation) => relation.range?.startLine === 3
+        );
+        expect(call).toMatchObject({ unresolved: true, reason: expect.stringContaining('shadow') });
+        expect(call?.to?.ref).toBeUndefined();
+      }
+    );
+  });
+
+  it('uses the real owner range for same-name nested callers', async () => {
+    const source = [
+      'function left() {',
+      '  function same() {',
+      '    target();',
+      '  }',
+      '}',
+      'function right() {',
+      '  function same() {',
+      '    target();',
+      '  }',
+      '}',
+      'function target() {}',
+    ].join('\n');
+    await withFixture({ 'src/example.ts': source }, async (projectRoot) => {
+      const { data } = await ProjectContext.execute({
+        kind: 'file-flow',
+        payload: { filePath: 'src/example.ts' },
+        scope: { projectRoot },
+      });
+      const calls = (data as FileFlowContext).callers.filter(
+        (relation) => relation.to?.label === 'target'
+      );
+      expect(calls).toHaveLength(2);
+      // standard符号表尚无nested声明；真实owner名称可保留，但不能借outer ref冒充。
+      expect(calls.find((relation) => relation.range?.startLine === 3)?.from?.label).toBe(
+        'left.same'
+      );
+      expect(calls.find((relation) => relation.range?.startLine === 8)?.from?.label).toBe(
+        'right.same'
+      );
+      for (const call of calls) {
+        expect(call).toMatchObject({ unresolved: true, reason: 'caller-unresolved' });
+        expect(call.from?.ref).toBeUndefined();
+      }
+    });
+  });
+
+  it('leaves multiple local declaration candidates unresolved instead of selecting the first', async () => {
+    await withFixture(
+      {
+        'src/example.js':
+          'function target() { return 1; }\nfunction target() { return 2; }\nfunction run() { target(); }',
+      },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.js' },
+          scope: { projectRoot },
+        });
+        const call = (data as FileFlowContext).callees.find(
+          (relation) => relation.range?.startLine === 3
+        );
+        expect(call).toMatchObject({
+          unresolved: true,
+          reason: expect.stringContaining('ambiguous'),
+        });
+        expect(call?.to?.ref).toBeUndefined();
+      }
+    );
+  });
+
+  it('keeps distinct same-line call sites with their real matching columns', async () => {
+    await withFixture(
+      {
+        'src/example.ts':
+          'function target() {}\nexport function run() { target(); target();\n  target();\n}',
+      },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const calls = (data as FileFlowContext).callees.filter(
+          (relation) => relation.range?.startLine === 2
+        );
+        expect(calls).toHaveLength(2);
+        expect(new Set(calls.map((relation) => relation.ref?.id)).size).toBe(2);
+        const columns = calls.map((relation) => relation.range?.startColumn);
+        expect(columns.every((column) => typeof column === 'number')).toBe(true);
+        expect(columns[0]).toBeLessThan(columns[1]);
+        const ordinary = (data as FileFlowContext).callees.find(
+          (relation) => relation.range?.startLine === 3
+        );
+        expect(ordinary?.range).toEqual({ startLine: 3, endLine: 3 });
+        expect(ordinary?.ref?.id).toContain(':L3-L3:');
+        for (const call of calls) {
+          expect(call.sourceRef?.scope.range).toEqual(call.range);
+          expect(call.ref?.scope.range).toEqual(call.range);
+        }
+      }
+    );
+  });
+
+  it('uses the existing file ref for a proven top-level program caller', async () => {
+    await withFixture(
+      { 'src/example.ts': 'function target() {}\ntarget();' },
+      async (projectRoot) => {
+        const { data } = await ProjectContext.execute({
+          kind: 'file-flow',
+          payload: { filePath: 'src/example.ts' },
+          scope: { projectRoot },
+        });
+        const flow = data as FileFlowContext;
+        const call = flow.callees.find((relation) => relation.range?.startLine === 2);
+        expect(call).toMatchObject({
+          unresolved: false,
+          from: { filePath: 'src/example.ts', ref: flow.file.ref },
+          to: { qualifiedName: 'target' },
+        });
+        expect(call?.from?.symbol).toBeUndefined();
+      }
+    );
+  });
+
   it('does not project block-comment examples as public exports', async () => {
     await withFixture(
       { 'src/example.ts': '/*\nexport const phantom = 1;\n*/\nexport const real = 2;\n' },
@@ -153,9 +374,23 @@ describe('ProjectContext PCQ-3 file-flow', () => {
               to: expect.objectContaining({ label: 'WorkerService.helper' }),
             }),
             expect.objectContaining({
-              from: expect.objectContaining({ label: 'createWorker' }),
+              from: expect.objectContaining({
+                label: 'createWorker',
+                ref: expect.objectContaining({
+                  scope: expect.objectContaining({
+                    range: expect.objectContaining({ startLine: 19 }),
+                  }),
+                }),
+              }),
               kind: 'calls',
-              to: expect.objectContaining({ label: 'WorkerService' }),
+              to: expect.objectContaining({
+                label: 'WorkerService',
+                ref: expect.objectContaining({
+                  scope: expect.objectContaining({
+                    range: expect.objectContaining({ startLine: 10 }),
+                  }),
+                }),
+              }),
             }),
           ])
         );

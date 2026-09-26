@@ -4,6 +4,7 @@ import type {
   ProjectContextRef,
   RelationEndpointSummary,
   RelationSummary,
+  SourceRangeSummary,
   SymbolSummary,
 } from '../../../domain/project-context/index.js';
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
@@ -202,35 +203,77 @@ function normalizeCallSites(input: {
   callSites: readonly ExtractedFileFlowCallSite[];
   symbols: readonly SymbolSummary[];
 }): RelationSummary[] {
-  return dedupeRelations(
-    input.callSites.map((callSite) => {
-      const caller = findCallerSymbol(input.symbols, callSite);
-      const callee = findCalleeSymbol(input.symbols, callSite);
-      return createRelationSummary({
-        direction: 'internal',
-        facts: input.facts,
-        fileRef: input.fileRef,
-        from: createSymbolEndpoint({
-          fallback: callSite.callerClass
-            ? `${callSite.callerClass}.${callSite.callerMethod}`
-            : callSite.callerMethod,
-          filePath: input.facts.filePath,
-          symbol: caller,
-        }),
-        kind: 'calls',
-        label: `${callSite.callerClass ? `${callSite.callerClass}.` : ''}${callSite.callerMethod} calls ${callSite.callee}`,
-        range: callSite.range,
-        reason: callee ? undefined : 'callee-unresolved',
-        symbolName: callSite.callee,
-        to: createSymbolEndpoint({
-          fallback: callSite.callee,
-          filePath: callee?.filePath ?? input.facts.filePath,
-          symbol: callee,
-        }),
-        unresolved: callee === undefined,
-      });
-    })
+  const entries = input.callSites.map((callSite) => {
+    const caller = findCallerSymbol(input.symbols, callSite);
+    const callee = findCalleeSymbol(input.symbols, callSite);
+    const reason = [caller.reason, callee.reason].filter(Boolean).join('; ') || undefined;
+    const relationInput: Parameters<typeof createRelationSummary>[0] = {
+      direction: 'internal',
+      facts: input.facts,
+      fileRef: input.fileRef,
+      from: caller.fileCaller
+        ? { filePath: input.facts.filePath, label: input.facts.filePath, ref: input.fileRef }
+        : createSymbolEndpoint({
+            fallback:
+              callSite.callerQualifiedName ??
+              (callSite.callerClass
+                ? `${callSite.callerClass}.${callSite.callerMethod}`
+                : callSite.callerMethod),
+            filePath: input.facts.filePath,
+            symbol: caller.symbol,
+          }),
+      kind: 'calls',
+      label: `${callSite.callerClass ? `${callSite.callerClass}.` : ''}${callSite.callerMethod} calls ${callSite.callee}`,
+      range: callSite.range,
+      reason,
+      symbolName: callSite.callee,
+      to: createSymbolEndpoint({
+        fallback: callSite.callee,
+        filePath: input.facts.filePath,
+        symbol: callee.symbol,
+      }),
+      unresolved: reason !== undefined,
+    };
+    return { callSite, relationInput, relation: createRelationSummary(relationInput) };
+  });
+  const groups = new Map<string | undefined, typeof entries>();
+  for (const entry of entries) {
+    const key = entry.relation.ref?.id;
+    const group = groups.get(key) ?? [];
+    group.push(entry);
+    groups.set(key, group);
+  }
+  // 普通行级ref继续逐字兼容。只有同一个ref确实对应不同AST调用位置时才升级为真实列；
+  // 缺少列的旧生产方仍按原ref去重，不能拿SDK id或数组序号伪造源码位置。
+  const relations: RelationSummary[] = [];
+  for (const group of groups.values()) {
+    const ranges = group.map(({ callSite }) => callSite.matchingRange);
+    const located = ranges.every(hasColumns);
+    const distinctLocations = new Set(ranges.map(rangeKey));
+    for (const entry of group) {
+      relations.push(
+        located && distinctLocations.size > 1
+          ? createRelationSummary({
+              ...entry.relationInput,
+              range: entry.callSite.matchingRange ?? entry.callSite.range,
+            })
+          : entry.relation
+      );
+    }
+  }
+  return dedupeRelations(relations);
+}
+
+function hasColumns(range: SourceRangeSummary | undefined): range is SourceRangeSummary {
+  return (
+    range !== undefined && Number.isInteger(range.startColumn) && Number.isInteger(range.endColumn)
   );
+}
+
+function rangeKey(range: SourceRangeSummary | undefined): string {
+  return range
+    ? [range.startLine, range.endLine, range.startColumn ?? '', range.endColumn ?? ''].join(':')
+    : '';
 }
 
 function createRelationSummary(input: {
@@ -389,44 +432,171 @@ function findSymbolForExport(
   );
 }
 
+interface SymbolResolution {
+  fileCaller?: boolean;
+  symbol?: SymbolSummary;
+  reason?: string;
+}
+
+function uniqueSymbol(
+  candidates: readonly SymbolSummary[],
+  role: 'caller' | 'callee'
+): SymbolResolution {
+  return candidates.length === 1
+    ? { symbol: candidates[0] }
+    : { reason: `${role}-${candidates.length > 1 ? 'ambiguous' : 'unresolved'}` };
+}
+
 function findCallerSymbol(
   symbols: readonly SymbolSummary[],
   callSite: ExtractedFileFlowCallSite
-): SymbolSummary | undefined {
-  const qualifiedName = callSite.callerClass
-    ? `${callSite.callerClass}.${callSite.callerMethod}`
-    : callSite.callerMethod;
-  // 先解析容器内的完整身份，避免文件里更早出现的同名方法抢占调用方。
-  return (
-    symbols.find((symbol) => symbol.qualifiedName === qualifiedName) ??
-    symbols.find((symbol) => symbol.name === callSite.callerMethod)
+): SymbolResolution {
+  const qualifiedName =
+    callSite.callerQualifiedName ??
+    (callSite.callerClass
+      ? `${callSite.callerClass}.${callSite.callerMethod}`
+      : callSite.callerMethod);
+  if (
+    qualifiedName === '<module>' &&
+    callSite.callerRange &&
+    containsRange(callSite.callerRange, callSite.matchingRange ?? callSite.range)
+  ) {
+    // 真实program owner对应现有文件ref，不制造一个“module函数”或借SDK节点推断调用者。
+    return { fileCaller: true };
+  }
+  const named = symbols.filter((symbol) => (symbol.qualifiedName ?? symbol.name) === qualifiedName);
+  if (callSite.callerRange) {
+    // 公共symbol可能为兼容保留旧短名/行级range，真实owner声明位置负责消歧。
+    // 不能因为完整名未投影出来，就退回第一个同名函数。
+    const candidates =
+      named.length > 0 ? named : symbols.filter((symbol) => symbol.name === callSite.callerMethod);
+    const owner = callSite.callerRange;
+    if (!containsRange(owner, callSite.matchingRange ?? callSite.range)) {
+      return { reason: 'caller-range-mismatch' };
+    }
+    return uniqueSymbol(
+      candidates.filter((symbol) => matchesDeclarationRange(symbol.range, owner)),
+      'caller'
+    );
+  }
+  if (named.length === 1) {
+    return { symbol: named[0] };
+  }
+  // 老语言插件没有owner范围时，仅完整声明范围能证明某个重复候选包含调用点。
+  const candidates =
+    named.length > 0 ? named : symbols.filter((symbol) => symbol.name === callSite.callerMethod);
+  const containing = candidates.filter(
+    (symbol) =>
+      symbol.range && containsRange(symbol.range, callSite.matchingRange ?? callSite.range)
   );
+  return uniqueSymbol(containing.length > 0 ? containing : named, 'caller');
 }
 
 function findCalleeSymbol(
   symbols: readonly SymbolSummary[],
   callSite: ExtractedFileFlowCallSite
-): SymbolSummary | undefined {
-  const calleeName = normalizeCalleeName(callSite.callee);
-  if (callSite.receiver === 'this' && callSite.callerClass) {
-    const qualifiedName = `${callSite.callerClass}.${calleeName}`;
-    const classMember = symbols.find((symbol) => symbol.qualifiedName === qualifiedName);
-    if (classMember) {
-      return classMember;
-    }
+): SymbolResolution {
+  const receiver = callSite.receiver?.trim();
+  if (callSite.calleeShadowed) {
+    const candidates = symbols.filter(
+      (symbol) => (symbol.qualifiedName ?? symbol.name) === callSite.callee
+    );
+    return {
+      reason: receiver
+        ? 'callee-receiver-shadowed'
+        : candidates.length > 1
+          ? 'callee-shadowed; callee-ambiguous'
+          : 'callee-shadowed',
+    };
   }
-  return symbols.find(
-    (symbol) =>
-      symbol.qualifiedName === calleeName ||
-      symbol.name === calleeName ||
-      symbol.qualifiedName?.endsWith(`.${calleeName}`)
+  const expression = callSite.calleeExpression ?? callSite.callee;
+  const calleeName = callSite.callee.split('.').at(-1) ?? callSite.callee;
+  if (receiver === 'this' && callSite.callerClass) {
+    // 新AST区分普通nested function的动态this与arrow继承的词法this；callerClass
+    // 只表示词法包含关系，不能单独证明接收者。旧插件没有syntax元数据时保留原分支。
+    if (callSite.syntaxKind && callSite.receiverType !== callSite.callerClass) {
+      return { reason: 'callee-receiver-unresolved' };
+    }
+    return uniqueSymbol(
+      symbols.filter((symbol) => symbol.qualifiedName === `${callSite.callerClass}.${calleeName}`),
+      'callee'
+    );
+  }
+  // 任意对象成员不是文件内同名函数。receiverType仅是旧启发式数据，不是绑定证明。
+  if (receiver) {
+    return { reason: 'callee-receiver-unresolved' };
+  }
+  const bindingRange = callSite.calleeBindingRange;
+  const qualifiedName = callSite.calleeQualifiedName;
+  if (bindingRange) {
+    const candidates = symbols.filter(
+      (symbol) =>
+        ((symbol.qualifiedName ?? symbol.name) === qualifiedName || symbol.name === calleeName) &&
+        matchesDeclarationRange(symbol.range, bindingRange)
+    );
+    return uniqueSymbol(candidates, 'callee');
+  }
+  if (qualifiedName) {
+    return uniqueSymbol(
+      symbols.filter((symbol) => (symbol.qualifiedName ?? symbol.name) === qualifiedName),
+      'callee'
+    );
+  }
+  // 括号只改变callee的源码表达式；真实AST已证明的identifier绑定优先于文本形态防线。
+  if (expression.includes('.') || expression.includes('[') || expression.includes('(')) {
+    return { reason: 'callee-receiver-unresolved' };
+  }
+  if (callSite.syntaxKind) {
+    // 新AST已做词法查找但没有证明本地绑定；缺证据不能再用裸名补造一个目标。
+    const candidates = symbols.filter(
+      (symbol) => (symbol.qualifiedName ?? symbol.name) === calleeName
+    );
+    return { reason: candidates.length > 1 ? 'callee-ambiguous' : 'callee-unresolved' };
+  }
+  // 旧生产方只保留唯一、顶层的同名声明；移除跨class的后缀匹配。
+  return uniqueSymbol(
+    symbols.filter(
+      (symbol) => !symbol.container && (symbol.qualifiedName ?? symbol.name) === calleeName
+    ),
+    'callee'
   );
 }
 
-function normalizeCalleeName(value: string): string {
-  const withoutThis = value.replace(/^this\./, '');
-  const parts = withoutThis.split('.');
-  return parts[parts.length - 1] ?? withoutThis;
+function matchesDeclarationRange(
+  symbol: SourceRangeSummary | undefined,
+  declaration: SourceRangeSummary
+): boolean {
+  if (!symbol || symbol.startLine !== declaration.startLine) {
+    return false;
+  }
+  if (
+    symbol.startColumn !== undefined &&
+    declaration.startColumn !== undefined &&
+    symbol.startColumn !== declaration.startColumn
+  ) {
+    return false;
+  }
+  // 旧symbol行级锚点可能仅覆盖声明首行；完整多行范围存在时必须吻合。
+  return symbol.endLine === symbol.startLine || symbol.endLine === declaration.endLine;
+}
+
+function containsRange(outer: SourceRangeSummary, inner: SourceRangeSummary): boolean {
+  return (
+    outer.startLine <= inner.startLine &&
+    outer.endLine >= inner.endLine &&
+    !(
+      outer.startLine === inner.startLine &&
+      outer.startColumn !== undefined &&
+      inner.startColumn !== undefined &&
+      outer.startColumn > inner.startColumn
+    ) &&
+    !(
+      outer.endLine === inner.endLine &&
+      outer.endColumn !== undefined &&
+      inner.endColumn !== undefined &&
+      outer.endColumn < inner.endColumn
+    )
+  );
 }
 
 function createImportTargetCandidates(base: string): string[] {
@@ -555,5 +725,10 @@ function compareRanges(left: RelationSummary['range'], right: RelationSummary['r
   if (!right) {
     return -1;
   }
-  return left.startLine - right.startLine || left.endLine - right.endLine;
+  return (
+    left.startLine - right.startLine ||
+    left.endLine - right.endLine ||
+    (left.startColumn ?? 0) - (right.startColumn ?? 0) ||
+    (left.endColumn ?? 0) - (right.endColumn ?? 0)
+  );
 }

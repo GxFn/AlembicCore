@@ -16,8 +16,12 @@
  *   - Go / Java / Kotlin (P1 — via lang plugin extractCallSites)
  */
 
+import { isNoiseCall as _isNoiseCall } from './CallSiteNoisePolicy.js';
+import { extractJsCallSites } from './JsCallSiteExtractor.js';
+
 interface WalkerContext {
   callSites: CallSiteInfo[];
+  callSiteEvidence?: CallSiteInfo[];
   [key: string]: unknown;
 }
 
@@ -31,362 +35,31 @@ export interface CallSiteInfo {
   argCount: number;
   line: number;
   isAwait: boolean;
+  /** 内部observer证据；不写入旧AstFileSummary.callSites记录。 */
+  matchingRange?: CallSiteRange;
+  callerRange?: CallSiteRange;
+  callerQualifiedName?: string;
+  calleeExpression?: string;
+  syntaxKind?: 'call' | 'new' | 'jsx';
+  omissionReason?: string;
+  calleeShadowed?: boolean;
+  calleeQualifiedName?: string;
+  calleeBindingRange?: CallSiteRange;
+  receiverSyntax?: string;
 }
 
-// ── TypeScript / JavaScript / TSX ──────────────────────────
-
-/**
- * 从 TS/JS AST root 中提取所有调用点
- * 使用 post-walk 策略，遍历已由 walker 收集的 methods/classes 来定位方法体，
- * 然后从方法体中递归提取 call_expression / new_expression。
- *
- * @param root AST root 节点
- * @param ctx walker context (含 classes, methods, callSites, references 等)
- * @param lang 语言标识
- */
-export function extractCallSitesTS(root: TreeSitterNode, ctx: WalkerContext, lang: string) {
-  // 收集所有 function/method body 节点与其上下文
-  const scopes = _collectTSScopes(root);
-
-  for (const scope of scopes) {
-    _extractCallSitesFromBody(scope.body, scope.className, scope.methodName, ctx);
-  }
-}
-
-/**
- * 收集 TS/JS 中所有函数/方法作用域
- * 遍历 AST 找到 function_declaration / method_definition / arrow_function 等，
- * 以及它们对应的 statement_block 和上下文信息。
- *
- * @returns >}
- */
-function _collectTSScopes(root: TreeSitterNode) {
-  const scopes: { body: TreeSitterNode; className: string | null; methodName: string }[] = [];
-
-  function walk(node: TreeSitterNode, className: string | null) {
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const child = node.namedChild(i);
-      if (!child) {
-        continue;
-      }
-
-      switch (child.type) {
-        case 'class_declaration':
-        case 'abstract_class_declaration': {
-          const name =
-            child.namedChildren.find(
-              (c: TreeSitterNode) => c.type === 'type_identifier' || c.type === 'identifier'
-            )?.text || null;
-          const body = child.namedChildren.find((c: TreeSitterNode) => c.type === 'class_body');
-          if (body && name) {
-            walk(body, name);
-          }
-          break;
-        }
-
-        case 'method_definition': {
-          const name =
-            child.namedChildren.find(
-              (c: TreeSitterNode) =>
-                c.type === 'property_identifier' ||
-                c.type === 'identifier' ||
-                c.type === 'computed_property_name'
-            )?.text || 'unknown';
-          const body = child.namedChildren.find(
-            (c: TreeSitterNode) => c.type === 'statement_block'
-          );
-          if (body) {
-            scopes.push({ body, className, methodName: name });
-          }
-          break;
-        }
-
-        case 'function_declaration': {
-          const name =
-            child.namedChildren.find((c: TreeSitterNode) => c.type === 'identifier')?.text ||
-            'unknown';
-          const body = child.namedChildren.find(
-            (c: TreeSitterNode) => c.type === 'statement_block'
-          );
-          if (body) {
-            scopes.push({ body, className, methodName: name });
-          }
-          break;
-        }
-
-        case 'lexical_declaration':
-        case 'variable_declaration': {
-          // const foo = () => { ... }
-          for (const decl of child.namedChildren) {
-            if (decl.type === 'variable_declarator') {
-              const nameNode = decl.namedChildren.find(
-                (c: TreeSitterNode) => c.type === 'identifier'
-              );
-              const valueNode = decl.namedChildren.find(
-                (c: TreeSitterNode) => c.type === 'arrow_function' || c.type === 'function'
-              );
-              if (nameNode && valueNode) {
-                // Arrow 的 body 可以是块或表达式，不能只接受 statement_block 而漏掉 foo()。
-                const body =
-                  valueNode.childForFieldName('body') ??
-                  valueNode.namedChildren.find((c: TreeSitterNode) => c.type === 'statement_block');
-                if (body) {
-                  scopes.push({ body, className, methodName: nameNode.text });
-                }
-              }
-            }
-          }
-          break;
-        }
-
-        case 'export_statement': {
-          // export 下面可能有 function_declaration / class_declaration
-          walk(child, className);
-          break;
-        }
-
-        default: {
-          // 递归进入其他有子节点的容器（但避免进入函数体）
-          if (
-            child.namedChildCount > 0 &&
-            !['statement_block', 'function_body', 'template_string'].includes(child.type)
-          ) {
-            walk(child, className);
-          }
-        }
-      }
-    }
-  }
-
-  walk(root, null);
-  return scopes;
+interface CallSiteRange {
+  startLine: number;
+  endLine: number;
+  startColumn: number;
+  endColumn: number;
 }
 
 type CallType = CallSiteInfo['callType'];
 
-/**
- * 从方法体中递归提取调用点
- *
- * @param bodyNode statement_block 节点
- * @param className 所在类名
- * @param methodName 所在方法名
- * @param ctx walker context
- */
-function _extractCallSitesFromBody(
-  bodyNode: TreeSitterNode | null,
-  className: string | null,
-  methodName: string,
-  ctx: WalkerContext
-) {
-  if (!bodyNode) {
-    return;
-  }
-
-  function walk(node: TreeSitterNode, isAwaited: boolean) {
-    // 跳过语法错误节点 (Issue #17: 防御性处理)
-    if (!node || node.type === 'ERROR' || node.isMissing) {
-      return;
-    }
-
-    // await expression → 标记下一层的调用为 awaited
-    if (node.type === 'await_expression') {
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const c = node.namedChild(i);
-        if (c) {
-          walk(c, true);
-        }
-      }
-      return;
-    }
-
-    if (node.type === 'call_expression') {
-      const callSite = _parseTSCallExpression(node, className, methodName, isAwaited);
-      if (callSite) {
-        ctx.callSites.push(callSite);
-      }
-      // 继续遍历参数中的嵌套调用
-      const args = node.namedChildren.find((c: TreeSitterNode) => c.type === 'arguments');
-      if (args) {
-        for (let i = 0; i < args.namedChildCount; i++) {
-          const c = args.namedChild(i);
-          if (c) {
-            walk(c, false);
-          }
-        }
-      }
-      return;
-    }
-
-    if (node.type === 'new_expression') {
-      const ctor = node.namedChildren.find(
-        (c: TreeSitterNode) => c.type === 'identifier' || c.type === 'member_expression'
-      );
-      if (ctor) {
-        ctx.callSites.push({
-          callee: ctor.text,
-          callerMethod: methodName,
-          callerClass: className,
-          callType: 'constructor',
-          receiver: null,
-          receiverType: ctor.text,
-          argCount: _countArgs(node),
-          line: node.startPosition.row + 1,
-          isAwait: isAwaited,
-        });
-      }
-      // 继续遍历参数中的嵌套调用
-      const args = node.namedChildren.find((c: TreeSitterNode) => c.type === 'arguments');
-      if (args) {
-        for (let i = 0; i < args.namedChildCount; i++) {
-          const c = args.namedChild(i);
-          if (c) {
-            walk(c, false);
-          }
-        }
-      }
-      return;
-    }
-
-    // JSX/TSX: 组件渲染视为调用点 (Issue #13)
-    // <MyComponent /> 或 <MyComponent>...</MyComponent> → 视为 constructor 调用
-    if (node.type === 'jsx_self_closing_element' || node.type === 'jsx_opening_element') {
-      const tagNode =
-        node.namedChildren.find(
-          (c: TreeSitterNode) => c.type === 'identifier' || c.type === 'jsx_identifier'
-        ) ||
-        node.namedChildren.find(
-          (c: TreeSitterNode) =>
-            c.type === 'member_expression' || c.type === 'jsx_member_expression'
-        );
-      if (tagNode) {
-        const tagName = tagNode.text;
-        // 仅大写开头为组件 (小写为 HTML 原生标签如 div, span)
-        if (tagName && /^[A-Z]/.test(tagName)) {
-          // 计算 JSX 属性数量作为 argCount
-          const attrNodes = node.namedChildren.filter(
-            (c: TreeSitterNode) => c.type === 'jsx_attribute'
-          );
-          ctx.callSites.push({
-            callee: tagName,
-            callerMethod: methodName,
-            callerClass: className,
-            callType: 'constructor',
-            receiver: null,
-            receiverType: tagName,
-            argCount: attrNodes.length,
-            line: node.startPosition.row + 1,
-            isAwait: false,
-          });
-        }
-      }
-      // 继续遍历 JSX 表达式中的嵌套调用 (如 onClick={handleClick()})
-      for (let i = 0; i < node.namedChildCount; i++) {
-        const child = node.namedChild(i);
-        if (!child) {
-          continue;
-        }
-        if (child.type === 'jsx_attribute') {
-          // 属性值中可能有嵌套调用: onClick={doSomething()}
-          for (let j = 0; j < child.namedChildCount; j++) {
-            const c = child.namedChild(j);
-            if (c) {
-              walk(c, false);
-            }
-          }
-        }
-      }
-      return;
-    }
-
-    // 递归子节点
-    for (let i = 0; i < node.namedChildCount; i++) {
-      const c = node.namedChild(i);
-      if (c) {
-        walk(c, false);
-      }
-    }
-  }
-
-  walk(bodyNode, false);
-}
-
-/**
- * 解析 TS/JS 的 call_expression 节点
- *
- * @param node call_expression 节点
- * @param className 所在类名
- * @param methodName 所在方法名
- * @param isAwaited 是否被 await
- */
-function _parseTSCallExpression(
-  node: TreeSitterNode,
-  className: string | null,
-  methodName: string,
-  isAwaited: boolean
-): CallSiteInfo | null {
-  const func = node.namedChildren[0]; // call_expression 的第一个子节点是被调用者
-  if (!func) {
-    return null;
-  }
-
-  let callee: string;
-  let receiver: string | null = null;
-  let receiverType: string | null = null;
-  let callType: CallType;
-
-  if (func.type === 'member_expression') {
-    // obj.method() — method call
-    const object = func.namedChildren.find((c: TreeSitterNode) => c.type !== 'property_identifier');
-    const prop = func.namedChildren.find((c: TreeSitterNode) => c.type === 'property_identifier');
-    receiver = object?.text || null;
-    callee = prop?.text || func.text;
-    callType = 'method';
-
-    // 推断 receiverType
-    if (receiver === 'this' || receiver === 'self') {
-      receiverType = className;
-    } else if (receiver === 'super') {
-      callType = 'super';
-      receiverType = className; // 需要 CHA 进一步解析到父类
-    } else if (receiver && /^[A-Z]/.test(receiver)) {
-      // 静态调用推断 e.g. UserService.create()
-      receiverType = receiver;
-      callType = 'static';
-    } else if (receiver?.startsWith('this.')) {
-      // this.xxx.method() → xxx 可能是注入的 field
-      receiverType = null; // 后续由 CallEdgeResolver 从 properties 解析
-    }
-  } else if (func.type === 'identifier') {
-    // foo() — function call
-    callee = func.text;
-    callType = 'function';
-  } else if (func.type === 'super') {
-    // super() — constructor call
-    callee = 'super';
-    callType = 'super';
-    receiverType = className;
-  } else {
-    // 复杂表达式调用 (e.g. getFactory()(), callback())
-    callee = func.text?.slice(0, 80) || 'unknown';
-    callType = 'function';
-  }
-
-  // 过滤噪声:跳过常见的内置/工具调用
-  if (_isNoiseCall(callee, receiver)) {
-    return null;
-  }
-
-  return {
-    callee,
-    callerMethod: methodName,
-    callerClass: className,
-    callType,
-    receiver,
-    receiverType,
-    argCount: _countArgs(node),
-    line: node.startPosition.row + 1,
-    isAwait: isAwaited,
-  };
+/** TS/JS的结构证据和旧callSites投影共用同一遍历；其他语言规则留在本模块。 */
+export function extractCallSitesTS(root: TreeSitterNode, ctx: WalkerContext, _lang: string) {
+  extractJsCallSites(root, ctx);
 }
 
 // ── Python ─────────────────────────────────────────────────
@@ -651,15 +324,6 @@ export function defaultExtractCallSites(root: TreeSitterNode, ctx: WalkerContext
 
 // ── 工具函数 ───────────────────────────────────────────────
 
-/** 计算参数数量 (TS/JS) */
-function _countArgs(node: TreeSitterNode): number {
-  const args = node.namedChildren.find((c: TreeSitterNode) => c.type === 'arguments');
-  if (!args) {
-    return 0;
-  }
-  return args.namedChildCount;
-}
-
 /** 计算参数数量 (Python) */
 function _countPyArgs(node: TreeSitterNode): number {
   const args = node.namedChildren.find((c: TreeSitterNode) => c.type === 'argument_list');
@@ -667,85 +331,4 @@ function _countPyArgs(node: TreeSitterNode): number {
     return 0;
   }
   return args.namedChildCount;
-}
-
-/** 判断是否为噪声调用（内置/console/日志等，不产生有意义的调用边） */
-function _isNoiseCall(callee: string, receiver: string | null): boolean {
-  // 常见内置调用噪声
-  const NOISE_RECEIVERS = new Set([
-    'console',
-    'Math',
-    'JSON',
-    'Object',
-    'Array',
-    'String',
-    'Number',
-    'Boolean',
-    'Date',
-    'RegExp',
-    'Promise',
-    'Set',
-    'Map',
-    'WeakMap',
-    'WeakSet',
-    'Symbol',
-    'Reflect',
-    'Proxy',
-    'parseInt',
-    'parseFloat',
-  ]);
-
-  const NOISE_CALLEES = new Set([
-    'require',
-    'import',
-    'console',
-    'log',
-    'warn',
-    'error',
-    'info',
-    'debug',
-    'setTimeout',
-    'setInterval',
-    'clearTimeout',
-    'clearInterval',
-    'requestAnimationFrame',
-    'cancelAnimationFrame',
-    'alert',
-    'confirm',
-    'prompt',
-    'print',
-    'len',
-    'range',
-    'enumerate',
-    'zip',
-    'map',
-    'filter',
-    'isinstance',
-    'issubclass',
-    'hasattr',
-    'getattr',
-    'setattr',
-    'str',
-    'int',
-    'float',
-    'bool',
-    'list',
-    'dict',
-    'tuple',
-    'set',
-    'type',
-    'super',
-    'property',
-    'staticmethod',
-    'classmethod',
-  ]);
-
-  if (receiver && NOISE_RECEIVERS.has(receiver)) {
-    return true;
-  }
-  if (callee && NOISE_CALLEES.has(callee)) {
-    return true;
-  }
-
-  return false;
 }
