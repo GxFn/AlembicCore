@@ -54,8 +54,9 @@ export const fileSymbolsProjectContextHandler: ProjectContextHandler = async (
     sourceFolder: fileAccess.facts.sourceFolder,
   });
   const extraction = context?.analysis
-    ? context.analysis.symbols(fileAccess.facts)
+    ? await context.analysis.symbols(fileAccess.facts, context)
     : extractFileSymbolsFromSource(fileAccess.facts);
+  throwIfProjectContextAborted(context);
   const normalized = normalizeFileSymbols({
     facts: fileAccess.facts,
     fileRef,

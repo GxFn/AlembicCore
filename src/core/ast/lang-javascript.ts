@@ -7,6 +7,7 @@
 
 // JavaScript walker 与 TypeScript walker 结构相同
 // 复用 lang-typescript 的 walker 逻辑
+import { astNodeRange } from './nodeRange.js';
 
 function walkJavaScript(root: any, ctx: any) {
   _walkJSNode(root, ctx, null);
@@ -71,10 +72,10 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
     if (child.type === 'method_definition') {
-      const name =
-        child.namedChildren.find(
-          (c: any) => c.type === 'property_identifier' || c.type === 'identifier'
-        )?.text || 'unknown';
+      const nameNode = child.namedChildren.find(
+        (c: any) => c.type === 'property_identifier' || c.type === 'identifier'
+      );
+      const name = nameNode?.text || 'unknown';
 
       const isStatic = child.text.trimStart().startsWith('static');
       const bodyNode = child.namedChildren.find((c: any) => c.type === 'statement_block');
@@ -82,6 +83,8 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
 
       ctx.methods.push({
         name,
+        nameIsPlaceholder: !nameNode,
+        matchingRange: astNodeRange(child),
         className,
         isClassMethod: isStatic,
         bodyLines,
@@ -150,6 +153,8 @@ function _walkForThisAssignments(node: any, ctx: any, className: any, seen: Set<
             ctx.properties.push({
               name: prop.text,
               className,
+              // 此属性来自真实constructor this赋值，供CodeGraph兼容补充判别，不靠显示文本猜测。
+              isConstructorAssignment: true,
               isStatic: false,
               isConstant: false,
               line: child.startPosition.row + 1,
@@ -222,6 +227,7 @@ function _parseJSVariableDecl(node: any, ctx: any, parentClassName: any) {
         const body = valueNode.namedChildren.find((c: any) => c.type === 'statement_block');
         ctx.methods.push({
           name: nameNode.text,
+          matchingRange: astNodeRange(valueNode),
           className: parentClassName,
           isClassMethod: false,
           bodyLines: body ? body.endPosition.row - body.startPosition.row + 1 : 0,

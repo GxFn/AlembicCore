@@ -56,6 +56,12 @@ export {
   ProjectContextCapabilities,
 } from './project-context-capabilities.js';
 export {
+  type CodeGraphProjectContextOptions,
+  type CodeGraphProjectContextRuntime,
+  getCodeGraphProjectContextIdentity,
+  withCodeGraphProjectContextSession,
+} from './service/project-context/analysis/codeGraphSession.js';
+export {
   ProjectContext,
   withProjectContextSession,
 } from './service/project-context/ProjectContextService.js';

@@ -13,6 +13,10 @@ interface AstSymbolRecord {
   endLine?: unknown;
   bodyLines?: unknown;
   className?: unknown;
+  isConstructorParam?: unknown;
+  isConstructorAssignment?: unknown;
+  matchingRange?: { startLine: number; endLine: number; startColumn?: number; endColumn?: number };
+  nameIsPlaceholder?: boolean;
 }
 
 interface AstFileSummaryLike {
@@ -44,6 +48,8 @@ export function extractFileSymbolsFromSource(
 
   try {
     return {
+      syntaxValid: facts.syntaxValid,
+      syntaxFeatures: facts.syntaxFeatures,
       symbols: collectExtractedSymbols({
         filePath: input.filePath,
         lineCount: input.lineCount,
@@ -126,6 +132,11 @@ function collectExtractedSymbols(input: {
     const kind = container ? (name === 'constructor' ? 'constructor' : 'method') : 'function';
     symbols.push({
       container,
+      ...(record.matchingRange ? { matchingRange: { ...record.matchingRange } } : {}),
+      ...(record.nameIsPlaceholder ? { nameIsPlaceholder: true } : {}),
+      ...(record.kind === 'declaration'
+        ? { compatibilitySource: 'method-declaration' as const }
+        : {}),
       exported: isExported(name, range.startLine, input.lines, exportedNames),
       filePath: input.filePath,
       kind,
@@ -149,6 +160,11 @@ function collectExtractedSymbols(input: {
     const container = readString(record.className);
     symbols.push({
       container,
+      ...(record.isConstructorParam === true
+        ? { compatibilitySource: 'constructor-parameter-property' as const }
+        : record.isConstructorAssignment === true
+          ? { compatibilitySource: 'constructor-this-assignment' as const }
+          : {}),
       exported: isExported(name, range.startLine, input.lines, exportedNames),
       filePath: input.filePath,
       kind: container ? 'property' : 'variable',

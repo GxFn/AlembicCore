@@ -7,6 +7,7 @@ import type {
 import { nodeProjectSourceReader } from '../../infrastructure/io/ProjectSourceReader.js';
 import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
 import { FileAnalysisSession } from './analysis/FileAnalysisSession.js';
+import type { ProjectContextSymbolExtractor } from './analysis/SymbolExtractor.js';
 import { anchorRangeProjectContextHandler } from './anchorRange/index.js';
 import { fileFlowProjectContextHandler } from './fileFlow/index.js';
 import { fileSymbolsProjectContextHandler } from './fileSymbols/index.js';
@@ -14,6 +15,7 @@ import type {
   ProjectContextHandlerExecutionContext,
   ProjectContextHandlerRegistry,
 } from './interface/contracts.js';
+import { throwIfProjectContextAborted } from './interface/execution.js';
 import { createProjectContext } from './interface/projectContext.js';
 import { mapProjectContextHandler } from './map/index.js';
 import { moduleProjectContextHandler } from './module/index.js';
@@ -83,9 +85,14 @@ export class ProjectContextService implements ProjectContextContract {
  */
 export async function withProjectContextSession<T>(
   collect: (projectContext: ProjectContextContract) => Promise<T>,
-  options: { sourceReader?: ProjectSourceReader } = {}
+  options: {
+    sourceReader?: ProjectSourceReader;
+    symbolExtractor?: ProjectContextSymbolExtractor;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<T> {
-  const analysis = new FileAnalysisSession(true);
+  throwIfProjectContextAborted(options);
+  const analysis = new FileAnalysisSession(true, options.symbolExtractor);
   const service = new ProjectContextService(
     PROJECT_CONTEXT_DEFAULT_HANDLERS,
     analysis,
@@ -98,7 +105,14 @@ export async function withProjectContextSession<T>(
       if (closed) {
         return Promise.reject(new Error('ProjectContext analysis session is closed.'));
       }
-      const pending = tail.then(() => service.execute(input, context));
+      const signal =
+        options.signal && context?.signal && options.signal !== context.signal
+          ? AbortSignal.any([options.signal, context.signal])
+          : (options.signal ?? context?.signal);
+      // owner signal覆盖整个批次；保留sourceReader等内部字段，不能另包一个失去能力标记的executor。
+      const pending = tail.then(() =>
+        service.execute(input, signal ? { ...context, signal } : context)
+      );
       tail = pending.then(
         () => undefined,
         () => undefined
@@ -109,7 +123,9 @@ export async function withProjectContextSession<T>(
   sourceReaderAwareContexts.add(projectContext);
   let failed = false;
   try {
-    return await collect(projectContext);
+    const result = await collect(projectContext);
+    throwIfProjectContextAborted(options);
+    return result;
   } catch (error) {
     failed = true;
     throw error;
@@ -120,6 +136,8 @@ export async function withProjectContextSession<T>(
       // 已失败的回调保留原始错误语义（如 capture 的 retryable drift）；
       // 只有正常返回才再检查锁存，阻止调用方 catch 后把不完整输入当成成功。
       if (!failed) {
+        // 已接受但未await的查询在tail中排空；排空期间到达的owner取消也不能发布旧callback值。
+        throwIfProjectContextAborted(options);
         analysis.assertInputsComplete();
       }
     } finally {

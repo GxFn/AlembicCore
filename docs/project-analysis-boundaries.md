@@ -48,6 +48,40 @@ registry 也共用队列。取消排队不会越过仍在执行的前序请求�
 约定；旧扩展实例仍可用于实时查询，但不能自动获得完整输入捕获保证。会话期间替换
 reader 或追加未确认的发现器会使该次捕获失败。
 
+## CodeGraph 符号生产
+
+宿主可通过 `withCodeGraphProjectContextSession({ dataRoot, signal }, callback)` 创建
+真实 SDK 分析作用域。回调拿到原生 ProjectContext 执行器和 `{ engineHash, engine,
+runtimeRoot }`；它保留完整输入记录能力，不能再包成未声明读取能力的任意执行器。
+该入口需要 Node.js 22.5+；既有普通 ProjectContext 入口仍使用原 AST 实现。
+
+当前固定官方 `@colbymchenry/codegraph@1.6.0`，在独立子进程设置官方
+`CODEGRAPH_KERNEL=0`，通过公开 `extractFromSource` 分析传入字符串。SDK只在
+`dataRoot/.asd/codegraph-sessions` 的唯一临时子目录内初始化，`index:false` 不创建活动
+源码全图。宿主必须将位于源码范围内的固定 runtimeRoot 加入 inventory 排除策略。
+退出时停止接单、排空已接受查询、关闭并等待进程退出，然后删除该临时子目录。
+超时或取消会终止在途 SDK 任务；作用域任何阶段的 owner 取消均不能发布成功。
+单个请求取消后先等待旧进程退出，健康owner的后续请求才可惰性重开同一身份的worker；
+不能把一个repo的deadline扩散为其它repo也被取消。worker同时启用SDK建议的
+`--liftoff-only`，在需要标志的早期Node 22/23版本显式启用`node:sqlite`，实际启动参数
+一并进入身份并在READY中核对。
+
+`getCodeGraphProjectContextIdentity()` 只读取 SDK/平台包版本、Node、worker字节和
+规范化策略身份，不启动进程。共享 Graph build 应在 acquire 前将 engineHash 放入缓存
+键，在真正的 build(ownerSignal) 回调中创建 SDK 作用域；不能让单个订阅者拥有共享 worker。
+认证 producer 应使用实际 engineHash 作为 parserHash。改变规范化或 AST 补充策略时，
+必须更新对应策略版本并复核兼容矩阵，不能沿用旧身份假称新引擎结果。
+
+首片覆盖 JS 家族的具名符号。CodeGraph 节点提供事实，Alembic继续生成既有refs；同行
+同名节点不能按 SDK id 去重，确有碰撞时使用已验证的 UTF-16 列区分。AST通过真实节点位置
+对应跨行箭头绑定、私有方法占位；仅补已证实的声明方法、构造参数属性与 JS constructor
+this 属性。普通SDK声明丢失时明确返回不可用，不以全量旧结果掩盖。
+
+1.6.0 对匿名默认声明、namespace 的投影不完整，本入口按真实 AST 形态返回明确的覆盖
+不可用；语法错误也不能因 SDK `errors=[]` 被认证为空成功。导出标志、已有非碰撞范围与
+类别保留兼容语义。imports/exports/call metadata、非JS语言、Guard和SourceGraph索引
+目前继续使用原生产方；不得把本入口描述成全部AST或完整图索引已经迁移。
+
 ## 捕获期间的源码读取
 
 共用 source loader 的七类查询（source-slice、file-symbols、file-flow、anchor-range、

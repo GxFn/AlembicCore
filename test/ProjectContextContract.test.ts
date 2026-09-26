@@ -45,7 +45,10 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       'buildProjectContextPresenterInput',
       'createProjectContextCapabilities',
       'createProjectContextFileRef',
+      // 宿主启动前身份与真实SDK作用域；保持精确门面清单，不开放第三方内部类型。
+      'getCodeGraphProjectContextIdentity',
       'resolveAstParserLanguage',
+      'withCodeGraphProjectContextSession',
       'withProjectContextSession',
     ]);
     expect(ProjectContext.execute).toBeInstanceOf(Function);

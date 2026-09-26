@@ -190,6 +190,8 @@ interface FileSummaryEntry extends AstFileSummary {
 
 interface AnalyzeFileOptions {
   extractCallSites?: boolean;
+  /** 独立观察真实语法完整性，保留既有摘要字段与持久化形态。 */
+  onSyntaxValidity?: (valid: boolean | undefined, features: readonly string[]) => void;
 }
 
 interface AnalyzeProjectOptions {
@@ -270,6 +272,36 @@ function analyzeFile(
   }
   try {
     const root = tree.rootNode;
+    if (options.onSyntaxValidity) {
+      const features: string[] = [];
+      // 保留真实AST声明形态，后端自行声明能力；不能用空symbols推断不存在namespace/匿名导出。
+      if (
+        ['typescript', 'javascript', 'tsx', 'jsx'].includes(lang) &&
+        typeof root.descendantsOfType === 'function'
+      ) {
+        if (root.descendantsOfType(['internal_module', 'module']).length > 0) {
+          features.push('namespace');
+        }
+        if (
+          root.descendantsOfType('export_statement').some((declaration) => {
+            const value = declaration.childForFieldName('value');
+            return (
+              value &&
+              ['class', 'function_expression', 'generator_function', 'arrow_function'].includes(
+                value.type
+              ) &&
+              !value.childForFieldName('name')
+            );
+          })
+        ) {
+          features.push('anonymous-default-declaration');
+        }
+      }
+      options.onSyntaxValidity(
+        typeof root.hasError === 'boolean' ? !root.hasError : undefined,
+        features
+      );
+    }
 
     const ctx: AstWalkerContext = {
       classes: [],

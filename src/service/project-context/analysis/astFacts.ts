@@ -18,6 +18,8 @@ export type ProjectContextAstFacts =
       status: 'ready';
       parserLanguage: string;
       summary: NonNullable<ReturnType<typeof analyzeFile>>;
+      syntaxValid?: boolean;
+      syntaxFeatures?: string[];
     }
   | { status: 'unsupported' }
   | { status: 'runtime-unavailable' | 'empty' | 'failed'; parserLanguage: string };
@@ -38,9 +40,17 @@ export function readProjectContextAst(
     return { status: 'runtime-unavailable', parserLanguage };
   }
   try {
-    const summary = analyzeFile(input.text, parserLanguage, { extractCallSites });
+    let syntaxValid: boolean | undefined;
+    let syntaxFeatures: string[] = [];
+    const summary = analyzeFile(input.text, parserLanguage, {
+      extractCallSites,
+      onSyntaxValidity: (valid, features) => {
+        syntaxValid = valid;
+        syntaxFeatures = [...features];
+      },
+    });
     return summary
-      ? { status: 'ready', parserLanguage, summary }
+      ? { status: 'ready', parserLanguage, summary, syntaxValid, syntaxFeatures }
       : { status: 'empty', parserLanguage };
   } catch {
     return { status: 'failed', parserLanguage };

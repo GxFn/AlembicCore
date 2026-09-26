@@ -54,16 +54,18 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     sourceFolder: fileAccess.facts.sourceFolder,
   });
   const symbolExtraction = context?.analysis
-    ? context.analysis.symbols(fileAccess.facts)
+    ? await context.analysis.symbols(fileAccess.facts, context)
     : extractFileSymbolsFromSource(fileAccess.facts);
+  throwIfProjectContextAborted(context);
   const normalizedSymbols = normalizeFileSymbols({
     facts: fileAccess.facts,
     fileRef,
     symbols: symbolExtraction.symbols,
   });
   const flowExtraction = context?.analysis
-    ? context.analysis.flow(fileAccess.facts)
+    ? await context.analysis.flow(fileAccess.facts, context)
     : extractFileFlowFromSource(fileAccess.facts);
+  throwIfProjectContextAborted(context);
   const normalized = await normalizeFileFlow({
     callSites: flowExtraction.callSites,
     exports: flowExtraction.exports,

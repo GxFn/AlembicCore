@@ -21,7 +21,17 @@ import {
   type SourceSliceContext,
   type SpaceContext,
 } from '../src/domain/project-context/index.js';
+import { nodeProjectSourceReader } from '../src/infrastructure/io/ProjectSourceReader.js';
 import { ProjectContext, withProjectContextSession } from '../src/project-context.js';
+import { FileAnalysisSession } from '../src/service/project-context/analysis/FileAnalysisSession.js';
+import type { ProjectContextSymbolExtractor } from '../src/service/project-context/analysis/SymbolExtractor.js';
+import type { FileSymbolsExtractionResult } from '../src/service/project-context/fileSymbols/contracts.js';
+import { NodeProjectContextFoundationHostPorts } from '../src/service/project-context/foundation/nodePorts.js';
+import type { ProjectContextHandlerExecutionContext } from '../src/service/project-context/interface/contracts.js';
+import {
+  PROJECT_CONTEXT_DEFAULT_HANDLERS,
+  ProjectContextService,
+} from '../src/service/project-context/ProjectContextService.js';
 import { computeContentHash } from '../src/shared/contentHash.js';
 import {
   createProjectDescriptor,
@@ -57,6 +67,240 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     resetDiscovererRegistry();
+  });
+
+  it('does not publish a callback value when its owner aborts while accepted work drains', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-context-owner-drain-'));
+    await fs.writeFile(path.join(root, 'source.ts'), 'export const value = 1;');
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const owner = new AbortController();
+    const execution: ProjectContextHandlerExecutionContext = {
+      sourceReader: {
+        ...nodeProjectSourceReader,
+        async readFile(filePath, options) {
+          const bytes = await nodeProjectSourceReader.readFile(filePath, options);
+          entered.resolve();
+          await release.promise;
+          return bytes;
+        },
+      },
+    };
+    const batch = withProjectContextSession(
+      async (context) => {
+        void context
+          .execute(
+            {
+              kind: 'source-slice',
+              scope: { projectRoot: root },
+              payload: { filePath: 'source.ts' },
+            },
+            execution
+          )
+          .catch(() => {});
+        return 'callback completed before accepted work';
+      },
+      { signal: owner.signal }
+    );
+    const rejected = expect(batch).rejects.toMatchObject({ name: 'AbortError' });
+    try {
+      await entered.promise;
+      owner.abort();
+      release.resolve();
+      await rejected;
+    } finally {
+      release.resolve();
+      await batch.catch(() => {});
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('uses one async symbol extraction across real symbol, flow and nested module queries', async () => {
+    const filePath = 'src/model.ts';
+    const source = 'export class Model { run() { return this.help(); } help() { return 1; } }';
+    await withFixture({ [filePath]: source }, async (projectRoot) => {
+      const inputs: string[] = [];
+      const symbolExtractor: ProjectContextSymbolExtractor = {
+        async extractSymbols(input, legacy, context) {
+          inputs.push(input.text);
+          expect(Object.keys(context ?? {})).toEqual(['signal']);
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          return {
+            ...legacy,
+            symbols: legacy.symbols.map((symbol) => ({
+              ...symbol,
+              signature: `async:${symbol.signature}`,
+            })),
+          };
+        },
+      };
+      await withProjectContextSession(
+        async (session) => {
+          const request = {
+            kind: 'file-symbols' as const,
+            scope: { projectRoot },
+            payload: { filePath },
+          };
+          const symbols = await session.execute(request);
+          expect(
+            (symbols.data as FileSymbolContext).symbols.every((symbol) =>
+              symbol.signature?.startsWith('async:')
+            )
+          ).toBe(true);
+          const flow = await session.execute({ ...request, kind: 'file-flow' });
+          expect(
+            (flow.data as FileFlowContext).callees.some(
+              (relation) => relation.to?.qualifiedName === 'Model.help'
+            )
+          ).toBe(true);
+          expect((flow.data as FileFlowContext).exports[0]?.signature).toMatch(/^async:/);
+          const module = await session.execute({
+            ...request,
+            kind: 'module',
+            payload: { moduleName: 'model', ownedFiles: [filePath] },
+          });
+          expect((module.data as ModuleContext).publicSurfaces[0]?.signature).toMatch(/^async:/);
+          expect(symbols.errors).toBeUndefined();
+          expect(flow.errors).toBeUndefined();
+          expect(module.errors).toBeUndefined();
+        },
+        { symbolExtractor }
+      );
+      expect(inputs).toEqual([source]);
+    });
+  });
+
+  it.each([
+    'failure',
+    'cancellation',
+  ] as const)('evicts an async symbol %s and retries the same file inside the session', async (kind) => {
+    const filePath = 'src/model.ts';
+    await withFixture({ [filePath]: 'export class Model {}' }, async (projectRoot) => {
+      const controller = new AbortController();
+      const failure = new Error('async symbol failure');
+      let calls = 0;
+      const symbolExtractor: ProjectContextSymbolExtractor = {
+        async extractSymbols(_input, legacy) {
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          if (++calls === 1) {
+            if (kind === 'failure') {
+              throw failure;
+            }
+            // 后端故意不检查 signal：Core 在 await 后也必须阻止取消结果进入缓存。
+            controller.abort(new Error('async symbol cancellation'));
+          }
+          return legacy;
+        },
+      };
+      await withProjectContextSession(
+        async (session) => {
+          const request = {
+            kind: 'file-symbols' as const,
+            scope: { projectRoot },
+            payload: { filePath },
+          };
+          const first = session.execute(request, { signal: controller.signal });
+          if (kind === 'failure') {
+            await expect(first).rejects.toBe(failure);
+          } else {
+            await expect(first).rejects.toMatchObject({
+              name: 'AbortError',
+              message: 'async symbol cancellation',
+            });
+          }
+          const recovered = await session.execute(request);
+          expect(recovered.errors).toBeUndefined();
+          expect(
+            (recovered.data as FileSymbolContext).symbols.map((symbol) => symbol.name)
+          ).toEqual(['Model']);
+        },
+        { symbolExtractor }
+      );
+      expect(calls).toBe(2);
+    });
+  });
+
+  it('coalesces concurrent async symbol queries and returns independent mutable projections', async () => {
+    const filePath = 'src/model.ts';
+    await withFixture({ [filePath]: 'export class Model {}' }, async (projectRoot) => {
+      let calls = 0;
+      let backendResult: FileSymbolsExtractionResult | undefined;
+      const symbolExtractor: ProjectContextSymbolExtractor = {
+        async extractSymbols(_input, legacy) {
+          calls++;
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          backendResult = legacy;
+          return legacy;
+        },
+      };
+      const analysis = new FileAnalysisSession(true, symbolExtractor);
+      const service = new ProjectContextService(PROJECT_CONTEXT_DEFAULT_HANDLERS, analysis);
+      try {
+        const request = {
+          kind: 'file-symbols' as const,
+          scope: { projectRoot },
+          payload: { filePath },
+        };
+        const [left, right] = await Promise.all([
+          service.execute(request),
+          service.execute(request),
+        ]);
+        const pristine = structuredClone(right);
+        (left.data as FileSymbolContext).symbols[0]!.range!.startLine = 99;
+        expect(right).toEqual(pristine);
+        if (!backendResult) {
+          throw new Error('The asynchronous backend did not produce symbols.');
+        }
+        backendResult.symbols[0]!.name = 'ChangedByProducer';
+        expect(await service.execute(request)).toEqual(pristine);
+        expect(calls).toBe(1);
+      } finally {
+        analysis.dispose();
+      }
+    });
+  });
+
+  it('keeps async symbol sessions reader-aware and re-extracts recorded inputs during offline replay', async () => {
+    const filePath = 'src/model.ts';
+    const source = 'export class Model {}';
+    await withFixture({ [filePath]: source }, async (projectRoot) => {
+      const inputs: string[] = [];
+      const symbolExtractor: ProjectContextSymbolExtractor = {
+        async extractSymbols(input, legacy) {
+          inputs.push(input.text);
+          await Promise.resolve();
+          return legacy;
+        },
+      };
+      await withProjectContextSession(
+        async (session) => {
+          const ports = new NodeProjectContextFoundationHostPorts(session);
+          const capture = await ports.createInputCapture({
+            repositories: [
+              { scopeId: 'scope', repoId: 'model', relativeRoot: '.', sourceRoot: projectRoot },
+            ],
+            files: [{ repoId: 'model', relativePath: filePath, content: Buffer.from(source) }],
+          });
+          expect(capture).toBeDefined();
+          if (!capture) {
+            throw new Error('The native session lost input-reader capability.');
+          }
+          const request = {
+            kind: 'file-symbols' as const,
+            scope: { projectRoot },
+            payload: { filePath },
+          };
+          const recorded = await session.execute(request, { sourceReader: capture.reader });
+          const snapshot = JSON.parse(JSON.stringify(await capture.snapshot()));
+          await fs.rm(projectRoot, { recursive: true, force: true });
+          expect(
+            await session.execute(request, { sourceReader: capture.createReplay(snapshot) })
+          ).toEqual(recorded);
+        },
+        { symbolExtractor }
+      );
+      expect(inputs).toEqual([source, source]);
+    });
   });
 
   it.each([

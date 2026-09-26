@@ -10,6 +10,7 @@
 
 import { extractCallSitesTS } from '../analysis/CallSiteExtractor.js';
 import { ImportRecord, type ImportRecordMeta } from '../analysis/ImportRecord.js';
+import { astNodeRange } from './nodeRange.js';
 
 function walkTypeScript(root: any, ctx: any) {
   _walkTSNode(root, ctx, null);
@@ -264,13 +265,13 @@ function _parseTSFunction(node: any, className: any) {
 }
 
 function _parseTSMethod(node: any, className: any) {
-  const name =
-    node.namedChildren.find(
-      (c: any) =>
-        c.type === 'property_identifier' ||
-        c.type === 'identifier' ||
-        c.type === 'computed_property_name'
-    )?.text || 'unknown';
+  const nameNode = node.namedChildren.find(
+    (c: any) =>
+      c.type === 'property_identifier' ||
+      c.type === 'identifier' ||
+      c.type === 'computed_property_name'
+  );
+  const name = nameNode?.text || 'unknown';
 
   const isStatic = node.text.trimStart().startsWith('static');
   const isAsync = node.text.includes('async');
@@ -281,6 +282,8 @@ function _parseTSMethod(node: any, className: any) {
 
   return {
     name,
+    nameIsPlaceholder: !nameNode,
+    matchingRange: astNodeRange(node),
     className,
     isClassMethod: isStatic,
     isAsync,
@@ -427,6 +430,7 @@ function _parseTSVariableDecl(node: any, ctx: any, parentClassName: any) {
         const body = valueNode.namedChildren.find((c: any) => c.type === 'statement_block');
         ctx.methods.push({
           name: nameNode.text,
+          matchingRange: astNodeRange(valueNode),
           className: parentClassName,
           isClassMethod: false,
           bodyLines: body ? body.endPosition.row - body.startPosition.row + 1 : 0,

@@ -5,14 +5,20 @@ import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
 import { extractFileFlowFromSource, getFileFlowUnavailableReason } from '../fileFlow/extract.js';
 import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
 import { extractFileSymbolsFromSource } from '../fileSymbols/extract.js';
+import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
 import { readProjectContextAst } from './astFacts.js';
+import type { ProjectContextSymbolExtractor } from './SymbolExtractor.js';
 
 interface FileExtraction {
-  callSitesPrepared: boolean;
   symbols: FileSymbolsExtractionResult;
   flow?: FileFlowExtractionResult;
+}
+
+interface PendingFileExtraction {
+  callSitesPrepared: boolean;
+  promise: Promise<FileExtraction>;
 }
 
 /**
@@ -27,10 +33,13 @@ export class FileAnalysisSession {
     Map<string, Promise<SourceSliceFileAccessResult>>
   >();
   readonly #readers = new Set<ProjectSourceReader>();
-  #extractions = new WeakMap<SourceSliceFileFacts, FileExtraction>();
+  #extractions = new WeakMap<SourceSliceFileFacts, PendingFileExtraction>();
   #sourceVersions = new WeakMap<SourceSliceFileFacts, SourceSliceFileFacts>();
 
-  constructor(private readonly includeCallSites: boolean) {}
+  constructor(
+    private readonly includeCallSites: boolean,
+    private readonly symbolExtractor?: ProjectContextSymbolExtractor
+  ) {}
 
   useReader(reader: ProjectSourceReader): void {
     this.#readers.add(projectSourceReaderIdentity(reader));
@@ -77,14 +86,24 @@ export class FileAnalysisSession {
     return { ok: true, facts };
   }
 
-  symbols(facts: SourceSliceFileFacts): FileSymbolsExtractionResult {
-    const entry = this.extraction(facts, this.includeCallSites);
+  async symbols(
+    facts: SourceSliceFileFacts,
+    context?: { signal?: AbortSignal }
+  ): Promise<FileSymbolsExtractionResult> {
+    throwIfProjectContextAborted(context);
+    const entry = await this.extraction(facts, this.includeCallSites, context);
+    throwIfProjectContextAborted(context);
     // 归一化输出会引用 range 等对象，不能让外层修改返回值污染后续查询的缓存。
     return structuredClone(entry.symbols);
   }
 
-  flow(facts: SourceSliceFileFacts): FileFlowExtractionResult {
-    const entry = this.extraction(facts, true);
+  async flow(
+    facts: SourceSliceFileFacts,
+    context?: { signal?: AbortSignal }
+  ): Promise<FileFlowExtractionResult> {
+    throwIfProjectContextAborted(context);
+    const entry = await this.extraction(facts, true, context);
+    throwIfProjectContextAborted(context);
     // extraction(true) 同时生成两种投影，即使 flow unavailable 也返回完整诊断形态。
     return structuredClone(entry.flow!);
   }
@@ -96,29 +115,70 @@ export class FileAnalysisSession {
     this.#sourceVersions = new WeakMap();
   }
 
-  private extraction(facts: SourceSliceFileFacts, includeCalls: boolean): FileExtraction {
+  private async extraction(
+    facts: SourceSliceFileFacts,
+    includeCalls: boolean,
+    context?: { signal?: AbortSignal }
+  ): Promise<FileExtraction> {
+    throwIfProjectContextAborted(context);
     // 病态内容仍遵守既有 flow 防线；symbols 可继续走原有不提取调用点的 AST 路径。
     const sourceVersion = this.#sourceVersions.get(facts) ?? facts;
-    const cached = this.#extractions.get(sourceVersion);
-    if (cached && (!includeCalls || cached.callSitesPrepared)) {
-      return cached;
+    let pending = this.#extractions.get(sourceVersion);
+    if (!pending || (includeCalls && !pending.callSitesPrepared)) {
+      if (pending) {
+        Logger.debug('ProjectContext analysis expands from symbols to call sites', {
+          projectRoot: facts.projectRoot,
+          filePath: facts.filePath,
+          reason: 'additional-analysis-mode-requested',
+        });
+      }
+      // 先发布进行中的 promise，真实并发查询才能共享同一次异步后端调用。
+      pending = {
+        callSitesPrepared: includeCalls,
+        promise: Promise.resolve().then(() => this.createExtraction(facts, includeCalls, context)),
+      };
+      this.#extractions.set(sourceVersion, pending);
     }
-    if (cached) {
-      Logger.debug('ProjectContext analysis expands from symbols to call sites', {
-        projectRoot: facts.projectRoot,
-        filePath: facts.filePath,
-        reason: 'additional-analysis-mode-requested',
-      });
+    try {
+      const result = await pending.promise;
+      throwIfProjectContextAborted(context);
+      return result;
+    } catch (error) {
+      // 失败/取消不能污染下一次同文件请求；不删除另一个已开始的扩展模式。
+      if (this.#extractions.get(sourceVersion) === pending) {
+        this.#extractions.delete(sourceVersion);
+      }
+      throw error;
     }
+  }
+
+  private async createExtraction(
+    facts: SourceSliceFileFacts,
+    includeCalls: boolean,
+    context?: { signal?: AbortSignal }
+  ): Promise<FileExtraction> {
+    throwIfProjectContextAborted(context);
     const includesCalls = includeCalls && !getFileFlowUnavailableReason(facts);
     const ast = readProjectContextAst(facts, includesCalls);
+    const legacy = extractFileSymbolsFromSource(facts, ast);
+    const symbols = this.symbolExtractor
+      ? await this.symbolExtractor.extractSymbols(
+          {
+            text: facts.text,
+            filePath: facts.filePath,
+            language: facts.language,
+            lineCount: facts.lineCount,
+          },
+          legacy,
+          context ? { signal: context.signal } : undefined
+        )
+      : legacy;
+    throwIfProjectContextAborted(context);
     // 只缓存真实消费的紧凑投影；不把完整 AST 指标/模式摘要留在整个批次中。
-    const entry = {
-      callSitesPrepared: includeCalls,
-      symbols: extractFileSymbolsFromSource(facts, ast),
+    return {
+      // 生产方也可能复用可变结果；缓存拥有独立投影，后端的后续修改不能重写已读事实。
+      symbols: this.symbolExtractor ? structuredClone(symbols) : symbols,
       flow: includeCalls ? extractFileFlowFromSource(facts, ast) : undefined,
     };
-    this.#extractions.set(sourceVersion, entry);
-    return entry;
   }
 }

@@ -79,6 +79,9 @@ function dedupeSymbols(symbols: readonly ExtractedFileSymbol[]): ExtractedFileSy
       symbol.qualifiedName ?? symbol.name,
       symbol.range.startLine,
       symbol.range.endLine,
+      // 仅有证据的同行碰撞携带真实列，不能在公开投影前再次合并。
+      symbol.range.startColumn ?? '',
+      symbol.range.endColumn ?? '',
     ].join(':');
     if (seen.has(key)) {
       continue;
@@ -107,7 +110,9 @@ function compareSymbols(left: ExtractedFileSymbol, right: ExtractedFileSymbol): 
     compareRanges(left.range, right.range) ||
     left.name.localeCompare(right.name) ||
     left.kind.localeCompare(right.kind) ||
-    (left.container ?? '').localeCompare(right.container ?? '')
+    (left.container ?? '').localeCompare(right.container ?? '') ||
+    (left.range.startColumn ?? 0) - (right.range.startColumn ?? 0) ||
+    (left.range.endColumn ?? 0) - (right.range.endColumn ?? 0)
   );
 }
 
