@@ -10,6 +10,7 @@ import type {
   ProjectContextScope,
   RelationSummary,
 } from '../../../../domain/project-context/index.js';
+import { isProjectContextReexportRelation } from '../fileFlow-moduleLayers/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../refs.js';
 
 export interface ProjectContextModuleMapModule {
@@ -337,7 +338,10 @@ function createRollupId(input: MutableDependencyRollup): string {
 }
 
 function isModuleMapDependencyRelation(relation: RelationSummary): boolean {
-  return ['calls', 'data_flow', 'depends_on', 'imports', 'references'].includes(relation.kind);
+  return (
+    ['calls', 'data_flow', 'depends_on', 'imports', 'references'].includes(relation.kind) ||
+    isProjectContextReexportRelation(relation)
+  );
 }
 
 function readRelationTargetFilePath(relation: RelationSummary): string | undefined {

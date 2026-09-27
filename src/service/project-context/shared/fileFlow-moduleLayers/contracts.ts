@@ -2,9 +2,15 @@ import type {
   ProjectContextMetadata,
   ProjectContextRef,
   ProjectContextRefScope,
+  RelationSummary,
   SourceRangeSummary,
 } from '../../../../domain/project-context/index.js';
 import { formatSourceRangeSummary } from '../sourceSlice-fileSymbols/contracts.js';
+
+/** 普通本地导出不建立模块依赖；只有export-from的真实来源specifier进入层级/项目图。 */
+export function isProjectContextReexportRelation(relation: RelationSummary): boolean {
+  return relation.kind === 'exports' && typeof relation.ref?.metadata?.specifier === 'string';
+}
 
 export interface ProjectContextFileFlowRelationRefInput {
   projectRoot: string;

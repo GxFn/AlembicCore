@@ -13,6 +13,7 @@ import type {
 } from '../../domain/source-graph/index.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
+import { moduleSourceCandidates } from '../code-analysis/moduleSourceCandidates.js';
 import { readProjectContextAst } from '../project-context/analysis/astFacts.js';
 import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
 import { extractFileFlowFromSource } from '../project-context/fileFlow/extract.js';
@@ -177,23 +178,47 @@ async function parseCodeGraphFile(
     });
     return failedFile(baseFile, error instanceof Error ? error.message : String(error));
   }
-  // SDK符号与现有Core导入生产方职责分开；复用多行/comment-aware解析，不再增一份JS正则。
+  // SDK符号与模块语法各自生产同文本事实；export-from同样建立文件依赖，不能在barrel处断链。
   const flow = extractFileFlowFromSource(input, ast);
   if (flow.unavailableReason) {
     const partial = partialFile(baseFile, 'parser-timeout', flow.unavailableReason);
     return { ...partial, symbols };
   }
   const edges: SourceGraphEdgeInput[] = [];
-  for (const item of flow.imports) {
-    const target = resolveRelativeImport(
-      file.repoRelativePath,
-      item.specifier,
-      knownPaths,
-      CODEGRAPH_PARSABLE_EXTENSIONS
-    );
+  const dependencies = [
+    ...flow.imports.map((item) => ({
+      specifier: item.specifier,
+      range: item.range,
+      dependencyKind: 'import',
+    })),
+    ...flow.exports.flatMap((item) =>
+      item.specifier
+        ? [{ specifier: item.specifier, range: item.range, dependencyKind: 're-export' }]
+        : []
+    ),
+  ];
+  const seenTargets = new Set<string>();
+  let unlinked = 0;
+  let coalesced = 0;
+  for (const item of dependencies) {
+    const target = item.specifier.startsWith('.')
+      ? moduleSourceCandidates(
+          path.posix.normalize(
+            path.posix.join(path.posix.dirname(file.repoRelativePath), item.specifier)
+          ),
+          [...CODEGRAPH_PARSABLE_EXTENSIONS]
+        ).find((candidate) => knownPaths.has(candidate))
+      : undefined;
     if (!target) {
+      unlinked += 1;
       continue;
     }
+    // 持久图延用一条来源文件→目标文件的imports边；多个re-export绑定不是多个文件依赖。
+    if (seenTargets.has(target)) {
+      coalesced += 1;
+      continue;
+    }
+    seenTargets.add(target);
     edges.push({
       generationId,
       edgeId: `${file.repoRelativePath}:imports:${target}`,
@@ -211,8 +236,16 @@ async function parseCodeGraphFile(
       provenance: 'deterministic',
       confidence: 1,
       source: item.specifier,
+      metadata: { dependencyKind: item.dependencyKind },
     });
   }
+  Logger.debug('Source graph projected module dependencies', {
+    filePath: file.repoRelativePath,
+    declarations: dependencies.length,
+    edges: edges.length,
+    coalesced,
+    outsideInventoryOrPackage: unlinked,
+  });
   return { file: baseFile, symbols, edges, diagnostics: [] };
 }
 
@@ -555,8 +588,7 @@ function extractImportEdges(
 function resolveRelativeImport(
   currentFile: string,
   specifier: string,
-  knownPaths: Set<string>,
-  extensions: ReadonlySet<string> = PARSABLE_EXTENSIONS
+  knownPaths: Set<string>
 ): string | undefined {
   if (!specifier.startsWith('.')) {
     return undefined;
@@ -568,8 +600,8 @@ function resolveRelativeImport(
     ImportPathResolver.resolveIndexedFile(base, (requestedPath) => {
       const candidates = [
         requestedPath,
-        ...Array.from(extensions).map((extension) => `${requestedPath}${extension}`),
-        ...Array.from(extensions).map((extension) => `${requestedPath}/index${extension}`),
+        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}${extension}`),
+        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}/index${extension}`),
       ];
       return candidates.find((candidate) => knownPaths.has(candidate));
     }) ?? undefined

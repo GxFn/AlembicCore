@@ -12,7 +12,7 @@ import {
 
 export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v1';
 // SDK身份还不足以描述SourceGraph的ID、kind和导入投影；此版本归本模块自身所有。
-const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v1';
+const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v2';
 
 export interface SourceGraphIndexOptions {
   projectRoot: string;

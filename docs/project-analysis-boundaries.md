@@ -99,6 +99,13 @@ JS/TS imports/exports从同一棵已解析AST的模块语法节点生成，替�
 注释、字符串与模板正文不构成依赖；模板插值中的真实调用仍可提取。该投影不改变旧
 AstFileSummary或ImportRecord序列化形态，保留原解析预算与非JS生产方。
 
+带来源specifier的重导出也建立文件依赖。file-flow保留其`exports`种类及原关系ID，
+通过同次查询的reader解析目标file ref；重导出不创建本地绑定，不能借同名私有函数造
+symbol端点。modules/layers/map只将这类exports纳入依赖，普通本地导出仍表示公共面。
+import与export-from共用一次目标观察，解析所需的存在性和不存在性都参与输入记录与重放。
+源码候选顺序由共享函数管理：真实`.js/.mjs/.cjs`优先，缺失时才映射到匹配TS源码；
+`feature.v2`等带点目录仍支持index入口，不能因点号被当作输出扩展名。
+
 ## SourceGraph 索引接入
 
 已有 `SourceGraphLifecycleService` 接受
@@ -115,6 +122,11 @@ SourceGraph文件分析只读一次文本，符号、导入关系和裸SHA256文
 SDK路径的导入证据复用上述模块语法投影及ImportPathResolver，未引入SDK调用关系的
 猜测值。JS/TS按worker的串行处理节奏读取，避免把全仓文本同时排入IPC。
 
+SDK SourceGraph将import与export-from统一投影为既有文件级`imports`边，metadata记录
+`dependencyKind`；同一来源到同一目标只保留一条依赖。目标内容变化时边继续成立，
+目标增删或实际输出文件出现/消失时重新解析。其路径候选与file-flow共用，存在性限定在
+本次索引库存内；这不等于完整TypeScript模块解析或跨文件调用绑定。
+
 普通符号ID保持path#name，新成员使用qualifiedName；真正碰撞才增加声明kind和真实范围。
 文件的#module锚点保留给库存/导入边，用户同名变量另行消歧。变量箭头绑定仍保持既有
 SourceGraph的variable类别。内部声明kind/range不进入ProjectContext公开SymbolSummary/ref。
@@ -123,6 +135,10 @@ SourceGraph的variable类别。内部声明kind/range不进入ProjectContext公�
 engineHash、SourceGraph自身投影版本、有效scope/roots、扫描配置和解析预算。旧快照缺少
 完整身份，或任一策略变化时，必须全量重提取；禁止保留旧符号却给新快照换版本标签。
 旧generation仍可读取，查询/分页预算和SQLite同步事务不变。
+
+freshness检查以与索引一致的UTF-8正文hash核对实际内容，size/mtime相等不再跳过核验。
+因此等长修改并恢复时间戳仍会进入增量追赶；仅触碰时间戳且正文相同仍noop。这个检查
+需要读取库存文件的正文，不是单纯stat优化，也不声称得到原子的全项目快照。
 
 SDK作用域完全关闭、owner取消检查通过后才能提交generation；关闭失败或取消不得发布
 新代际。固定私有runtime父目录始终排除，即使调用方自定义ignoreDirectories；不会删除

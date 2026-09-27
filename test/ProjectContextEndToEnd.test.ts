@@ -295,47 +295,57 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
     });
   });
 
-  it('keeps async symbol sessions reader-aware and re-extracts recorded inputs during offline replay', async () => {
+  it('re-extracts symbols and re-export targets from recorded inputs during offline replay', async () => {
     const filePath = 'src/model.ts';
-    const source = 'export class Model {}';
-    await withFixture({ [filePath]: source }, async (projectRoot) => {
-      const inputs: string[] = [];
-      const symbolExtractor: ProjectContextSymbolExtractor = {
-        async extractSymbols(input, legacy) {
-          inputs.push(input.text);
-          await Promise.resolve();
-          return legacy;
-        },
-      };
-      await withProjectContextSession(
-        async (session) => {
-          const ports = new NodeProjectContextFoundationHostPorts(session);
-          const capture = await ports.createInputCapture({
-            repositories: [
-              { scopeId: 'scope', repoId: 'model', relativeRoot: '.', sourceRoot: projectRoot },
-            ],
-            files: [{ repoId: 'model', relativePath: filePath, content: Buffer.from(source) }],
-          });
-          expect(capture).toBeDefined();
-          if (!capture) {
-            throw new Error('The native session lost input-reader capability.');
-          }
-          const request = {
-            kind: 'file-symbols' as const,
-            scope: { projectRoot },
-            payload: { filePath },
-          };
-          const recorded = await session.execute(request, { sourceReader: capture.reader });
-          const snapshot = JSON.parse(JSON.stringify(await capture.snapshot()));
-          await fs.rm(projectRoot, { recursive: true, force: true });
-          expect(
-            await session.execute(request, { sourceReader: capture.createReplay(snapshot) })
-          ).toEqual(recorded);
-        },
-        { symbolExtractor }
-      );
-      expect(inputs).toEqual([source, source]);
-    });
+    const source = "export class Model {}\nexport { Target } from './target.mjs';";
+    await withFixture(
+      { [filePath]: source, 'src/target.mts': 'export class Target {}' },
+      async (projectRoot) => {
+        const inputs: string[] = [];
+        const symbolExtractor: ProjectContextSymbolExtractor = {
+          async extractSymbols(input, legacy) {
+            inputs.push(input.text);
+            await Promise.resolve();
+            return legacy;
+          },
+        };
+        await withProjectContextSession(
+          async (session) => {
+            const ports = new NodeProjectContextFoundationHostPorts(session);
+            const capture = await ports.createInputCapture({
+              repositories: [
+                { scopeId: 'scope', repoId: 'model', relativeRoot: '.', sourceRoot: projectRoot },
+              ],
+              files: [{ repoId: 'model', relativePath: filePath, content: Buffer.from(source) }],
+            });
+            expect(capture).toBeDefined();
+            if (!capture) {
+              throw new Error('The native session lost input-reader capability.');
+            }
+            const request = {
+              kind: 'file-flow' as const,
+              scope: { projectRoot },
+              payload: { filePath },
+            };
+            const recorded = await session.execute(request, { sourceReader: capture.reader });
+            expect(recorded.errors).toBeUndefined();
+            expect((recorded.data as FileFlowContext).outflow).toContainEqual(
+              expect.objectContaining({
+                kind: 'exports',
+                to: expect.objectContaining({ filePath: 'src/target.mts' }),
+              })
+            );
+            const snapshot = JSON.parse(JSON.stringify(await capture.snapshot()));
+            await fs.rm(projectRoot, { recursive: true, force: true });
+            const replay = capture.createReplay(snapshot);
+            expect(await session.execute(request, { sourceReader: replay })).toEqual(recorded);
+            replay.assertComplete();
+          },
+          { symbolExtractor }
+        );
+        expect(inputs).toEqual([source, source]);
+      }
+    );
   });
 
   it.each([

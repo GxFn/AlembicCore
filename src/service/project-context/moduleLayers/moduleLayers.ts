@@ -12,6 +12,7 @@ import type {
 import { fileFlowProjectContextHandler } from '../fileFlow/index.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
+import { isProjectContextReexportRelation } from '../shared/fileFlow-moduleLayers/index.js';
 import {
   createProjectContextModuleLayerRef,
   resolveProjectContextModuleSeed,
@@ -362,7 +363,11 @@ function createModuleLayersFailure(
 }
 
 function isModuleLayerRelation(relation: RelationSummary): boolean {
-  return relation.kind === 'imports' || relation.kind === 'calls';
+  return (
+    relation.kind === 'imports' ||
+    relation.kind === 'calls' ||
+    isProjectContextReexportRelation(relation)
+  );
 }
 
 function readImmediateModuleDirectory(filePath: string, moduleRoot: string): string {

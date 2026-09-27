@@ -129,7 +129,7 @@ describe('SourceGraphIndexer', () => {
     const sdkInput = { ...input, codeGraph: { dataRoot: path.join(tmpDir, 'private') } };
     const sdk = await lifecycle.catchUpOnStartup({ ...sdkInput, generationId: 'sdk', now: 2000 });
     expect(sdk.action).toBe('built-full');
-    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v1:');
+    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v2:');
     expect(sdk.build?.symbols.some((symbol) => symbol.symbolId === 'src/index.ts#App.run')).toBe(
       true
     );
@@ -151,6 +151,95 @@ describe('SourceGraphIndexer', () => {
     expect(incremental.build?.symbols.map((symbol) => symbol.symbolId)).not.toContain(
       'src/index.ts#App.run'
     );
+  });
+
+  it('keeps SDK NodeNext and re-export dependencies through incremental target changes', async () => {
+    writeFixture(
+      'src/main.ts',
+      "import './api/barrel.js'; import './domain/esm.mjs'; import './domain/common.cjs'; import './feature.v2';"
+    );
+    writeFixture(
+      'src/api/barrel.ts',
+      "export { esm } from '../domain/esm.mjs';\nexport * as common from '../domain/common.cjs';\nexport { esm as alias } from '../domain/esm.mjs';"
+    );
+    writeFixture('src/domain/esm.mts', 'export const esm = 1;');
+    writeFixture('src/domain/common.cts', 'export const common = 1;');
+    writeFixture('src/feature.v2/index.ts', 'export const dotted = 1;');
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const indexer = new SourceGraphIndexer(repository);
+    const input = {
+      projectRoot: tmpDir,
+      projectScope: 'src',
+      codeGraph: { dataRoot: path.join(tmpDir, 'private') },
+    };
+    const expected = [
+      ['src/api/barrel.ts', 'src/domain/common.cts'],
+      ['src/api/barrel.ts', 'src/domain/esm.mts'],
+      ['src/main.ts', 'src/api/barrel.ts'],
+      ['src/main.ts', 'src/domain/common.cts'],
+      ['src/main.ts', 'src/domain/esm.mts'],
+      ['src/main.ts', 'src/feature.v2/index.ts'],
+    ];
+    await indexer.buildFull({ ...input, generationId: 'module-dependencies' });
+    const readEdges = async (id: string) =>
+      (await repository.listGenerationEdges(id))
+        .map((edge) => [edge.fromFilePath, edge.toFilePath])
+        .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    expect(await readEdges('module-dependencies')).toEqual(expected);
+    writeFixture('src/domain/esm.mts', 'export const esm = 22;');
+    await indexer.buildIncremental({ ...input, generationId: 'module-dependencies-next' });
+    expect(await readEdges('module-dependencies-next')).toEqual(expected);
+    fs.unlinkSync(path.join(tmpDir, 'src/domain/common.cts'));
+    await indexer.buildIncremental({ ...input, generationId: 'module-dependencies-deleted' });
+    expect(await readEdges('module-dependencies-deleted')).toEqual(
+      expected.filter((edge) => edge[1] !== 'src/domain/common.cts')
+    );
+    writeFixture('src/domain/common.cts', 'export const common = 2;');
+    await indexer.buildIncremental({ ...input, generationId: 'module-dependencies-restored' });
+    expect(await readEdges('module-dependencies-restored')).toEqual(expected);
+    writeFixture('src/domain/esm.mjs', 'export const esm = 3;');
+    writeFixture('src/domain/common.cjs', 'exports.common = 3;');
+    await indexer.buildIncremental({ ...input, generationId: 'module-dependencies-emitted' });
+    expect(await readEdges('module-dependencies-emitted')).toEqual(
+      expected.map(([from, to]) => [from, to.replace('.mts', '.mjs').replace('.cts', '.cjs')])
+    );
+    fs.unlinkSync(path.join(tmpDir, 'src/domain/esm.mjs'));
+    fs.unlinkSync(path.join(tmpDir, 'src/domain/common.cjs'));
+    await indexer.buildIncremental({ ...input, generationId: 'module-dependencies-source-again' });
+    expect(await readEdges('module-dependencies-source-again')).toEqual(expected);
+  });
+
+  it('detects equal-size content changes with preserved mtime and still noops for metadata-only touches', async () => {
+    const filePath = path.join(tmpDir, 'src/example.ts');
+    writeFixture('src/example.ts', 'export const alpha = 1;');
+    const timestamp = new Date('2026-01-01T00:00:00Z');
+    fs.utimesSync(filePath, timestamp, timestamp);
+    const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const lifecycle = new SourceGraphLifecycleService(repository);
+    const input = {
+      projectRoot: tmpDir,
+      projectScope: 'src',
+      codeGraph: { dataRoot: path.join(tmpDir, 'private') },
+    };
+    await lifecycle.catchUpOnStartup({ ...input, generationId: 'same-metadata-old' });
+    const before = fs.statSync(filePath);
+    writeFixture('src/example.ts', 'export const bravo = 1;');
+    fs.utimesSync(filePath, timestamp, timestamp);
+    const after = fs.statSync(filePath);
+    expect([after.size, after.mtimeMs]).toEqual([before.size, before.mtimeMs]);
+    const inspection = await lifecycle.inspect(input);
+    expect(inspection.freshness.status).toBe('stale');
+    const changed = await lifecycle.catchUpOnStartup({
+      ...input,
+      generationId: 'same-metadata-new',
+    });
+    expect(changed.action).toBe('built-incremental');
+    expect(
+      (await repository.listSymbols('same-metadata-new')).map((symbol) => symbol.displayName)
+    ).toContain('bravo');
+    const later = new Date('2026-01-02T00:00:00Z');
+    fs.utimesSync(filePath, later, later);
+    expect((await lifecycle.catchUpOnStartup(input)).action).toBe('fresh-noop');
   });
 
   it('uses one source text for SDK symbols and hashes even when the live file changes after the read', async () => {

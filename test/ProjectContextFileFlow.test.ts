@@ -12,6 +12,47 @@ import { ProjectContext } from '../src/project-context.js';
 import { computeContentHash } from '../src/shared/contentHash.js';
 
 describe('ProjectContext PCQ-3 file-flow', () => {
+  it('resolves export-from targets while retaining source relation identities and local export behavior', async () => {
+    const text =
+      "export { value as exposed } from './target.mjs';\nexport * from './missing';\nexport const local = 1;\nfunction value() {}";
+    await withFixture(
+      { 'src/barrel.ts': text, 'src/target.mts': 'export const value = 1;' },
+      async (projectRoot) => {
+        const result = await ProjectContext.execute({
+          kind: 'file-flow',
+          scope: { projectRoot },
+          payload: { filePath: 'src/barrel.ts' },
+        });
+        const exports = (result.data as FileFlowContext).outflow.filter(
+          (relation) => relation.kind === 'exports'
+        );
+        expect(exports[0]).toMatchObject({
+          from: { filePath: 'src/barrel.ts', ref: { kind: 'file' } },
+          to: { filePath: 'src/target.mts', ref: { kind: 'file' } },
+          unresolved: false,
+        });
+        expect(exports[0].from?.symbol).toBeUndefined();
+        expect((result.data as FileFlowContext).exports.map((symbol) => symbol.name)).not.toContain(
+          'value'
+        );
+        expect(exports[0].ref?.id).toBe(
+          `relation-site:root:src/barrel.ts:exports:./target.mjs:L1-L1:${computeContentHash(text)}`
+        );
+        expect(exports[1]).toMatchObject({ unresolved: true, reason: 'not-found' });
+        expect(result.errors).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              code: 'query-unavailable',
+              message: expect.stringContaining('./missing'),
+            }),
+          ])
+        );
+        expect(exports[2].to).toEqual({ label: 'public export surface' });
+        expect(exports[2].targetRef).toBeUndefined();
+      }
+    );
+  });
+
   it('does not bind an unknown receiver to a same-name local function', async () => {
     const source = [
       'function target() {}',

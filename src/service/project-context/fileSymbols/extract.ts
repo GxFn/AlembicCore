@@ -1,3 +1,4 @@
+import Logger from '../../../infrastructure/logging/Logger.js';
 import {
   type ProjectContextAstFacts,
   type ProjectContextAstInput,
@@ -49,15 +50,44 @@ export function extractFileSymbolsFromSource(
   }
 
   try {
+    const symbols = collectExtractedSymbols({
+      filePath: input.filePath,
+      lineCount: input.lineCount,
+      lines: input.text.split(/\r\n|\n|\r/),
+      summary: facts.summary,
+    });
+    if (facts.moduleSyntax) {
+      const local = new Set(
+        facts.moduleSyntax.exports
+          .filter((item) => item.specifier === undefined)
+          .map((item) => item.name)
+      );
+      const remote = new Set(
+        facts.moduleSyntax.exports
+          .filter((item) => item.specifier !== undefined)
+          .map((item) => item.name)
+      );
+      // 旧摘要的文本名集合会把export-from误当本地导出；只纠正已证实的同名非导出绑定，
+      // 其余旧语言、声明范围及成员标志不在此变更，不能借re-export把本地private符号公开。
+      for (const symbol of symbols) {
+        if (
+          symbol.exported &&
+          !symbol.container &&
+          remote.has(symbol.name) &&
+          !local.has(symbol.name)
+        ) {
+          symbol.exported = false;
+          Logger.debug('ProjectContext kept re-export and local symbol ownership separate', {
+            filePath: input.filePath,
+            symbol: symbol.name,
+          });
+        }
+      }
+    }
     return {
       syntaxValid: facts.syntaxValid,
       syntaxFeatures: facts.syntaxFeatures,
-      symbols: collectExtractedSymbols({
-        filePath: input.filePath,
-        lineCount: input.lineCount,
-        lines: input.text.split(/\r\n|\n|\r/),
-        summary: facts.summary,
-      }),
+      symbols,
     };
   } catch {
     return {

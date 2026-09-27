@@ -11,6 +11,36 @@ import type {
 import { ProjectContext } from '../src/project-context.js';
 
 describe('ProjectContext PCQ-5 module-layers and module', () => {
+  it('includes re-export dependencies in file layers and boundary crossings', async () => {
+    await withFixture(
+      {
+        'src/feature/api/index.ts':
+          "export * from '../domain/model.js';\nexport * from '../../shared/util.js';\nexport const local = 1;",
+        'src/feature/domain/model.ts': 'export const model = 1;',
+        'src/shared/util.ts': 'export const util = 1;',
+      },
+      async (projectRoot) => {
+        const result = await ProjectContext.execute({
+          kind: 'module-layers',
+          scope: { projectRoot },
+          payload: {
+            moduleName: 'feature',
+            modulePath: 'src/feature',
+            ownedFiles: ['src/feature/api/index.ts', 'src/feature/domain/model.ts'],
+          },
+        });
+        expect(result.errors).toBeUndefined();
+        const data = result.data as ModuleLayerContext;
+        expect(data.layers.map((layer) => layer.fileGroups)).toEqual([['domain'], ['api']]);
+        expect(data.boundaryCrossings).toHaveLength(1);
+        expect(data.boundaryCrossings[0]).toMatchObject({
+          kind: 'exports',
+          to: { filePath: 'src/shared/util.ts' },
+        });
+      }
+    );
+  });
+
   it('returns local module layers, file groups, boundary crossings, and drill-down refs', async () => {
     await withFixture(createModuleFixture(), async (projectRoot) => {
       const envelope = await ProjectContext.execute({

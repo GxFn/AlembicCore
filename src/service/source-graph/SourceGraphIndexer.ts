@@ -550,15 +550,21 @@ async function detectChangedFiles(
       deletedFiles.add(baseFile.repoRelativePath);
       continue;
     }
-    if (current.sizeBytes !== baseFile.sizeBytes || current.mtimeMs !== baseFile.mtimeMs) {
-      const content = await fs.readFile(current.absolutePath, {
-        encoding: 'utf8',
-        signal: options.signal,
+    // size/mtime可被编辑器或恢复操作保持，不能证明事实仍对应正文；hash语义与索引时一致。
+    const content = await fs.readFile(current.absolutePath, {
+      encoding: 'utf8',
+      signal: options.signal,
+    });
+    const hash = crypto.createHash('sha256').update(content).digest('hex');
+    if (hash !== baseFile.contentHash) {
+      changedFiles.add(current.repoRelativePath);
+      Logger.getInstance().debug('Source graph detected changed source content', {
+        filePath: current.repoRelativePath,
+        previousHash: baseFile.contentHash,
+        contentHash: hash,
+        metadataUnchanged:
+          current.sizeBytes === baseFile.sizeBytes && current.mtimeMs === baseFile.mtimeMs,
       });
-      const hash = crypto.createHash('sha256').update(content).digest('hex');
-      if (hash !== baseFile.contentHash) {
-        changedFiles.add(current.repoRelativePath);
-      }
     }
   }
 

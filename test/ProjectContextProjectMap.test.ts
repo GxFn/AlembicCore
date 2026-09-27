@@ -16,6 +16,38 @@ import {
 import { buildCoverageLedgerModuleAxisFromSummaries } from '../src/workflows/surfaces/coverage/index.js';
 
 describe('ProjectContext PCQ-6 project map', () => {
+  it('includes export-from in cross-module dependencies without counting local exports', async () => {
+    await withFixture(
+      {
+        'src/api/index.ts': "export * from '../domain/helper.js';\nexport const local = 1;",
+        'src/domain/helper.ts': 'export function helper() {}',
+      },
+      async (projectRoot) => {
+        const result = await ProjectContext.execute({
+          kind: 'map',
+          scope: { projectRoot },
+          payload: {
+            moduleSeeds: [
+              { moduleName: 'api', modulePath: 'src/api', ownedFiles: ['src/api/index.ts'] },
+              {
+                moduleName: 'domain',
+                modulePath: 'src/domain',
+                ownedFiles: ['src/domain/helper.ts'],
+              },
+            ],
+          },
+        });
+        expect(result.errors).toBeUndefined();
+        const map = result.data as ProjectMap;
+        expect(map.dependencySummary.edgeCount).toBe(1);
+        expect(map.majorFlows.map((flow) => flow.summary)).toContain(
+          'api -> domain via exports (1 relation)'
+        );
+        expect(map.externalDependencyHotspots).toEqual([]);
+      }
+    );
+  });
+
   it('returns project-level module graph facts, cycles, hotspots, flows, and drill-down refs', async () => {
     await withFixture(createMapFixture(), async (projectRoot) => {
       const envelope = await ProjectContext.execute({

@@ -9,7 +9,7 @@ import Logger from '../logging/Logger.js';
 
 const workerFile = path.join(RESOURCES_DIR, 'codegraph', 'worker.mjs');
 const require = createRequire(import.meta.url);
-const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v2';
+const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v3';
 
 export interface CodeGraphNode {
   id: string;

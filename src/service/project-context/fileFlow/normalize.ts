@@ -8,7 +8,9 @@ import type {
   SymbolSummary,
 } from '../../../domain/project-context/index.js';
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
+import Logger from '../../../infrastructure/logging/Logger.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
+import { moduleSourceCandidates } from '../../code-analysis/moduleSourceCandidates.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileFlowRelationRef } from '../shared/fileFlow-moduleLayers/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
@@ -38,6 +40,8 @@ export interface NormalizedFileFlow {
   warnings: FileFlowQueryFailure[];
 }
 
+type ModuleTargetResolver = (specifier: string) => Promise<ResolvedFileFlowImportTarget>;
+
 export async function normalizeFileFlow(input: {
   facts: SourceSliceFileFacts;
   fileRef: ProjectContextRef;
@@ -49,17 +53,44 @@ export async function normalizeFileFlow(input: {
   sourceReader?: ProjectSourceReader;
 }): Promise<NormalizedFileFlow> {
   throwIfProjectContextAborted(input);
-  const importRelations = await normalizeImports(input);
+  // 同次文件投影中的import/export-from共用目标观察，避免同一specifier重复读存在性。
+  const targets = new Map<string, Promise<ResolvedFileFlowImportTarget>>();
+  const resolveTarget: ModuleTargetResolver = (specifier) => {
+    throwIfProjectContextAborted(input);
+    let pending = targets.get(specifier);
+    if (!pending) {
+      pending = resolveModuleTarget(
+        input.facts,
+        specifier,
+        input.signal,
+        input.sourceReader ?? nodeProjectSourceReader
+      );
+      targets.set(specifier, pending);
+    } else {
+      Logger.debug('ProjectContext reused its module target observation', {
+        filePath: input.facts.filePath,
+        specifier,
+      });
+    }
+    return pending;
+  };
+  const importRelations = await normalizeImports(input, resolveTarget);
   throwIfProjectContextAborted(input);
   const exportSymbols = normalizeExportSymbols(input.symbols, input.exports);
-  const exportRelations = normalizeExportRelations({ ...input, exports: input.exports });
+  const exportRelations = await normalizeExportRelations(input, resolveTarget);
   const callRelations = normalizeCallSites(input);
 
   const inflow = callRelations.filter((relation) => relation.to?.filePath === input.facts.filePath);
-  const outflow = [...importRelations.relations, ...exportRelations, ...callRelations].sort(
-    compareRelations
-  );
-  const allRelations = [...importRelations.relations, ...exportRelations, ...callRelations];
+  const outflow = [
+    ...importRelations.relations,
+    ...exportRelations.relations,
+    ...callRelations,
+  ].sort(compareRelations);
+  const allRelations = [
+    ...importRelations.relations,
+    ...exportRelations.relations,
+    ...callRelations,
+  ];
   const nextRefs = dedupeRefs([
     ...allRelations.flatMap((relation) => [
       relation.ref,
@@ -89,27 +120,25 @@ export async function normalizeFileFlow(input: {
     nextRefs,
     outflow,
     refs: dedupeRefs([input.fileRef, ...nextRefs]),
-    warnings: importRelations.warnings,
+    warnings: [...importRelations.warnings, ...exportRelations.warnings],
   };
 }
 
-async function normalizeImports(input: {
-  facts: SourceSliceFileFacts;
-  fileRef: ProjectContextRef;
-  imports: readonly ExtractedFileFlowImport[];
-  signal?: AbortSignal;
-  sourceReader?: ProjectSourceReader;
-}): Promise<{ relations: RelationSummary[]; warnings: FileFlowQueryFailure[] }> {
+async function normalizeImports(
+  input: {
+    facts: SourceSliceFileFacts;
+    fileRef: ProjectContextRef;
+    imports: readonly ExtractedFileFlowImport[];
+    signal?: AbortSignal;
+    sourceReader?: ProjectSourceReader;
+  },
+  resolveTarget: ModuleTargetResolver
+): Promise<{ relations: RelationSummary[]; warnings: FileFlowQueryFailure[] }> {
   const relations: RelationSummary[] = [];
   const warnings: FileFlowQueryFailure[] = [];
   for (const importRecord of input.imports) {
     throwIfProjectContextAborted(input);
-    const target = await resolveImportTarget(
-      input.facts,
-      importRecord,
-      input.signal,
-      input.sourceReader ?? nodeProjectSourceReader
-    );
+    const target = await resolveTarget(importRecord.specifier);
     throwIfProjectContextAborted(input);
     if (target.unresolved && target.reason === 'not-found') {
       warnings.push({
@@ -152,7 +181,9 @@ function normalizeExportSymbols(
   exports: readonly ExtractedFileFlowExport[]
 ): SymbolSummary[] {
   const exportedNames = new Set(
-    exports.flatMap((item) => [item.name, item.exportedName].filter(Boolean) as string[])
+    exports
+      .filter((item) => item.specifier === undefined)
+      .flatMap((item) => [item.name, item.exportedName].filter(Boolean) as string[])
   );
   return symbols
     .filter(
@@ -164,37 +195,66 @@ function normalizeExportSymbols(
     .sort(compareSymbols);
 }
 
-function normalizeExportRelations(input: {
-  facts: SourceSliceFileFacts;
-  fileRef: ProjectContextRef;
-  exports: readonly ExtractedFileFlowExport[];
-  symbols: readonly SymbolSummary[];
-}): RelationSummary[] {
-  return dedupeRelations(
-    input.exports.map((exportRecord) => {
-      const symbol = findSymbolForExport(input.symbols, exportRecord);
-      return createRelationSummary({
+async function normalizeExportRelations(
+  input: {
+    facts: SourceSliceFileFacts;
+    fileRef: ProjectContextRef;
+    exports: readonly ExtractedFileFlowExport[];
+    symbols: readonly SymbolSummary[];
+    signal?: AbortSignal;
+  },
+  resolveTarget: ModuleTargetResolver
+): Promise<{ relations: RelationSummary[]; warnings: FileFlowQueryFailure[] }> {
+  const relations: RelationSummary[] = [];
+  const warnings: FileFlowQueryFailure[] = [];
+  for (const exportRecord of input.exports) {
+    throwIfProjectContextAborted(input);
+    const target =
+      exportRecord.specifier === undefined
+        ? undefined
+        : await resolveTarget(exportRecord.specifier);
+    throwIfProjectContextAborted(input);
+    // export-from不会创建本地绑定，同名本地函数也不能充当这个导出声明的symbol。
+    const symbol = target ? undefined : findSymbolForExport(input.symbols, exportRecord);
+    if (target?.reason === 'not-found') {
+      warnings.push({
+        code: 'query-unavailable',
+        message: `file-flow re-export target was not found: ${target.specifier}`,
+        path: input.facts.filePath,
+        retryable: false,
+      });
+    }
+    relations.push(
+      createRelationSummary({
         direction: 'outflow',
         facts: input.facts,
         fileRef: input.fileRef,
-        from: {
-          filePath: input.facts.filePath,
-          label: symbol?.qualifiedName ?? exportRecord.name,
-          qualifiedName: symbol?.qualifiedName,
-          ref: symbol?.ref,
-          symbol: symbol?.name ?? exportRecord.name,
-        },
+        from: target
+          ? {
+              filePath: input.facts.filePath,
+              label: input.facts.filePath,
+              ref: input.fileRef,
+            }
+          : {
+              filePath: input.facts.filePath,
+              label: symbol?.qualifiedName ?? exportRecord.name,
+              qualifiedName: symbol?.qualifiedName,
+              ref: symbol?.ref,
+              symbol: symbol?.name ?? exportRecord.name,
+            },
         kind: 'exports',
         label: `${input.facts.filePath} exports ${exportRecord.exportedName ?? exportRecord.name}`,
         range: exportRecord.range,
         specifier: exportRecord.specifier,
         symbolName: exportRecord.name,
-        to: {
-          label: exportRecord.specifier ?? 'public export surface',
-        },
-      });
-    })
-  );
+        // export关系继续按原specifier生成ID；目标file ref单独挂在to，不改历史关系身份。
+        to: target ? createImportTargetEndpoint(target) : { label: 'public export surface' },
+        reason: target?.reason,
+        unresolved: target?.unresolved,
+      })
+    );
+  }
+  return { relations: dedupeRelations(relations), warnings };
 }
 
 function normalizeCallSites(input: {
@@ -339,32 +399,42 @@ function createRelationSummary(input: {
   };
 }
 
-async function resolveImportTarget(
+async function resolveModuleTarget(
   facts: SourceSliceFileFacts,
-  importRecord: ExtractedFileFlowImport,
+  specifier: string,
   signal: AbortSignal | undefined,
   reader: ProjectSourceReader
 ): Promise<ResolvedFileFlowImportTarget> {
-  if (!isRelativeSpecifier(importRecord.specifier)) {
+  if (!isRelativeSpecifier(specifier)) {
     return {
       reason: 'external-or-package',
-      specifier: importRecord.specifier,
+      specifier,
       unresolved: true,
     };
   }
 
   const candidateBase = path.posix.normalize(
-    path.posix.join(path.posix.dirname(facts.filePath), importRecord.specifier)
+    path.posix.join(path.posix.dirname(facts.filePath), specifier)
   );
   if (!isContainedProjectPath(candidateBase)) {
     return {
       reason: 'outside-scope',
-      specifier: importRecord.specifier,
+      specifier,
       unresolved: true,
     };
   }
 
-  for (const candidate of createImportTargetCandidates(candidateBase)) {
+  for (const candidate of moduleSourceCandidates(candidateBase, [
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.mjs',
+    '.cjs',
+    '.mts',
+    '.cts',
+    '.json',
+  ])) {
     throwIfProjectContextAborted({ signal });
     if (!isContainedProjectPath(candidate)) {
       continue;
@@ -385,7 +455,7 @@ async function resolveImportTarget(
           repoId: facts.repoId,
           sourceFolder: facts.sourceFolder,
         }),
-        specifier: importRecord.specifier,
+        specifier,
         unresolved: false,
       };
     }
@@ -393,7 +463,7 @@ async function resolveImportTarget(
 
   return {
     reason: 'not-found',
-    specifier: importRecord.specifier,
+    specifier,
     unresolved: true,
   };
 }
@@ -597,42 +667,6 @@ function containsRange(outer: SourceRangeSummary, inner: SourceRangeSummary): bo
       outer.endColumn < inner.endColumn
     )
   );
-}
-
-function createImportTargetCandidates(base: string): string[] {
-  const extension = path.posix.extname(base);
-  if (extension) {
-    return createExplicitImportTargetCandidates(base, extension);
-  }
-  const extensions = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts', '.json'];
-  return [
-    ...extensions.map((extension) => `${base}${extension}`),
-    ...extensions.map((extension) => path.posix.join(base, `index${extension}`)),
-  ];
-}
-
-function createExplicitImportTargetCandidates(base: string, extension: string): string[] {
-  const stem = base.slice(0, -extension.length);
-  const aliases = nodeNextSourceExtensionAliases(extension);
-  return dedupeBy(
-    aliases.map((candidateExtension) => `${stem}${candidateExtension}`),
-    (candidate) => candidate
-  );
-}
-
-function nodeNextSourceExtensionAliases(extension: string): readonly string[] {
-  switch (extension) {
-    case '.cjs':
-      return ['.cjs', '.cts'];
-    case '.js':
-      return ['.js', '.ts', '.tsx'];
-    case '.jsx':
-      return ['.jsx', '.tsx'];
-    case '.mjs':
-      return ['.mjs', '.mts'];
-    default:
-      return [extension];
-  }
 }
 
 async function isFile(
