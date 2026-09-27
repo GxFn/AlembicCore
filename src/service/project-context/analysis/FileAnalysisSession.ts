@@ -2,14 +2,16 @@ import { projectSourceReaderIdentity } from '../../../infrastructure/io/ProjectS
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
-import { extractFileFlowFromSource, getFileFlowUnavailableReason } from '../fileFlow/extract.js';
 import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
-import { extractFileSymbolsFromSource } from '../fileSymbols/extract.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
-import { readProjectContextAst } from './astFacts.js';
+import {
+  type FileDeclarationEvidence,
+  type FileSyntaxEvidence,
+  readFileSyntaxEvidence,
+} from './FileSyntaxEvidence.js';
 import { projectCallResolver } from './projectCallResolver.js';
 import type {
   ProjectContextFileAnalysis,
@@ -39,6 +41,10 @@ export class FileAnalysisSession {
   >();
   readonly #readers = new Set<ProjectSourceReader>();
   #extractions = new WeakMap<SourceSliceFileFacts, PendingFileExtraction>();
+  #syntax = new WeakMap<
+    SourceSliceFileFacts,
+    { includeCalls: boolean; evidence: FileSyntaxEvidence }
+  >();
   #sourceVersions = new WeakMap<SourceSliceFileFacts, SourceSliceFileFacts>();
 
   constructor(
@@ -115,10 +121,21 @@ export class FileAnalysisSession {
     return resolve ? resolve(facts, flow, context) : flow;
   }
 
+  /** 项目SDK已产出目标节点；复用同版本AST证据，不再触发单文件SDK或扩大源码清单。 */
+  declarations(
+    facts: SourceSliceFileFacts,
+    context?: { signal?: AbortSignal }
+  ): FileDeclarationEvidence {
+    throwIfProjectContextAborted(context);
+    const { symbols, defaultExportNames } = this.syntax(facts, this.includeCallSites);
+    return structuredClone({ symbols, defaultExportNames });
+  }
+
   dispose(): void {
     this.#files.clear();
     this.#readers.clear();
     this.#extractions = new WeakMap();
+    this.#syntax = new WeakMap();
     this.#sourceVersions = new WeakMap();
   }
 
@@ -154,6 +171,7 @@ export class FileAnalysisSession {
       // 失败/取消不能污染下一次同文件请求；不删除另一个已开始的扩展模式。
       if (this.#extractions.get(sourceVersion) === pending) {
         this.#extractions.delete(sourceVersion);
+        this.#syntax.delete(sourceVersion);
       }
       throw error;
     }
@@ -165,12 +183,12 @@ export class FileAnalysisSession {
     context?: { signal?: AbortSignal }
   ): Promise<FileExtraction> {
     throwIfProjectContextAborted(context);
-    const includesCalls = includeCalls && !getFileFlowUnavailableReason(facts);
-    const ast = readProjectContextAst(facts, includesCalls);
-    const legacy = {
-      symbols: extractFileSymbolsFromSource(facts, ast),
-      flow: includeCalls ? extractFileFlowFromSource(facts, ast) : undefined,
-    };
+    const syntax = this.syntax(facts, includeCalls);
+    // 自定义后端可修改legacy；不能让它回写跨文件目标也在使用的原始声明证据。
+    const legacy = structuredClone({
+      symbols: syntax.symbols,
+      flow: includeCalls ? syntax.flow : undefined,
+    });
     const input = {
       text: facts.text,
       filePath: facts.filePath,
@@ -218,5 +236,15 @@ export class FileAnalysisSession {
         : undefined,
     };
     return this.symbolExtractor ? structuredClone(compact) : compact;
+  }
+
+  private syntax(facts: SourceSliceFileFacts, includeCalls: boolean): FileSyntaxEvidence {
+    const version = this.#sourceVersions.get(facts) ?? facts;
+    let cached = this.#syntax.get(version);
+    if (!cached || (includeCalls && !cached.includeCalls)) {
+      cached = { includeCalls, evidence: readFileSyntaxEvidence(facts, includeCalls) };
+      this.#syntax.set(version, cached);
+    }
+    return cached.evidence;
   }
 }

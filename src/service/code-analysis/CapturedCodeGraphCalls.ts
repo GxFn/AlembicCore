@@ -1,29 +1,23 @@
 import path from 'node:path';
-import type {
-  CodeGraphInputRequest,
-  CodeGraphProjectResult,
-} from '../../infrastructure/analysis/CodeGraphProjectContract.js';
+import type { CodeGraphInputRequest } from '../../infrastructure/analysis/CodeGraphProjectContract.js';
 import {
   type CodeGraphGitObservation,
   readCodeGraphGitInput,
 } from '../../infrastructure/io/CodeGraphGitInput.js';
 import {
+  type ProjectInputPath,
   type ProjectInputSnapshotView,
   readProjectInputSnapshotView,
 } from '../../infrastructure/io/ProjectInputSnapshot.js';
 import { projectSourceReaderIdentity } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import { hashBytes } from '../../shared/canonicalJson.js';
 import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
-import { readProjectContextAst } from '../project-context/analysis/astFacts.js';
-import { normalizeCodeGraphSymbols } from '../project-context/analysis/codeGraphSymbols.js';
 import type { ProjectCallResolver } from '../project-context/analysis/projectCallResolver.js';
 import type {
   ExtractedFileFlowCallSite,
+  ExtractedFileFlowImport,
   FileFlowExtractionResult,
 } from '../project-context/fileFlow/contracts.js';
-import type { ExtractedFileSymbol } from '../project-context/fileSymbols/contracts.js';
-import { extractFileSymbolsFromSource } from '../project-context/fileSymbols/extract.js';
 import { normalizeFileSymbols } from '../project-context/fileSymbols/normalize.js';
 import type { ProjectContextHandlerExecutionContext } from '../project-context/interface/contracts.js';
 import { throwIfProjectContextAborted } from '../project-context/interface/execution.js';
@@ -34,15 +28,16 @@ import {
 import { createProjectContextFileRef } from '../project-context/shared/sourceSlice-fileSymbols/index.js';
 import type { SourceSliceFileFacts } from '../project-context/sourceSlice/contracts.js';
 import { loadSourceSliceFile } from '../project-context/sourceSlice/fileAccess.js';
+import { CapturedCodeGraphIndex } from './CapturedCodeGraphIndex.js';
 import type { CodeGraphProjectRunner } from './withCodeGraphAnalysis.js';
 
 interface PreparedProject {
-  result: Extract<CodeGraphProjectResult, { status: 'ready' }>;
   sources: Map<string, SourceSliceFileFacts>;
-  targets: Map<
-    string,
-    { facts: SourceSliceFileFacts; symbol: ExtractedFileSymbol; defaultExport: boolean }
-  >;
+  index: CapturedCodeGraphIndex;
+}
+interface CapturedProjectMetadata {
+  roots: ProjectInputSnapshotView['roots'];
+  sourceFiles: ProjectInputPath[];
 }
 
 /** 捕获清单而非“查询过的文件”拥有项目图；每个reader/repo单独计算，Replay必定重新运行SDK。 */
@@ -51,32 +46,43 @@ export function createCapturedCodeGraphCallResolver(
   runtimeRoot: string
 ): ProjectCallResolver {
   const projects = new WeakMap<ProjectSourceReader, Map<string, Promise<PreparedProject>>>();
+  const catalogs = new WeakMap<ProjectSourceReader, CapturedProjectMetadata>();
   return async (facts, flow, context) => {
     const reader = context?.sourceReader;
-    if (
-      !reader ||
-      flow.unavailableReason ||
-      !flow.callSites.some((site) => importedBinding(site, flow))
-    ) {
+    if (!reader || flow.unavailableReason) {
       return flow;
     }
-    const view = await readProjectInputSnapshotView(reader);
-    if (!view?.snapshot.sourceFiles) {
-      Logger.debug(
-        'CodeGraph retains file observations without a declared captured source catalog',
-        { filePath: facts.filePath, mode: reader.mode }
-      );
+    const imports = flow.imports.flatMap((record) => record.bindings ?? []);
+    if (!flow.callSites.some((site) => importedBinding(site, imports))) {
       return flow;
+    }
+    throwIfProjectContextAborted(context);
+    reader.assertComplete();
+    const identity = projectSourceReaderIdentity(reader);
+    let metadata = catalogs.get(identity);
+    if (!metadata) {
+      const view = await readProjectInputSnapshotView(reader);
+      if (!view?.snapshot.sourceFiles) {
+        // Recording可在之后首次声明清单，不能永久缓存“无清单”。
+        Logger.debug(
+          'CodeGraph retains file observations without a declared captured source catalog',
+          { filePath: facts.filePath, mode: reader.mode }
+        );
+        return flow;
+      }
+      // roots/已声明清单不可变；热查询无需重新base64编码、排序、hash和clone全部字节。
+      // 新的支持输入仍在prepare每轮重新snapshot，不能把这里当作封闭读集。
+      metadata = { roots: view.roots, sourceFiles: view.snapshot.sourceFiles };
+      catalogs.set(identity, metadata);
     }
     const canonical = await reader.realpath(facts.projectRoot, { signal: context?.signal });
-    const roots = view.roots.filter(
+    const roots = metadata.roots.filter(
       (root) => root.path === canonical && (!facts.repoId || root.id === facts.repoId)
     );
     if (roots.length !== 1) {
       return unavailable(flow, facts, 'Captured repository identity is ambiguous.');
     }
     const rootId = roots[0].id;
-    const identity = projectSourceReaderIdentity(reader);
     let cache = projects.get(identity);
     if (!cache) {
       cache = new Map();
@@ -84,7 +90,7 @@ export function createCapturedCodeGraphCallResolver(
     }
     let pending = cache.get(rootId);
     if (!pending) {
-      pending = prepare(view, rootId, reader, facts, context, run, runtimeRoot);
+      pending = prepare(metadata, rootId, reader, facts, context, run, runtimeRoot);
       cache.set(rootId, pending);
     }
     try {
@@ -98,31 +104,28 @@ export function createCapturedCodeGraphCallResolver(
           blobSha256: source.blobSha256,
         });
       }
-      const sourceRecord = project.result.files.find((file) => file.filePath === facts.filePath);
-      if (!sourceRecord || sourceRecord.ambiguous) {
+      if (!project.index.allowsSource(facts.filePath)) {
         return flow;
       }
       let resolved = 0;
       const callSites = flow.callSites.map((site) => {
-        const binding = importedBinding(site, flow);
+        const binding = importedBinding(site, imports);
         if (!binding || !site.matchingRange) {
           return site;
         }
-        const candidates = project.result.bindings.filter(
-          (binding) =>
-            binding.filePath === facts.filePath &&
-            binding.line === site.matchingRange!.startLine &&
-            binding.column === site.matchingRange!.startColumn &&
-            binding.resolvedBy === 'import' &&
-            (binding.referenceKind === 'instantiates') === (site.syntaxKind === 'new') &&
-            [
-              site.callee,
-              site.calleeExpression,
-              site.receiver ? `${site.receiver}.${site.callee}` : undefined,
-            ].includes(binding.referenceName)
-        );
+        const candidates = project.index
+          .candidates(facts.filePath, site.matchingRange.startLine, site.matchingRange.startColumn!)
+          .filter(
+            (binding) =>
+              (binding.referenceKind === 'instantiates') === (site.syntaxKind === 'new') &&
+              [
+                site.callee,
+                site.calleeExpression,
+                site.receiver ? `${site.receiver}.${site.callee}` : undefined,
+              ].includes(binding.referenceName)
+          );
         const ids = [...new Set(candidates.map((candidate) => candidate.targetNodeId))];
-        const target = ids.length === 1 ? project.targets.get(ids[0]) : undefined;
+        const target = ids.length === 1 ? project.index.target(ids[0], context) : undefined;
         if (!target || target.facts.filePath === facts.filePath) {
           return site;
         }
@@ -151,7 +154,8 @@ export function createCapturedCodeGraphCallResolver(
         const summary = normalizeFileSymbols({
           facts: targetFacts,
           fileRef: createProjectContextFileRef(targetFacts),
-          symbols: [target.symbol],
+          // 公开ref会复用range对象；不能把缓存声明暴露给可变的调用方。
+          symbols: [structuredClone(target.symbol)],
         }).symbols[0];
         if (!summary) {
           return site;
@@ -178,25 +182,26 @@ export function createCapturedCodeGraphCallResolver(
   };
 }
 
-function importedBinding(site: ExtractedFileFlowCallSite, flow: FileFlowExtractionResult) {
+function importedBinding(
+  site: ExtractedFileFlowCallSite,
+  imports: NonNullable<ExtractedFileFlowImport['bindings']>
+) {
   const range = site.calleeBindingRange;
   if (!range || !site.matchingRange || !['call', 'new'].includes(site.syntaxKind ?? '')) {
     return undefined;
   }
-  return flow.imports
-    .flatMap((record) => record.bindings ?? [])
-    .find(
-      (binding) =>
-        !binding.typeOnly &&
-        sameRange(binding.range, range) &&
-        (site.receiver
-          ? binding.imported === '*' && site.receiver === binding.local
-          : site.callee === binding.local)
-    );
+  return imports.find(
+    (binding) =>
+      !binding.typeOnly &&
+      sameRange(binding.range, range) &&
+      (site.receiver
+        ? binding.imported === '*' && site.receiver === binding.local
+        : site.callee === binding.local)
+  );
 }
 
 async function prepare(
-  view: ProjectInputSnapshotView,
+  metadata: CapturedProjectMetadata,
   rootId: string,
   reader: ProjectSourceReader,
   owner: SourceSliceFileFacts,
@@ -204,7 +209,7 @@ async function prepare(
   run: CodeGraphProjectRunner,
   runtimeRoot: string
 ): Promise<PreparedProject> {
-  const catalog = view.snapshot.sourceFiles!.filter(
+  const catalog = metadata.sourceFiles.filter(
     (file) =>
       file.rootId === rootId &&
       JS_FAMILY_LANGUAGES.has(resolveAstParserLanguage(file.relativePath) ?? '')
@@ -235,7 +240,7 @@ async function prepare(
     }
     sources.set(file.relativePath, result.facts);
   }
-  const logicalRoot = view.roots.find((root) => root.id === rootId)!.path;
+  const logicalRoot = metadata.roots.find((root) => root.id === rootId)!.path;
   for (let round = 0; round < 64; round++) {
     throwIfProjectContextAborted(context);
     const current = await readProjectInputSnapshotView(reader);
@@ -287,7 +292,7 @@ async function prepare(
     if (result.errors.length) {
       throw new Error(`CodeGraph project extraction failed: ${result.errors[0]}`);
     }
-    return { result, sources, targets: buildTargets(result, sources) };
+    return { sources, index: new CapturedCodeGraphIndex(result, sources) };
   }
   throw new Error('CodeGraph input closure did not converge within 64 rounds.');
 }
@@ -351,60 +356,6 @@ async function fulfill(
   }
 }
 
-function buildTargets(
-  result: Extract<CodeGraphProjectResult, { status: 'ready' }>,
-  sources: Map<string, SourceSliceFileFacts>
-): PreparedProject['targets'] {
-  const targets: PreparedProject['targets'] = new Map();
-  for (const file of result.files) {
-    const facts = sources.get(file.filePath);
-    if (
-      !facts ||
-      file.ambiguous ||
-      file.contentHash !== hashBytes(Buffer.from(facts.text)).slice(7)
-    ) {
-      continue;
-    }
-    const ast = readProjectContextAst(facts, false);
-    const legacy = extractFileSymbolsFromSource(facts, ast);
-    if (legacy.syntaxValid !== true || legacy.syntaxFeatures?.length || legacy.unavailableReason) {
-      continue;
-    }
-    const extracted = normalizeCodeGraphSymbols(facts, { nodes: file.nodes, errors: [] }, legacy);
-    if (extracted.unavailableReason) {
-      continue;
-    }
-    for (const node of file.nodes) {
-      const named = extracted.symbols.filter(
-        (symbol) =>
-          symbol.name === node.name &&
-          (symbol.qualifiedName ?? symbol.name) === node.qualifiedName.replaceAll('::', '.')
-      );
-      const located = named.filter(
-        (symbol) =>
-          (symbol.matchingRange ?? symbol.declarationRange ?? symbol.range).startLine ===
-          node.startLine
-      );
-      const candidates = located.length ? located : named;
-      if (candidates.length !== 1) {
-        continue;
-      }
-      const defaultExports =
-        ast.status === 'ready'
-          ? (ast.moduleSyntax?.exports.filter(
-              (item) =>
-                !item.specifier && (item.defaultDeclaration || item.exportedName === 'default')
-            ) ?? [])
-          : [];
-      targets.set(node.id, {
-        facts,
-        symbol: candidates[0],
-        defaultExport: defaultExports.length === 1 && defaultExports[0].name === candidates[0].name,
-      });
-    }
-  }
-  return targets;
-}
 function sameRange(
   a: { startLine: number; endLine: number; startColumn?: number; endColumn?: number },
   b: typeof a

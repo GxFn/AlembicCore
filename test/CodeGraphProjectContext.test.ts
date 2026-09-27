@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadPlugins } from '../src/core/ast/index.js';
 import type { FileFlowContext, FileSymbolContext } from '../src/domain/project-context/index.js';
 import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
+import { RecordingProjectSourceReader } from '../src/infrastructure/io/ProjectInputSnapshot.js';
 import { ProjectContext } from '../src/project-context.js';
 import { NodeProjectContextFoundationHostPorts } from '../src/projectContextFoundation.js';
 import { normalizeCodeGraphFlow } from '../src/service/code-analysis/CodeGraphFlow.js';
@@ -18,6 +19,7 @@ import {
 import { extractFileFlowFromSource } from '../src/service/project-context/fileFlow/extract.js';
 import { extractFileSymbolsFromSource } from '../src/service/project-context/fileSymbols/extract.js';
 import { hashCanonicalJson } from '../src/shared/canonicalJson.js';
+import { typeScriptAstPlugin } from '../src/test-fixtures.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -59,6 +61,141 @@ async function captureInputs(
 }
 
 describe('CodeGraph ProjectContext production backend', () => {
+  it('reuses prepared input metadata without exporting blobs again while preserving source receipts', async () => {
+    const files = {
+      'sample.ts': "import { target } from './dep'; export function run() { target(); }",
+      'dep.ts': 'export function target() {}',
+      'unused.ts': 'export const unused = 1;',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    const snapshots = vi.spyOn(RecordingProjectSourceReader.prototype, 'snapshot');
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const capture = await captureInputs(context, projectRoot, files);
+      const query = {
+        kind: 'file-flow' as const,
+        scope: { projectRoot, repoId: 'repo' },
+        payload: { filePath: 'sample.ts' },
+      };
+      const first = await context.execute(query, { sourceReader: capture.reader });
+      expect(first.errors ?? []).toEqual([]);
+      snapshots.mockClear();
+      const used = new Set<string>();
+      expect(
+        await context.execute(query, {
+          sourceReader: capture.reader,
+          onSourceFileVersion: (version) => used.add(version.filePath),
+        })
+      ).toEqual(first);
+      expect(used).toEqual(new Set(Object.keys(files)));
+      expect(snapshots).not.toHaveBeenCalled();
+    });
+  });
+
+  it('accepts a later declared catalog and still rejects invalidated cached inputs', async () => {
+    const files = {
+      'sample.ts': "import { target } from './dep'; export function run() { target(); }",
+      'dep.ts': 'export function target() {}',
+    };
+    const fixtureRoots = await fixture(files);
+    const projectRoot = await fs.realpath(fixtureRoots.projectRoot);
+    const reader = new RecordingProjectSourceReader([{ id: 'repo', path: projectRoot }]);
+    await expect(
+      withCodeGraphProjectContextSession({ dataRoot: fixtureRoots.dataRoot }, async (context) => {
+        const query = {
+          kind: 'file-flow' as const,
+          scope: { projectRoot, repoId: 'repo' },
+          payload: { filePath: 'sample.ts' },
+        };
+        const before = await context.execute(query, { sourceReader: reader });
+        expect((before.data as FileFlowContext).callers[0].unresolved).toBe(true);
+        for (const [file, source] of Object.entries(files)) {
+          await reader.seedFile(path.join(projectRoot, file), Buffer.from(source));
+        }
+        reader.declareSourceFiles(
+          Object.keys(files).map((relativePath) => ({ rootId: 'repo', relativePath }))
+        );
+        const captured = await context.execute(query, { sourceReader: reader });
+        expect(captured.errors ?? []).toEqual([]);
+        expect((captured.data as FileFlowContext).callers[0].unresolved).toBe(false);
+        expect(() => reader.declareSourceFiles([])).toThrow(
+          expect.objectContaining({ code: 'PROJECT_SOURCE_INPUT_DRIFT' })
+        );
+        await expect(context.execute(query, { sourceReader: reader })).rejects.toMatchObject({
+          code: 'PROJECT_SOURCE_INPUT_DRIFT',
+        });
+      })
+    ).rejects.toMatchObject({ code: 'PROJECT_SOURCE_INPUT_DRIFT' });
+  });
+
+  it.each([
+    'symbols-first',
+    'calls-first',
+  ] as const)('reuses only required declaration evidence in each captured view (%s)', async (order) => {
+    const files: Record<string, string> = {
+      'sample.ts': "import { target } from './dep'; export function run() { target(); target(); }",
+      'dep.ts': 'export function target() {}',
+      ...Object.fromEntries(
+        Array.from({ length: 8 }, (_, index) => [
+          `unused-${index}.ts`,
+          `export function unused${index}() {}`,
+        ])
+      ),
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    const walk = vi.spyOn(typeScriptAstPlugin, 'walk');
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const capture = await captureInputs(context, projectRoot, files);
+      const symbols = {
+        kind: 'file-symbols' as const,
+        scope: { projectRoot, repoId: 'repo' },
+        payload: { filePath: 'dep.ts' },
+      };
+      const flow = { ...symbols, kind: 'file-flow' as const, payload: { filePath: 'sample.ts' } };
+      const query = order === 'symbols-first' ? [symbols, flow] : [flow, symbols];
+      const recorded = [];
+      for (const request of query) {
+        const result = await context.execute(request, { sourceReader: capture.reader });
+        expect(result.errors ?? []).toEqual([]);
+        recorded.push(result);
+      }
+      expect(walk).toHaveBeenCalledTimes(2);
+      const snapshot = await capture.snapshot();
+      await fs.rm(projectRoot, { recursive: true });
+      const replay = capture.createReplay(snapshot);
+      for (let index = 0; index < query.length; index++) {
+        expect(await context.execute(query[index], { sourceReader: replay })).toEqual(
+          recorded[index]
+        );
+      }
+      expect(walk).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  it('keeps captured target ranges independent from publicly mutable refs', async () => {
+    const files = {
+      'sample.ts': "import { target } from './dep'; export function run() { target(); }",
+      'dep.ts': 'export function target() {}',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const capture = await captureInputs(context, projectRoot, files);
+      const query = {
+        kind: 'file-flow' as const,
+        scope: { projectRoot, repoId: 'repo' },
+        payload: { filePath: 'sample.ts' },
+      };
+      const first = await context.execute(query, { sourceReader: capture.reader });
+      expect(first.errors ?? []).toEqual([]);
+      const pristine = structuredClone(first);
+      const target = first.refs.find(
+        (ref) => ref.kind === 'file-symbol' && ref.scope.filePath === 'dep.ts'
+      );
+      expect(target?.scope.range).toBeDefined();
+      target!.scope.range!.startLine = 99;
+      expect(await context.execute(query, { sourceReader: capture.reader })).toEqual(pristine);
+    });
+  });
+
   it('requires captured lexical import evidence and rejects collided SDK target identities', async () => {
     const files = {
       'sample.ts': [

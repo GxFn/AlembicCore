@@ -239,6 +239,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
       throw new TypeError('Project input closure roots do not match the current repositories.');
     }
     let missingCount = 0;
+    let prior: ReplayProjectSourceReader | undefined;
     for (const observation of snapshot.observations) {
       throwIfAborted(input.signal);
       const root = rootsById.get(observation.path.rootId);
@@ -270,7 +271,8 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
             await loadProjectDiscovererPreference(absolutePath, reader);
             break;
           case 'codegraph-git': {
-            const prior = new ReplayProjectSourceReader(snapshot, roots);
+            // 同一闭包的Git请求共用已验证的解码视图；每次freshness调用仍独立重观测。
+            prior ??= new ReplayProjectSourceReader(snapshot, roots);
             const observation = await prior.readConfiguration<CodeGraphGitObservation>(
               'codegraph-git',
               absolutePath,

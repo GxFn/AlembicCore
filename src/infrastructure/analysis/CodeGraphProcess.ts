@@ -14,7 +14,7 @@ import {
 
 const workerFile = path.join(RESOURCES_DIR, 'codegraph', 'worker.mjs');
 const require = createRequire(import.meta.url);
-const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v4';
+const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v5';
 
 export interface CodeGraphNode {
   id: string;
