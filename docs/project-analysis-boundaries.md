@@ -58,7 +58,8 @@ runtimeRoot }`；它保留完整输入记录能力，不能再包成未声明读
 当前固定官方 `@colbymchenry/codegraph@1.6.0`，在独立子进程设置官方
 `CODEGRAPH_KERNEL=0`，通过公开 `extractFromSource` 分析传入字符串。SDK只在
 `dataRoot/.asd/codegraph-sessions` 的唯一临时子目录内初始化，`index:false` 不创建活动
-源码全图。宿主必须将位于源码范围内的固定 runtimeRoot 加入 inventory 排除策略。
+源码全图。带有已声明捕获清单的会话另按下节运行私有项目解析。
+宿主必须将位于源码范围内的固定 runtimeRoot 加入 inventory 排除策略。
 退出时停止接单、排空已接受查询、关闭并等待进程退出，然后删除该临时子目录。
 超时或取消会终止在途 SDK 任务；作用域任何阶段的 owner 取消均不能发布成功。
 单个请求取消后先等待旧进程退出，健康owner的后续请求才可惰性重开同一身份的worker；
@@ -90,7 +91,7 @@ file-flow从同一次SDK提取取得未解析的calls/instantiates候选，AST�
 省略的字面量receiver调用（例如数组的includes）仅通过对应AST语法形态补充，保留既有
 噪声策略；字面量调用也不能按方法裸名连到项目函数。
 
-调用关系只在同文件声明、词法绑定和实际范围足以证明时连接到symbol ref。未知receiver、
+实时查询的调用关系只在同文件声明、词法绑定和实际范围足以证明时连接到symbol ref。未知receiver、
 参数遮蔽或歧义保留unresolved；真实顶层owner连接已有file ref。普通关系保留行级ref，
 同一ref对应多个真实调用位置时才附列消歧。callers/callees是同一文件观察的不同排序，
 不能视为跨文件反向调用索引，也不代表静态分析已证明运行时分派。
@@ -105,6 +106,34 @@ symbol端点。modules/layers/map只将这类exports纳入依赖，普通本地�
 import与export-from共用一次目标观察，解析所需的存在性和不存在性都参与输入记录与重放。
 源码候选顺序由共享函数管理：真实`.js/.mjs/.cjs`优先，缺失时才映射到匹配TS源码；
 `feature.v2`等带点目录仍支持index入口，不能因点号被当作输出扩展名。
+
+## 冻结输入上的 CodeGraph 项目解析
+
+Main/Plugin 的原生 Foundation 捕获先声明 `sourceFiles`，再把同一 reader 交给分析会话。
+该清单只列出本次选定的源码身份；源码字节继续来自既有 blob/read receipts，配置和目录
+观察不会自动成为源码清单。旧 V1 快照没有该字段时保持旧 hash 和读取语义；普通 live
+单文件查询不因启用 SDK 自动扫描全仓。
+
+Core 在每个 reader/repo 内使用公开 `indexFiles` 与 `resolveReferences`。SDK 的同步
+文件读取通过独立进程内的冻结读集适配，tsconfig/extends/package、目录、stat、realpath
+和有限只读 Git 命令均进入同一 snapshot。未知读取会中止该轮，Recording 经 reader 补齐
+后使用新图重算；Replay 缺记录时锁存失败。SDK 自己吞掉读取异常，也不能发布该轮结果。
+Git 验证使用当前验证 signal；重放不启动 Git。真实图数据库只存在私有临时目录。
+
+这是固定 SDK 1.6 的输入适配，**不是操作系统沙箱或任意插件执行环境**。不执行项目代码；
+未知 IO 形态、越出已接受 roots 的支持输入、宿主绝对路径配置和私有 runtime 输入明确
+不可用。当前每仓上限为 2,000 个 JS/TS 源文件、32 MiB 源码、64 轮闭包补齐，每轮最多
+4,096 个读取请求；超限返回诊断，不裁剪后冒称完整。非 JS 生产方保持原行为。
+
+实际跨文件目标仍投影到既有 file-flow：调用位置、词法 import 绑定、目标同文本符号和
+无碰撞身份同时成立时才接纳 SDK `import` 候选。参数遮蔽、type-only、动态 receiver、
+SDK 节点碰撞及猜测式全局匹配保持 unresolved。SDK 1.6 会把首个导出函数误作 default，
+因此默认导入还要求目标具有明确 default 导出证据；缺证据的默认重导出等形式不会补猜。
+
+不同仓库即使有相同相对路径也分开建图；导航字段按当前请求投影。缓存命中仍报告本次
+消费的源码版本，Replay 使用独立 reader 重新运行 SDK。新增目标不改变既有调用点 ref ID，
+只补 `to/targetRef`。这里仍不是跨仓反向 callers 索引，也不保证运行时动态分派正确。
+SourceGraph live SQLite 索引继续使用下节的独立能力边界。
 
 ## SourceGraph 索引接入
 

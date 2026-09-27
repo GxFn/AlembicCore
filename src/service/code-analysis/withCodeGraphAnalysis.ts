@@ -3,6 +3,10 @@ import {
   CodeGraphProcess,
   type CodeGraphProcessOptions,
 } from '../../infrastructure/analysis/CodeGraphProcess.js';
+import type {
+  CodeGraphProjectInput,
+  CodeGraphProjectResult,
+} from '../../infrastructure/analysis/CodeGraphProjectContract.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { normalizeCodeGraphSymbols } from '../project-context/analysis/codeGraphSymbols.js';
 import type {
@@ -20,13 +24,18 @@ import { normalizeCodeGraphFlow } from './CodeGraphFlow.js';
 export interface CodeGraphAnalysisRuntime extends CodeGraphIdentity {
   runtimeRoot: string;
 }
+export type CodeGraphProjectRunner = (
+  input: CodeGraphProjectInput,
+  context?: { signal?: AbortSignal }
+) => Promise<CodeGraphProjectResult>;
 
 /** 两个真实消费者共用进程/取消/重开规则，只接收已经读取并绑定版本的文本。 */
 export async function withCodeGraphAnalysis<T>(
   options: CodeGraphProcessOptions,
   collect: (
     extractor: ProjectContextSymbolExtractor,
-    runtime: CodeGraphAnalysisRuntime
+    runtime: CodeGraphAnalysisRuntime,
+    project: CodeGraphProjectRunner
   ) => Promise<T>
 ): Promise<T> {
   const initial = await CodeGraphProcess.open(options);
@@ -69,6 +78,29 @@ export async function withCodeGraphAnalysis<T>(
       retiring = failed.close(true);
     }
     await failed.close(true);
+  };
+  const project: CodeGraphProjectRunner = async (input, context) => {
+    for (let attempt = 0; ; attempt++) {
+      const active = await acquire();
+      try {
+        return await active.analyzeProject(input, context?.signal);
+      } catch (error) {
+        await retire(active);
+        if (
+          error instanceof Error &&
+          error.name === 'AbortError' &&
+          !options.signal?.aborted &&
+          !context?.signal?.aborted &&
+          attempt === 0
+        ) {
+          Logger.debug('CodeGraph retries captured project after sibling cancellation', {
+            attempt: 1,
+          });
+          continue;
+        }
+        throw error;
+      }
+    }
   };
   const analyzeFile: NonNullable<ProjectContextSymbolExtractor['analyzeFile']> = async (
     input,
@@ -148,7 +180,7 @@ export async function withCodeGraphAnalysis<T>(
   };
   // 统一接住callback同步抛错和异步失败，关闭真实worker后再向调用方传播。
   const outcome = await Promise.resolve()
-    .then(() => collect(symbolExtractor, runtime))
+    .then(() => collect(symbolExtractor, runtime, project))
     .then(
       (value) => ({ ok: true as const, value }),
       (error: unknown) => ({ ok: false as const, error })

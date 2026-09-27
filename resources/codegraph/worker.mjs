@@ -2,10 +2,15 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import path from 'node:path';
+import { installFrozenIO } from './frozen-io.mjs';
+import { analyzeFrozenProject, projectHash, projectNode } from './project-analysis.mjs';
 
 const require = createRequire(import.meta.url);
 let graph;
 let sdk;
+let io;
+let directory;
 let tail = Promise.resolve();
 // 等待IPC写入完成，close不能抢在大结果仍在缓冲时exit并丢失已接受请求的响应。
 const send = (message) =>
@@ -28,6 +33,15 @@ process.on('message', (message) => {
         if (process.env.CODEGRAPH_KERNEL !== '0') {
           throw new Error('CodeGraph WASM route is not fixed.');
         }
+        directory = message.directory;
+        io = installFrozenIO([
+          path.dirname(require.resolve('@colbymchenry/codegraph/package.json')),
+          path.dirname(
+            require.resolve(
+              `@colbymchenry/codegraph-${process.platform}-${process.arch}/package.json`
+            )
+          ),
+        ]);
         sdk = require('@colbymchenry/codegraph');
         sdk.setLogger(sdk.silentLogger);
         await sdk.initGrammars();
@@ -53,6 +67,17 @@ process.on('message', (message) => {
             workerHash: `sha256:${createHash('sha256')
               .update(await readFile(new URL(import.meta.url)))
               .digest('hex')}`,
+            projectWorkerHash: `sha256:${createHash('sha256')
+              .update(
+                Buffer.concat(
+                  await Promise.all(
+                    ['frozen-io.mjs', 'project-analysis.mjs'].map((name) =>
+                      readFile(new URL(name, import.meta.url))
+                    )
+                  )
+                )
+              )
+              .digest('hex')}`,
           },
         });
       } else if (message.kind === 'extract') {
@@ -70,17 +95,7 @@ process.on('message', (message) => {
           sourceHash: `sha256:${createHash('sha256').update(message.source).digest('hex')}`,
           result: {
             // 不传updatedAt/duration/私有SDK对象，也不把SDK id当Alembic ref。
-            nodes: result.nodes.map((node) => ({
-              id: node.id,
-              kind: node.kind,
-              name: node.name,
-              qualifiedName: node.qualifiedName,
-              startLine: node.startLine,
-              endLine: node.endLine,
-              startColumn: node.startColumn,
-              endColumn: node.endColumn,
-              isExported: node.isExported,
-            })),
+            nodes: result.nodes.map(projectNode),
             // 这里只传未解析调用观察，绝不把SDK候选或contains边包装成确定调用图。
             references: result.unresolvedReferences
               .filter((reference) => ['calls', 'instantiates'].includes(reference.referenceKind))
@@ -97,6 +112,14 @@ process.on('message', (message) => {
               typeof error === 'string' ? error : String(error.message ?? error)
             ),
           },
+        });
+      } else if (message.kind === 'project') {
+        const result = await analyzeFrozenProject(sdk, io, directory, message.input);
+        await send({
+          kind: 'result',
+          id: message.id,
+          sourceHash: projectHash(message.input),
+          result,
         });
       } else if (message.kind === 'close') {
         graph?.close();

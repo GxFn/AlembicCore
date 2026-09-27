@@ -19,7 +19,8 @@ export interface ProjectSourceStat {
 export type ProjectSourceConfigurationKind =
   | 'scope-for-folder'
   | 'scope-for-control-root'
-  | 'discoverer-preference';
+  | 'discoverer-preference'
+  | 'codegraph-git';
 
 export interface ProjectSourceReadOptions {
   signal?: AbortSignal;
@@ -38,7 +39,8 @@ export interface ProjectSourceReader {
   readConfiguration<T>(
     kind: ProjectSourceConfigurationKind,
     absolutePath: string,
-    load: () => T | Promise<T>
+    load: (options?: ProjectSourceReadOptions) => T | Promise<T>,
+    options?: ProjectSourceReadOptions
   ): Promise<T>;
   /** 缺失的重放读取不能被业务层已有 catch/fallback 吞掉。 */
   assertComplete(): void;

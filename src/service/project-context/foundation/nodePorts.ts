@@ -11,6 +11,10 @@ import type {
 } from '../../../domain/project-context/index.js';
 import { loadProjectDiscovererPreference } from '../../../infrastructure/config/DiscovererPreferenceStore.js';
 import {
+  type CodeGraphGitObservation,
+  readCodeGraphGitInput,
+} from '../../../infrastructure/io/CodeGraphGitInput.js';
+import {
   type ProjectInputRootBinding,
   RecordingProjectSourceReader,
   ReplayProjectSourceReader,
@@ -198,6 +202,12 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
         file.content
       );
     }
+    reader.declareSourceFiles(
+      input.files.map((file) => ({
+        rootId: file.repoId,
+        relativePath: normalizePortableRelativePath(file.relativePath),
+      }))
+    );
     return {
       reader,
       snapshot: () => reader.snapshot(),
@@ -219,6 +229,9 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     const roots = await createInputCaptureRootBindings(input);
     const reader = new RecordingProjectSourceReader(roots);
     const rootsById = new Map(roots.map((root) => [root.id, root.path]));
+    if (snapshot.sourceFiles !== undefined) {
+      reader.declareSourceFiles(snapshot.sourceFiles);
+    }
     if (
       snapshot.roots.length !== roots.length ||
       snapshot.roots.some((root) => !rootsById.has(root.id))
@@ -256,6 +269,18 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           case 'discoverer-preference':
             await loadProjectDiscovererPreference(absolutePath, reader);
             break;
+          case 'codegraph-git': {
+            const prior = new ReplayProjectSourceReader(snapshot, roots);
+            const observation = await prior.readConfiguration<CodeGraphGitObservation>(
+              'codegraph-git',
+              absolutePath,
+              () => {
+                throw new Error('Recorded Git input is required');
+              }
+            );
+            await readCodeGraphGitInput(reader, observation.request, { signal: input.signal });
+            break;
+          }
         }
       } catch (error) {
         throwIfAborted(input.signal);
@@ -746,19 +771,32 @@ async function createInputCaptureRootBindings(input: {
     }
   };
   const roots = await Promise.all(
-    input.repositories.map(async (repository) => ({
-      id: repository.repoId,
-      path: await canonicalRoot(repository.sourceRoot),
-    }))
+    input.repositories.map(async (repository) => {
+      const original = path.resolve(repository.sourceRoot);
+      const canonical = await canonicalRoot(original);
+      return {
+        id: repository.repoId,
+        path: canonical,
+        ...(canonical !== original ? { aliases: [original] } : {}),
+      };
+    })
   );
-  const controlRoot = input.controlRoot ? await canonicalRoot(input.controlRoot) : undefined;
+  const controlAlias = input.controlRoot ? path.resolve(input.controlRoot) : undefined;
+  const controlRoot = controlAlias ? await canonicalRoot(controlAlias) : undefined;
   throwIfAborted(input.signal);
   if (controlRoot && !roots.some((root) => root.path === controlRoot)) {
     let id = 'capture-control-root';
     while (roots.some((root) => root.id === id)) {
       id += '-';
     }
-    roots.push({ id, path: controlRoot });
+    roots.push({
+      id,
+      path: controlRoot,
+      ...(controlAlias !== controlRoot ? { aliases: [controlAlias!] } : {}),
+    });
+  } else if (controlRoot && controlAlias !== controlRoot) {
+    const root = roots.find((root) => root.path === controlRoot)!;
+    root.aliases = [...new Set([...(root.aliases ?? []), controlAlias!])];
   }
   return roots;
 }

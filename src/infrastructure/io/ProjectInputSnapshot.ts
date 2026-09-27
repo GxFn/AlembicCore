@@ -12,11 +12,17 @@ import type {
   ProjectSourceReadOptions,
   ProjectSourceStat,
 } from '../../types/projectSourceReader.js';
-import { nodeProjectSourceReader, throwIfSourceReadAborted } from './ProjectSourceReader.js';
+import {
+  nodeProjectSourceReader,
+  projectSourceReaderIdentity,
+  throwIfSourceReadAborted,
+} from './ProjectSourceReader.js';
 
 export interface ProjectInputRootBinding {
   id: string;
   path: string;
+  /** 运行时别名（如macOS /var）；不写入portable roots，统一映射到同一真实根。 */
+  aliases?: string[];
 }
 export interface ProjectInputPath {
   rootId: string;
@@ -46,8 +52,23 @@ export interface ProjectInputSnapshot {
   version: 1;
   roots: { id: string; label: string }[];
   observations: ProjectInputObservation[];
+  /** Foundation明确声明的源码清单；不从支持读集/控制根反推源码权限，旧快照可缺省。 */
+  sourceFiles?: ProjectInputPath[];
   blobs: { hash: `sha256:${string}`; byteLength: number; dataBase64: string }[];
   snapshotHash: `sha256:${string}`;
+}
+
+export interface ProjectInputSnapshotView {
+  snapshot: ProjectInputSnapshot;
+  roots: ProjectInputRootBinding[];
+}
+const snapshotViews = new WeakMap<ProjectSourceReader, () => Promise<ProjectInputSnapshotView>>();
+
+/** 仅内置读取器提供不可变读集副本；signal facade仍绑定同一个读取器身份。 */
+export async function readProjectInputSnapshotView(
+  reader: ProjectSourceReader
+): Promise<ProjectInputSnapshotView | undefined> {
+  return snapshotViews.get(projectSourceReaderIdentity(reader))?.();
 }
 
 export class ProjectSourceInputUncapturedError extends Error {
@@ -84,12 +105,28 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
   readonly #records = new Map<string, Promise<RecordedInput>>();
   readonly #blobs = new Map<`sha256:${string}`, Uint8Array>();
   readonly #failures = new Map<string, Error>();
+  #sourceFiles?: ProjectInputPath[];
 
   constructor(
     roots: readonly ProjectInputRootBinding[],
     private readonly delegate: ProjectSourceReader = nodeProjectSourceReader
   ) {
     this.#roots = normalizeRoots(roots);
+    snapshotViews.set(this, async () => {
+      this.assertComplete();
+      return { snapshot: await this.snapshot(), roots: structuredClone(this.#roots) };
+    });
+  }
+
+  /** 清单来自已验证的Foundation inventory；实际字节仍必须经reader读取并核验。 */
+  declareSourceFiles(files: readonly ProjectInputPath[]): void {
+    const declared = validateSourceCatalog(files, this.#roots);
+    if (this.#sourceFiles && hashCanonicalJson(this.#sourceFiles) !== hashCanonicalJson(declared)) {
+      const error = new ProjectSourceInputDriftError('source-catalog', 'declared source inventory');
+      this.invalidate(error);
+      throw error;
+    }
+    this.#sourceFiles = declared;
   }
 
   async readFile(absolutePath: string, options?: ProjectSourceReadOptions): Promise<Uint8Array> {
@@ -158,17 +195,25 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
   async readConfiguration<T>(
     kind: ProjectSourceConfigurationKind,
     absolutePath: string,
-    load: () => T | Promise<T>
+    load: (options?: ProjectSourceReadOptions) => T | Promise<T>,
+    options?: ProjectSourceReadOptions
   ): Promise<T> {
-    const value = await this.record(kind, absolutePath, async () =>
-      this.encode(await this.delegate.readConfiguration(kind, absolutePath, load), kind)
+    const value = await this.record(
+      kind,
+      absolutePath,
+      async (readOptions) =>
+        this.encode(
+          await this.delegate.readConfiguration(kind, absolutePath, load, readOptions),
+          kind
+        ),
+      options
     );
     return decodeValue(value as PortableValue, this.#roots) as T;
   }
 
   /** 初始源码已由Foundation捕获，分析须复用这些字节，而非再次读取可能变化的live版本。 */
   async seedFile(absolutePath: string, bytes: Uint8Array): Promise<void> {
-    const normalized = path.resolve(absolutePath);
+    const normalized = normalizeBoundPath(absolutePath, this.#roots);
     const hash = hashBytes(bytes);
     const key = inputKey('file', normalized);
     const pending = this.#records.get(key);
@@ -216,6 +261,7 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
           outcome: record.outcome,
         }))
         .sort((left, right) => observationKey(left).localeCompare(observationKey(right))),
+      ...(this.#sourceFiles === undefined ? {} : { sourceFiles: this.#sourceFiles }),
       blobs: [...this.#blobs]
         .map(([hash, bytes]) => ({
           hash,
@@ -259,7 +305,7 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
     verify = load
   ): Promise<CanonicalJsonValue> {
     throwIfSourceReadAborted(options);
-    const normalized = path.resolve(absolutePath);
+    const normalized = normalizeBoundPath(absolutePath, this.#roots);
     const key = inputKey(operation, normalized);
     let pending = this.#records.get(key);
     if (!pending) {
@@ -291,6 +337,7 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
   }
 
   private location(absolutePath: string): ProjectInputPath {
+    absolutePath = normalizeBoundPath(absolutePath, this.#roots);
     const candidates = this.#roots
       .map((root) => ({
         root,
@@ -321,7 +368,8 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
         path.isAbsolute(value) &&
         kind !== 'discoverer-preference' &&
         (isScopeConfigurationPath(keys) ||
-          this.#roots.some((root) => isWithinRoot(value, root.path)))
+          this.#roots.some((root) => isWithinRoot(value, root.path)) ||
+          kind === 'codegraph-git')
       ) {
         return { path: this.location(value) };
       }
@@ -397,6 +445,31 @@ export class ReplayProjectSourceReader implements ProjectSourceReader {
       this.#records.set(key, structuredClone(observation));
       validateOutcome(observation, this.#blobs, this.#roots);
     }
+    // 旧V1可按宿主别名保存路径；保留旧key，并建立当前canonical读取入口。
+    // 两条旧事实若在重绑定后冲突，不能靠插入顺序选择其中一份。
+    for (const observation of [...this.#records.values()]) {
+      const absolute = normalizeBoundPath(
+        resolveLocation(observation.path, this.#roots),
+        this.#roots
+      );
+      const key = inputKey(observation.operation, absolute);
+      const previous = this.#records.get(key);
+      if (
+        previous &&
+        hashCanonicalJson(previous.outcome) !== hashCanonicalJson(observation.outcome)
+      ) {
+        throw new TypeError('Conflicting project input observations after root alias binding.');
+      }
+      this.#records.set(key, observation);
+    }
+    if (snapshot.sourceFiles !== undefined) {
+      validateSourceCatalog(snapshot.sourceFiles, this.#roots);
+    }
+    const frozen = structuredClone(snapshot);
+    snapshotViews.set(this, async () => {
+      this.assertComplete();
+      return { snapshot: structuredClone(frozen), roots: structuredClone(this.#roots) };
+    });
   }
 
   async readFile(absolutePath: string, options?: ProjectSourceReadOptions): Promise<Uint8Array> {
@@ -421,9 +494,10 @@ export class ReplayProjectSourceReader implements ProjectSourceReader {
   async readConfiguration<T>(
     kind: ProjectSourceConfigurationKind,
     absolutePath: string,
-    _load: () => T | Promise<T>
+    _load: (options?: ProjectSourceReadOptions) => T | Promise<T>,
+    options?: ProjectSourceReadOptions
   ): Promise<T> {
-    return decodeValue(this.read(kind, absolutePath) as PortableValue, this.#roots) as T;
+    return decodeValue(this.read(kind, absolutePath, options) as PortableValue, this.#roots) as T;
   }
   assertComplete(): void {
     if (this.#failure) {
@@ -440,7 +514,10 @@ export class ReplayProjectSourceReader implements ProjectSourceReader {
     options?: ProjectSourceReadOptions
   ): CanonicalJsonValue {
     throwIfSourceReadAborted(options);
-    const record = this.#records.get(inputKey(operation, absolutePath));
+    // 老快照可能把/var别名编码为支持路径；先保留原key，再尝试新规范根。
+    const record =
+      this.#records.get(inputKey(operation, absolutePath)) ??
+      this.#records.get(inputKey(operation, normalizeBoundPath(absolutePath, this.#roots)));
     if (!record) {
       const error = new ProjectSourceInputUncapturedError(operation, absolutePath);
       this.#failure ??= error;
@@ -465,15 +542,30 @@ function normalizeRoots(roots: readonly ProjectInputRootBinding[]): ProjectInput
         !root ||
         !isNonEmptyString(root.id) ||
         typeof root.path !== 'string' ||
-        !path.isAbsolute(root.path)
+        !path.isAbsolute(root.path) ||
+        (root.aliases !== undefined &&
+          (!Array.isArray(root.aliases) ||
+            root.aliases.some((alias) => typeof alias !== 'string' || !path.isAbsolute(alias))))
     ) ||
     new Set(roots.map((root) => root.id)).size !== roots.length
   ) {
     throw new TypeError('Project input roots require unique ids and absolute runtime paths.');
   }
   return roots
-    .map((root) => ({ id: root.id, path: path.resolve(root.path) }))
+    .map((root) => ({
+      id: root.id,
+      path: path.resolve(root.path),
+      ...(root.aliases ? { aliases: root.aliases.map((alias) => path.resolve(alias)) } : {}),
+    }))
     .sort((a, b) => a.id.localeCompare(b.id));
+}
+function normalizeBoundPath(value: string, roots: readonly ProjectInputRootBinding[]): string {
+  const resolved = path.resolve(value);
+  const candidates = roots
+    .flatMap((root) => (root.aliases ?? []).map((alias) => ({ alias, root })))
+    .sort((a, b) => b.alias.length - a.alias.length);
+  const match = candidates.find(({ alias }) => isWithinRoot(resolved, alias));
+  return match ? path.resolve(match.root.path, path.relative(match.alias, resolved)) : resolved;
 }
 function inputKey(operation: InputOperation, absolutePath: string): string {
   return `${operation}\0${path.resolve(absolutePath)}`;
@@ -488,8 +580,46 @@ function snapshotHash(
     version: snapshot.version,
     roots: snapshot.roots,
     observations: snapshot.observations,
+    ...(snapshot.sourceFiles === undefined ? {} : { sourceFiles: snapshot.sourceFiles }),
     blobs: snapshot.blobs.map(({ hash, byteLength }) => ({ hash, byteLength })),
   });
+}
+function validateSourceCatalog(
+  files: readonly ProjectInputPath[],
+  roots: readonly ProjectInputRootBinding[]
+): ProjectInputPath[] {
+  if (!Array.isArray(files)) {
+    throw new TypeError('Project source catalog must be an array.');
+  }
+  const ids = new Set(roots.map((root) => root.id));
+  const seen = new Set<string>();
+  return files
+    .map((file: ProjectInputPath) => {
+      if (
+        !file ||
+        !ids.has(file.rootId) ||
+        typeof file.relativePath !== 'string' ||
+        !file.relativePath ||
+        file.relativePath === '.' ||
+        path.posix.isAbsolute(file.relativePath) ||
+        /^[A-Za-z]:/.test(file.relativePath) ||
+        file.relativePath.includes('\\') ||
+        file.relativePath.split('/').some((part) => part === '..' || part === '.' || part === '')
+      ) {
+        throw new TypeError(
+          'Project source catalog requires root-contained normalized source paths.'
+        );
+      }
+      const key = `${file.rootId}\0${file.relativePath}`;
+      if (seen.has(key)) {
+        throw new TypeError('Duplicate project source catalog entry.');
+      }
+      seen.add(key);
+      return { rootId: file.rootId, relativePath: file.relativePath };
+    })
+    .sort((a, b) =>
+      `${a.rootId}\0${a.relativePath}`.localeCompare(`${b.rootId}\0${b.relativePath}`)
+    );
 }
 function resolveLocation(
   location: ProjectInputPath,
@@ -639,6 +769,7 @@ function validateOutcome(
     case 'scope-for-folder':
     case 'scope-for-control-root':
     case 'discoverer-preference':
+    case 'codegraph-git':
       validateValue = () => decodeValue(value as PortableValue, roots);
       break;
     default:

@@ -14,6 +14,8 @@ export interface ModuleImportSyntax {
   symbols: string[];
   alias?: string;
   typeOnly?: boolean;
+  /** 实际导入绑定位置，用于区分import与同名参数/局部变量；不进入旧AstFileSummary。 */
+  bindings?: { local: string; imported: string; range: ModuleSyntaxRange; typeOnly: boolean }[];
 }
 
 export interface ModuleExportSyntax {
@@ -23,6 +25,8 @@ export interface ModuleExportSyntax {
   statement: string;
   exportedName?: string;
   specifier?: string;
+  /** AST确认的default声明标记；不改变旧exports摘要或关系的公共名字。 */
+  defaultDeclaration?: boolean;
 }
 
 export interface ModuleSyntaxFacts {
@@ -90,16 +94,35 @@ function collectStaticImport(
   }
   const clause = node.namedChildren.find((child) => child.type === 'import_clause');
   const symbols: string[] = [];
+  const bindings: NonNullable<ModuleImportSyntax['bindings']> = [];
+  const typeOnly = node.children.some((child) => child.type === 'type');
+  const addBinding = (local: TreeSitterNode, imported: string, binding = local) =>
+    bindings.push({
+      local: nameOf(local),
+      imported,
+      typeOnly: typeOnly || binding.children.some((child) => child.type === 'type'),
+      range: {
+        startLine: binding.startPosition.row + 1,
+        endLine: binding.endPosition.row + 1,
+        startColumn: binding.startPosition.column,
+        endColumn: binding.endPosition.column,
+      },
+    });
   let kind: ModuleImportSyntax['kind'] = 'side-effect';
   let alias: string | undefined;
   for (const child of clause?.namedChildren ?? []) {
     if (child.type === 'identifier') {
       symbols.push(child.text);
       kind = 'default';
+      addBinding(child, 'default');
     } else if (child.type === 'namespace_import') {
       alias = child.namedChildren.find((item) => item.type === 'identifier')?.text;
       symbols.push('*');
       kind = 'namespace';
+      const local = child.namedChildren.find((item) => item.type === 'identifier');
+      if (local) {
+        addBinding(local, '*');
+      }
     } else if (child.type === 'named_imports') {
       for (const binding of child.namedChildren) {
         if (binding.type !== 'import_specifier') {
@@ -108,6 +131,10 @@ function collectStaticImport(
         const local = binding.childForFieldName('alias') ?? binding.childForFieldName('name');
         if (local) {
           symbols.push(nameOf(local));
+          const imported = binding.childForFieldName('name');
+          if (imported) {
+            addBinding(local, nameOf(imported), binding);
+          }
         }
       }
       kind = 'named';
@@ -120,7 +147,8 @@ function collectStaticImport(
     statement: statementText(node),
     symbols,
     ...(alias ? { alias } : {}),
-    typeOnly: node.children.some((child) => child.type === 'type'),
+    typeOnly,
+    bindings,
   };
 }
 
@@ -230,7 +258,17 @@ function collectExports(node: TreeSitterNode, rangeOf: RangeOf): ModuleExportSyn
             : declaration.type.includes('class')
               ? 'class'
               : declaration.type.replace(/_declaration$/, '');
-      return [{ name: nameOf(name), kind, range: rangeOf(node), statement }];
+      return [
+        {
+          name: nameOf(name),
+          kind,
+          range: rangeOf(node),
+          statement,
+          ...(node.children.some((child) => child.type === 'default')
+            ? { defaultDeclaration: true }
+            : {}),
+        },
+      ];
     }
   }
   // default 表达式没有具名声明；保留真实公共名字，不凭文本构造一个函数符号。

@@ -4,8 +4,10 @@ import {
   type CodeGraphProcessOptions,
   getCodeGraphProjectContextIdentity,
 } from '../../../infrastructure/analysis/CodeGraphProcess.js';
+import { createCapturedCodeGraphCallResolver } from '../../code-analysis/CapturedCodeGraphCalls.js';
 import { withCodeGraphAnalysis } from '../../code-analysis/withCodeGraphAnalysis.js';
 import { withProjectContextSession } from '../ProjectContextService.js';
+import { bindProjectCallResolver } from './projectCallResolver.js';
 
 export { getCodeGraphProjectContextIdentity };
 export type CodeGraphProjectContextOptions = CodeGraphProcessOptions;
@@ -19,10 +21,14 @@ export async function withCodeGraphProjectContextSession<T>(
   options: CodeGraphProjectContextOptions,
   collect: (context: ProjectContext, runtime: CodeGraphProjectContextRuntime) => Promise<T>
 ): Promise<T> {
-  return withCodeGraphAnalysis(options, (symbolExtractor, runtime) =>
-    withProjectContextSession((context) => collect(context, runtime), {
+  return withCodeGraphAnalysis(options, (symbolExtractor, runtime, project) => {
+    bindProjectCallResolver(
+      symbolExtractor,
+      createCapturedCodeGraphCallResolver(project, runtime.runtimeRoot)
+    );
+    return withProjectContextSession((context) => collect(context, runtime), {
       symbolExtractor,
       signal: options.signal,
-    })
-  );
+    });
+  });
 }

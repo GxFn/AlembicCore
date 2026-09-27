@@ -4,6 +4,7 @@
     "includes": [
       "src/**",
       "test/**",
+      "resources/codegraph/**",
       "*.js",
       "*.mjs",
       "*.cjs",

@@ -2,6 +2,7 @@ import type {
   ProjectContextQueryErrorCode,
   ProjectContextRef,
   SourceRangeSummary,
+  SymbolSummary,
 } from '../../../domain/project-context/index.js';
 
 export type {
@@ -32,6 +33,7 @@ export interface ExtractedFileFlowImport {
   symbols: string[];
   alias?: string;
   typeOnly?: boolean;
+  bindings?: { local: string; imported: string; range: SourceRangeSummary; typeOnly: boolean }[];
 }
 
 export interface ExtractedFileFlowExport {
@@ -45,6 +47,8 @@ export interface ExtractedFileFlowExport {
 
 export interface ExtractedFileFlowCallSite {
   callee: string;
+  /** 同次冻结输入与实际SDK解析证明的跨文件目标，公开层仍使用原SymbolSummary/ref。 */
+  resolvedTarget?: SymbolSummary;
   callerMethod: string;
   callerClass?: string;
   callType: string;

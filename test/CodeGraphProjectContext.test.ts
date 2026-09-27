@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,7 @@ import {
 } from '../src/service/project-context/analysis/codeGraphSession.js';
 import { extractFileFlowFromSource } from '../src/service/project-context/fileFlow/extract.js';
 import { extractFileSymbolsFromSource } from '../src/service/project-context/fileSymbols/extract.js';
+import { hashCanonicalJson } from '../src/shared/canonicalJson.js';
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -23,17 +25,229 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(text = 'export class Input {}') {
+async function fixture(text: string | Record<string, string> = 'export class Input {}') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'alembic-codegraph-test-'));
   roots.push(root);
   const projectRoot = path.join(root, 'project');
   const dataRoot = path.join(root, 'data');
   await fs.mkdir(projectRoot, { recursive: true });
-  await fs.writeFile(path.join(projectRoot, 'sample.ts'), text);
+  const files = typeof text === 'string' ? { 'sample.ts': text } : text;
+  for (const [file, source] of Object.entries(files)) {
+    await fs.mkdir(path.dirname(path.join(projectRoot, file)), { recursive: true });
+    await fs.writeFile(path.join(projectRoot, file), source);
+  }
   return { root, projectRoot, dataRoot };
 }
 
+async function captureInputs(
+  context: ConstructorParameters<typeof NodeProjectContextFoundationHostPorts>[0],
+  projectRoot: string,
+  files: Record<string, string>
+) {
+  const capture = await new NodeProjectContextFoundationHostPorts(context).createInputCapture({
+    repositories: [{ repoId: 'repo', scopeId: 'repo', relativeRoot: '.', sourceRoot: projectRoot }],
+    files: Object.entries(files).map(([relativePath, source]) => ({
+      repoId: 'repo',
+      relativePath,
+      content: Buffer.from(source),
+    })),
+  });
+  if (!capture) {
+    throw new Error('Expected native capture');
+  }
+  return capture;
+}
+
 describe('CodeGraph ProjectContext production backend', () => {
+  it('requires captured lexical import evidence and rejects collided SDK target identities', async () => {
+    const files = {
+      'sample.ts': [
+        "import { target as alias } from './dep';",
+        "import * as ns from './dep';",
+        "import type { target as typeOnly } from './dep';",
+        "import { type target as inlineType } from './dep';",
+        "import { A } from './collision';",
+        'export function real() { alias(); ns.target(); typeOnly(); inlineType(); new A(); }',
+        'export function shadow(alias: Function, ns: { target(): void }) { alias(); ns.target(); }',
+      ].join('\n'),
+      'dep.ts': 'export function target() {}',
+      'collision.ts': 'export class A { run() {} } export class B { run() {} }',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const capture = await captureInputs(context, projectRoot, files);
+      const result = await context.execute(
+        {
+          kind: 'file-flow',
+          scope: { projectRoot, repoId: 'repo' },
+          payload: { filePath: 'sample.ts' },
+        },
+        { sourceReader: capture.reader }
+      );
+      expect(result.errors ?? []).toEqual([]);
+      const calls = (result.data as FileFlowContext).callers;
+      expect(calls).toHaveLength(7);
+      expect(calls.filter((call) => !call.unresolved)).toHaveLength(2);
+      expect(
+        calls
+          .filter((call) => !call.unresolved)
+          .every((call) => call.to?.filePath === 'dep.ts' && call.to.symbol === 'target')
+      ).toBe(true);
+      expect(
+        calls.filter((call) => call.from?.symbol === 'shadow').every((call) => call.unresolved)
+      ).toBe(true);
+    });
+  }, 60_000);
+
+  it('cancels captured project work and lets the healthy session retry from the same frozen reader', async () => {
+    const files = {
+      'sample.ts': "import { target } from './dep'; export function run() { target(); }",
+      'dep.ts': 'export function target() {}',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    const entered = Promise.withResolvers<CodeGraphProcess>();
+    const original = CodeGraphProcess.prototype.analyzeProject;
+    vi.spyOn(CodeGraphProcess.prototype, 'analyzeProject').mockImplementation(function (
+      this: CodeGraphProcess,
+      ...args
+    ) {
+      const pending = original.apply(this, args);
+      entered.resolve(this);
+      return pending;
+    });
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const capture = await captureInputs(context, projectRoot, files);
+      const query = {
+        kind: 'file-flow' as const,
+        scope: { projectRoot, repoId: 'repo' },
+        payload: { filePath: 'sample.ts' },
+      };
+      const request = new AbortController();
+      const pending = context.execute(query, {
+        sourceReader: capture.reader,
+        signal: request.signal,
+      });
+      const worker = await entered.promise;
+      request.abort();
+      await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+      expect(() => process.kill(worker.pid!, 0)).toThrow();
+      const result = await context.execute(query, { sourceReader: capture.reader });
+      expect(result.errors ?? []).toEqual([]);
+      expect((result.data as FileFlowContext).callers[0]).toMatchObject({
+        unresolved: false,
+        to: { symbol: 'target', filePath: 'dep.ts' },
+      });
+    });
+    expect(await fs.readdir(path.join(dataRoot, '.asd/codegraph-sessions'))).toEqual([]);
+  }, 60_000);
+
+  it('rejects the SDK default-import decoy while retaining proven default and named import targets', async () => {
+    const files = {
+      'sample.ts':
+        "import invoke, { decoy as named } from './dep';\nimport valid from './valid';\nexport function run() { invoke(); named(); valid(); }",
+      'dep.ts': 'export function decoy() {}\nexport default function actual() {}',
+      'valid.ts': 'export default function valid() {}',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const capture = await captureInputs(context, projectRoot, files);
+      const result = await context.execute(
+        {
+          kind: 'file-flow',
+          scope: { projectRoot, repoId: 'repo' },
+          payload: { filePath: 'sample.ts' },
+        },
+        { sourceReader: capture.reader }
+      );
+      expect(result.errors ?? []).toEqual([]);
+      const calls = (result.data as FileFlowContext).callers;
+      expect(calls.find((call) => call.to?.symbol === 'invoke')?.unresolved).toBe(true);
+      expect(
+        calls
+          .filter((call) => !call.unresolved)
+          .map((call) => call.to?.symbol)
+          .sort()
+      ).toEqual(['decoy', 'valid']);
+    });
+  }, 60_000);
+
+  it('binds captured import aliases through the real SDK and recomputes them offline without changing call site refs', async () => {
+    const text = "import { target as alias } from '@barrel';\nexport function run() { alias(); }";
+    const files = {
+      'sample.ts': text,
+      'barrel.ts': "export { target } from './dep';",
+      'dep.ts': 'export function target() { return 1; }',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    await fs.mkdir(path.join(projectRoot, 'config'));
+    await fs.writeFile(
+      path.join(projectRoot, 'tsconfig.json'),
+      '{"extends":["./missing-base.json","./config/base.json"]}'
+    );
+    await fs.writeFile(
+      path.join(projectRoot, 'config/base.json'),
+      '{"compilerOptions":{"baseUrl":"..","paths":{"@barrel":["barrel.ts"]}}}'
+    );
+    execFileSync('git', ['init', '-q'], { cwd: projectRoot });
+    const project = vi.spyOn(CodeGraphProcess.prototype, 'analyzeProject');
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const request = {
+        kind: 'file-flow' as const,
+        scope: { projectRoot, repoId: 'repo' },
+        payload: { filePath: 'sample.ts' },
+      };
+      const live = await context.execute(request);
+      const liveCall = (live.data as FileFlowContext).callers[0];
+      expect(liveCall.unresolved).toBe(true);
+      const capture = await captureInputs(context, projectRoot, files);
+      const recorded = await context.execute(request, { sourceReader: capture.reader });
+      expect(recorded.errors ?? []).toEqual([]);
+      const call = (recorded.data as FileFlowContext).callers[0];
+      expect(call).toMatchObject({
+        unresolved: false,
+        to: { filePath: 'dep.ts', symbol: 'target', ref: { kind: 'file-symbol' } },
+      });
+      expect(call.ref?.id).toBe(liveCall.ref?.id);
+      const count = project.mock.calls.length;
+      expect(count).toBeGreaterThan(0);
+      const snapshot = await capture.snapshot();
+      expect(snapshot.observations.some((row) => row.operation === 'codegraph-git')).toBe(true);
+      const negatives = snapshot.observations.filter(
+        (row) => row.path.relativePath === 'missing-base.json'
+      );
+      expect(negatives.length).toBeGreaterThan(0);
+      expect(negatives.every((row) => !row.outcome.ok)).toBe(true);
+      await capture.verify();
+      await fs.rm(projectRoot, { recursive: true });
+      const replay = capture.createReplay(snapshot);
+      expect(await context.execute(request, { sourceReader: replay })).toEqual(recorded);
+      replay.assertComplete();
+      expect(project.mock.calls.length).toBeGreaterThan(count);
+      // SDK会吞掉不存在的extends；移除其负向事实后，外层仍必须锁存未捕获错误。
+      const incomplete = structuredClone(snapshot);
+      incomplete.observations = incomplete.observations.filter(
+        (row) =>
+          !negatives.some(
+            (negative) =>
+              negative.operation === row.operation &&
+              negative.path.relativePath === row.path.relativePath
+          )
+      );
+      const { snapshotHash: _hash, ...semantic } = incomplete;
+      incomplete.snapshotHash = hashCanonicalJson({
+        ...semantic,
+        blobs: incomplete.blobs.map(({ hash, byteLength }) => ({ hash, byteLength })),
+      });
+      const missing = capture.createReplay(incomplete);
+      await expect(
+        withCodeGraphProjectContextSession({ dataRoot }, (offline) =>
+          offline.execute(request, { sourceReader: missing })
+        )
+      ).rejects.toMatchObject({ code: 'PROJECT_SOURCE_INPUT_UNCAPTURED' });
+      expect(() => missing.assertComplete()).toThrow();
+    });
+  }, 60_000);
+
   it('shares one actual SDK extraction across symbol and flow requests while preserving source call evidence', async () => {
     const input = [
       'function helper(value?: number) { return value; }',

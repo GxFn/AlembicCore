@@ -13,6 +13,7 @@ import {
   projectSourceReaderIdentity,
   sourceExists,
 } from '../src/infrastructure/io/ProjectSourceReader.js';
+import { NodeProjectContextFoundationHostPorts } from '../src/service/project-context/foundation/nodePorts.js';
 import { withProjectContextSession } from '../src/service/project-context/ProjectContextService.js';
 import { hashBytes, hashCanonicalJson } from '../src/shared/canonicalJson.js';
 import type { ProjectSourceReader } from '../src/types/projectSourceReader.js';
@@ -27,6 +28,37 @@ afterEach(async () => {
 });
 
 describe('Project input snapshot primitives', () => {
+  it('keeps the declared source catalog separate from support inputs through portable replay', async () => {
+    const fixture = await createFixture();
+    const support = path.join(fixture.base, 'tsconfig.base.json');
+    await fs.writeFile(support, '{}');
+    await withProjectContextSession(async (context) => {
+      const ports = new NodeProjectContextFoundationHostPorts(context);
+      const capture = await ports.createInputCapture({
+        repositories: [
+          { repoId: 'repo', scopeId: 'scope', relativeRoot: '.', sourceRoot: fixture.root },
+        ],
+        controlRoot: fixture.base,
+        files: [
+          { repoId: 'repo', relativePath: 'source.ts', content: await fs.readFile(fixture.file) },
+        ],
+      });
+      if (!capture) {
+        throw new Error('Expected native input capture');
+      }
+      await capture.reader.readFile(support);
+      const snapshot = await capture.snapshot();
+      expect(snapshot.sourceFiles).toEqual([{ rootId: 'repo', relativePath: 'source.ts' }]);
+      const changed = structuredClone(snapshot);
+      changed.sourceFiles![0].relativePath = '../tsconfig.base.json';
+      resignSnapshot(changed);
+      expect(() => capture.createReplay(changed)).toThrow(/source.*catalog|source.*path/i);
+      await fs.rm(fixture.root, { recursive: true });
+      expect(await capture.createReplay(snapshot).readFile(fixture.file)).toEqual(
+        await capture.reader.readFile(fixture.file)
+      );
+    });
+  });
   it('replays bytes, directories, empty directories, negative reads, configuration and realpath after the source moves', async () => {
     const fixture = await createFixture();
     const reader = new RecordingProjectSourceReader(fixture.roots);
@@ -437,6 +469,67 @@ describe('Project input snapshot primitives', () => {
     await expect(recorder.verify()).resolves.toBeUndefined();
   });
 
+  it('passes the current verification cancellation to a captured configuration loader', async () => {
+    const fixture = await createFixture();
+    const request = new AbortController();
+    const recorder = new RecordingProjectSourceReader(fixture.roots);
+    const reader = bindProjectSourceReader(recorder, request.signal);
+    const entered = Promise.withResolvers<void>();
+    let validating = false;
+    await reader.readConfiguration('codegraph-git', fixture.root, async (options) => {
+      if (!validating) {
+        return { status: 0 };
+      }
+      entered.resolve();
+      await new Promise<void>((_resolve, reject) => {
+        options?.signal?.addEventListener(
+          'abort',
+          () => reject(Object.assign(new Error('verification cancelled'), { name: 'AbortError' })),
+          { once: true }
+        );
+      });
+      return { status: 0 };
+    });
+    request.abort();
+    validating = true;
+    const verification = new AbortController();
+    const pending = recorder.verify({ signal: verification.signal });
+    await entered.promise;
+    verification.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(() => recorder.assertComplete()).not.toThrow();
+  });
+
+  it('records runtime root aliases once and rejects a changed source catalog', async () => {
+    const fixture = await createFixture();
+    const alias = path.join(fixture.base, 'alias');
+    await fs.symlink(fixture.root, alias);
+    const bindings = [{ id: 'repo', path: fixture.root, aliases: [alias] }];
+    // 老快照尚不知道runtime alias，记录中的../alias仍须在新runtime可重绑定。
+    const old = new RecordingProjectSourceReader(fixture.roots);
+    await old.readFile(path.join(alias, 'source.ts'));
+    const oldReplay = new ReplayProjectSourceReader(await old.snapshot(), bindings);
+    const reader = new RecordingProjectSourceReader(bindings);
+    reader.declareSourceFiles([{ rootId: 'repo', relativePath: 'source.ts' }]);
+    await reader.readFile(path.join(alias, 'source.ts'));
+    await reader.readFile(fixture.file);
+    const snapshot = await reader.snapshot();
+    expect(snapshot.observations.filter((row) => row.operation === 'file')).toHaveLength(1);
+    expect(JSON.stringify(snapshot)).not.toContain(alias);
+    const replay = new ReplayProjectSourceReader(snapshot, bindings);
+    await fs.rm(fixture.root, { recursive: true });
+    expect(await oldReplay.readFile(fixture.file)).toEqual(Uint8Array.from(Buffer.from('initial')));
+    expect(await replay.readFile(path.join(alias, 'source.ts'))).toEqual(
+      Uint8Array.from(Buffer.from('initial'))
+    );
+    expect(() => reader.declareSourceFiles([])).toThrow(
+      expect.objectContaining({ code: 'PROJECT_SOURCE_INPUT_DRIFT' })
+    );
+    expect(() => reader.assertComplete()).toThrow(
+      expect.objectContaining({ code: 'PROJECT_SOURCE_INPUT_DRIFT' })
+    );
+  });
+
   it('rejects a source-slice session when a leaf catches the bound realpath cancellation', async () => {
     const fixture = await createFixture();
     const controller = new AbortController();
@@ -753,6 +846,7 @@ function resignSnapshot(snapshot: ProjectInputSnapshot): void {
     version: snapshot.version,
     roots: snapshot.roots,
     observations: snapshot.observations,
+    ...(snapshot.sourceFiles === undefined ? {} : { sourceFiles: snapshot.sourceFiles }),
     blobs: snapshot.blobs.map(({ hash, byteLength }) => ({ hash, byteLength })),
   });
 }

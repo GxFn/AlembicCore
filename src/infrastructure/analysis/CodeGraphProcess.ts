@@ -6,10 +6,15 @@ import { hashBytes, hashCanonicalJson } from '../../shared/canonicalJson.js';
 import { RESOURCES_DIR } from '../../shared/packageRoot.js';
 import { throwIfSourceReadAborted } from '../io/ProjectSourceReader.js';
 import Logger from '../logging/Logger.js';
+import {
+  type CodeGraphProjectInput,
+  type CodeGraphProjectResult,
+  isCodeGraphProjectResult,
+} from './CodeGraphProjectContract.js';
 
 const workerFile = path.join(RESOURCES_DIR, 'codegraph', 'worker.mjs');
 const require = createRequire(import.meta.url);
-const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v3';
+const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v4';
 
 export interface CodeGraphNode {
   id: string;
@@ -44,6 +49,7 @@ export interface CodeGraphIdentity {
     nodeVersion: string;
     route: 'wasm';
     workerHash: `sha256:${string}`;
+    projectWorkerHash: `sha256:${string}`;
     normalizerVersion: string;
     platform: string;
     languages: string[];
@@ -84,6 +90,15 @@ export async function getCodeGraphProjectContextIdentity(): Promise<CodeGraphIde
     nodeVersion: process.version,
     route: 'wasm' as const,
     workerHash: hashBytes(await readFile(workerFile)),
+    projectWorkerHash: hashBytes(
+      Buffer.concat(
+        await Promise.all(
+          ['frozen-io.mjs', 'project-analysis.mjs'].map((name) =>
+            readFile(path.join(RESOURCES_DIR, 'codegraph', name))
+          )
+        )
+      )
+    ),
     normalizerVersion: NORMALIZER_VERSION,
     platform: `${process.platform}-${process.arch}`,
     languages: ['typescript', 'tsx', 'javascript', 'jsx'],
@@ -93,7 +108,8 @@ export async function getCodeGraphProjectContextIdentity(): Promise<CodeGraphIde
 }
 
 interface Pending {
-  resolve: (result: CodeGraphExtraction) => void;
+  resolve: (result: unknown) => void;
+  validate: (result: unknown) => boolean;
   reject: (error: Error) => void;
   cleanup: () => void;
   sourceHash: string;
@@ -126,9 +142,23 @@ export class CodeGraphProcess {
       // 不继承用户全局CodeGraph开关/索引目录；本worker的提取路由与私有scratch是显式配置。
       env: {
         ...Object.fromEntries(
-          Object.entries(process.env).filter(([key]) => !key.toUpperCase().startsWith('CODEGRAPH_'))
+          Object.entries(process.env).filter(
+            ([key]) =>
+              !key.toUpperCase().startsWith('CODEGRAPH_') &&
+              ![
+                'NODE_OPTIONS',
+                'NODE_PATH',
+                'NODE_DEBUG',
+                'NODE_DEBUG_NATIVE',
+                'NODE_V8_COVERAGE',
+                'NODE_COMPILE_CACHE',
+              ].includes(key.toUpperCase())
+          )
         ),
         CODEGRAPH_KERNEL: '0',
+        CODEGRAPH_PARSE_WORKERS: '1',
+        CODEGRAPH_TELEMETRY: '0',
+        DO_NOT_TRACK: '1',
       },
       execArgv: identity.engine.processFlags,
       stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
@@ -235,6 +265,43 @@ export class CodeGraphProcess {
     source: string,
     signal?: AbortSignal
   ): Promise<CodeGraphExtraction> {
+    return this.request(
+      { kind: 'extract', filePath, source },
+      hashBytes(Buffer.from(source)),
+      isExtraction,
+      signal
+    );
+  }
+
+  async analyzeProject(
+    input: CodeGraphProjectInput,
+    signal?: AbortSignal
+  ): Promise<CodeGraphProjectResult> {
+    throwIfSourceReadAborted({ signal });
+    if (!this.#accepting) {
+      throw engineError('CODEGRAPH_CLOSED', 'CodeGraph worker is closing.');
+    }
+    const pending = this.#tail.then(() =>
+      this.request(
+        { kind: 'project', input },
+        hashBytes(Buffer.from(JSON.stringify(input))),
+        isCodeGraphProjectResult,
+        signal
+      )
+    );
+    this.#tail = pending.then(
+      () => undefined,
+      () => undefined
+    );
+    return pending;
+  }
+
+  private request<T>(
+    message: object,
+    sourceHash: string,
+    validate: (result: unknown) => result is T,
+    signal?: AbortSignal
+  ): Promise<T> {
     throwIfSourceReadAborted({ signal });
     if (this.#failure) {
       throw this.#failure;
@@ -247,21 +314,22 @@ export class CodeGraphProcess {
       };
       const abort = () => stop(abortError(signal));
       const timer = setTimeout(
-        () =>
-          stop(engineError('CODEGRAPH_TIMEOUT', `CodeGraph extraction timed out for ${filePath}.`)),
+        () => stop(engineError('CODEGRAPH_TIMEOUT', 'CodeGraph analysis request timed out.')),
         this.#timeoutMs
       );
       signal?.addEventListener('abort', abort, { once: true });
       this.#pending.set(id, {
-        resolve,
+        // receive只在对应validator成功后调用；泛型只存在于本请求闭包，不跨IPC作类型断言。
+        resolve: (result) => resolve(result as T),
+        validate,
         reject,
-        sourceHash: hashBytes(Buffer.from(source)),
+        sourceHash,
         cleanup: () => {
           clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
         },
       });
-      this.send({ kind: 'extract', id, filePath, source });
+      this.send({ ...message, id });
     });
   }
 
@@ -336,8 +404,15 @@ export class CodeGraphProcess {
       return;
     }
     if (message.kind === 'ready' && 'engine' in message) {
-      const { sdkVersion, platformVersion, nodeVersion, route, workerHash, processFlags } =
-        this.identity.engine;
+      const {
+        sdkVersion,
+        platformVersion,
+        nodeVersion,
+        route,
+        workerHash,
+        projectWorkerHash,
+        processFlags,
+      } = this.identity.engine;
       if (
         hashCanonicalJson(message.engine) !==
         hashCanonicalJson({
@@ -346,6 +421,7 @@ export class CodeGraphProcess {
           nodeVersion,
           route,
           workerHash,
+          projectWorkerHash,
           processFlags,
         })
       ) {
@@ -378,7 +454,7 @@ export class CodeGraphProcess {
         !('sourceHash' in message) ||
         message.sourceHash !== pending.sourceHash ||
         !('result' in message) ||
-        !isExtraction(message.result)
+        !pending.validate(message.result)
       ) {
         this.fail(
           engineError('CODEGRAPH_PROTOCOL', 'CodeGraph result does not match its requested source.')

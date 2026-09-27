@@ -36,8 +36,11 @@ export const nodeProjectSourceReader: ProjectSourceReader = Object.freeze<Projec
     throwIfSourceReadAborted(options);
     return result;
   },
-  async readConfiguration(_kind, _absolutePath, load) {
-    return load();
+  async readConfiguration(_kind, _absolutePath, load, options) {
+    throwIfSourceReadAborted(options);
+    const result = await load(options);
+    throwIfSourceReadAborted(options);
+    return result;
   },
   assertComplete() {},
   invalidate() {},
@@ -116,22 +119,25 @@ export function bindProjectSourceReader(
     readDirectory: (file, options) => reader.readDirectory(file, readOptions(options)),
     stat: (file, options) => reader.stat(file, readOptions(options)),
     realpath: (file, options) => reader.realpath(file, readOptions(options)),
-    async readConfiguration(kind, file, load) {
-      throwIfSourceReadAborted({ signal });
+    async readConfiguration(kind, file, load, options) {
+      const initialOptions = readOptions(options);
+      throwIfSourceReadAborted(initialOptions);
       let active = true;
       try {
-        const value = await reader.readConfiguration(kind, file, async () => {
-          if (active) {
-            throwIfSourceReadAborted({ signal });
-          }
-          const result = await load();
-          if (active) {
-            // 在记录器提交配置前传播AbortError，让取消的在途读取可以正常重试。
-            throwIfSourceReadAborted({ signal });
-          }
-          return result;
-        });
-        throwIfSourceReadAborted({ signal });
+        const value = await reader.readConfiguration(
+          kind,
+          file,
+          async (currentOptions) => {
+            // 在途请求受父signal约束；后续verify使用它自己的signal，不复活旧请求。
+            const effective = active ? readOptions(currentOptions) : currentOptions;
+            throwIfSourceReadAborted(effective);
+            const result = await load(effective);
+            throwIfSourceReadAborted(effective);
+            return result;
+          },
+          initialOptions
+        );
+        throwIfSourceReadAborted(initialOptions);
         return value;
       } finally {
         // 记录器会保留load用于终态verify；已完成请求的signal不能绑住后续验证。

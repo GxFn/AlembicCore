@@ -265,7 +265,8 @@ function normalizeCallSites(input: {
 }): RelationSummary[] {
   const entries = input.callSites.map((callSite) => {
     const caller = findCallerSymbol(input.symbols, callSite);
-    const callee = findCalleeSymbol(input.symbols, callSite);
+    const originalCallee = findCalleeSymbol(input.symbols, callSite);
+    const callee = callSite.resolvedTarget ? { symbol: callSite.resolvedTarget } : originalCallee;
     const reason = [caller.reason, callee.reason].filter(Boolean).join('; ') || undefined;
     const relationInput: Parameters<typeof createRelationSummary>[0] = {
       direction: 'internal',
@@ -285,11 +286,13 @@ function normalizeCallSites(input: {
       kind: 'calls',
       label: `${callSite.callerClass ? `${callSite.callerClass}.` : ''}${callSite.callerMethod} calls ${callSite.callee}`,
       range: callSite.range,
+      // 新增跨文件目标不重写既有调用位置ID；语义目标通过原to/targetRef字段给出。
+      referenceQualifiedName: { value: originalCallee.symbol?.qualifiedName },
       reason,
       symbolName: callSite.callee,
       to: createSymbolEndpoint({
         fallback: callSite.callee,
-        filePath: input.facts.filePath,
+        filePath: callSite.resolvedTarget?.filePath ?? input.facts.filePath,
         symbol: callee.symbol,
       }),
       unresolved: reason !== undefined,
@@ -350,6 +353,7 @@ function createRelationSummary(input: {
   symbolName?: string;
   unresolved?: boolean;
   reason?: string;
+  referenceQualifiedName?: { value?: string };
 }): RelationSummary {
   const sourceProjection = createProjectContextSourceRangeProjection({
     filePath: input.facts.filePath,
@@ -369,7 +373,9 @@ function createRelationSummary(input: {
     label: input.label,
     parentRef: sourceProjection.ref.id,
     projectRoot: input.facts.projectRoot,
-    qualifiedName: input.to?.qualifiedName,
+    qualifiedName: input.referenceQualifiedName
+      ? input.referenceQualifiedName.value
+      : input.to?.qualifiedName,
     range: input.range,
     reason: input.reason,
     relationKind: input.kind,

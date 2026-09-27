@@ -5,10 +5,12 @@ import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
 import { extractFileFlowFromSource, getFileFlowUnavailableReason } from '../fileFlow/extract.js';
 import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
 import { extractFileSymbolsFromSource } from '../fileSymbols/extract.js';
+import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
 import { readProjectContextAst } from './astFacts.js';
+import { projectCallResolver } from './projectCallResolver.js';
 import type {
   ProjectContextFileAnalysis,
   ProjectContextSymbolExtractor,
@@ -102,13 +104,15 @@ export class FileAnalysisSession {
 
   async flow(
     facts: SourceSliceFileFacts,
-    context?: { signal?: AbortSignal }
+    context?: ProjectContextHandlerExecutionContext
   ): Promise<FileFlowExtractionResult> {
     throwIfProjectContextAborted(context);
     const entry = await this.extraction(facts, true, context);
     throwIfProjectContextAborted(context);
     // extraction(true) 同时生成两种投影，即使 flow unavailable 也返回完整诊断形态。
-    return structuredClone(entry.flow!);
+    const flow = structuredClone(entry.flow!);
+    const resolve = projectCallResolver(this.symbolExtractor);
+    return resolve ? resolve(facts, flow, context) : flow;
   }
 
   dispose(): void {

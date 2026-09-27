@@ -312,9 +312,9 @@
     "lint:scope-resolution": "node scripts/lint-scope-resolution.mjs",
     "report:public-api-closeout": "node scripts/report-public-api-closeout.mjs",
     "release:check": "node scripts/check-release-readiness.mjs",
-    "lint": "biome check src/ test/ scripts/ *.ts",
-    "lint:fix": "biome check --fix src/ test/ scripts/ *.ts",
-    "format": "biome format --write src/ test/ scripts/ *.ts",
+    "lint": "biome check src/ test/ scripts/ resources/codegraph/ *.ts",
+    "lint:fix": "biome check --fix src/ test/ scripts/ resources/codegraph/ *.ts",
+    "format": "biome format --write src/ test/ scripts/ resources/codegraph/ *.ts",
     "check": "npm run build && npm run lint:public-api-boundary && npm run lint:layer-contract && npm run lint:consumer-core-imports && npm run lint:scope-resolution && npm run smoke:public-api && npm run check:output-budgets && npm run check:space-edges && npm run lint:doctrine && npm run lint:naming && npm run test && npm run lint && npm run lint:retired-symbols",
     "lint:retired-symbols": "node scripts/lint-retired-symbols.mjs . --dirs=src,test"
   },
