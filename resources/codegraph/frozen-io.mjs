@@ -40,18 +40,23 @@ export function installFrozenIO(runtimeRoots) {
   const physical = (file) =>
     path.resolve(active.physicalRoot, path.relative(active.logicalRoot, file));
 
-  function need(operation, file, args) {
+  function requestInput(operation, file, args) {
     const request = {
       operation,
       relativePath:
         path.relative(active.logicalRoot, logical(file)).split(path.sep).join('/') || '.',
       ...(args ? { args } : {}),
     };
-    active.requests.set(JSON.stringify(request), request);
-    return Object.assign(
-      new Error(`Uncaptured CodeGraph input: ${operation} ${request.relativePath}`),
-      { code: 'CODEGRAPH_INPUT_REQUIRED' }
-    );
+    const key = JSON.stringify(request);
+    if (!active.dynamic.has(key)) {
+      try {
+        active.dynamic.set(key, active.readInput(request));
+      } catch (error) {
+        active.failure ??= `CodeGraph input bridge failed: ${String(error)}`;
+        throw error;
+      }
+    }
+    return active.dynamic.get(key);
   }
   function unsupported(operation, file) {
     active.failure ??= `Unsupported CodeGraph input operation ${operation}: ${file}`;
@@ -64,20 +69,28 @@ export function installFrozenIO(runtimeRoots) {
     }
     const key = `${operation}\0${logical(file)}`;
     const row = active.records.get(key);
-    if (!row) {
-      throw need(operation, file);
-    }
+    const outcome = row?.outcome ?? requestInput(operation, file);
     active.used.add(key);
-    if (!row.outcome.ok) {
-      if (!missingCodes.has(row.outcome.code)) {
-        active.failure ??= `CodeGraph input failed: ${operation} ${row.outcome.code}`;
+    if (!outcome.ok) {
+      if (!missingCodes.has(outcome.code)) {
+        active.failure ??= `CodeGraph input failed: ${operation} ${outcome.code}`;
       }
-      throw Object.assign(new Error(`${row.outcome.code}: captured ${operation}`), {
-        code: row.outcome.code,
+      throw Object.assign(new Error(`${outcome.code}: captured ${operation}`), {
+        code: outcome.code,
         path: file,
       });
     }
-    return row.outcome.value;
+    if (operation === 'file') {
+      const bytes = row ? active.blobs.get(outcome.value) : Buffer.from(outcome.value, 'base64');
+      if (!bytes) {
+        throw unsupported(operation, 'missing blob');
+      }
+      return bytes;
+    }
+    if (operation === 'realpath' && row) {
+      return path.resolve(active.roots.get(outcome.value.rootId), outcome.value.relativePath);
+    }
+    return outcome.value;
   }
   function stat(value) {
     const predicates = {
@@ -113,15 +126,10 @@ export function installFrozenIO(runtimeRoots) {
       return stat(lookup('stat', file));
     }
     if (name === 'realpathSync' || name === 'realpath') {
-      const location = lookup('realpath', file);
-      return physical(path.resolve(active.roots.get(location.rootId), location.relativePath));
+      return physical(lookup('realpath', file));
     }
     if (name === 'readFileSync' || name === 'readFile') {
-      const hash = lookup('file', file);
-      const bytes = active.blobs.get(hash);
-      if (!bytes) {
-        throw unsupported(name, 'missing blob');
-      }
+      const bytes = lookup('file', file);
       const encoding = typeof option === 'string' ? option : option?.encoding;
       return encoding ? bytes.toString(encoding) : Buffer.from(bytes);
     }
@@ -332,17 +340,21 @@ export function installFrozenIO(runtimeRoots) {
       }
       const cwd = toPath(args[2]?.cwd ?? active.physicalRoot);
       const commandArgs = args[1].map((arg) => (path.isAbsolute(arg) ? logical(arg) : arg));
-      const found = active.git.find(
+      let found = active.git.find(
         (row) =>
           row.request.cwd === logical(cwd) &&
           JSON.stringify(row.request.args) === JSON.stringify(commandArgs)
       );
       if (!found) {
-        throw need(
+        const outcome = requestInput(
           'git',
           cwd,
           args[1].map((arg) => (path.isAbsolute(arg) ? { relative: path.relative(cwd, arg) } : arg))
         );
+        if (!outcome.ok) {
+          throw unsupported('git', 'Git command is unavailable');
+        }
+        found = outcome.value;
       }
       const stdout = found.root ? `${physical(found.root)}\n` : found.stdout;
       if (found.status !== 0) {
@@ -377,14 +389,13 @@ export function installFrozenIO(runtimeRoots) {
         blobs: new Map(
           input.snapshot.blobs.map((blob) => [blob.hash, Buffer.from(blob.dataBase64, 'base64')])
         ),
-        requests: new Map(),
+        dynamic: new Map(),
         used: new Set(),
         failure: undefined,
       };
     },
     finish() {
       const result = {
-        requests: [...active.requests.values()],
         failure: active.failure,
         used: [...active.used],
       };

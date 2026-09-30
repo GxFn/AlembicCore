@@ -116,14 +116,19 @@ Main/Plugin 的原生 Foundation 捕获先声明 `sourceFiles`，再把同一 re
 
 Core 在每个 reader/repo 内使用公开 `indexFiles` 与 `resolveReferences`。SDK 的同步
 文件读取通过独立进程内的冻结读集适配，tsconfig/extends/package、目录、stat、realpath
-和有限只读 Git 命令均进入同一 snapshot。未知读取会中止该轮，Recording 经 reader 补齐
-后使用新图重算；Replay 缺记录时锁存失败。SDK 自己吞掉读取异常，也不能发布该轮结果。
+和有限只读 Git 命令均进入同一 snapshot。缺项读取通过额外私有 pipe 同步等待父进程的
+同一个 reader 返回真实结果，然后继续当前图，不返回临时空值或假 ENOENT。
+每个 Recording/Replay 视图独立构图；Replay 缺记录、权限错误或取消立即终止项目。
+SDK 自己吞掉读取异常，也不能发布失败输入对应的结果。
 Git 验证使用当前验证 signal；重放不启动 Git。真实图数据库只存在私有临时目录。
 
 这是固定 SDK 1.6 的输入适配，**不是操作系统沙箱或任意插件执行环境**。不执行项目代码；
 未知 IO 形态、越出已接受 roots 的支持输入、宿主绝对路径配置和私有 runtime 输入明确
-不可用。当前每仓上限为 2,000 个 JS/TS 源文件、32 MiB 源码、64 轮闭包补齐，每轮最多
-4,096 个读取请求；超限返回诊断，不裁剪后冒称完整。非 JS 生产方保持原行为。
+不可用。当前每仓上限为 2,000 个 JS/TS 源文件、32 MiB 源码，单图最多 262,144 个去重
+动态支持读取。该累计上界来自旧 64 轮×4,096 的最大读取量；流式协议取消单批限制，
+并非保留旧两维准入规则。超限返回诊断，不裁剪后冒称完整。非 JS 生产方保持原行为。
+SDK timeout 保留剩余计算时间，在父端 reader 执行时暂停，不因每次读取而重置。
+父端取消会关闭通道、终止并等待 child 退出，迟到的旧 response 不进入新请求。
 
 实际跨文件目标仍投影到既有 file-flow：调用位置、词法 import 绑定、目标同文本符号和
 无碰撞身份同时成立时才接纳 SDK `import` 候选。参数遮蔽、type-only、动态 receiver、
@@ -141,10 +146,11 @@ SourceGraph live SQLite 索引继续使用下节的独立能力边界。
 补提取调用事实。自定义后端和公开 refs 都获得独立可变副本，不能修改会话内部缓存。
 
 已经声明的清单和 root 绑定可在 reader 生命周期内复用；每次命中仍检查取消及失败锁存，
-并保留完整源码消费收据。热查询不重新导出全部 blob，但首次准备及每轮支持输入增长
-仍获取新的 snapshot。一次 freshness 检查中的 Git 请求共用一个只读 Replay 解码视图，
-实际 Git 重观察、输入 hash 校验和新闭包校验保持独立。SDK 缺输入时销毁并重新索引的
-成本仍然存在，不以缓存未知状态换取速度。
+并保留完整源码消费收据。热查询不重新导出全部 blob；首次准备发送已有 snapshot，
+动态读取只传单项事实，由原 reader 记录，收尾再冻结完整闭包。一次 freshness 检查中的
+Git 请求共用一个只读 Replay 解码视图，实际 Git 重观察、输入 hash 校验和新闭包校验
+保持独立。新策略不执行旧 unknown 分叉，闭包可能比旧策略小；新引擎身份参与认证，
+不能用不同策略的 snapshotHash 相同作为正确性标准。
 
 ## SourceGraph 索引接入
 

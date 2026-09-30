@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { installFrozenIO } from './frozen-io.mjs';
+import { createInputBridge } from './input-bridge.mjs';
 import { analyzeFrozenProject, projectHash, projectNode } from './project-analysis.mjs';
 
 const require = createRequire(import.meta.url);
@@ -71,7 +72,7 @@ process.on('message', (message) => {
               .update(
                 Buffer.concat(
                   await Promise.all(
-                    ['frozen-io.mjs', 'project-analysis.mjs'].map((name) =>
+                    ['frozen-io.mjs', 'project-analysis.mjs', 'input-bridge.mjs'].map((name) =>
                       readFile(new URL(name, import.meta.url))
                     )
                   )
@@ -114,7 +115,13 @@ process.on('message', (message) => {
           },
         });
       } else if (message.kind === 'project') {
-        const result = await analyzeFrozenProject(sdk, io, directory, message.input);
+        const result = await analyzeFrozenProject(
+          sdk,
+          io,
+          directory,
+          message.input,
+          createInputBridge(message.id)
+        );
         await send({
           kind: 'result',
           id: message.id,

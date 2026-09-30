@@ -2,11 +2,15 @@ import { type ChildProcess, fork } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import type { Duplex } from 'node:stream';
 import { hashBytes, hashCanonicalJson } from '../../shared/canonicalJson.js';
 import { RESOURCES_DIR } from '../../shared/packageRoot.js';
 import { throwIfSourceReadAborted } from '../io/ProjectSourceReader.js';
 import Logger from '../logging/Logger.js';
+import { CodeGraphInputChannel, type CodeGraphInputFrame } from './CodeGraphInputChannel.js';
 import {
+  CODEGRAPH_MAX_SUPPORT_INPUTS,
+  type CodeGraphInputReader,
   type CodeGraphProjectInput,
   type CodeGraphProjectResult,
   isCodeGraphProjectResult,
@@ -14,7 +18,7 @@ import {
 
 const workerFile = path.join(RESOURCES_DIR, 'codegraph', 'worker.mjs');
 const require = createRequire(import.meta.url);
-const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v5';
+const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v6';
 
 export interface CodeGraphNode {
   id: string;
@@ -93,7 +97,7 @@ export async function getCodeGraphProjectContextIdentity(): Promise<CodeGraphIde
     projectWorkerHash: hashBytes(
       Buffer.concat(
         await Promise.all(
-          ['frozen-io.mjs', 'project-analysis.mjs'].map((name) =>
+          ['frozen-io.mjs', 'project-analysis.mjs', 'input-bridge.mjs'].map((name) =>
             readFile(path.join(RESOURCES_DIR, 'codegraph', name))
           )
         )
@@ -113,11 +117,21 @@ interface Pending {
   reject: (error: Error) => void;
   cleanup: () => void;
   sourceHash: string;
+  input?: {
+    read: CodeGraphInputReader;
+    controller: AbortController;
+    active: boolean;
+    sequence: number;
+    seen: Set<string>;
+    pause: () => void;
+    resume: () => void;
+  };
 }
 
 /** 一个宿主分析作用域拥有一个子进程；关闭与取消均等待真实exit后清理私有目录。 */
 export class CodeGraphProcess {
   readonly #child: ChildProcess;
+  readonly #inputs: CodeGraphInputChannel;
   readonly #ready = Promise.withResolvers<void>();
   readonly #exit = Promise.withResolvers<void>();
   readonly #pending = new Map<number, Pending>();
@@ -161,9 +175,21 @@ export class CodeGraphProcess {
         DO_NOT_TRACK: '1',
       },
       execArgv: identity.engine.processFlags,
-      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc', 'pipe'],
       serialization: 'advanced',
     });
+    // Node额外pipe是双向通道；不要复用Node自己管理的IPC fd。
+    this.#inputs = new CodeGraphInputChannel(
+      this.#child.stdio[4] as Duplex,
+      (frame) => {
+        void this.receiveInput(frame);
+      },
+      (error) => {
+        if (!this.#exited && (!this.#closing || this.#pending.size > 0)) {
+          this.stop(engineError('CODEGRAPH_INPUT_CHANNEL', error.message));
+        }
+      }
+    );
     for (const stream of [this.#child.stdout, this.#child.stderr]) {
       stream?.setEncoding('utf8').on('data', (text: string) => {
         Logger.debug('CodeGraph worker diagnostic', { text: text.slice(0, 2048) });
@@ -275,7 +301,8 @@ export class CodeGraphProcess {
 
   async analyzeProject(
     input: CodeGraphProjectInput,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    readInput?: CodeGraphInputReader
   ): Promise<CodeGraphProjectResult> {
     throwIfSourceReadAborted({ signal });
     if (!this.#accepting) {
@@ -286,7 +313,8 @@ export class CodeGraphProcess {
         { kind: 'project', input },
         hashBytes(Buffer.from(JSON.stringify(input))),
         isCodeGraphProjectResult,
-        signal
+        signal,
+        readInput
       )
     );
     this.#tail = pending.then(
@@ -300,7 +328,8 @@ export class CodeGraphProcess {
     message: object,
     sourceHash: string,
     validate: (result: unknown) => result is T,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    readInput?: CodeGraphInputReader
   ): Promise<T> {
     throwIfSourceReadAborted({ signal });
     if (this.#failure) {
@@ -308,15 +337,27 @@ export class CodeGraphProcess {
     }
     const id = this.#nextId++;
     return new Promise((resolve, reject) => {
-      const stop = (error: Error) => {
-        this.fail(error);
-        void this.close(true).catch((error: unknown) => this.logCleanupFailure(error));
-      };
+      const stop = (error: Error) => this.stop(error);
       const abort = () => stop(abortError(signal));
-      const timer = setTimeout(
-        () => stop(engineError('CODEGRAPH_TIMEOUT', 'CodeGraph analysis request timed out.')),
-        this.#timeoutMs
-      );
+      const controller = new AbortController();
+      let remaining = this.#timeoutMs;
+      let started = performance.now();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const resume = () => {
+        started = performance.now();
+        timer = setTimeout(
+          () => stop(engineError('CODEGRAPH_TIMEOUT', 'CodeGraph analysis request timed out.')),
+          Math.max(0, remaining)
+        );
+      };
+      const pause = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+          remaining -= performance.now() - started;
+        }
+      };
+      resume();
       signal?.addEventListener('abort', abort, { once: true });
       this.#pending.set(id, {
         // receive只在对应validator成功后调用；泛型只存在于本请求闭包，不跨IPC作类型断言。
@@ -324,8 +365,22 @@ export class CodeGraphProcess {
         validate,
         reject,
         sourceHash,
+        ...(readInput
+          ? {
+              input: {
+                read: readInput,
+                controller,
+                active: false,
+                sequence: 0,
+                seen: new Set<string>(),
+                pause,
+                resume,
+              },
+            }
+          : {}),
         cleanup: () => {
           clearTimeout(timer);
+          controller.abort();
           signal?.removeEventListener('abort', abort);
         },
       });
@@ -336,6 +391,7 @@ export class CodeGraphProcess {
   close(force = false): Promise<void> {
     this.#accepting = false;
     if (force && !this.#exited) {
+      this.#inputs.close();
       this.#child.kill('SIGTERM');
     }
     this.#closing ??= this.finishClose();
@@ -357,6 +413,7 @@ export class CodeGraphProcess {
       await this.#exit.promise;
     } finally {
       this.#removeOwnerSignal();
+      this.#inputs.close();
       clearTimeout(timer);
       await rm(this.directory, { force: true, recursive: true });
     }
@@ -390,6 +447,52 @@ export class CodeGraphProcess {
       pending.reject(this.#failure);
     }
     this.#pending.clear();
+  }
+
+  private stop(error: Error): void {
+    this.fail(error);
+    void this.close(true).catch((failure: unknown) => this.logCleanupFailure(failure));
+  }
+
+  private async receiveInput(frame: CodeGraphInputFrame): Promise<void> {
+    const pending = this.#pending.get(frame.projectId);
+    const input = pending?.input;
+    if (!input || input.active || frame.sequence !== input.sequence + 1) {
+      this.stop(
+        engineError('CODEGRAPH_PROTOCOL', 'CodeGraph input request has no matching active project.')
+      );
+      return;
+    }
+    const key = JSON.stringify(frame.request);
+    input.seen.add(key);
+    if (input.seen.size > CODEGRAPH_MAX_SUPPORT_INPUTS) {
+      this.stop(engineError('CODEGRAPH_INPUT_LIMIT', 'CodeGraph support input budget exceeded.'));
+      return;
+    }
+    input.sequence = frame.sequence;
+    input.active = true;
+    // 旧路线的reader补齐在SDK尝试外；暂停而不重置SDK的剩余计算时间。
+    input.pause();
+    try {
+      const outcome = await input.read(frame.request, input.controller.signal);
+      if (this.#pending.get(frame.projectId) !== pending || input.controller.signal.aborted) {
+        Logger.debug('CodeGraph discarded a late input after project cancellation', {
+          projectId: frame.projectId,
+          sequence: frame.sequence,
+        });
+        return;
+      }
+      input.active = false;
+      input.resume();
+      this.#inputs.reply(frame, outcome, (error) =>
+        this.stop(engineError('CODEGRAPH_INPUT_CHANNEL', error.message))
+      );
+    } catch (error) {
+      if (this.#pending.get(frame.projectId) === pending) {
+        // Replay缺口/取消/权限错误保留原异常；不让SDK catch把控制失败当模块不存在。
+        this.stop(error instanceof Error ? error : new Error(String(error)));
+      }
+    }
   }
 
   private logCleanupFailure(error: unknown): void {
@@ -454,7 +557,8 @@ export class CodeGraphProcess {
         !('sourceHash' in message) ||
         message.sourceHash !== pending.sourceHash ||
         !('result' in message) ||
-        !pending.validate(message.result)
+        !pending.validate(message.result) ||
+        pending.input?.active
       ) {
         this.fail(
           engineError('CODEGRAPH_PROTOCOL', 'CodeGraph result does not match its requested source.')

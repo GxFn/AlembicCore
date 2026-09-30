@@ -1,5 +1,8 @@
 import path from 'node:path';
-import type { CodeGraphInputRequest } from '../../infrastructure/analysis/CodeGraphProjectContract.js';
+import type {
+  CodeGraphInputOutcome,
+  CodeGraphInputRequest,
+} from '../../infrastructure/analysis/CodeGraphProjectContract.js';
 import {
   type CodeGraphGitObservation,
   readCodeGraphGitInput,
@@ -11,7 +14,10 @@ import {
 } from '../../infrastructure/io/ProjectInputSnapshot.js';
 import { projectSourceReaderIdentity } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
+import type {
+  ProjectSourceDirectoryEntry,
+  ProjectSourceReader,
+} from '../../types/projectSourceReader.js';
 import type { ProjectCallResolver } from '../project-context/analysis/projectCallResolver.js';
 import type {
   ExtractedFileFlowCallSite,
@@ -71,7 +77,7 @@ export function createCapturedCodeGraphCallResolver(
         return flow;
       }
       // roots/已声明清单不可变；热查询无需重新base64编码、排序、hash和clone全部字节。
-      // 新的支持输入仍在prepare每轮重新snapshot，不能把这里当作封闭读集。
+      // 新的支持输入经同一reader按需记录；这里只缓存清单，不把它当作封闭读集。
       metadata = { roots: view.roots, sourceFiles: view.snapshot.sourceFiles };
       catalogs.set(identity, metadata);
     }
@@ -241,70 +247,75 @@ async function prepare(
     sources.set(file.relativePath, result.facts);
   }
   const logicalRoot = metadata.roots.find((root) => root.id === rootId)!.path;
-  for (let round = 0; round < 64; round++) {
-    throwIfProjectContextAborted(context);
-    const current = await readProjectInputSnapshotView(reader);
-    if (!current) {
-      throw new Error('Captured input reader lost its snapshot capability.');
-    }
-    const git: CodeGraphGitObservation[] = [];
-    for (const row of current.snapshot.observations.filter(
-      (row) => row.operation === 'codegraph-git'
-    )) {
-      const absolute = path.resolve(
-        current.roots.find((root) => root.id === row.path.rootId)!.path,
-        row.path.relativePath
-      );
-      git.push(
-        await reader.readConfiguration<CodeGraphGitObservation>('codegraph-git', absolute, () => {
-          throw new Error('Captured Git input is unavailable');
-        })
-      );
-    }
-    const result = await run(
-      {
-        logicalRoot,
-        roots: current.roots,
-        snapshot: current.snapshot,
-        files: [...sources.keys()],
-        git,
-      },
-      { signal: context?.signal }
-    );
-    if (result.status === 'unavailable') {
-      throw new Error(result.reason);
-    }
-    if (result.status === 'needs-input') {
-      if (result.requests.length > 4096) {
-        throw new Error('CodeGraph requested too many support inputs.');
-      }
-      Logger.debug('CodeGraph completes a captured input read set before publishing bindings', {
-        repoId: rootId,
-        round,
-        requests: result.requests.length,
-        mode: reader.mode,
-      });
-      for (const request of result.requests) {
-        await fulfill(request, logicalRoot, current, reader, context, runtimeRoot);
-      }
-      continue;
-    }
-    if (result.errors.length) {
-      throw new Error(`CodeGraph project extraction failed: ${result.errors[0]}`);
-    }
-    return { sources, index: new CapturedCodeGraphIndex(result, sources) };
+  throwIfProjectContextAborted(context);
+  const current = await readProjectInputSnapshotView(reader);
+  if (!current) {
+    throw new Error('Captured input reader lost its snapshot capability.');
   }
-  throw new Error('CodeGraph input closure did not converge within 64 rounds.');
+  const git: CodeGraphGitObservation[] = [];
+  for (const row of current.snapshot.observations.filter(
+    (row) => row.operation === 'codegraph-git'
+  )) {
+    const absolute = path.resolve(
+      current.roots.find((root) => root.id === row.path.rootId)!.path,
+      row.path.relativePath
+    );
+    git.push(
+      await reader.readConfiguration<CodeGraphGitObservation>('codegraph-git', absolute, () => {
+        throw new Error('Captured Git input is unavailable');
+      })
+    );
+  }
+  const result = await run(
+    {
+      logicalRoot,
+      roots: current.roots,
+      snapshot: current.snapshot,
+      files: [...sources.keys()],
+      git,
+    },
+    {
+      signal: context?.signal,
+      readInput: async (request, signal) => {
+        const effective = context?.signal ? AbortSignal.any([context.signal, signal]) : signal;
+        const outcome = await readInput(
+          request,
+          logicalRoot,
+          current,
+          reader,
+          effective,
+          runtimeRoot
+        );
+        reader.assertComplete();
+        throwIfProjectContextAborted({ signal: effective });
+        return outcome;
+      },
+    }
+  );
+  if (result.status === 'unavailable') {
+    throw new Error(result.reason);
+  }
+  if (result.errors.length) {
+    throw new Error(`CodeGraph project extraction failed: ${result.errors[0]}`);
+  }
+  reader.assertComplete();
+  Logger.debug('CodeGraph completed a captured project without rebuilding for missing inputs', {
+    repoId: rootId,
+    mode: reader.mode,
+    files: sources.size,
+  });
+  return { sources, index: new CapturedCodeGraphIndex(result, sources) };
 }
 
-async function fulfill(
+async function readInput(
   request: CodeGraphInputRequest,
   root: string,
   view: ProjectInputSnapshotView,
   reader: ProjectSourceReader,
-  context: ProjectContextHandlerExecutionContext | undefined,
+  signal: AbortSignal,
   runtimeRoot: string
-): Promise<void> {
+): Promise<CodeGraphInputOutcome> {
+  throwIfProjectContextAborted({ signal });
   const absolute = path.resolve(root, request.relativePath);
   if (
     !view.roots.some((binding) => inside(absolute, binding.path)) ||
@@ -315,45 +326,73 @@ async function fulfill(
     );
   }
   try {
-    const options = { signal: context?.signal };
+    const options = { signal };
     switch (request.operation) {
       case 'file':
-        await reader.readFile(absolute, options);
-        break;
+        return {
+          ok: true,
+          value: Buffer.from(await reader.readFile(absolute, options)).toString('base64'),
+        };
       case 'directory':
-        await reader.readDirectory(absolute, options);
-        break;
-      case 'stat':
-        await reader.stat(absolute, options);
-        break;
+        return {
+          ok: true,
+          value: (await reader.readDirectory(absolute, options)).map((entry) => ({
+            name: entry.name,
+            kind: entryKind(entry),
+          })),
+        };
+      case 'stat': {
+        const value = await reader.stat(absolute, options);
+        return { ok: true, value: { kind: entryKind(value), mode: value.mode, size: value.size } };
+      }
       case 'realpath':
-        await reader.realpath(absolute, options);
-        break;
+        return { ok: true, value: await reader.realpath(absolute, options) };
       case 'git':
-        await readCodeGraphGitInput(
-          reader,
-          {
-            cwd: absolute,
-            args: (request.args ?? []).map((arg) =>
-              typeof arg === 'string' ? arg : path.resolve(absolute, arg.relative)
-            ),
-          },
-          options
-        );
-        break;
+        return {
+          ok: true,
+          value: await readCodeGraphGitInput(
+            reader,
+            {
+              cwd: absolute,
+              args: (request.args ?? []).map((arg) =>
+                typeof arg === 'string' ? arg : path.resolve(absolute, arg.relative)
+              ),
+            },
+            options
+          ),
+        };
     }
   } catch (error) {
-    throwIfProjectContextAborted(context);
+    throwIfProjectContextAborted({ signal });
     reader.assertComplete();
     if (
+      request.operation === 'git' ||
       !(error instanceof Error) ||
       !('code' in error) ||
       !['ENOENT', 'ENOTDIR'].includes(String(error.code))
     ) {
       throw error;
     }
-    // reader已记录真实不存在；下一轮Replay可以消费，未捕获错误绝不能走这个分支。
+    // 仅reader实际记录的不存在进入SDK；Replay缺口和Git程序缺失都不能冒充模块不存在。
+    Logger.debug('CodeGraph consumed a captured negative input', {
+      operation: request.operation,
+      relativePath: request.relativePath,
+      code: error.code,
+    });
+    return { ok: false, code: String(error.code) as 'ENOENT' | 'ENOTDIR' };
   }
+}
+
+function entryKind(
+  value: Pick<ProjectSourceDirectoryEntry, 'isFile' | 'isDirectory' | 'isSymbolicLink'>
+): string {
+  return value.isFile()
+    ? 'file'
+    : value.isDirectory()
+      ? 'directory'
+      : value.isSymbolicLink()
+        ? 'symlink'
+        : 'other';
 }
 
 function sameRange(

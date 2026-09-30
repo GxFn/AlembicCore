@@ -15,6 +15,38 @@ export interface CodeGraphInputRequest {
   relativePath: string;
   args?: (string | { relative: string })[];
 }
+/** 单项reader事实；不改变持久化snapshot，错误只允许真实文件不存在进入SDK。 */
+export type CodeGraphInputOutcome =
+  | {
+      ok: true;
+      value:
+        | string
+        | { name: string; kind: string }[]
+        | { kind: string; mode: number; size: number }
+        | CodeGraphGitObservation;
+    }
+  | { ok: false; code: 'ENOENT' | 'ENOTDIR' };
+export type CodeGraphInputReader = (
+  request: CodeGraphInputRequest,
+  signal: AbortSignal
+) => Promise<CodeGraphInputOutcome>;
+
+// 原64次尝试×4096缺口的累计上界；流式读取不再有“每轮”的批次含义。
+export const CODEGRAPH_MAX_SUPPORT_INPUTS = 64 * 4096;
+
+export function isCodeGraphInputRequest(value: unknown): value is CodeGraphInputRequest {
+  return (
+    record(value) &&
+    ['file', 'directory', 'stat', 'realpath', 'git'].includes(String(value.operation)) &&
+    typeof value.relativePath === 'string' &&
+    (value.args === undefined ||
+      (Array.isArray(value.args) &&
+        value.args.every(
+          (arg: unknown) =>
+            typeof arg === 'string' || (record(arg) && typeof arg.relative === 'string')
+        )))
+  );
+}
 export interface CodeGraphProjectBinding {
   filePath: string;
   fromNodeId: string;
@@ -27,7 +59,6 @@ export interface CodeGraphProjectBinding {
   confidence: number;
 }
 export type CodeGraphProjectResult =
-  | { status: 'needs-input'; requests: CodeGraphInputRequest[] }
   | { status: 'unavailable'; reason: string }
   | {
       status: 'ready';
@@ -48,23 +79,6 @@ export function isCodeGraphProjectResult(value: unknown): value is CodeGraphProj
   }
   if (value.status === 'unavailable') {
     return typeof value.reason === 'string';
-  }
-  if (value.status === 'needs-input') {
-    return (
-      Array.isArray(value.requests) &&
-      value.requests.every(
-        (item: unknown) =>
-          record(item) &&
-          ['file', 'directory', 'stat', 'realpath', 'git'].includes(String(item.operation)) &&
-          typeof item.relativePath === 'string' &&
-          (item.args === undefined ||
-            (Array.isArray(item.args) &&
-              item.args.every(
-                (arg: unknown) =>
-                  typeof arg === 'string' || (record(arg) && typeof arg.relative === 'string')
-              )))
-      )
-    );
   }
   return (
     value.status === 'ready' &&

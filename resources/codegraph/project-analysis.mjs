@@ -19,13 +19,13 @@ export function projectNode(node) {
   };
 }
 
-/** 每轮新图，避免SDK的配置缓存与失败引用队列污染下一份输入；只调用公开SDK API。 */
-export async function analyzeFrozenProject(sdk, io, directory, input) {
+/** 每个输入视图独立新图；缺项同步等reader事实，不让未知配置进入SDK后再重建。 */
+export async function analyzeFrozenProject(sdk, io, directory, input, readInput) {
   const viewRoot = await fs.mkdtemp(path.join(directory, 'project-'));
   // 为合法的父级配置留独立的虚拟祖先；不会按support相对路径向宿主写回文件。
   const physicalRoot = path.join(viewRoot, ...Array.from({ length: 16 }, () => 'scope'));
   await fs.mkdir(physicalRoot, { recursive: true });
-  io.begin({ ...input, physicalRoot, viewRoot });
+  io.begin({ ...input, physicalRoot, viewRoot, readInput });
   let graph;
   let result;
   let error;
@@ -89,9 +89,6 @@ export async function analyzeFrozenProject(sdk, io, directory, input) {
   await fs.rm(viewRoot, { recursive: true, force: true });
   if (audit.failure) {
     return { status: 'unavailable', reason: audit.failure };
-  }
-  if (audit.requests.length) {
-    return { status: 'needs-input', requests: audit.requests };
   }
   if (error) {
     return { status: 'unavailable', reason: error };

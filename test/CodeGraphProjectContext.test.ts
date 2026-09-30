@@ -61,6 +61,83 @@ async function captureInputs(
 }
 
 describe('CodeGraph ProjectContext production backend', () => {
+  it.each([
+    'cancel',
+    'terminate',
+  ] as const)('cleans up a project waiting for input and ignores its late response (%s)', async (action) => {
+    const files = {
+      'sample.ts': "import { target } from '@dep'; export function run() { target(); }",
+      'dep.ts': 'export function target() {}',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    await fs.writeFile(
+      path.join(projectRoot, 'tsconfig.json'),
+      '{"compilerOptions":{"baseUrl":".","paths":{"@dep":["dep.ts"]}}}'
+    );
+    const entered = Promise.withResolvers<CodeGraphProcess>();
+    const release = Promise.withResolvers<void>();
+    const late = Promise.withResolvers<void>();
+    const original = CodeGraphProcess.prototype.analyzeProject;
+    let held = false;
+    vi.spyOn(CodeGraphProcess.prototype, 'analyzeProject').mockImplementation(function (
+      this: CodeGraphProcess,
+      input,
+      signal,
+      readInput
+    ) {
+      return original.call(this, input, signal, async (request, bridgeSignal) => {
+        const outcome = await readInput!(request, bridgeSignal);
+        if (!held && request.operation === 'file' && request.relativePath === 'tsconfig.json') {
+          held = true;
+          entered.resolve(this);
+          // 故意忽略取消、延迟一个已取得的合法outcome，模拟无法及时停止的宿主读取。
+          await release.promise;
+          late.resolve();
+        }
+        return outcome;
+      });
+    });
+    try {
+      await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+        const capture = await captureInputs(context, projectRoot, files);
+        const query = {
+          kind: 'file-flow' as const,
+          scope: { projectRoot, repoId: 'repo' },
+          payload: { filePath: 'sample.ts' },
+        };
+        const controller = new AbortController();
+        const pending = context.execute(query, {
+          sourceReader: capture.reader,
+          signal: controller.signal,
+        });
+        const worker = await entered.promise;
+        if (action === 'cancel') {
+          controller.abort();
+          await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+        } else {
+          process.kill(worker.pid!, 'SIGKILL');
+          expect((await pending).errors).toEqual(
+            expect.arrayContaining([expect.objectContaining({ code: 'query-unavailable' })])
+          );
+        }
+        expect(() => process.kill(worker.pid!, 0)).toThrow();
+        const healthy = await context.execute(query, { sourceReader: capture.reader });
+        expect(healthy.errors ?? []).toEqual([]);
+        expect((healthy.data as FileFlowContext).callers[0]).toMatchObject({
+          unresolved: false,
+          to: { filePath: 'dep.ts', symbol: 'target' },
+        });
+        release.resolve();
+        await late.promise;
+        expect(await context.execute(query, { sourceReader: capture.reader })).toEqual(healthy);
+        await capture.verify();
+      });
+    } finally {
+      release.resolve();
+    }
+    expect(await fs.readdir(path.join(dataRoot, '.asd/codegraph-sessions'))).toEqual([]);
+  }, 30_000);
+
   it('reuses prepared input metadata without exporting blobs again while preserving source receipts', async () => {
     const files = {
       'sample.ts': "import { target } from './dep'; export function run() { target(); }",
@@ -323,7 +400,10 @@ describe('CodeGraph ProjectContext production backend', () => {
     );
     await fs.writeFile(
       path.join(projectRoot, 'config/base.json'),
-      '{"compilerOptions":{"baseUrl":"..","paths":{"@barrel":["barrel.ts"]}}}'
+      JSON.stringify({
+        compilerOptions: { baseUrl: '..', paths: { '@barrel': ['barrel.ts'] } },
+        padding: '界'.repeat(800_000),
+      })
     );
     execFileSync('git', ['init', '-q'], { cwd: projectRoot });
     const project = vi.spyOn(CodeGraphProcess.prototype, 'analyzeProject');
@@ -346,7 +426,7 @@ describe('CodeGraph ProjectContext production backend', () => {
       });
       expect(call.ref?.id).toBe(liveCall.ref?.id);
       const count = project.mock.calls.length;
-      expect(count).toBeGreaterThan(0);
+      expect(count).toBe(1);
       const snapshot = await capture.snapshot();
       expect(snapshot.observations.some((row) => row.operation === 'codegraph-git')).toBe(true);
       const negatives = snapshot.observations.filter(
@@ -359,7 +439,7 @@ describe('CodeGraph ProjectContext production backend', () => {
       const replay = capture.createReplay(snapshot);
       expect(await context.execute(request, { sourceReader: replay })).toEqual(recorded);
       replay.assertComplete();
-      expect(project.mock.calls.length).toBeGreaterThan(count);
+      expect(project.mock.calls.length).toBe(count + 1);
       // SDK会吞掉不存在的extends；移除其负向事实后，外层仍必须锁存未捕获错误。
       const incomplete = structuredClone(snapshot);
       incomplete.observations = incomplete.observations.filter(

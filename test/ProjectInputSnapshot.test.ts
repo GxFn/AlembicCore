@@ -28,6 +28,45 @@ afterEach(async () => {
 });
 
 describe('Project input snapshot primitives', () => {
+  it.each([
+    'record',
+    'verify',
+  ] as const)('does not retain an input failure that arrives after cancellation (%s)', async (phase) => {
+    const fixture = await createFixture();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    let held = phase === 'record';
+    const delegate: ProjectSourceReader = {
+      ...nodeProjectSourceReader,
+      async readFile(file, options) {
+        if (held) {
+          held = false;
+          entered.resolve();
+          await release.promise;
+          throw Object.assign(new Error('late filesystem failure'), { code: 'EACCES' });
+        }
+        return nodeProjectSourceReader.readFile(file, options);
+      },
+    };
+    const reader = new RecordingProjectSourceReader(fixture.roots, delegate);
+    const controller = new AbortController();
+    if (phase === 'verify') {
+      await reader.readFile(fixture.file);
+      held = true;
+    }
+    const pending =
+      phase === 'record'
+        ? reader.readFile(fixture.file, { signal: controller.signal })
+        : reader.verify({ signal: controller.signal });
+    await entered.promise;
+    controller.abort();
+    release.resolve();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(() => reader.assertComplete()).not.toThrow();
+    expect(await reader.readFile(fixture.file)).toEqual(Uint8Array.from(Buffer.from('initial')));
+    await reader.verify();
+  });
+
   it('keeps the declared source catalog separate from support inputs through portable replay', async () => {
     const fixture = await createFixture();
     const support = path.join(fixture.base, 'tsconfig.base.json');

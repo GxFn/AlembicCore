@@ -4,6 +4,7 @@ import {
   type CodeGraphProcessOptions,
 } from '../../infrastructure/analysis/CodeGraphProcess.js';
 import type {
+  CodeGraphInputReader,
   CodeGraphProjectInput,
   CodeGraphProjectResult,
 } from '../../infrastructure/analysis/CodeGraphProjectContract.js';
@@ -26,7 +27,7 @@ export interface CodeGraphAnalysisRuntime extends CodeGraphIdentity {
 }
 export type CodeGraphProjectRunner = (
   input: CodeGraphProjectInput,
-  context?: { signal?: AbortSignal }
+  context: { signal?: AbortSignal; readInput: CodeGraphInputReader }
 ) => Promise<CodeGraphProjectResult>;
 
 /** 两个真实消费者共用进程/取消/重开规则，只接收已经读取并绑定版本的文本。 */
@@ -83,7 +84,7 @@ export async function withCodeGraphAnalysis<T>(
     for (let attempt = 0; ; attempt++) {
       const active = await acquire();
       try {
-        return await active.analyzeProject(input, context?.signal);
+        return await active.analyzeProject(input, context.signal, context.readInput);
       } catch (error) {
         await retire(active);
         if (

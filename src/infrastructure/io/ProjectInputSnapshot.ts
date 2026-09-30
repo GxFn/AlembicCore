@@ -277,7 +277,10 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
     this.assertComplete();
     for (const record of await Promise.all(this.#records.values())) {
       throwIfSourceReadAborted(options);
-      if (hashCanonicalJson(await record.verify(options)) !== hashCanonicalJson(record.outcome)) {
+      const observed = await record.verify(options);
+      // 底层IO可能晚于取消才报错；取消的验证不能把旧读取器永久标成漂移。
+      throwIfSourceReadAborted(options);
+      if (hashCanonicalJson(observed) !== hashCanonicalJson(record.outcome)) {
         const error = new ProjectSourceInputDriftError(record.operation, record.absolutePath);
         this.invalidate(error);
         throw error;
@@ -310,6 +313,10 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
     let pending = this.#records.get(key);
     if (!pending) {
       pending = captureOutcome(() => load(options)).then((outcome) => {
+        // 不可中断的IO在取消后失败时，仍按控制取消驱逐，不缓存成后续请求的失败。
+        if (!outcome.ok) {
+          throwIfSourceReadAborted(options);
+        }
         if (!outcome.ok && !['ENOENT', 'ENOTDIR'].includes(outcome.code)) {
           this.#failures.set(key, inputError(outcome.code, operation, normalized));
         }
