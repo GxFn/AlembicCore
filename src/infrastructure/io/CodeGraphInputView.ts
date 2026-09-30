@@ -2,6 +2,7 @@ import path from 'node:path';
 import { hashCanonicalJson } from '../../shared/canonicalJson.js';
 import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
 import Logger from '../logging/Logger.js';
+import { normalizePrivateDirectories } from './ProjectInputScope.js';
 import {
   type ProjectInputSnapshotView,
   ProjectSourceInputDriftError,
@@ -17,6 +18,7 @@ export async function readCodeGraphInputView(
   view: ProjectInputSnapshotView,
   projectRoot: string,
   runtimeRoot: string,
+  privateDirectories: readonly string[],
   signal?: AbortSignal
 ): Promise<CodeGraphInputViewPolicy> {
   const key = path.join(projectRoot, '.alembic-codegraph-input-view');
@@ -33,8 +35,11 @@ export async function readCodeGraphInputView(
     return { excludedDirectories: [] };
   }
   const stateRoot = path.dirname(runtimeRoot);
+  const directories = normalizePrivateDirectories([stateRoot, ...privateDirectories]);
   const expected = {
-    excludedDirectories: view.roots.some((root) => inside(stateRoot, root.path)) ? [stateRoot] : [],
+    excludedDirectories: directories.filter((directory) =>
+      view.roots.some((root) => inside(directory, root.path))
+    ),
   };
   const policy = await reader.readConfiguration<CodeGraphInputViewPolicy>(
     'codegraph-input-view',
@@ -48,6 +53,10 @@ export async function readCodeGraphInputView(
     policy.excludedDirectories.some((item) => typeof item !== 'string' || !path.isAbsolute(item))
   ) {
     throw new TypeError('Invalid captured CodeGraph directory-view policy.');
+  }
+  // Replay只校验解码后的原策略；本次宿主目录不能否决旧输入视图。
+  if (policy.excludedDirectories.some((directory) => inside(projectRoot, directory))) {
+    throw new TypeError('A private directory must not replace the source repository.');
   }
   if (reader.mode === 'record' && hashCanonicalJson(policy) !== hashCanonicalJson(expected)) {
     const error = new ProjectSourceInputDriftError('codegraph-input-view', projectRoot);

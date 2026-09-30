@@ -15,6 +15,10 @@ import {
   readCodeGraphGitInput,
 } from '../../../infrastructure/io/CodeGraphGitInput.js';
 import {
+  normalizePrivateDirectories,
+  scopeGitInput,
+} from '../../../infrastructure/io/ProjectInputScope.js';
+import {
   type ProjectInputRootBinding,
   RecordingProjectSourceReader,
   ReplayProjectSourceReader,
@@ -95,6 +99,8 @@ export interface NodeProjectContextFoundationPortableRoot {
 }
 
 export interface NodeProjectContextFoundationHostPortsOptions {
+  /** 与宿主inventory/SDK视图共用的私有绝对目录，仅从Git状态观察排除；默认保持历史语义。 */
+  privateDirectories?: readonly string[];
   portableRoots?: NodeProjectContextFoundationPortableRoot[];
   dependencyOwnership?: ProjectContextDependencyOwnershipV1;
 }
@@ -166,6 +172,7 @@ export function createProjectContextDependencyOwnershipV1(
 export class NodeProjectContextFoundationHostPorts implements ProjectContextFoundationHostPorts {
   readonly #projectContext: ProjectContextContract;
   readonly #portableRoots: NodeProjectContextFoundationPortableRoot[];
+  readonly #privateDirectories: string[];
   readonly #dependencyOwnership?: ProjectContextDependencyOwnershipV1;
 
   constructor(
@@ -173,6 +180,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     options: NodeProjectContextFoundationHostPortsOptions = {}
   ) {
     this.#projectContext = projectContext;
+    this.#privateDirectories = normalizePrivateDirectories(options.privateDirectories);
     this.#portableRoots = options.portableRoots ?? [];
     this.#dependencyOwnership = options.dependencyOwnership
       ? validateDependencyOwnership(options.dependencyOwnership)
@@ -333,6 +341,11 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
   }) {
     throwIfAborted(input.signal);
     const sourceRoot = await fs.realpath(input.repository.sourceRoot);
+    const statusCommand = scopeGitInput(
+      ['status', '--porcelain=v1', '-z', '--untracked-files=all'],
+      sourceRoot,
+      this.#privateDirectories
+    );
     try {
       const { stdout: gitRootOutput } = await execFileAsync(
         'git',
@@ -357,16 +370,20 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           maxBuffer: 1024 * 1024,
           signal: input.signal,
         }),
-        execFileAsync(
-          'git',
-          ['-C', sourceRoot, 'status', '--porcelain=v1', '-z', '--untracked-files=all'],
-          {
-            encoding: 'utf8',
-            maxBuffer: 64 * 1024 * 1024,
-            signal: input.signal,
-          }
-        ),
+        execFileAsync('git', ['-C', sourceRoot, ...statusCommand.args], {
+          env: statusCommand.env,
+          encoding: 'utf8',
+          maxBuffer: 64 * 1024 * 1024,
+          signal: input.signal,
+        }),
       ]);
+      if (this.#privateDirectories.length) {
+        Logger.debug('ProjectContext observed Git revision with declared private directories', {
+          sourceRoot,
+          privateDirectories: this.#privateDirectories,
+          dirty: statusResult.stdout.length > 0,
+        });
+      }
       return {
         kind: 'git' as const,
         dirty: statusResult.stdout.length > 0,

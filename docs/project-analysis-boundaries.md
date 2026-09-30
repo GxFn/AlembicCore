@@ -130,6 +130,14 @@ Git 输入通过真实 literal exclude pathspec 获取，同一命令的不同�
 缺少该配置的历史 V1 snapshot 保持原有发现语义，不为兼容而吞掉未捕获读取。
 runtime 根规范化真实路径，避免 `/var` 与 `/private/var` 等别名绕过私有目录边界。
 
+宿主还可通过 `CodeGraphProjectContextOptions.privateDirectories` 声明自己的产物目录，
+例如认证存储。使用规范化的绝对路径，在捕获前创建固定目录，并把同一数组传给
+`NodeProjectContextFoundationHostPortsOptions.privateDirectories`，同时纳入宿主 inventory
+排除策略。前者绑定 SDK 发现视图，后者为真实 Git status 添加 literal exclude pathspec，
+避免发布私有产物把无变化源码从 clean 判为 dirty；不声明时保留原 Git 状态语义。
+这些目录必须由宿主拥有，不能覆盖源码根；Core 不创建或迁移宿主存储。新策略须进入
+宿主配置身份；历史产物的 freshness 应继续使用其已接受的版本，不能偷偷套用新排除。
+
 这是固定 SDK 1.6 的输入适配，**不是操作系统沙箱或任意插件执行环境**。不执行项目代码；
 未知 IO 形态、越出已接受 roots 的支持输入、宿主绝对路径配置和私有 runtime 输入明确
 不可用。当前每仓上限为 2,000 个 JS/TS 源文件、32 MiB 源码，单图最多 262,144 个去重

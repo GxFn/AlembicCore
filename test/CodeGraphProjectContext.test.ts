@@ -79,13 +79,15 @@ describe('CodeGraph ProjectContext production backend', () => {
     };
     const { root, projectRoot, dataRoot } = await fixture(files);
     const canonicalRoot = await fs.realpath(projectRoot);
+    const artifactRoot = path.join(canonicalRoot, 'context/certified-project-facts/v2');
+    await fs.mkdir(artifactRoot, { recursive: true });
     if (git) {
       execFileSync('git', ['init', '-q'], { cwd: projectRoot });
       // 宿主的literal开关不得取消SDK视图明确指定的排除规则。
       vi.stubEnv('GIT_LITERAL_PATHSPECS', '1');
     }
     const saved = await withCodeGraphProjectContextSession(
-      { dataRoot: projectRoot },
+      { dataRoot: projectRoot, privateDirectories: [artifactRoot] },
       async (context, runtime) => {
         const capture = await captureInputs(context, projectRoot, files);
         const query = {
@@ -107,6 +109,7 @@ describe('CodeGraph ProjectContext production backend', () => {
           (await capture.reader.readDirectory(projectRoot)).some((entry) => entry.name === '.asd')
         ).toBe(true);
         await fs.writeFile(path.join(projectRoot, '.asd', 'host-state.json'), '{"changed":true}');
+        await fs.writeFile(path.join(artifactRoot, 'artifact.json'), '{"owned":true}');
         await capture.verify();
         return {
           snapshot: await capture.snapshot(),
@@ -126,40 +129,43 @@ describe('CodeGraph ProjectContext production backend', () => {
     await fs.mkdir(path.dirname(moved));
     await fs.rename(projectRoot, moved);
     const relocatedRoot = await fs.realpath(moved);
-    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
-      const ports = new NodeProjectContextFoundationHostPorts(context);
-      const observation = {
-        ...frozen,
-        repositories: [
-          { repoId: 'repo', scopeId: 'repo', relativeRoot: '.', sourceRoot: relocatedRoot },
-        ],
-      };
-      expect(await ports.observeInputClosureHash(observation)).toBe(
-        hashCanonicalJson(frozen.closure)
-      );
-      await fs.writeFile(path.join(relocatedRoot, 'dep.ts'), 'export function changed() {}');
-      expect(await ports.observeInputClosureHash(observation)).not.toBe(
-        hashCanonicalJson(frozen.closure)
-      );
-      await fs.rm(relocatedRoot, { recursive: true });
-      const replay = new ReplayProjectSourceReader(
-        hydrateProjectContextInputClosure(frozen.closure, frozen.chunks),
-        [{ id: 'repo', path: relocatedRoot }]
-      );
-      const replayed = await context.execute(
-        { ...saved.query, scope: { ...saved.query.scope, projectRoot: relocatedRoot } },
-        { sourceReader: replay }
-      );
-      expect(replayed).toEqual(
-        JSON.parse(
-          JSON.stringify(saved.recorded).replaceAll(
-            JSON.stringify(canonicalRoot).slice(1, -1),
-            JSON.stringify(relocatedRoot).slice(1, -1)
+    await withCodeGraphProjectContextSession(
+      { dataRoot, privateDirectories: [relocatedRoot] },
+      async (context) => {
+        const ports = new NodeProjectContextFoundationHostPorts(context);
+        const observation = {
+          ...frozen,
+          repositories: [
+            { repoId: 'repo', scopeId: 'repo', relativeRoot: '.', sourceRoot: relocatedRoot },
+          ],
+        };
+        expect(await ports.observeInputClosureHash(observation)).toBe(
+          hashCanonicalJson(frozen.closure)
+        );
+        await fs.writeFile(path.join(relocatedRoot, 'dep.ts'), 'export function changed() {}');
+        expect(await ports.observeInputClosureHash(observation)).not.toBe(
+          hashCanonicalJson(frozen.closure)
+        );
+        await fs.rm(relocatedRoot, { recursive: true });
+        const replay = new ReplayProjectSourceReader(
+          hydrateProjectContextInputClosure(frozen.closure, frozen.chunks),
+          [{ id: 'repo', path: relocatedRoot }]
+        );
+        const replayed = await context.execute(
+          { ...saved.query, scope: { ...saved.query.scope, projectRoot: relocatedRoot } },
+          { sourceReader: replay }
+        );
+        expect(replayed).toEqual(
+          JSON.parse(
+            JSON.stringify(saved.recorded).replaceAll(
+              JSON.stringify(canonicalRoot).slice(1, -1),
+              JSON.stringify(relocatedRoot).slice(1, -1)
+            )
           )
-        )
-      );
-      replay.assertComplete();
-    });
+        );
+        replay.assertComplete();
+      }
+    );
   }, 60_000);
 
   it.each([

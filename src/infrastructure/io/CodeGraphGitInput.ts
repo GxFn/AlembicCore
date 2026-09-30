@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 import { hashCanonicalJson } from '../../shared/canonicalJson.js';
 import type { ProjectSourceReader } from '../../types/projectSourceReader.js';
+import { scopeGitInput } from './ProjectInputScope.js';
 import { throwIfSourceReadAborted } from './ProjectSourceReader.js';
 
 export interface CodeGraphGitRequest {
@@ -75,32 +76,15 @@ function observeGit(
   request: CodeGraphGitRequest,
   options?: { signal?: AbortSignal }
 ): Promise<CodeGraphGitObservation> {
-  // 用Git自己的literal pathspec约束结果，不伪造stdout，也不把临时数据库列入捕获读集。
-  const excludes =
-    request.args[0] === 'ls-files'
-      ? (request.excludedDirectories ?? [])
-          .map((directory) => path.relative(request.cwd, directory))
-          .filter(
-            (relative) =>
-              !path.isAbsolute(relative) &&
-              relative !== '..' &&
-              !relative.startsWith(`..${path.sep}`)
-          )
-      : [];
-  const args = excludes.length
-    ? [
-        ...request.args,
-        '--',
-        '.',
-        ...excludes.map(
-          (relative) => `:(exclude,literal)${relative.split(path.sep).join('/') || '.'}`
-        ),
-      ]
-    : request.args;
+  const command = scopeGitInput(
+    request.args,
+    request.cwd,
+    request.args[0] === 'ls-files' ? (request.excludedDirectories ?? []) : []
+  );
   return new Promise((resolve, reject) => {
     execFile(
       'git',
-      args,
+      command.args,
       {
         cwd: request.cwd,
         encoding: 'utf8',
@@ -110,19 +94,8 @@ function observeGit(
         // 调用者设置的Git目录不能把当前源码仓库偷偷切到另一个工作树。
         env: {
           ...Object.fromEntries(
-            Object.entries(process.env).filter(
-              ([key]) =>
-                !['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'].includes(key) &&
-                // 注入literal排除规则时固定Git语义，宿主环境不能把magic变成普通文件名。
-                !(
-                  excludes.length &&
-                  [
-                    'GIT_LITERAL_PATHSPECS',
-                    'GIT_GLOB_PATHSPECS',
-                    'GIT_NOGLOB_PATHSPECS',
-                    'GIT_ICASE_PATHSPECS',
-                  ].includes(key)
-                )
+            Object.entries(command.env).filter(
+              ([key]) => !['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE'].includes(key)
             )
           ),
           GIT_OPTIONAL_LOCKS: '0',

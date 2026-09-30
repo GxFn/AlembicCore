@@ -1193,6 +1193,31 @@ describe('ProjectContext certified facts foundation', () => {
     expect((await execFileAsync('git', ['-C', root, 'status', '--porcelain'])).stdout).toBe('');
   });
 
+  it('keeps declared private artifacts out of Git revisions without hiding other changes', async () => {
+    const root = await fs.realpath(await createTemporaryGitRepository());
+    const privateRoot = path.join(root, 'context[1]', 'certified');
+    await fs.mkdir(privateRoot, { recursive: true });
+    const repository = { relativeRoot: '.', repoId: 'core', scopeId: 'core', sourceRoot: root };
+    const scoped = new NodeProjectContextFoundationHostPorts(undefined, {
+      privateDirectories: [privateRoot],
+    });
+    const unscoped = new NodeProjectContextFoundationHostPorts();
+    const clean = await scoped.observeRevision({ repository });
+    expect(clean).toMatchObject({ kind: 'git', dirty: false });
+    await fs.writeFile(path.join(privateRoot, 'artifact.json'), '{}');
+    expect(await scoped.observeRevision({ repository })).toEqual(clean);
+    expect(await unscoped.observeRevision({ repository })).toMatchObject({
+      kind: 'git',
+      dirty: true,
+    });
+    await fs.mkdir(path.join(root, 'context1'), { recursive: true });
+    await fs.writeFile(path.join(root, 'context1', 'source.ts'), 'export const visible = true;');
+    expect(await scoped.observeRevision({ repository })).toMatchObject({
+      kind: 'git',
+      dirty: true,
+    });
+  });
+
   it('binds a stable dirty Git snapshot to its terminal full-content hash', async () => {
     const root = await createTemporaryGitRepository();
     await fs.writeFile(path.join(root, 'src/index.ts'), 'export const value = "dirty";\n');

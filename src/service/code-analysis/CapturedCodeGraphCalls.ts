@@ -50,7 +50,8 @@ interface CapturedProjectMetadata {
 /** 捕获清单而非“查询过的文件”拥有项目图；每个reader/repo单独计算，Replay必定重新运行SDK。 */
 export function createCapturedCodeGraphCallResolver(
   run: CodeGraphProjectRunner,
-  runtimeRoot: string
+  runtimeRoot: string,
+  privateDirectories: readonly string[] = []
 ): ProjectCallResolver {
   const projects = new WeakMap<ProjectSourceReader, Map<string, Promise<PreparedProject>>>();
   const catalogs = new WeakMap<ProjectSourceReader, CapturedProjectMetadata>();
@@ -97,7 +98,16 @@ export function createCapturedCodeGraphCallResolver(
     }
     let pending = cache.get(rootId);
     if (!pending) {
-      pending = prepare(metadata, rootId, reader, facts, context, run, runtimeRoot);
+      pending = prepare(
+        metadata,
+        rootId,
+        reader,
+        facts,
+        context,
+        run,
+        runtimeRoot,
+        privateDirectories
+      );
       cache.set(rootId, pending);
     }
     try {
@@ -214,7 +224,8 @@ async function prepare(
   owner: SourceSliceFileFacts,
   context: ProjectContextHandlerExecutionContext | undefined,
   run: CodeGraphProjectRunner,
-  runtimeRoot: string
+  runtimeRoot: string,
+  privateDirectories: readonly string[]
 ): Promise<PreparedProject> {
   const catalog = metadata.sourceFiles.filter(
     (file) =>
@@ -258,6 +269,7 @@ async function prepare(
     current,
     logicalRoot,
     runtimeRoot,
+    privateDirectories,
     context?.signal
   );
   const git: CodeGraphGitObservation[] = [];
