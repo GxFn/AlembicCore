@@ -137,16 +137,23 @@ export function installFrozenIO(runtimeRoots) {
       if (option?.recursive) {
         throw unsupported(name, 'recursive directory read');
       }
-      return lookup('directory', file).map((entry) =>
-        option?.withFileTypes
-          ? {
-              name: entry.name,
-              parentPath: file,
-              path: file,
-              ...stat({ kind: entry.kind, mode: 0, size: 0 }),
-            }
-          : entry.name
-      );
+      return lookup('directory', file)
+        .filter(
+          (entry) =>
+            !(active.excludedDirectories ?? []).some((root) =>
+              inside(path.resolve(logical(file), entry.name), root)
+            )
+        )
+        .map((entry) =>
+          option?.withFileTypes
+            ? {
+                name: entry.name,
+                parentPath: file,
+                path: file,
+                ...stat({ kind: entry.kind, mode: 0, size: 0 }),
+              }
+            : entry.name
+        );
     }
     throw unsupported(name, file);
   }
@@ -343,7 +350,10 @@ export function installFrozenIO(runtimeRoots) {
       let found = active.git.find(
         (row) =>
           row.request.cwd === logical(cwd) &&
-          JSON.stringify(row.request.args) === JSON.stringify(commandArgs)
+          JSON.stringify(row.request.args) === JSON.stringify(commandArgs) &&
+          // 同一reader可已有别的视图产生的Git事实，不能按cwd/args复用不同排除策略。
+          JSON.stringify(row.request.excludedDirectories ?? []) ===
+            JSON.stringify(active.excludedDirectories ?? [])
       );
       if (!found) {
         const outcome = requestInput(

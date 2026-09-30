@@ -283,6 +283,21 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
             await readCodeGraphGitInput(reader, observation.request, { signal: input.signal });
             break;
           }
+          case 'codegraph-input-view': {
+            // 这是已接受的视图策略，与sourceFiles一样不由freshness重新选择；其物理读集仍逐项重观测。
+            prior ??= new ReplayProjectSourceReader(snapshot, roots);
+            const policy = await prior.readConfiguration(
+              'codegraph-input-view',
+              absolutePath,
+              () => {
+                throw new Error('Recorded input view is required');
+              }
+            );
+            await reader.readConfiguration('codegraph-input-view', absolutePath, () => policy, {
+              signal: input.signal,
+            });
+            break;
+          }
         }
       } catch (error) {
         throwIfAborted(input.signal);

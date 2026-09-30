@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadPlugins } from '../src/core/ast/index.js';
 import type { FileFlowContext, FileSymbolContext } from '../src/domain/project-context/index.js';
 import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
-import { RecordingProjectSourceReader } from '../src/infrastructure/io/ProjectInputSnapshot.js';
+import {
+  RecordingProjectSourceReader,
+  ReplayProjectSourceReader,
+} from '../src/infrastructure/io/ProjectInputSnapshot.js';
 import { ProjectContext } from '../src/project-context.js';
 import { NodeProjectContextFoundationHostPorts } from '../src/projectContextFoundation.js';
 import { normalizeCodeGraphFlow } from '../src/service/code-analysis/CodeGraphFlow.js';
@@ -18,12 +21,17 @@ import {
 } from '../src/service/project-context/analysis/codeGraphSession.js';
 import { extractFileFlowFromSource } from '../src/service/project-context/fileFlow/extract.js';
 import { extractFileSymbolsFromSource } from '../src/service/project-context/fileSymbols/extract.js';
+import {
+  freezeProjectContextInputClosure,
+  hydrateProjectContextInputClosure,
+} from '../src/service/project-context/foundation/inputClosure.js';
 import { hashCanonicalJson } from '../src/shared/canonicalJson.js';
 import { typeScriptAstPlugin } from '../src/test-fixtures.js';
 
 const roots: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
 });
 
@@ -61,6 +69,99 @@ async function captureInputs(
 }
 
 describe('CodeGraph ProjectContext production backend', () => {
+  it.each([
+    false,
+    true,
+  ])('excludes host state from SDK discovery while preserving raw observations and portable replay (git=%s)', async (git) => {
+    const files = {
+      'sample.ts': "import { target } from './dep'; export function run() { target(); }",
+      'dep.ts': 'export function target() {}',
+    };
+    const { root, projectRoot, dataRoot } = await fixture(files);
+    const canonicalRoot = await fs.realpath(projectRoot);
+    if (git) {
+      execFileSync('git', ['init', '-q'], { cwd: projectRoot });
+      // 宿主的literal开关不得取消SDK视图明确指定的排除规则。
+      vi.stubEnv('GIT_LITERAL_PATHSPECS', '1');
+    }
+    const saved = await withCodeGraphProjectContextSession(
+      { dataRoot: projectRoot },
+      async (context, runtime) => {
+        const capture = await captureInputs(context, projectRoot, files);
+        const query = {
+          kind: 'file-flow' as const,
+          scope: { projectRoot: canonicalRoot, repoId: 'repo' },
+          payload: { filePath: 'sample.ts' },
+        };
+        const recorded = await context.execute(query, { sourceReader: capture.reader });
+        expect(recorded.errors ?? []).toEqual([]);
+        expect((recorded.data as FileFlowContext).callers[0].unresolved).toBe(false);
+        const snapshot = await capture.snapshot();
+        expect(
+          snapshot.observations
+            .filter((row) => ['file', 'directory', 'stat', 'realpath'].includes(row.operation))
+            .some((row) => row.path.relativePath.startsWith('.asd/'))
+        ).toBe(false);
+        // 父reader仍保留真实目录项；仅SDK的发现视图排除宿主状态，不伪造源目录不存在。
+        expect(
+          (await capture.reader.readDirectory(projectRoot)).some((entry) => entry.name === '.asd')
+        ).toBe(true);
+        await fs.writeFile(path.join(projectRoot, '.asd', 'host-state.json'), '{"changed":true}');
+        await capture.verify();
+        return {
+          snapshot: await capture.snapshot(),
+          query,
+          recorded,
+          runtimeRoot: runtime.runtimeRoot,
+        };
+      }
+    );
+    expect(await fs.readdir(saved.runtimeRoot)).toEqual([]);
+    const frozen = freezeProjectContextInputClosure(
+      saved.snapshot,
+      hashCanonicalJson(saved.recorded)
+    );
+    // 迁移实际源码根后重观测：策略和Git请求均按RootBinding重绑，而非使用旧绝对路径。
+    const moved = path.join(root, 'relocated', 'project');
+    await fs.mkdir(path.dirname(moved));
+    await fs.rename(projectRoot, moved);
+    const relocatedRoot = await fs.realpath(moved);
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const ports = new NodeProjectContextFoundationHostPorts(context);
+      const observation = {
+        ...frozen,
+        repositories: [
+          { repoId: 'repo', scopeId: 'repo', relativeRoot: '.', sourceRoot: relocatedRoot },
+        ],
+      };
+      expect(await ports.observeInputClosureHash(observation)).toBe(
+        hashCanonicalJson(frozen.closure)
+      );
+      await fs.writeFile(path.join(relocatedRoot, 'dep.ts'), 'export function changed() {}');
+      expect(await ports.observeInputClosureHash(observation)).not.toBe(
+        hashCanonicalJson(frozen.closure)
+      );
+      await fs.rm(relocatedRoot, { recursive: true });
+      const replay = new ReplayProjectSourceReader(
+        hydrateProjectContextInputClosure(frozen.closure, frozen.chunks),
+        [{ id: 'repo', path: relocatedRoot }]
+      );
+      const replayed = await context.execute(
+        { ...saved.query, scope: { ...saved.query.scope, projectRoot: relocatedRoot } },
+        { sourceReader: replay }
+      );
+      expect(replayed).toEqual(
+        JSON.parse(
+          JSON.stringify(saved.recorded).replaceAll(
+            JSON.stringify(canonicalRoot).slice(1, -1),
+            JSON.stringify(relocatedRoot).slice(1, -1)
+          )
+        )
+      );
+      replay.assertComplete();
+    });
+  }, 60_000);
+
   it.each([
     'cancel',
     'terminate',
@@ -440,6 +541,19 @@ describe('CodeGraph ProjectContext production backend', () => {
       expect(await context.execute(request, { sourceReader: replay })).toEqual(recorded);
       replay.assertComplete();
       expect(project.mock.calls.length).toBe(count + 1);
+      // 老V1快照没有SDK视图策略；显式保持旧发现语义，不能先试读再吞掉缺口锁存。
+      const legacy = structuredClone(snapshot);
+      legacy.observations = legacy.observations.filter(
+        (row) => row.operation !== 'codegraph-input-view'
+      );
+      const { snapshotHash: _legacyHash, ...legacySemantic } = legacy;
+      legacy.snapshotHash = hashCanonicalJson({
+        ...legacySemantic,
+        blobs: legacy.blobs.map(({ hash, byteLength }) => ({ hash, byteLength })),
+      });
+      const legacyReplay = capture.createReplay(legacy);
+      expect(await context.execute(request, { sourceReader: legacyReplay })).toEqual(recorded);
+      legacyReplay.assertComplete();
       // SDK会吞掉不存在的extends；移除其负向事实后，外层仍必须锁存未捕获错误。
       const incomplete = structuredClone(snapshot);
       incomplete.observations = incomplete.observations.filter(

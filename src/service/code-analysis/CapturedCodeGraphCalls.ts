@@ -7,6 +7,7 @@ import {
   type CodeGraphGitObservation,
   readCodeGraphGitInput,
 } from '../../infrastructure/io/CodeGraphGitInput.js';
+import { readCodeGraphInputView } from '../../infrastructure/io/CodeGraphInputView.js';
 import {
   type ProjectInputPath,
   type ProjectInputSnapshotView,
@@ -252,6 +253,13 @@ async function prepare(
   if (!current) {
     throw new Error('Captured input reader lost its snapshot capability.');
   }
+  const policy = await readCodeGraphInputView(
+    reader,
+    current,
+    logicalRoot,
+    runtimeRoot,
+    context?.signal
+  );
   const git: CodeGraphGitObservation[] = [];
   for (const row of current.snapshot.observations.filter(
     (row) => row.operation === 'codegraph-git'
@@ -273,6 +281,7 @@ async function prepare(
       snapshot: current.snapshot,
       files: [...sources.keys()],
       git,
+      excludedDirectories: policy.excludedDirectories,
     },
     {
       signal: context?.signal,
@@ -284,7 +293,8 @@ async function prepare(
           current,
           reader,
           effective,
-          runtimeRoot
+          runtimeRoot,
+          policy.excludedDirectories
         );
         reader.assertComplete();
         throwIfProjectContextAborted({ signal: effective });
@@ -313,7 +323,8 @@ async function readInput(
   view: ProjectInputSnapshotView,
   reader: ProjectSourceReader,
   signal: AbortSignal,
-  runtimeRoot: string
+  runtimeRoot: string,
+  excludedDirectories: string[]
 ): Promise<CodeGraphInputOutcome> {
   throwIfProjectContextAborted({ signal });
   const absolute = path.resolve(root, request.relativePath);
@@ -357,6 +368,7 @@ async function readInput(
               args: (request.args ?? []).map((arg) =>
                 typeof arg === 'string' ? arg : path.resolve(absolute, arg.relative)
               ),
+              ...(excludedDirectories.length ? { excludedDirectories } : {}),
             },
             options
           ),

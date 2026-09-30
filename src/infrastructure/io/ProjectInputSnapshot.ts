@@ -777,6 +777,7 @@ function validateOutcome(
     case 'scope-for-control-root':
     case 'discoverer-preference':
     case 'codegraph-git':
+    case 'codegraph-input-view':
       validateValue = () => decodeValue(value as PortableValue, roots);
       break;
     default:

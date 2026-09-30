@@ -9,6 +9,8 @@ export interface CodeGraphProjectInput {
   snapshot: ProjectInputSnapshot;
   files: string[];
   git: CodeGraphGitObservation[];
+  /** 只控制SDK目录发现；raw目录事实不在传输层篡改。 */
+  excludedDirectories?: string[];
 }
 export interface CodeGraphInputRequest {
   operation: 'file' | 'directory' | 'stat' | 'realpath' | 'git';

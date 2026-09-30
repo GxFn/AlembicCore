@@ -1,5 +1,5 @@
 import { type ChildProcess, fork } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import type { Duplex } from 'node:stream';
@@ -18,7 +18,7 @@ import {
 
 const workerFile = path.join(RESOURCES_DIR, 'codegraph', 'worker.mjs');
 const require = createRequire(import.meta.url);
-const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v6';
+const NORMALIZER_VERSION = 'alembic-codegraph-file-analysis-v7';
 
 export interface CodeGraphNode {
   id: string;
@@ -234,8 +234,10 @@ export class CodeGraphProcess {
       throw new TypeError('CodeGraph timeoutMs must be positive.');
     }
     const identity = await getCodeGraphProjectContextIdentity();
-    const runtimeRoot = path.resolve(options.dataRoot, '.asd', 'codegraph-sessions');
-    await mkdir(runtimeRoot, { recursive: true });
+    const requestedRoot = path.resolve(options.dataRoot, '.asd', 'codegraph-sessions');
+    await mkdir(requestedRoot, { recursive: true });
+    // SDK输入使用canonical根；/var与/private/var不能使私有目录防线失效。
+    const runtimeRoot = await realpath(requestedRoot);
     const directory = await mkdtemp(path.join(runtimeRoot, 'session-'));
     let instance: CodeGraphProcess | undefined;
     try {
