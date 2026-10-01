@@ -35,22 +35,15 @@ import type {
 } from './service/production/SemanticDispositionReviewExecution.js';
 import type { KnowledgeDispositionReviewV1 } from './service/production/StrictAnalysisContracts.js';
 
-export type { ProjectAnalysisResult } from './core/AstAnalyzer.js';
 export {
   analyzeFile,
-  analyzeProject,
   isAvailable,
   parseToTree,
   supportedLanguages as supportedAstLanguages,
 } from './core/AstAnalyzer.js';
-export {
-  CallEdgeResolver,
-  CallGraphAnalyzer,
-  DataFlowInferrer,
-  ImportPathResolver,
-  ImportRecord,
-  SymbolTableBuilder,
-} from './core/analysis/index.js';
+// 旧调用图引擎（CallGraphAnalyzer 一线）与项目级 AST 聚合已移除：四个仓库均无生产调用方。
+// 跨文件关系由 SourceGraph 索引与链接器提供；这里只保留仍在使用的导入记录与路径解析。
+export { ImportPathResolver, ImportRecord } from './core/analysis/index.js';
 export type {
   CoreGrammarResourceFile,
   EnsureProjectGrammarResourcesResult,

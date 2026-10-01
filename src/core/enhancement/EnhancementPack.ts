@@ -9,7 +9,7 @@
  * - SFC 预处理（.vue → 提取 <script>）
  * - Reference Skill 路径
  */
-/** AST method info from analyzeFile/analyzeProject */
+/** AST method info from analyzeFile */
 export interface AstMethodInfo {
   name: string;
   className?: string;
@@ -52,7 +52,7 @@ export interface AstPatternInfo {
   confidence?: number;
 }
 
-/** analyzeFile/analyzeProject return value */
+/** analyzeFile return value */
 export interface AstSummary {
   methods?: AstMethodInfo[];
   classes?: AstClassInfo[];
@@ -136,7 +136,7 @@ export class EnhancementPack {
 
   /**
    * 额外的设计模式检测
-   * @param astSummary analyzeFile/analyzeProject 的返回值
+   * @param astSummary analyzeFile 的返回值
    * @returns >}
    */
   detectPatterns(astSummary: AstSummary): DetectedPattern[] {

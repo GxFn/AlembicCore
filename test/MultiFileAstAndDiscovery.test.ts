@@ -12,12 +12,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { analyzeFile, analyzeProject, isAvailable, parseToTree } from '../src/core/AstAnalyzer.js';
-import { CallGraphAnalyzer } from '../src/core/analysis/CallGraphAnalyzer.js';
+import { analyzeFile, isAvailable, parseToTree } from '../src/core/AstAnalyzer.js';
 import { type CallSiteInfo, extractCallSitesTS } from '../src/core/analysis/CallSiteExtractor.js';
 import { ImportPathResolver } from '../src/core/analysis/ImportPathResolver.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
-import ProjectGraph from '../src/core/ast/ProjectGraph.js';
 import { GenericDiscoverer } from '../src/core/discovery/GenericDiscoverer.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from '../src/core/discovery/index.js';
 import { NodeDiscoverer } from '../src/core/discovery/NodeDiscoverer.js';
@@ -36,7 +34,7 @@ beforeAll(async () => {
   await reloadPlugins();
 });
 
-describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/GoSupport)', () => {
+describe('multi-file AST analysis (RIC-4b — was RealProjectAst/GoSupport)', () => {
   it('assigns nested named function calls to the actual inner owner', () => {
     const source =
       'function outer() { function inner() { target(); } inner(); register(() => later()); }';
@@ -293,52 +291,6 @@ describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/G
         className: pattern.className === name ? 'PlainSample' : pattern.className,
       }))
     ).toEqual(ordinary?.patterns);
-    const project = analyzeProject([{ name: 'module', relativePath: 'module', content }], language);
-    expect(project?.projectMetrics.avgMethodsPerClass).toBe(result?.methods.length);
-  });
-
-  it('rebuilds ProjectGraph conformance after deletion and keeps facts when parsing is unavailable', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'project-graph-relations-'));
-    try {
-      writeFileSync(join(root, 'P.swift'), 'protocol P { func work() }');
-      writeFileSync(join(root, 'A.swift'), 'class A: P { func work() {} }');
-      writeFileSync(join(root, 'B.swift'), 'class B: P { func work() {} }');
-      const graph = await ProjectGraph.build(root, { extensions: ['.swift'] });
-      expect(graph.getProtocolInfo('P').conformers).toEqual(['A', 'B']);
-      rmSync(join(root, 'A.swift'));
-      await graph.incrementalUpdate([], ['A.swift']);
-      expect(graph.getProtocolInfo('P').conformers).toEqual(['B']);
-      await graph.incrementalUpdate([join(root, 'B.swift')], [], {
-        extensionToLang: { '.swift': 'not-a-registered-language' },
-      });
-      expect(graph.getClassInfo('B')).not.toBeNull();
-      expect(graph.getProtocolInfo('P').conformers).toEqual(['B']);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-
-  it('removes only the changed ProjectGraph file contributions to shared categories and methods', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'project-graph-sources-'));
-    try {
-      writeFileSync(join(root, 'FooOne.h'), '@interface Foo (One)\n- (void)one;\n@end');
-      writeFileSync(join(root, 'FooTwo.h'), '@interface Foo (Two)\n- (void)two;\n@end');
-      writeFileSync(join(root, 'Foo.m'), '@implementation Foo\n- (void)oldMethod {}\n@end');
-      const graph = await ProjectGraph.build(root, { extensions: ['.h', '.m'] });
-      rmSync(join(root, 'FooOne.h'));
-      await graph.incrementalUpdate([], ['FooOne.h']);
-      expect(graph.getCategoryExtensions('Foo').map((item) => item.categoryName)).toEqual(['Two']);
-      writeFileSync(join(root, 'Foo.m'), '@implementation Foo\n- (void)newMethod {}\n@end');
-      await graph.incrementalUpdate([join(root, 'Foo.m')]);
-      expect(
-        graph
-          .getClassMethods('Foo')
-          .map((item) => item.name)
-          .sort()
-      ).toEqual(['newMethod', 'two']);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
   });
 
   it.each(['typescript', 'javascript'])('keeps expression-arrow call sites for %s', (language) => {
@@ -350,36 +302,7 @@ describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/G
     expect(expression?.callSites).toEqual(block?.callSites);
   });
 
-  it('resolves NodeNext JavaScript specifiers to TypeScript without overriding real JavaScript', async () => {
-    const summary = analyzeProject(
-      [
-        {
-          content: "import { helper } from './util.js'; export function run() { return helper(); }",
-          name: 'main.ts',
-          relativePath: 'src/main.ts',
-        },
-        {
-          content: 'export function helper() { return 1; }',
-          name: 'util.ts',
-          relativePath: 'src/util.ts',
-        },
-        {
-          // 同名函数使全局唯一匹配无法掩盖 import 解析失败。
-          content: 'export function helper() { return 2; }',
-          name: 'other.ts',
-          relativePath: 'src/other.ts',
-        },
-      ],
-      'typescript'
-    );
-    const result = await new CallGraphAnalyzer('/project').analyze(summary);
-    expect(result.callEdges).toContainEqual(
-      expect.objectContaining({
-        caller: 'src/main.ts::run',
-        callee: 'src/util.ts::helper',
-        resolveMethod: 'direct',
-      })
-    );
+  it('resolves NodeNext JavaScript specifiers to TypeScript without overriding real JavaScript', () => {
     const sourceFirst = new ImportPathResolver('/project', ['src/util.tsx', 'src/util.ts']);
     expect(sourceFirst.resolve('./util.js', 'src/main.ts')).toBe('src/util.tsx');
     const withJavaScript = new ImportPathResolver('/project', ['src/util.ts', 'src/util.js']);
@@ -387,98 +310,46 @@ describe('multi-file analyzeProject aggregation (RIC-4b — was RealProjectAst/G
     expect(withJavaScript.resolve('./util', 'src/main.ts')).toBe('src/util.ts');
   });
 
-  it('aggregates classes, cross-file inheritance, and metrics across TypeScript files', () => {
+  it('keeps per-file classes, inheritance edges, and metrics across TypeScript files', () => {
     expect(isAvailable()).toBe(true);
 
-    const result = analyzeProject(
-      [
-        {
-          content: 'export class Base { foo(): void {} }',
-          name: 'Base.ts',
-          relativePath: 'src/Base.ts',
-        },
-        {
-          content:
-            'import { Base } from "./Base";\nexport class Derived extends Base { bar(): void {} baz(): void {} }',
-          name: 'Derived.ts',
-          relativePath: 'src/Derived.ts',
-        },
-      ],
+    const base = analyzeFile('export class Base { foo(): void {} }', 'typescript');
+    const derived = analyzeFile(
+      'import { Base } from "./Base";\nexport class Derived extends Base { bar(): void {} baz(): void {} }',
       'typescript'
     );
 
-    expect(result.fileCount).toBe(2);
-    // Classes from BOTH files are aggregated.
-    expect(result.classes.map((cls) => cls.name).sort()).toEqual(['Base', 'Derived']);
-    expect(result.classes.find((cls) => cls.name === 'Derived')?.superclass).toBe('Base');
-    // Inheritance edge spans the two files.
-    expect(result.inheritanceGraph).toContainEqual({
+    expect(base?.classes.map((cls) => cls.name)).toEqual(['Base']);
+    expect(derived?.classes.map((cls) => cls.name)).toEqual(['Derived']);
+    expect(derived?.classes[0]?.superclass).toBe('Base');
+    // 继承边由声明所在文件给出；跨文件汇总属于索引层，不再由 AST 层聚合。
+    expect(derived?.inheritanceGraph).toContainEqual({
       from: 'Derived',
       to: 'Base',
       type: 'inherits',
     });
-    // Aggregated project metrics.
-    expect(result.projectMetrics.totalClasses).toBe(2);
-    expect(result.projectMetrics.totalMethods).toBe(3);
-    expect(result.fileSummaries).toHaveLength(2);
-    expect(typeof result.patternStats).toBe('object');
+    expect(base?.metrics.methodCount).toBe(1);
+    expect(derived?.metrics.methodCount).toBe(2);
   });
 
-  it('prioritizes root-relative source directories when call analysis is sampled', async () => {
-    const files = Array.from({ length: 500 }, (_, i) => ({
-      content: 'function helper() {} export function run() { helper(); }',
-      name: `fixture-${i}.ts`,
-      relativePath: `test/fixture-${i}.ts`,
-    }));
-    files.push({
-      content: 'function critical() {} export function run() { critical(); }',
-      name: 'critical.ts',
-      relativePath: 'src/critical.ts',
-    });
-    const summary = analyzeProject(files, 'typescript');
-    const result = await new CallGraphAnalyzer('/project').analyze(summary);
-    expect(result.stats.tier).toBe('sampled');
-    expect(result.stats.filesProcessed).toBe(500);
-    expect(result.callEdges.some((edge) => edge.file === 'src/critical.ts')).toBe(true);
-  });
-
-  it('aggregates structs and interfaces across Go files', () => {
-    const result = analyzeProject(
-      [
-        {
-          content:
-            'package demo\n\ntype Engine struct { addr string }\n\nfunc (e *Engine) Run() {}\n',
-          name: 'engine.go',
-          relativePath: 'engine.go',
-        },
-        {
-          content:
-            'package demo\n\ntype Handler interface { Serve() }\n\ntype Router struct {}\n\nfunc (r *Router) Add() {}\n',
-          name: 'router.go',
-          relativePath: 'router.go',
-        },
-      ],
+  it('extracts structs and interfaces from each Go file', () => {
+    const engine = analyzeFile(
+      'package demo\n\ntype Engine struct { addr string }\n\nfunc (e *Engine) Run() {}\n',
+      'go'
+    );
+    const router = analyzeFile(
+      'package demo\n\ntype Handler interface { Serve() }\n\ntype Router struct {}\n\nfunc (r *Router) Add() {}\n',
       'go'
     );
 
-    expect(result.fileCount).toBe(2);
-    expect(result.classes.map((cls) => cls.name).sort()).toEqual(['Engine', 'Router']);
-    expect(result.protocols.map((proto) => proto.name)).toContain('Handler');
-    expect(result.projectMetrics.totalClasses).toBe(2);
-    expect(result.fileSummaries).toHaveLength(2);
+    expect(engine?.classes.map((cls) => cls.name)).toEqual(['Engine']);
+    expect(router?.classes.map((cls) => cls.name)).toEqual(['Router']);
+    expect(router?.protocols.map((proto) => proto.name)).toContain('Handler');
   });
 
   it('degrades gracefully for a language with no AST plugin (was the Ruby case)', () => {
     // Single-file analysis returns null (no plugin) rather than throwing.
     expect(analyzeFile('puts "hi"', 'ruby')).toBeNull();
-    // Multi-file analysis skips unsupported files and yields an empty aggregation.
-    const result = analyzeProject(
-      [{ content: 'puts "hi"', name: 'app.rb', relativePath: 'app.rb' }],
-      'ruby'
-    );
-    expect(result.fileCount).toBe(0);
-    expect(result.classes).toEqual([]);
-    expect(result.fileSummaries).toEqual([]);
   });
 });
 

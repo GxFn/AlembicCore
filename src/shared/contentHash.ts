@@ -6,7 +6,6 @@
  *
  * 消费者：
  *   - FileDiffSnapshotStore: 文件快照 diff
- *   - GraphCache: SPM/AST 图缓存
  *   - IndexingPipeline: 向量索引去重
  *   - KnowledgeFileWriter: Recipe 内容完整性
  *

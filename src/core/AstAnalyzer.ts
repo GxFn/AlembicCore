@@ -140,12 +140,6 @@ interface InheritanceEdge {
   type: string;
 }
 
-interface PatternStatEntry {
-  count: number;
-  files: string[];
-  instances: AstPatternRecord[];
-}
-
 interface AstMetrics {
   methodCount: number;
   avgBodyLines: number;
@@ -153,21 +147,6 @@ interface AstMetrics {
   maxNestingDepth: number;
   longMethods: AstMethodRecord[];
   complexMethods: AstMethodRecord[];
-}
-
-interface AggregatedMetrics {
-  totalMethods: number;
-  totalClasses: number;
-  avgMethodsPerClass: number;
-  maxNestingDepth: number;
-  longMethods: { name: string; className?: string; lines?: number; file?: string; line?: number }[];
-  complexMethods: {
-    name: string;
-    className?: string;
-    complexity?: number;
-    file?: string;
-    line?: number;
-  }[];
 }
 
 interface AstFileSummary {
@@ -186,10 +165,6 @@ interface AstFileSummary {
   metrics: AstMetrics;
 }
 
-interface FileSummaryEntry extends AstFileSummary {
-  file: string;
-}
-
 interface AnalyzeFileOptions {
   extractCallSites?: boolean;
   /** 独立观察真实语法完整性，保留既有摘要字段与持久化形态。 */
@@ -200,31 +175,9 @@ interface AnalyzeFileOptions {
   onCallSiteEvidence?: (facts: { callSites: CallSiteInfo[]; complete: boolean }) => void;
 }
 
-interface AnalyzeProjectOptions {
-  preprocessFile?: (content: string, ext: string) => { content: string; lang?: string } | null;
-}
-
-interface FileInput {
-  name: string;
-  relativePath: string;
-  content: string;
-}
-
 interface ContextFilter {
   forbiddenContext?: string;
   requiredContext?: string;
-}
-
-interface ProjectAnalysisResult {
-  lang: string;
-  fileCount: number;
-  classes: AstClassRecord[];
-  protocols: AstProtocolRecord[];
-  categories: AstCategoryRecord[];
-  inheritanceGraph: InheritanceEdge[];
-  patternStats: Record<string, PatternStatEntry>;
-  projectMetrics: AggregatedMetrics;
-  fileSummaries: FileSummaryEntry[];
 }
 
 // ──────────────────────────────────────────────────────────────────
@@ -392,188 +345,6 @@ function analyzeFile(
   } finally {
     tree.delete();
   }
-}
-
-/**
- * 批量分析多文件，返回项目级汇总
- * @param files
- * @param | null }} [options]
- */
-function analyzeProject(
-  files: FileInput[],
-  lang: string,
-  options: AnalyzeProjectOptions
-): ProjectAnalysisResult {
-  const fileSummaries: FileSummaryEntry[] = [];
-  const allClasses: AstClassRecord[] = [];
-  const allProtocols: AstProtocolRecord[] = [];
-  const allCategories: AstCategoryRecord[] = [];
-  const allMethods: AstMethodRecord[] = [];
-  const allPatterns: AstPatternRecord[] = [];
-  const allImports: { path: string; file: string }[] = [];
-  const preprocessFile = options?.preprocessFile;
-
-  for (const file of files) {
-    let { content } = file;
-    let fileLang = lang;
-
-    // SFC 预处理: .vue / .svelte 等文件 → 提取 <script> 块再交给 AST
-    if (preprocessFile) {
-      const ext = file.name ? `.${file.name.split('.').pop()}` : '';
-      const result = preprocessFile(content, ext);
-      if (result) {
-        content = result.content;
-        fileLang = result.lang || lang;
-      }
-    }
-
-    const summary = analyzeFile(content, fileLang);
-    if (!summary) {
-      continue;
-    }
-
-    fileSummaries.push({ file: file.relativePath, ...summary });
-    allClasses.push(...summary.classes.map((c) => ({ ...c, file: file.relativePath })));
-    allProtocols.push(...summary.protocols.map((p) => ({ ...p, file: file.relativePath })));
-    allCategories.push(...summary.categories.map((c) => ({ ...c, file: file.relativePath })));
-    allMethods.push(...summary.methods.map((m) => ({ ...m, file: file.relativePath })));
-    allPatterns.push(...summary.patterns.map((p) => ({ ...p, file: file.relativePath })));
-    allImports.push(...summary.imports.map((i) => ({ path: i, file: file.relativePath })));
-  }
-
-  // 将 methodCount 回写到 class 对象（方法按 className 分组统计）
-  const _methodCountByClass: Record<string, number> = {};
-  for (const m of allMethods) {
-    if (m.className && m.kind === 'definition') {
-      _methodCountByClass[m.className] = (_methodCountByClass[m.className] || 0) + 1;
-    }
-  }
-  for (const cls of allClasses) {
-    if (!cls.methodCount) {
-      cls.methodCount = _methodCountByClass[cls.name] || 0;
-    }
-  }
-
-  // 项目级继承图（跨文件合并）
-  const inheritanceGraph = _buildInheritanceGraph(allClasses, allProtocols, allCategories);
-
-  // 项目级模式统计
-  const patternStats: Record<string, PatternStatEntry> = {};
-  for (const p of allPatterns) {
-    if (!patternStats[p.type]) {
-      patternStats[p.type] = { count: 0, files: [], instances: [] };
-    }
-    patternStats[p.type].count++;
-    if (!patternStats[p.type].files.includes(p.file!)) {
-      patternStats[p.type].files.push(p.file!);
-    }
-    patternStats[p.type].instances.push(p);
-  }
-
-  // 项目级指标聚合
-  const projectMetrics = _aggregateMetrics(fileSummaries);
-
-  return {
-    lang,
-    fileCount: fileSummaries.length,
-    classes: allClasses,
-    protocols: allProtocols,
-    categories: allCategories,
-    inheritanceGraph,
-    patternStats,
-    projectMetrics,
-    fileSummaries,
-  };
-}
-
-/** 为 Agent 生成结构化上下文摘要（Markdown） */
-function generateContextForAgent(projectSummary: ProjectAnalysisResult): string {
-  const lines = ['## 项目代码结构分析（AST）', ''];
-
-  // 类型声明概览
-  const { classes, protocols, categories, inheritanceGraph, patternStats, projectMetrics } =
-    projectSummary;
-
-  lines.push(`### 代码规模`);
-  lines.push(`- 已分析文件: ${projectSummary.fileCount}`);
-  lines.push(`- 类/结构体: ${classes.length}`);
-  lines.push(`- 协议: ${protocols.length}`);
-  lines.push(`- Category/Extension: ${categories.length}`);
-  lines.push(`- 平均方法数/类: ${projectMetrics.avgMethodsPerClass.toFixed(1)}`);
-  lines.push(`- 最大嵌套深度: ${projectMetrics.maxNestingDepth}`);
-  lines.push('');
-
-  // 继承关系
-  if (inheritanceGraph.length > 0) {
-    lines.push(`### 继承关系图`);
-    const tree = _renderInheritanceTree(inheritanceGraph);
-    lines.push('```');
-    lines.push(tree);
-    lines.push('```');
-    lines.push('');
-  }
-
-  // 协议遵循
-  const conformances = classes.filter((c) => c.protocols && c.protocols.length > 0);
-  if (conformances.length > 0) {
-    lines.push(`### 协议遵循`);
-    for (const c of conformances.slice(0, 20)) {
-      lines.push(`- \`${c.name}\` → ${c.protocols!.map((p) => `\`${p}\``).join(', ')}`);
-    }
-    if (conformances.length > 20) {
-      lines.push(`- ... (共 ${conformances.length} 个)`);
-    }
-    lines.push('');
-  }
-
-  // Category
-  if (categories.length > 0) {
-    lines.push(`### Category / Extension`);
-    for (const cat of categories.slice(0, 15)) {
-      const methodNames = (cat.methods || [])
-        .slice(0, 5)
-        .map((m) => m.name)
-        .join(', ');
-      lines.push(`- \`${cat.className}(${cat.categoryName})\` → ${methodNames || '(无方法)'}`);
-    }
-    if (categories.length > 15) {
-      lines.push(`- ... (共 ${categories.length} 个)`);
-    }
-    lines.push('');
-  }
-
-  // 设计模式
-  if (Object.keys(patternStats).length > 0) {
-    lines.push(`### 检测到的设计模式`);
-    for (const [type, stat] of Object.entries(patternStats)) {
-      lines.push(
-        `- **${type}**: ${stat.count} 处 (${stat.files.slice(0, 3).join(', ')}${stat.files.length > 3 ? '...' : ''})`
-      );
-    }
-    lines.push('');
-  }
-
-  // 代码质量指标
-  lines.push(`### 代码质量指标`);
-  if (projectMetrics.complexMethods.length > 0) {
-    lines.push(`- ⚠️ 高复杂度方法 (cyclomatic > 10):`);
-    for (const m of projectMetrics.complexMethods.slice(0, 5)) {
-      lines.push(
-        `  - \`${m.className || ''}${m.className ? '.' : ''}${m.name}\` (复杂度: ${m.complexity}, ${m.file}:${m.line})`
-      );
-    }
-  }
-  if (projectMetrics.longMethods.length > 0) {
-    lines.push(`- ⚠️ 过长方法 (> 50 行):`);
-    for (const m of projectMetrics.longMethods.slice(0, 5)) {
-      lines.push(
-        `  - \`${m.className || ''}${m.className ? '.' : ''}${m.name}\` (${m.lines} 行, ${m.file}:${m.line})`
-      );
-    }
-  }
-  lines.push('');
-
-  return lines.join('\n');
 }
 
 /** 检查 Tree-sitter 是否可用（至少有一个语言插件注册） */
@@ -809,41 +580,6 @@ function _buildInheritanceGraph(
   return edges;
 }
 
-function _renderInheritanceTree(edges: InheritanceEdge[]) {
-  // 找出根节点（只被继承不继承其他的）
-  const allTargets = new Set(edges.map((e) => e.to));
-  const allSources = new Set(edges.map((e) => e.from));
-  const roots = [...allTargets].filter((t) => !allSources.has(t)).slice(0, 5);
-
-  const childMap: Record<string, string[]> = {};
-  for (const e of edges) {
-    if (!childMap[e.to]) {
-      childMap[e.to] = [];
-    }
-    const label = e.type === 'conforms' ? `${e.from} ◇` : e.from;
-    if (!childMap[e.to].includes(label)) {
-      childMap[e.to].push(label);
-    }
-  }
-
-  const lines: string[] = [];
-  function render(name: string, prefix: string, isLast: boolean) {
-    const connector = prefix.length === 0 ? '' : isLast ? '└─ ' : '├─ ';
-    lines.push(prefix + connector + name);
-    const children = childMap[name] || [];
-    for (let i = 0; i < children.length && i < 10; i++) {
-      const childPrefix = prefix + (prefix.length === 0 ? '' : isLast ? '   ' : '│  ');
-      render(children[i], childPrefix, i === children.length - 1);
-    }
-  }
-
-  for (const root of roots.slice(0, 5)) {
-    render(root, '', true);
-  }
-
-  return lines.join('\n');
-}
-
 // ──────────────────────────────────────────────────────────────────
 // 内部实现 — 代码质量指标
 // ──────────────────────────────────────────────────────────────────
@@ -860,46 +596,6 @@ function _computeMetrics(root: TreeSitterNode, lang: string, methods: AstMethodR
     maxNestingDepth: defs.length > 0 ? Math.max(...defs.map((m) => m.nestingDepth || 0)) : 0,
     longMethods: defs.filter((m) => (m.bodyLines || 0) > 50),
     complexMethods: defs.filter((m) => (m.complexity || 1) > 10),
-  };
-}
-
-function _aggregateMetrics(fileSummaries: AstFileSummary[]): AggregatedMetrics {
-  const allMethods = fileSummaries.flatMap((f) => f.methods.filter((m) => m.kind === 'definition'));
-  const allClasses = fileSummaries.flatMap((f) => f.classes);
-
-  const methodsByClass = new Map<string, number>();
-  for (const m of allMethods) {
-    if (m.className) {
-      methodsByClass.set(m.className, (methodsByClass.get(m.className) ?? 0) + 1);
-    }
-  }
-  const classCounts = [...methodsByClass.values()];
-
-  return {
-    totalMethods: allMethods.length,
-    totalClasses: allClasses.length,
-    avgMethodsPerClass:
-      classCounts.length > 0 ? classCounts.reduce((a, b) => a + b, 0) / classCounts.length : 0,
-    maxNestingDepth:
-      allMethods.length > 0 ? Math.max(...allMethods.map((m) => m.nestingDepth || 0)) : 0,
-    longMethods: allMethods
-      .filter((m) => (m.bodyLines || 0) > 50)
-      .map((m) => ({
-        name: m.name,
-        className: m.className,
-        lines: m.bodyLines,
-        file: m.file,
-        line: m.line,
-      })),
-    complexMethods: allMethods
-      .filter((m) => (m.complexity || 1) > 10)
-      .map((m) => ({
-        name: m.name,
-        className: m.className,
-        complexity: m.complexity,
-        file: m.file,
-        line: m.line,
-      })),
   };
 }
 
@@ -1314,8 +1010,6 @@ function checkProtocolConformance(
 
 export {
   analyzeFile,
-  analyzeProject,
-  generateContextForAgent,
   isAvailable,
   supportedLanguages,
   // registerLanguage 已在定义处 inline export，此处不再重复
@@ -1326,4 +1020,3 @@ export {
   // ASTChunker 使用的低级 API
   parseToTree,
 };
-export type { ProjectAnalysisResult };

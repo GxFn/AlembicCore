@@ -9,7 +9,6 @@ import {
 import type { RecipeProductionPort } from '../src/knowledge.js';
 import {
   buildProducerStyleGuide,
-  CodeEntityGraph,
   ConfidenceRouter,
   computeKnowledgeHash,
   getAgentAdapterFieldSpec,
@@ -84,7 +83,6 @@ describe('stable knowledge and dimension entrypoints', () => {
   });
 
   it('exposes high-reference knowledge services through the stable knowledge facade', () => {
-    expect(CodeEntityGraph).toBeDefined();
     expect(ConfidenceRouter).toBeDefined();
     expect(KnowledgeFileWriter).toBeDefined();
     expect(KnowledgeGraphService).toBeDefined();

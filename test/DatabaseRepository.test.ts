@@ -6,9 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { KnowledgeEntry } from '../src/domain/knowledge/KnowledgeEntry.js';
 import { DatabaseConnection } from '../src/infrastructure/database/DatabaseConnection.js';
 import { resetDrizzle } from '../src/infrastructure/database/drizzle/index.js';
-import { CodeEntityGraph } from '../src/knowledge.js';
-import { CodeEntityRepositoryImpl } from '../src/repository/code/CodeEntityRepository.js';
-import { KnowledgeEdgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeEdgeRepository.js';
 import { KnowledgeRepositoryImpl } from '../src/repository/knowledge/KnowledgeRepositoryImpl.js';
 import pathGuard from '../src/shared/PathGuard.js';
 
@@ -134,40 +131,5 @@ describe('DatabaseConnection and repository migration integration', () => {
       patterns: 1,
       facts: 0,
     });
-  });
-
-  it.each([
-    'getDescendants',
-    'getImpactRadius',
-  ] as const)('%s returns each diamond node once at its first breadth-first depth', async (query) => {
-    const edges = new KnowledgeEdgeRepositoryImpl(connection.getDrizzle());
-    for (const [fromId, toId] of [
-      ['B', 'A'],
-      ['C', 'A'],
-      ['D', 'B'],
-      ['D', 'C'],
-      ['A', 'D'],
-    ]) {
-      await edges.upsertEdge({
-        fromId,
-        fromType: 'class',
-        toId,
-        toType: 'class',
-        relation: 'inherits',
-      });
-    }
-    const graph = new CodeEntityGraph(
-      new CodeEntityRepositoryImpl(connection.getDrizzle()),
-      edges,
-      { projectRoot: tmpDir }
-    );
-
-    expect(await graph[query]('A', 'class', 3)).toEqual([
-      { id: 'B', type: 'class', relation: 'inherits', depth: 1 },
-      { id: 'C', type: 'class', relation: 'inherits', depth: 1 },
-      { id: 'D', type: 'class', relation: 'inherits', depth: 2 },
-    ]);
-    expect(await graph[query]('A', 'class', 1)).toHaveLength(2);
-    expect(await graph[query]('A', 'class', 0)).toEqual([]);
   });
 });

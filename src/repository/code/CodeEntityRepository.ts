@@ -1,7 +1,8 @@
 /**
  * CodeEntityRepository — AST 代码实体的仓储实现
  *
- * 从 CodeEntityGraph 提取的数据操作，使用 Drizzle 类型安全 API。
+ * code_entities 表的数据操作，使用 Drizzle 类型安全 API。
+ * 原上层 CodeEntityGraph 已移除（从未被生产构造）；本仓储因宿主清表流程仍在使用而保留。
  */
 
 import { and, count, eq, inArray, isNotNull, like, ne, sql } from 'drizzle-orm';

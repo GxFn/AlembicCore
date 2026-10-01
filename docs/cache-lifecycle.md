@@ -2,7 +2,6 @@
 
 `@alembic/core/infrastructure/cache` 保留 CacheService、cacheService、
 UnifiedCacheAdapter、initCacheAdapter、getCacheAdapter 和 CacheKeyBuilder 的既有出口。
-GraphCache 是另一种基于文件与内容 hash 的缓存，不共享内存 TTL Map。
 
 默认 UnifiedCacheAdapter 都借用模块级 cacheService；初始化 adapter 不转移缓存的
 所有权。单个宿主服务关闭时，不能直接销毁其他调用方仍在使用的共享缓存。

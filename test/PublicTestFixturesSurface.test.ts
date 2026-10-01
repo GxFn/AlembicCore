@@ -5,8 +5,6 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import {
   AST_LANGUAGE_TEST_PLUGINS,
   analyzeFile,
-  analyzeProject,
-  CallGraphAnalyzer,
   detectConflict,
   getAstLanguageTestPlugin,
   getDiscovererRegistry,
@@ -34,7 +32,7 @@ describe('public test-fixtures migration surface', () => {
     expect(prepared.failed).toEqual([]);
   });
 
-  it('exposes real AST project helpers through test-fixtures', () => {
+  it('exposes the real single-file AST helper through test-fixtures', () => {
     const fileSummary = analyzeFile(
       `
         export class FixtureService {
@@ -45,22 +43,9 @@ describe('public test-fixtures migration surface', () => {
       `,
       'typescript'
     );
-    const projectSummary = analyzeProject(
-      [
-        {
-          content: 'export class ProjectFixture { handle() { return 1; } }',
-          name: 'ProjectFixture.ts',
-          relativePath: 'src/ProjectFixture.ts',
-        },
-      ],
-      'typescript',
-      {}
-    );
 
     expect(isAvailable()).toBe(true);
     expect(fileSummary?.classes.some((item) => item.name === 'FixtureService')).toBe(true);
-    expect(projectSummary.fileCount).toBe(1);
-    expect(projectSummary.classes.some((item) => item.name === 'ProjectFixture')).toBe(true);
   });
 
   it('exposes discovery registry and parser helpers through test-fixtures', () => {
@@ -78,15 +63,13 @@ describe('public test-fixtures migration surface', () => {
     expect(RULE_TO_LANGUAGE.go_library).toBe('go');
   });
 
-  it('exposes analysis classes and language plugin fixtures without deep core imports', () => {
+  it('exposes import records and language plugin fixtures without deep core imports', () => {
     const importRecord = new ImportRecord('./service/UserService', {
       kind: 'named',
       symbols: ['UserService'],
     });
-    const analyzer = new CallGraphAnalyzer('/project');
 
     expect(importRecord.hasSymbol('UserService')).toBe(true);
-    expect(analyzer).toBeInstanceOf(CallGraphAnalyzer);
     expect(typeScriptAstPlugin.extractCallSites).toBeInstanceOf(Function);
     expect(getAstLanguageTestPlugin('typescript')).toBe(typeScriptAstPlugin);
     expect(AST_LANGUAGE_TEST_PLUGINS.go).toBe(goAstPlugin);

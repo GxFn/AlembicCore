@@ -1,4 +1,3 @@
-export * from './CodeEntityGraph.js';
 export * from './ConfidenceRouter.js';
 export * from './driftClassifier.js';
 export * from './KnowledgeFileWriter.js';

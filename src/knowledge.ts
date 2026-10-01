@@ -162,7 +162,6 @@ export { createFsSourceRefResolver } from './service/knowledge/FsSourceRefResolv
 export {
   type ApplyReport,
   type BlockedRecipeInfo,
-  CodeEntityGraph,
   ConfidenceRouter,
   type CreatedRecipeInfo,
   type CreateRecipeItem,

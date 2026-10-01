@@ -318,10 +318,8 @@ const requiredSubpathExports = {
   '@alembic/core/types': ['normalizeFileChangeEventSource'],
   '@alembic/core/test-fixtures': [
     'analyzeFile',
-    'analyzeProject',
     'AST_LANGUAGE_TEST_PLUGINS',
     'CapabilityProbe',
-    'CallGraphAnalyzer',
     'CORE_GRAMMAR_RESOURCE_FILES',
     'consumeCrossHarvestSemanticReviewFixtureV1',
     'detectConflict',
@@ -538,7 +536,6 @@ const requiredTypeDeclarations = {
     'CrossHarvestSemanticReviewFixtureResultV1',
     'DiscovererPreferenceData',
     'PrepareProjectAnalysisTestFixturesOptions',
-    'ProjectAnalysisResult',
     'SnapshotData',
     'TwoScaleSharedHarvestSemanticReviewFixtureResultV1',
     'TwoScaleSharedHarvestSemanticReviewFixtureV1',

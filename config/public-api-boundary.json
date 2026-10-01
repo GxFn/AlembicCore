@@ -142,25 +142,20 @@
           "targetFacade": "./test-fixtures",
           "symbols": [
             "analyzeFile",
-            "analyzeProject",
             "analyzeSourceFile",
             "isAvailable",
             "parseToTree"
           ],
-          "reason": "CO-5B exposes real AST test helpers through ./test-fixtures for downstream parser/project-analysis tests; product project-information queries still route through ./project-context."
+          "reason": "CO-5B exposes real single-file AST test helpers through ./test-fixtures for downstream parser tests; product project-information queries still route through ./project-context. The project-level analyzeProject aggregation was removed on 2026-10-01 (no production caller in any repository)."
         },
         "@alembic/core/core/analysis": {
           "decision": "consumer-ready-stable",
           "targetFacade": "./test-fixtures",
           "symbols": [
-            "CallGraphAnalyzer",
-            "CallEdgeResolver",
-            "DataFlowInferrer",
             "ImportPathResolver",
-            "ImportRecord",
-            "SymbolTableBuilder"
+            "ImportRecord"
           ],
-          "reason": "CO-5B exposes analysis classes through the test-only fixture facade so focused CallGraphAnalyzer tests can stop importing the transitional core/analysis route."
+          "reason": "CO-5B exposes import records and path resolution through the test-only fixture facade. The legacy call-graph engine (CallGraphAnalyzer, CallEdgeResolver, DataFlowInferrer, SymbolTableBuilder) was removed on 2026-10-01: no production caller in any repository; cross-file relations are owned by the source-graph index."
         },
         "@alembic/core/core/ast": {
           "decision": "consumer-ready-stable",
