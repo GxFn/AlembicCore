@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import { EXTENSION_PARSER_LANGUAGE } from '../../core/facts/parserLanguage.js';
 import {
   createSourceGraphDiagnostic,
@@ -42,7 +43,7 @@ import {
   detectChangedFiles,
   normalizeRepoPathList,
 } from './SourceGraphInventory.js';
-import { linkFile } from './SourceGraphLinker.js';
+import { linkFile, type SourceGraphLinkContext } from './SourceGraphLinker.js';
 
 export type {
   SourceGraphFreshnessReport,
@@ -121,7 +122,13 @@ export class SourceGraphIndexer {
     // - 文件集合变了：相对导入可能落到别的文件（目标消失/恢复、同名入口优先级变化），
     //   所有会做模块解析的文件都重来。
     // - 只有内容变了：直接导入它的文件，以及经 re-export 链拿到它声明的文件，调用目标可能变化。
-    const fileSetChanged = addedFiles.length > 0 || deletedFiles.length > 0;
+    // 上一代的别名解析读过的配置文件（tsconfig / jsconfig 及它们继承的配置）内容变了，
+    // 等同于文件集合变了：别名可能指向别处。新出现或被删除的配置已经算在文件集合变化里。
+    const baseModuleConfigFiles = readModuleConfigFiles(baseSnapshot.metadata);
+    const moduleConfigChanged = changedFiles.some((filePath) =>
+      baseModuleConfigFiles.includes(filePath)
+    );
+    const fileSetChanged = addedFiles.length > 0 || deletedFiles.length > 0 || moduleConfigChanged;
     const relinkCandidates = fileSetChanged
       ? inventory
           .filter((file) => LINKED_MODULE_EXTENSIONS.has(file.extension))
@@ -144,9 +151,11 @@ export class SourceGraphIndexer {
           deletedFiles,
           changedFiles,
           reparsedFiles,
-          reason: fileSetChanged
-            ? 'relative-import-targets-changed'
-            : 'imported-declarations-changed',
+          reason: moduleConfigChanged
+            ? 'module-config-changed'
+            : fileSetChanged
+              ? 'module-targets-changed'
+              : 'imported-declarations-changed',
         }
       );
     }
@@ -194,6 +203,7 @@ export class SourceGraphIndexer {
       changedFiles,
       deletedFiles,
       baseGenerationId: baseSnapshot.generationId,
+      baseModuleConfigFiles,
       preservedFiles,
       preservedSymbols,
       preservedEdges,
@@ -210,6 +220,8 @@ export class SourceGraphIndexer {
     changedFiles: string[];
     deletedFiles: string[];
     baseGenerationId?: string;
+    /** 上一代读过的模块配置；沿用的文件仍依赖它们，要随本代一起记下。 */
+    baseModuleConfigFiles?: string[];
     preservedFiles?: SourceFileNode[];
     preservedSymbols?: SourceSymbolNode[];
     preservedEdges?: SourceGraphEdge[];
@@ -243,19 +255,39 @@ export class SourceGraphIndexer {
       }
       return pending;
     };
+    const linkContext: SourceGraphLinkContext = {
+      generationId,
+      knownPaths,
+      factsOf,
+      moduleConfigs: new Map(),
+      moduleConfigFiles: new Set(),
+      readText: async (filePath) => {
+        const file = input.currentByPath.get(filePath);
+        return file
+          ? fs.readFile(file.absolutePath, { encoding: 'utf8', signal: options.signal })
+          : undefined;
+      },
+    };
     const linkedEdges: SourceGraphEdgeInput[] = [];
     for (const analyzed of analyzedFiles) {
       throwIfSourceReadAborted(options);
       if (!analyzed.facts) {
         continue;
       }
-      const linked = await linkFile(analyzed.facts, { generationId, knownPaths, factsOf });
+      const linked = await linkFile(analyzed.facts, linkContext);
       linkedEdges.push(...linked.edges);
       analyzed.file.metadata = { ...analyzed.file.metadata, callSites: linked.callSites };
       // 调用点只为链接而留；声明与导出表继续供后面的文件当链接目标。
       analyzed.facts.callSites = undefined;
     }
     throwIfSourceReadAborted(options);
+    // 沿用的文件没有重新链接，它们依赖的配置从上一代的记录带过来；已不在清单里的丢掉。
+    const moduleConfigFiles = [
+      ...new Set([
+        ...(input.baseModuleConfigFiles ?? []).filter((filePath) => knownPaths.has(filePath)),
+        ...linkContext.moduleConfigFiles,
+      ]),
+    ].sort();
     // 未重解析的文件仍保留上一代的解析缺口。只汇总本轮 diagnostics 会把
     // failed/skipped/partial 文件误报为 fresh；诊断从持久化 parseErrors 恢复，
     // 文件被重解析或删除后自然消失，不永久继承上一代整体降级状态。
@@ -323,6 +355,7 @@ export class SourceGraphIndexer {
           deletedFiles: input.deletedFiles,
           extractorVersion: input.options.extractorVersion,
           indexIdentity: input.options.indexIdentity,
+          ...(moduleConfigFiles.length > 0 ? { moduleConfigFiles } : {}),
           ...(external ? { externalLinker: external.metadata } : {}),
         },
       },
@@ -651,6 +684,13 @@ function edgeTouchesFiles(edge: SourceGraphEdge, impacted: Set<string>): boolean
     (edge.toFilePath !== undefined && impacted.has(edge.toFilePath)) ||
     (edge.siteFilePath !== undefined && impacted.has(edge.siteFilePath))
   );
+}
+
+function readModuleConfigFiles(metadata: Record<string, unknown>): string[] {
+  const value = metadata.moduleConfigFiles;
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 /** 外部引擎解析模块说明符时会读的配置文件。 */

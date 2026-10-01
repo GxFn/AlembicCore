@@ -2,7 +2,7 @@ import type { AnalysisBenchmarkFixture } from './types.js';
 
 /**
  * TSX + bundler 写法：相对导入不带扩展名，另有 tsconfig paths 别名。
- * 相对导入归自有的 import 绑定解析；`@/` 别名需要读 tsconfig，归外部索引器补位。
+ * 两者都归自有的 import 绑定解析：别名经 tsconfig 的 paths 落到项目内文件。
  */
 export const tsxBundlerFixture: AnalysisBenchmarkFixture = {
   name: 'tsx-bundler',
@@ -74,7 +74,7 @@ export function App() {
       at: 'app.useCounter',
       toFile: 'src/hooks/useCounter.ts',
       toSymbol: 'useCounter',
-      via: 'external',
+      via: 'import-binding',
     },
   ],
   mustNot: [

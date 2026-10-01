@@ -12,7 +12,8 @@ import {
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
-import { findRelativeModuleFile } from '../fileFlow/moduleFile.js';
+import { loadModuleAliasConfig } from '../fileFlow/moduleAliasConfig.js';
+import { findModuleFile } from '../fileFlow/moduleFile.js';
 import { normalizeFileSymbols } from '../fileSymbols/normalize.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
@@ -21,7 +22,8 @@ import type { SourceSliceFileFacts } from '../sourceSlice/contracts.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 
 /**
- * 给 JS/TS 的调用点补上经 import 绑定证明的跨文件目标。
+ * 给 JS/TS 的调用点补上经 import 绑定证明的跨文件目标。说明符可以是相对路径，
+ * 也可以是 tsconfig / jsconfig 的路径别名；包名没有项目内目标。
  *
  * 目标文件经同一个输入读取器按需读取：live 查询读当前文件，认证捕获读冻结字节并登记消费版本，
  * 重放时得到相同结果。只读真正被引用到的文件，不需要预先声明整个项目清单。
@@ -85,13 +87,21 @@ export async function linkImportBoundCalls(
           };
     },
     async resolveModule(importerFile, specifier) {
-      const found = await findRelativeModuleFile({
+      const found = await findModuleFile({
         importerFile,
         projectRoot: facts.projectRoot,
         specifier,
         extensions: MODULE_SOURCE_EXTENSIONS,
         reader,
         signal: context?.signal,
+        aliases: () =>
+          loadModuleAliasConfig({
+            importerFile,
+            projectRoot: facts.projectRoot,
+            reader,
+            signal: context?.signal,
+            analysis: context?.analysis,
+          }),
       });
       return found.status === 'found' ? found.filePath : undefined;
     },

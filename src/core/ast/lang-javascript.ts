@@ -88,7 +88,6 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
 
       ctx.methods.push({
         name,
-        nameIsPlaceholder: !nameNode,
         matchingRange: astNodeRange(child),
         declarationKind: name === 'constructor' ? 'constructor' : 'method',
         declarationRange: astNodeRange(child),
@@ -166,7 +165,7 @@ function _walkForThisAssignments(node: any, ctx: any, className: any, seen: Set<
               className,
               declarationKind: 'property',
               declarationRange: astNodeRange(child),
-              // 此属性来自真实constructor this赋值，供CodeGraph兼容补充判别，不靠显示文本猜测。
+              // 这个属性来自 constructor 里的 this 赋值（没有字段声明），符号事实据此标注声明来源。
               isConstructorAssignment: true,
               isStatic: false,
               isConstant: false,

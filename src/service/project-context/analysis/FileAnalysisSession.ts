@@ -13,7 +13,6 @@ import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
 import { linkImportBoundCalls } from './importBindingCalls.js';
-import { projectCallResolver } from './projectCallResolver.js';
 import type {
   ProjectContextFileAnalysis,
   ProjectContextSymbolExtractor,
@@ -47,6 +46,7 @@ export class FileAnalysisSession {
     { includeCalls: boolean; evidence: FileSyntaxEvidence }
   >();
   #sourceVersions = new WeakMap<SourceSliceFileFacts, SourceSliceFileFacts>();
+  readonly #shared = new Map<ProjectSourceReader, Map<string, Promise<unknown>>>();
 
   constructor(
     private readonly includeCallSites: boolean,
@@ -117,15 +117,38 @@ export class FileAnalysisSession {
     const entry = await this.extraction(facts, true, context);
     throwIfProjectContextAborted(context);
     // extraction(true) 同时生成两种投影，即使 flow unavailable 也返回完整诊断形态。
-    // 链接顺序即证据强度：先由自有的导入绑定链接给出有语法证明的跨文件目标（live 与认证会话都执行），
-    // 再交给外部后端补它没有解析的调用点；外部后端不得改写已有目标。
-    const flow = await linkImportBoundCalls(facts, structuredClone(entry.flow!), context);
-    throwIfProjectContextAborted(context);
-    const resolve = projectCallResolver(this.symbolExtractor);
-    return resolve ? resolve(facts, flow, context) : flow;
+    // 跨文件目标由自有的导入绑定链接给出（相对路径与路径别名），live 与认证会话都执行。
+    // 同文件目标在归一化时由词法链接给出。
+    return linkImportBoundCalls(facts, structuredClone(entry.flow!), context);
   }
 
-  /** 目标文件的声明与导出表；复用同版本AST证据，不触发单文件SDK，也不扩大源码清单。 */
+  /**
+   * 同一输入视图下由多个文件共用的派生事实（如某个目录适用的模块别名配置），本会话内只算一次。
+   * 以读取器身份分开缓存：记录与重放是不同的输入视图，重放必须自己再读一遍。
+   */
+  shared<T>(reader: ProjectSourceReader, key: string, create: () => Promise<T>): Promise<T> {
+    const identity = projectSourceReaderIdentity(reader);
+    let entries = this.#shared.get(identity);
+    if (!entries) {
+      entries = new Map();
+      this.#shared.set(identity, entries);
+    }
+    let pending = entries.get(key) as Promise<T> | undefined;
+    if (!pending) {
+      pending = create();
+      entries.set(key, pending);
+      const started = pending;
+      // 失败或取消不成为后续请求的缓存结果。
+      void pending.catch(() => {
+        if (entries.get(key) === started) {
+          entries.delete(key);
+        }
+      });
+    }
+    return pending;
+  }
+
+  /** 目标文件的声明与导出表；复用同版本AST证据，不扩大源码清单。 */
   declarations(
     facts: SourceSliceFileFacts,
     context?: { signal?: AbortSignal }
@@ -137,6 +160,7 @@ export class FileAnalysisSession {
 
   dispose(): void {
     this.#files.clear();
+    this.#shared.clear();
     this.#readers.clear();
     this.#extractions = new WeakMap();
     this.#syntax = new WeakMap();

@@ -303,7 +303,6 @@ function _parseTSMethod(node: any, className: any) {
 
   return {
     name,
-    nameIsPlaceholder: !nameNode,
     matchingRange: astNodeRange(node),
     declarationKind: name === 'constructor' ? 'constructor' : 'method',
     declarationRange: astNodeRange(node),

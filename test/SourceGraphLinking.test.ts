@@ -222,6 +222,123 @@ describe('source graph linking', () => {
     ]);
   });
 
+  it('resolves tsconfig path aliases and re-links when the config changes', async () => {
+    write({
+      'tsconfig.json': JSON.stringify({
+        extends: './config/base.json',
+        compilerOptions: { paths: { '@/*': ['src/*'], '#lib': ['src/lib/index.ts'] } },
+      }),
+      // baseUrl 来自被继承的配置，相对那份配置所在的目录。
+      'config/base.json': '{ "compilerOptions": { "baseUrl": ".." } } // 允许注释',
+      'src/app.ts': [
+        "import { format } from '@/lib/format';",
+        "import { helper } from '#lib';",
+        "import { external } from 'some-package';",
+        "import { missing } from '@/nowhere';",
+        'export function main() { format(); helper(); external(); missing(); }',
+      ].join('\n'),
+      'src/lib/format.ts': 'export function format() {}\n',
+      'src/lib/index.ts': 'export function helper() {}\n',
+      'src/alt/format.ts': 'export function format() {}\n',
+    });
+    // 配置文件在项目根，清单范围也取项目根。
+    const build = (generationId: string, incrementally = false) =>
+      incrementally
+        ? new SourceGraphIndexer(repository).buildIncremental({ projectRoot: tmpDir, generationId })
+        : new SourceGraphIndexer(repository).buildFull({ projectRoot: tmpDir, generationId });
+    const dependencies = (result: SourceGraphIndexBuildResult) =>
+      result.edges
+        .filter((edge) => edge.kind === 'imports')
+        .map((edge) => {
+          const resolution = edge.metadata.resolution as { strategy: string };
+          return `${edge.source} -> ${edge.toFilePath} [${resolution.strategy}]`;
+        })
+        .sort();
+
+    const result = await build('aliases');
+
+    expect(dependencies(result)).toEqual([
+      '#lib -> src/lib/index.ts [path-alias]',
+      '@/lib/format -> src/lib/format.ts [path-alias]',
+    ]);
+    expect(calls(result.edges)).toEqual([
+      'src/app.ts#main -> src/lib/format.ts#format [named-import / declaration]',
+      'src/app.ts#main -> src/lib/index.ts#helper [named-import / declaration]',
+    ]);
+
+    // 只改配置：app.ts 没变，但 `@/` 现在指向别的目录，它的出边要重算。
+    write({
+      'tsconfig.json': JSON.stringify({
+        compilerOptions: { baseUrl: '.', paths: { '@/lib/*': ['src/alt/*'] } },
+      }),
+    });
+    const next = await build('aliases-next', true);
+    expect(next.changedFiles).toEqual(['tsconfig.json']);
+    expect(dependencies(next)).toEqual(['@/lib/format -> src/alt/format.ts [path-alias]']);
+    expect(calls(next.edges)).toEqual([
+      'src/app.ts#main -> src/alt/format.ts#format [named-import / declaration]',
+    ]);
+  });
+
+  it('re-links when an inherited config with an arbitrary name changes', async () => {
+    write({
+      'tsconfig.json': '{ "extends": "./config/paths.json" }',
+      'config/paths.json': JSON.stringify({
+        compilerOptions: { baseUrl: '..', paths: { '@/*': ['src/*'] } },
+      }),
+      // 不参与别名解析的 JSON：它变化时不应该牵连任何源码文件。
+      'data/locale.json': '{ "title": "one" }',
+      'src/app.ts': "import { format } from '@/format';\nexport function main() { format(); }\n",
+      'src/format.ts': 'export function format() {}\n',
+      'alt/format.ts': 'export function format() {}\n',
+    });
+    const indexer = () => new SourceGraphIndexer(repository);
+    const first = await indexer().buildFull({ projectRoot: tmpDir, generationId: 'inherited' });
+    expect(calls(first.edges)).toEqual([
+      'src/app.ts#main -> src/format.ts#format [named-import / declaration]',
+    ]);
+    expect(first.snapshot.metadata.moduleConfigFiles).toEqual([
+      'config/paths.json',
+      'tsconfig.json',
+    ]);
+
+    write({ 'data/locale.json': '{ "title": "two" }' });
+    const unrelated = await indexer().buildIncremental({
+      projectRoot: tmpDir,
+      generationId: 'inherited-unrelated',
+    });
+    expect(unrelated.changedFiles).toEqual(['data/locale.json']);
+    // 沿用的 app.ts 仍依赖这两份配置，记录随代际带下去。
+    expect(unrelated.snapshot.metadata.moduleConfigFiles).toEqual([
+      'config/paths.json',
+      'tsconfig.json',
+    ]);
+    expect(calls(unrelated.edges)).toEqual(calls(first.edges));
+
+    // 被继承的配置改了别名目标：app.ts 没变，但它的出边要重算，结果与全量构建一致。
+    write({
+      'config/paths.json': JSON.stringify({
+        compilerOptions: { baseUrl: '..', paths: { '@/*': ['alt/*'] } },
+      }),
+    });
+    const next = await indexer().buildIncremental({
+      projectRoot: tmpDir,
+      generationId: 'inherited-next',
+    });
+    expect(next.changedFiles).toEqual(['config/paths.json']);
+    expect(calls(next.edges)).toEqual([
+      'src/app.ts#main -> alt/format.ts#format [named-import / declaration]',
+    ]);
+    const rebuilt = await indexer().buildFull({
+      projectRoot: tmpDir,
+      generationId: 'inherited-full',
+    });
+    expect(calls(rebuilt.edges)).toEqual(calls(next.edges));
+    expect(rebuilt.snapshot.metadata.moduleConfigFiles).toEqual(
+      next.snapshot.metadata.moduleConfigFiles
+    );
+  });
+
   it('answers callers and callees from the stored call edges', async () => {
     write({
       'src/app.ts': [

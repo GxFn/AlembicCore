@@ -17,7 +17,6 @@ interface AstSymbolRecord {
   isConstructorParam?: unknown;
   isConstructorAssignment?: unknown;
   matchingRange?: { startLine: number; endLine: number; startColumn?: number; endColumn?: number };
-  nameIsPlaceholder?: boolean;
   declarationKind?: unknown;
   declarationRange?: ExtractedFileSymbol['range'];
 }
@@ -99,6 +98,7 @@ export function extractFileSymbolsFromSource(
         }
       }
     }
+    distinguishSameLineDeclarations(symbols, lines);
     return {
       syntaxValid: facts.syntaxValid,
       syntaxFeatures: facts.syntaxFeatures,
@@ -188,7 +188,6 @@ function collectExtractedSymbols(input: {
       ...declarationEvidence(record),
       container,
       ...(record.matchingRange ? { matchingRange: { ...record.matchingRange } } : {}),
-      ...(record.nameIsPlaceholder ? { nameIsPlaceholder: true } : {}),
       ...(record.kind === 'declaration'
         ? { compatibilitySource: 'method-declaration' as const }
         : {}),
@@ -267,10 +266,45 @@ function collectSupplementalSymbols(input: {
         : declaration.name,
       range,
       signature: readSignature(input.lines, range),
-      supplement: true,
     });
   }
   return symbols;
+}
+
+/**
+ * 同名、同种类、行范围也相同的多个声明（写在同一行的 getter 与 setter、重载签名）
+ * 在行级范围下无法区分。只有这样的一组改用真实节点的列范围；其余符号保持行级范围，
+ * 它们的引用标识不因此变化。缺少列信息的声明不处理，由下游按相同记录合并。
+ */
+function distinguishSameLineDeclarations(symbols: ExtractedFileSymbol[], lines: string[]): void {
+  const groups = new Map<string, ExtractedFileSymbol[]>();
+  for (const symbol of symbols) {
+    const key = JSON.stringify([
+      symbol.kind,
+      symbol.qualifiedName ?? symbol.name,
+      symbol.range.startLine,
+      symbol.range.endLine,
+    ]);
+    const group = groups.get(key) ?? [];
+    group.push(symbol);
+    groups.set(key, group);
+  }
+  for (const group of groups.values()) {
+    const precise = group.map((symbol) => symbol.declarationRange);
+    const distinct = new Set(precise.map((range) => JSON.stringify(range)));
+    if (
+      group.length < 2 ||
+      distinct.size !== group.length ||
+      precise.some((range) => range?.startColumn === undefined || range.endColumn === undefined)
+    ) {
+      continue;
+    }
+    for (const symbol of group) {
+      const range = symbol.declarationRange as NonNullable<ExtractedFileSymbol['declarationRange']>;
+      symbol.range = { ...range };
+      symbol.signature = readSignature(lines, range);
+    }
+  }
 }
 
 function declarationEvidence(
@@ -348,10 +382,23 @@ function isExported(
   return exportedNames.has(name) || /\bexport\b/.test(line);
 }
 
-function readSignature(lines: readonly string[], range: { startLine: number; endLine: number }) {
-  const text = lines
-    .slice(range.startLine - 1, Math.min(range.endLine, range.startLine + 2))
-    .join(' ');
+function readSignature(
+  lines: readonly string[],
+  range: { startLine: number; endLine: number; startColumn?: number; endColumn?: number }
+) {
+  const selected = lines.slice(range.startLine - 1, Math.min(range.endLine, range.startLine + 2));
+  // 带列的范围只取声明自己的那一段，不带同一行上的其他声明。
+  if (
+    selected.length > 0 &&
+    range.endLine <= range.startLine + 2 &&
+    range.endColumn !== undefined
+  ) {
+    selected[selected.length - 1] = selected[selected.length - 1].slice(0, range.endColumn);
+  }
+  if (selected.length > 0 && range.startColumn !== undefined) {
+    selected[0] = selected[0].slice(range.startColumn);
+  }
+  const text = selected.join(' ');
   const normalized = text.replace(/\s+/g, ' ').trim();
   const firstBlock = normalized.split(/\s+\{|\s+=>/)[0]?.trim() ?? normalized;
   return firstBlock.length > 160 ? `${firstBlock.slice(0, 157)}...` : firstBlock;

@@ -4,4 +4,5 @@ export * from './exportTable.js';
 export * from './heritageLinker.js';
 export * from './importBindingLinker.js';
 export * from './lexicalLinker.js';
+export * from './moduleAliases.js';
 export * from './moduleTargets.js';

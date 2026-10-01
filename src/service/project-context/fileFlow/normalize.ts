@@ -4,6 +4,7 @@ import {
   findCallerSymbol,
   hasImplicitMemberCalls,
 } from '../../../core/linking/lexicalLinker.js';
+import type { ModuleAliasConfig } from '../../../core/linking/moduleAliases.js';
 import { MODULE_SOURCE_EXTENSIONS } from '../../../core/linking/moduleTargets.js';
 import type {
   FileSummary,
@@ -31,7 +32,7 @@ import type {
   FileFlowQueryFailure,
   ResolvedFileFlowImportTarget,
 } from './contracts.js';
-import { findRelativeModuleFile } from './moduleFile.js';
+import { findModuleFile } from './moduleFile.js';
 
 export interface NormalizedFileFlow {
   file: FileSummary;
@@ -59,6 +60,8 @@ export async function normalizeFileFlow(input: {
   declarationRanges?: WeakMap<SymbolSummary, SourceRangeSummary>;
   signal?: AbortSignal;
   sourceReader?: ProjectSourceReader;
+  /** 本文件适用的模块别名配置；只在遇到非相对说明符时才加载。 */
+  aliases?: () => Promise<ModuleAliasConfig | undefined>;
 }): Promise<NormalizedFileFlow> {
   throwIfProjectContextAborted(input);
   // 同次文件投影中的import/export-from共用目标观察，避免同一specifier重复读存在性。
@@ -71,7 +74,8 @@ export async function normalizeFileFlow(input: {
         input.facts,
         specifier,
         input.signal,
-        input.sourceReader ?? nodeProjectSourceReader
+        input.sourceReader ?? nodeProjectSourceReader,
+        input.aliases
       );
       targets.set(specifier, pending);
     } else {
@@ -432,9 +436,10 @@ async function resolveModuleTarget(
   facts: SourceSliceFileFacts,
   specifier: string,
   signal: AbortSignal | undefined,
-  reader: ProjectSourceReader
+  reader: ProjectSourceReader,
+  aliases: (() => Promise<ModuleAliasConfig | undefined>) | undefined
 ): Promise<ResolvedFileFlowImportTarget> {
-  const found = await findRelativeModuleFile({
+  const found = await findModuleFile({
     importerFile: facts.filePath,
     projectRoot: facts.projectRoot,
     specifier,
@@ -442,6 +447,7 @@ async function resolveModuleTarget(
     extensions: [...MODULE_SOURCE_EXTENSIONS, '.json'],
     reader,
     signal,
+    aliases,
   });
   if (found.status !== 'found') {
     return {

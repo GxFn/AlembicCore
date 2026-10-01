@@ -15,13 +15,15 @@ export interface ExtractedFileSymbol {
   qualifiedName?: string;
   signature?: string;
   container?: string;
-  /** 真实AST位置仅用于不同生产方的对应；兼容输出仍使用原range。 */
+  /** 声明节点的真实位置（含列），用于调用点归属；公开结果仍使用按行的 range。 */
   matchingRange?: SourceRangeSummary;
-  nameIsPlaceholder?: boolean;
-  /** 内部声明证据：SourceGraph可保留变量绑定种类；不改变公开SymbolSummary或ref。 */
+  /** 声明的语法种类与真实位置（含列）：索引据此保留绑定种类、区分同一行上的多个声明。 */
   declarationKind?: string;
   declarationRange?: SourceRangeSummary;
-  /** 内部兼容证据，由真实AST节点生产，不进入公开SymbolSummary或ref。 */
+  /**
+   * 声明来源：没有函数体的方法声明、由构造函数参数或 this 赋值得到的属性。
+   * 只进索引的符号元数据，不进入公开 SymbolSummary 或 ref。
+   */
   compatibilitySource?:
     | 'method-declaration'
     | 'constructor-parameter-property'
@@ -31,11 +33,6 @@ export interface ExtractedFileSymbol {
    * implements：实现的接口或遵循的协议。名字到声明的解析由链接层完成。
    */
   heritage?: { extends: string[]; implements: string[] };
-  /**
-   * 自有补充声明（顶层变量、接口成员）。SDK 符号合并时忽略这些记录：SDK 自己产出等价节点，
-   * 两份并存会被判成覆盖缺口。SDK 符号路线删除后此标记随之移除。
-   */
-  supplement?: boolean;
 }
 
 export interface FileSymbolsExtractionResult {
@@ -70,7 +67,7 @@ export interface ExtractedFileFlowExport {
 
 export interface ExtractedFileFlowCallSite {
   callee: string;
-  /** 同次冻结输入与实际SDK解析证明的跨文件目标，公开层仍使用原SymbolSummary/ref。 */
+  /** 导入绑定链接证明的跨文件目标；公开层仍使用原SymbolSummary/ref。 */
   resolvedTarget?: SymbolSummary;
   callerMethod: string;
   callerClass?: string;
@@ -98,7 +95,7 @@ export interface FileFlowExtractionResult {
   exports: ExtractedFileFlowExport[];
   callSites: ExtractedFileFlowCallSite[];
   unavailableReason?: string;
-  /** 含显式策略省略项的完整观察，用于证明SDK候选，不作为公开调用列表。 */
+  /** 含显式策略省略项的完整观察（噪声调用也在内），不作为公开调用列表。 */
   callSiteEvidence?: ExtractedFileFlowCallSite[];
   callSitesComplete?: boolean;
 }

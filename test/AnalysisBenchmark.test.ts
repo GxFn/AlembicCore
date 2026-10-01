@@ -37,8 +37,8 @@ const CURRENT_SCORES: Record<string, Record<BenchmarkLinkSource, [number, number
   },
   'tsx-bundler': {
     lexical: [0, 0],
-    'import-binding': [3, 3],
-    external: [0, 1],
+    'import-binding': [4, 4],
+    external: [0, 0],
     future: [0, 0],
   },
   'swift-app': {
@@ -69,8 +69,8 @@ const EXTERNAL_ENGINE_SCORES: typeof CURRENT_SCORES = {
   },
   'tsx-bundler': {
     lexical: [0, 0],
-    'import-binding': [3, 3],
-    external: [1, 1],
+    'import-binding': [4, 4],
+    external: [0, 0],
     future: [0, 0],
   },
   'swift-app': {

@@ -135,13 +135,12 @@
       "from": "src/service/source-graph/",
       "forbid": [
         "src/service/project-context/",
-        "src/service/code-analysis/",
         "src/core/AstAnalyzer",
         "src/core/analysis/",
         "src/core/ast/"
       ],
       "includeTypeOnly": true,
-      "reason": "The source-graph index is built from core/facts and core/linking only. The query protocol (service/project-context) may read the index, never the reverse; the index does not reach into the syntax layer or the external-engine session code either (2026-10-01 analysis re-architecture, P4a).",
+      "reason": "The source-graph index is built from core/facts and core/linking only. The query protocol (service/project-context) may read the index, never the reverse; the index does not reach into the syntax layer either (2026-10-01 analysis re-architecture, P4a).",
       "owner": "AlembicCore window"
     }
   ]

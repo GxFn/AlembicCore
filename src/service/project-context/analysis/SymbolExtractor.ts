@@ -3,9 +3,9 @@ import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
 import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
 
 /**
- * 单次分析会话固定的异步符号生产方。只消费已经读取的字符串，不自行扫描项目或替换 refs。
- * legacy 来自同一次原生 AST 投影；完整后端以它补足SDK未提供的精确调用语法证据。
- * 宿主 worker 的进程/资源生命周期由创建方拥有，会话只等待结果和传播取消。
+ * 分析会话的后端扩展点：接收自有文件事实（observed），返回会话实际采用的结果。
+ * 后端只消费已经读取的文本与事实，不自行扫描项目、不替换 refs。
+ * 当前唯一的实现是严格分析后端（strictAnalysisBackend）。
  */
 export interface ProjectContextSymbolExtractor {
   extractSymbols(
@@ -13,7 +13,7 @@ export interface ProjectContextSymbolExtractor {
     legacy: FileSymbolsExtractionResult,
     context?: { signal?: AbortSignal }
   ): Promise<FileSymbolsExtractionResult>;
-  /** 完整后端一次生产符号和flow；旧只符号注入者仍沿用上面的兼容接口。 */
+  /** 一次给出符号与 flow；只实现 extractSymbols 的后端沿用自有的 flow。 */
   analyzeFile?(
     input: FileAstInput,
     legacy: ProjectContextFileAnalysis,

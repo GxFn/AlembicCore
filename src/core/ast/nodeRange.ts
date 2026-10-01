@@ -1,4 +1,7 @@
-/** AST与CodeGraph对应使用的真实节点位置；行1-based，WASM字符串列为UTF-16的0-based偏移。 */
+/**
+ * 语法节点的真实位置：声明、调用点与外部引擎的边靠它对应。
+ * 行 1-based；列是 UTF-16 的 0-based 偏移（WASM 字符串的列）。
+ */
 export function astNodeRange(node: Pick<TreeSitterNode, 'startPosition' | 'endPosition'>) {
   return {
     startLine: node.startPosition.row + 1,

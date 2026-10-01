@@ -1,18 +1,25 @@
+import path from 'node:path';
 import type { ExtractedFileFlowCallSite, ExtractedFileSymbol } from '../../core/facts/contracts.js';
 import { JS_FAMILY_LANGUAGES } from '../../core/facts/parserLanguage.js';
 import {
+  aliasModuleBases,
   findCalleeSymbol,
   findCallerSymbol,
   findEnclosingDeclaration,
   hasImplicitMemberCalls,
   type ImportBindingStrategy,
+  inheritedModuleConfigPath,
   isCallSiteOwner,
   linkHeritage,
   linkImportBoundCallSites,
+  MODULE_CONFIG_FILE_NAMES,
   MODULE_SOURCE_EXTENSIONS,
+  type ModuleAliasConfig,
   type ModuleGraphAccess,
   moduleSourceCandidates,
+  parseModuleConfig,
   relativeModuleBase,
+  resolveModuleAliasConfig,
 } from '../../core/linking/index.js';
 import type { SourceGraphEdgeInput, SourceSymbolNode } from '../../domain/source-graph/index.js';
 import Logger from '../../infrastructure/logging/Logger.js';
@@ -25,6 +32,15 @@ export interface SourceGraphLinkContext {
   knownPaths: ReadonlySet<string>;
   /** 任意文件的链接事实。未完整解析的文件返回 undefined，它不能作为链接目标。 */
   factsOf(filePath: string): Promise<FileLinkFacts | undefined>;
+  /** 清单里某个文件的正文，用来读模块配置（tsconfig / jsconfig）；读不到返回 undefined。 */
+  readText(filePath: string): Promise<string | undefined>;
+  /** 本代共用：目录 → 它适用的别名配置。同一目录只读一次。 */
+  moduleConfigs: Map<string, Promise<ModuleAliasConfig | undefined>>;
+  /**
+   * 别名解析实际读过的配置文件（含经 extends 继承来的，名字不限于 tsconfig / jsconfig）。
+   * 它们的内容决定了链接结果：增量构建据此判断没改内容的源码要不要重新链接。
+   */
+  moduleConfigFiles: Set<string>;
 }
 
 export interface LinkedFile {
@@ -51,30 +67,39 @@ export async function linkFile(
   const jsFamily = JS_FAMILY_LANGUAGES.has(facts.parserLanguage);
   // 只有 JS 家族的模块说明符能按相对路径落到文件；其他语言的跨文件关系不在这里解析。
   const access = jsFamily ? moduleAccess(context) : undefined;
-  const edges = access ? linkModuleDependencies(facts, context, access.resolveFile) : [];
+  const edges = access ? await linkModuleDependencies(facts, context, access) : [];
   const heritage = access ? await linkTypeHierarchy(facts, context, access) : [];
   const calls = await linkCalls(facts, context, access);
   return { edges: [...edges, ...heritage, ...calls.edges], callSites: calls.callSites };
 }
 
-interface IndexModuleAccess extends ModuleGraphAccess {
-  resolveFile(importerFile: string, specifier: string): string | undefined;
-}
-
-/** 链接器看其他模块的通道：目标文件只能是本代清单里的文件，声明来自目标自己的事实。 */
-function moduleAccess(context: SourceGraphLinkContext): IndexModuleAccess {
-  const resolveFile = (importerFile: string, specifier: string): string | undefined => {
-    const base = relativeModuleBase(importerFile, specifier);
-    return base === undefined
-      ? undefined
-      : moduleSourceCandidates(base, MODULE_SOURCE_EXTENSIONS).find((candidate) =>
+/**
+ * 链接器看其他模块的通道：目标文件只能是本代清单里的文件，声明来自目标自己的事实。
+ * 相对说明符按导入方目录解析；非相对说明符经最近的 tsconfig / jsconfig 的别名配置解析，
+ * 配置不能把它映射到清单内文件的就是包名。
+ */
+function moduleAccess(context: SourceGraphLinkContext): ModuleGraphAccess {
+  return {
+    async resolveModule(importerFile, specifier) {
+      const relative = relativeModuleBase(importerFile, specifier);
+      const bases =
+        relative !== undefined
+          ? [relative]
+          : specifier.startsWith('.')
+            ? []
+            : aliasModuleBases(
+                (await aliasConfigFor(context, path.posix.dirname(importerFile))) ?? { paths: [] },
+                specifier
+              );
+      for (const base of bases) {
+        const target = moduleSourceCandidates(base, MODULE_SOURCE_EXTENSIONS).find((candidate) =>
           context.knownPaths.has(candidate)
         );
-  };
-  return {
-    resolveFile,
-    async resolveModule(importerFile, specifier) {
-      return resolveFile(importerFile, specifier);
+        if (target) {
+          return target;
+        }
+      }
+      return undefined;
     },
     async declarations(filePath) {
       const target = await context.factsOf(filePath);
@@ -87,6 +112,67 @@ function moduleAccess(context: SourceGraphLinkContext): IndexModuleAccess {
         : undefined;
     },
   };
+}
+
+/** 某个目录适用的别名配置：本目录的配置文件，没有就沿用上级目录的。 */
+function aliasConfigFor(
+  context: SourceGraphLinkContext,
+  directory: string
+): Promise<ModuleAliasConfig | undefined> {
+  const normalized = directory === '.' ? '' : directory;
+  let pending = context.moduleConfigs.get(normalized);
+  if (!pending) {
+    pending = (async () => {
+      for (const name of MODULE_CONFIG_FILE_NAMES) {
+        const configFile = normalized ? `${normalized}/${name}` : name;
+        const config = await readAliasConfig(context, configFile, 0);
+        if (config) {
+          return config;
+        }
+      }
+      return normalized === ''
+        ? undefined
+        : aliasConfigFor(context, path.posix.dirname(normalized));
+    })();
+    context.moduleConfigs.set(normalized, pending);
+  }
+  return pending;
+}
+
+async function readAliasConfig(
+  context: SourceGraphLinkContext,
+  configFile: string,
+  depth: number
+): Promise<ModuleAliasConfig | undefined> {
+  if (!context.knownPaths.has(configFile)) {
+    return undefined;
+  }
+  // 读不出内容的配置也算读过：它被修好之后，解析结果会不一样。
+  context.moduleConfigFiles.add(configFile);
+  const text = await context.readText(configFile);
+  const source = text === undefined ? undefined : parseModuleConfig(text);
+  if (!source) {
+    Logger.debug('Source graph ignores a module config it cannot read or parse', { configFile });
+    return undefined;
+  }
+  let inherited: ModuleAliasConfig | undefined;
+  for (const reference of source.extends) {
+    const parent = inheritedModuleConfigPath(configFile, reference);
+    // 只跟随清单内的相对 extends，最多四层；包名形式的共享预设不解析。
+    const loaded =
+      parent && depth < 4 ? await readAliasConfig(context, parent, depth + 1) : undefined;
+    if (loaded) {
+      inherited = {
+        ...(loaded.baseUrl === undefined
+          ? inherited?.baseUrl === undefined
+            ? {}
+            : { baseUrl: inherited.baseUrl }
+          : { baseUrl: loaded.baseUrl }),
+        paths: loaded.paths.length > 0 ? loaded.paths : (inherited?.paths ?? []),
+      };
+    }
+  }
+  return resolveModuleAliasConfig(configFile, source, inherited);
 }
 
 /** 声明对象 → 它在索引里的节点；目标可能在别的文件里。 */
@@ -154,12 +240,12 @@ async function linkTypeHierarchy(
   return [...edges.values()];
 }
 
-/** JS/TS 的相对导入与 re-export：每个（来源文件 → 目标文件）一条文件级依赖边。 */
-function linkModuleDependencies(
+/** JS/TS 的导入与 re-export：每个（来源文件 → 目标文件）一条文件级依赖边。 */
+async function linkModuleDependencies(
   facts: FileLinkFacts,
   context: SourceGraphLinkContext,
-  resolveModule: (importerFile: string, specifier: string) => string | undefined
-): SourceGraphEdgeInput[] {
+  access: ModuleGraphAccess
+): Promise<SourceGraphEdgeInput[]> {
   const dependencies = [
     ...facts.imports.map((item) => ({
       specifier: item.specifier,
@@ -173,7 +259,7 @@ function linkModuleDependencies(
   const byTarget = new Map<string, SourceGraphEdgeInput>();
   let unlinked = 0;
   for (const dependency of dependencies) {
-    const target = resolveModule(facts.filePath, dependency.specifier);
+    const target = await access.resolveModule(facts.filePath, dependency.specifier);
     if (!target) {
       unlinked += 1;
       continue;
@@ -209,7 +295,7 @@ function linkModuleDependencies(
         ...(dependency.reexport ? { reexport: true } : {}),
         resolution: {
           linker: 'module-import',
-          strategy: 'relative-specifier',
+          strategy: dependency.specifier.startsWith('.') ? 'relative-specifier' : 'path-alias',
           tier: 'certain',
         } satisfies EdgeResolution,
       },

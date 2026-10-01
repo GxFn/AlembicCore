@@ -76,7 +76,7 @@ type-only imports as well.
 | Syntax | `core/ast/` (parser runtime, language plugins, `extract/`) | nothing else in `core/` |
 | File facts | `core/facts/` (one source text → symbols, imports/exports, call sites) | `core/ast/` |
 | Linking | `core/linking/` (same-file linker, import-binding linker, heritage linker, module target candidates) | `core/facts/` |
-| Index | `service/source-graph/` (inventory, file analysis, linking into edges, external edge import, queries) | `core/facts/`, `core/linking/`, `infrastructure/analysis/` (external engine process) — never `service/project-context/` or `service/code-analysis/` |
+| Index | `service/source-graph/` (inventory, file analysis, linking into edges, external edge import, queries) | `core/facts/`, `core/linking/`, `infrastructure/analysis/` (external engine process) — never `service/project-context/` |
 | Facade | `core/AstAnalyzer.ts` | `core/ast/` (re-export only) |
 
 Linkers are pure functions: they reach other modules only through the
@@ -87,7 +87,8 @@ implementation left: its `index.ts` only forwards to `core/ast/extract/`.
 (`service/source-graph`) and the query protocol (`service/project-context`)
 both read the same facts and the same linkers instead of borrowing each
 other's internals. The index sits below the protocol: it must not import the
-protocol or the external-engine session code.
+protocol. The external engine (CodeGraph) is used by the index only; the
+protocol's sessions run on own facts and never start a process.
 
 ## Known exception (D3) — host-agent session ↔ persistence straddle
 

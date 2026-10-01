@@ -1,5 +1,7 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { loadPlugins } from '../src/core/ast/index.js';
 import { readFileSyntaxEvidence } from '../src/core/facts/fileSyntaxEvidence.js';
 import {
@@ -11,6 +13,8 @@ import {
   relativeModuleBase,
   resolveExportedDeclaration,
 } from '../src/core/linking/index.js';
+import type { FileFlowContext } from '../src/domain/project-context/index.js';
+import { ProjectContext } from '../src/project-context.js';
 
 /** 内存里的小项目：文件事实来自真实 AST，模块解析只看这组文件名。 */
 function project(files: Record<string, string>) {
@@ -217,5 +221,76 @@ describe('module target candidates', () => {
     expect(relativeModuleBase('src/app.ts', 'react')).toBeUndefined();
     expect(relativeModuleBase('src/app.ts', '@/lib')).toBeUndefined();
     expect(relativeModuleBase('app.ts', '../outside')).toBeUndefined();
+  });
+});
+
+describe('path aliases in ProjectContext file-flow', () => {
+  const roots: string[] = [];
+  afterEach(async () => {
+    await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  });
+
+  async function fileFlow(files: Record<string, string>, filePath: string) {
+    const projectRoot = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), 'alembic-alias-'))
+    );
+    roots.push(projectRoot);
+    for (const [name, text] of Object.entries(files)) {
+      await fs.mkdir(path.dirname(path.join(projectRoot, name)), { recursive: true });
+      await fs.writeFile(path.join(projectRoot, name), text);
+    }
+    const response = await ProjectContext.execute({
+      kind: 'file-flow',
+      scope: { projectRoot },
+      payload: { filePath },
+    });
+    const flow = response.data as FileFlowContext;
+    return {
+      imports: flow.imports.map(
+        (relation) => `${relation.to?.label}${relation.unresolved ? ` (${relation.reason})` : ''}`
+      ),
+      calls: flow.callees
+        .filter((relation) => !relation.unresolved)
+        .map(
+          (relation) => `${relation.from?.label} -> ${relation.to?.filePath}#${relation.to?.label}`
+        ),
+    };
+  }
+
+  const SOURCES = {
+    'packages/web/src/app.ts': [
+      "import { format } from '~/lib/format';",
+      "import { external } from 'some-package';",
+      'export function main() { format(); external(); }',
+    ].join('\n'),
+    'packages/web/src/lib/format.ts': 'export function format() {}\n',
+  };
+
+  it('resolves an alias through the nearest tsconfig, for both the import and the call', async () => {
+    const flow = await fileFlow(
+      {
+        ...SOURCES,
+        // 最近的配置在包目录里；paths 相对它自己的位置。
+        'packages/web/tsconfig.json': '{ "compilerOptions": { "paths": { "~/*": ["./src/*"] } } }',
+        'tsconfig.json': '{ "compilerOptions": { "paths": { "~/*": ["./elsewhere/*"] } } }',
+      },
+      'packages/web/src/app.ts'
+    );
+
+    expect(flow.imports).toEqual([
+      'packages/web/src/lib/format.ts',
+      'some-package (external-or-package)',
+    ]);
+    expect(flow.calls).toEqual(['main -> packages/web/src/lib/format.ts#format']);
+  });
+
+  it('treats the same specifier as a package when no config maps it into the project', async () => {
+    const flow = await fileFlow(SOURCES, 'packages/web/src/app.ts');
+
+    expect(flow.imports).toEqual([
+      '~/lib/format (external-or-package)',
+      'some-package (external-or-package)',
+    ]);
+    expect(flow.calls).toEqual([]);
   });
 });

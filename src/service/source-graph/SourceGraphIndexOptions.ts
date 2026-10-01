@@ -3,11 +3,11 @@ import path from 'node:path';
 import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
 import { EXTENSION_PARSER_LANGUAGE } from '../../core/facts/parserLanguage.js';
 import { MODULE_SOURCE_EXTENSIONS } from '../../core/linking/moduleTargets.js';
+import { getAnalysisEngineIdentity } from '../../infrastructure/analysis/AnalysisEngineIdentity.js';
 import {
   codeGraphRuntimeRoot,
   readCodeGraphNativeIdentity,
 } from '../../infrastructure/analysis/CodeGraphNativeIndex.js';
-import { getCodeGraphProjectContextIdentity } from '../../infrastructure/analysis/CodeGraphProcess.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { listProjectScopeFolders, type ProjectDescriptor } from '../../shared/ProjectScope.js';
@@ -18,10 +18,11 @@ import {
 } from './SourceGraphIndexIdentity.js';
 
 /**
- * 提取与链接规则的版本。v2：所有语言统一读文件事实，调用边由自有链接器写入。
- * 版本进入索引身份，旧版本的代际不会被增量沿用。
+ * 提取与链接规则的版本。版本进入索引身份，旧版本的代际不会被增量沿用。
+ * v2：所有语言统一读文件事实，调用边由自有链接器写入。
+ * v3：解析 tsconfig / jsconfig 的路径别名；同一行上的多个同名声明各有列范围。
  */
-export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v2';
+export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v3';
 // 启用外部引擎时，它的身份与本模块对其结果的采用规则一起进入提取版本。
 const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v4';
 
@@ -68,7 +69,6 @@ export interface NormalizedIndexOptions {
   maxParseBytes: number;
   signal?: AbortSignal;
   codeGraph?: SourceGraphIndexOptions['codeGraph'];
-  engineHash?: string;
   privateRuntimeRoot?: string;
   indexIdentity: SourceGraphIndexIdentity;
 }
@@ -125,23 +125,31 @@ export async function normalizeIndexOptions(
   const projectScope =
     explicitScope ??
     (folders.length > 0 ? input.projectScopeDescriptor?.projectScopeId : undefined);
+  // 没有外部引擎时，提取版本就是调用方给的版本（或索引规则版本），原样进入快照。
   let extractorVersion = input.extractorVersion?.trim() || SOURCE_GRAPH_INDEXER_VERSION;
-  let engineHash: string | undefined;
   let privateRuntimeRoot: string | undefined;
   if (input.codeGraph) {
-    // 先验证输入根存在，再允许worker创建私有目录；不能制造一个缺失的sourceRoot。
+    // 先验证输入根存在，再解析私有运行目录；不能制造一个缺失的sourceRoot。
     for (const sourceRoot of graphRoots) {
       await fs.realpath(sourceRoot);
     }
-    engineHash = (await getCodeGraphProjectContextIdentity()).engineHash;
     privateRuntimeRoot = await canonicalFuturePath(codeGraphRuntimeRoot(input.codeGraph.dataRoot));
-    const native = await readCodeGraphNativeIdentity();
+    // 外部引擎没装时身份里记为不可用：装上之后身份变化，代际重建并带上外部边。
+    const native = await readCodeGraphNativeIdentity().catch((error: unknown) => {
+      Logger.warn('Source graph external engine identity is unavailable', {
+        reason: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    });
+    // 启用外部引擎的索引给认证链路使用：自有分析引擎的身份（语法包）也进入提取版本，
+    // 与严格会话报告的 engineHash 是同一个值，宿主据此判断两者出自同一套分析能力。
     extractorVersion = [
       CODEGRAPH_PROJECTION_VERSION,
       EXTERNAL_EDGE_RULES_VERSION,
       extractorVersion,
-      engineHash,
-      native.workerHash,
+      (await getAnalysisEngineIdentity()).engineHash,
+      native ? `codegraph-${native.sdkVersion}` : 'codegraph-unavailable',
+      native?.workerHash ?? 'no-worker',
     ].join(':');
   }
   throwIfSourceReadAborted(input);
@@ -180,7 +188,6 @@ export async function normalizeIndexOptions(
     maxParseBytes,
     signal: input.signal,
     codeGraph: input.codeGraph,
-    engineHash,
     privateRuntimeRoot,
     indexIdentity,
   };

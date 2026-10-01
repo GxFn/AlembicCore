@@ -48,64 +48,64 @@ registry 也共用队列。取消排队不会越过仍在执行的前序请求�
 约定；旧扩展实例仍可用于实时查询，但不能自动获得完整输入捕获保证。会话期间替换
 reader 或追加未确认的发现器会使该次捕获失败。
 
-## CodeGraph 文件分析
+## 严格分析会话
 
-宿主可通过 `withCodeGraphProjectContextSession({ dataRoot, signal }, callback)` 创建
-真实 SDK 分析作用域。回调拿到原生 ProjectContext 执行器和 `{ engineHash, engine,
+宿主通过 `withCodeGraphProjectContextSession({ dataRoot, signal }, callback)` 创建认证捕获与
+图构建使用的分析作用域。回调拿到原生 ProjectContext 执行器和 `{ engineHash, engine,
 runtimeRoot }`；它保留完整输入记录能力，不能再包成未声明读取能力的任意执行器。
-该入口需要 Node.js 22.5+；既有普通 ProjectContext 入口仍使用原 AST 实现。
 
-当前固定官方 `@colbymchenry/codegraph@1.6.0`，在独立子进程设置官方
-`CODEGRAPH_KERNEL=0`，通过公开 `extractFromSource` 分析传入字符串。SDK只在
-`dataRoot/.asd/codegraph-sessions` 的唯一临时子目录内初始化，`index:false` 不创建活动
-源码全图。带有已声明捕获清单的会话另按下节运行私有项目解析。
-宿主必须将位于源码范围内的固定 runtimeRoot 加入 inventory 排除策略。
-退出时停止接单、排空已接受查询、关闭并等待进程退出，然后删除该临时子目录。
-超时或取消会终止在途 SDK 任务；作用域任何阶段的 owner 取消均不能发布成功。
-单个请求取消后先等待旧进程退出，健康owner的后续请求才可惰性重开同一身份的worker；
-不能把一个repo的deadline扩散为其它repo也被取消。worker同时启用SDK建议的
-`--liftoff-only`，在需要标志的早期Node 22/23版本显式启用`node:sqlite`，实际启动参数
-一并进入身份并在READY中核对。
+入口名字里的 CodeGraph 来自早期实现：那时会话在子进程里用 CodeGraph SDK 提取 JS/TS 符号，
+并在冻结输入上运行 SDK 的项目解析。现在会话的全部事实来自自有的文件事实（`core/facts`）与
+链接器（`core/linking`）：不启动进程、不使用 SDK、不需要预先声明源码清单。导出的名字与签名
+保持不变。CodeGraph 只在 SourceGraph 索引里作为外部链接来源使用（见"外部引擎的边"）。
 
-`getCodeGraphProjectContextIdentity()` 只读取 SDK/平台包版本、Node、worker字节和
-规范化策略身份，不启动进程。共享 Graph build 应在 acquire 前将 engineHash 放入缓存
-键，在真正的 build(ownerSignal) 回调中创建 SDK 作用域；不能让单个订阅者拥有共享 worker。
-认证 producer 应使用实际 engineHash 作为 parserHash。改变规范化或 AST 补充策略时，
-必须更新对应策略版本并复核兼容矩阵，不能沿用旧身份假称新引擎结果。
+与普通会话的区别只有一点：**不给部分结果**。认证捕获会把空结果当成"这个文件确实没有声明"，
+所以 JS/TS 文件出现下面两种情况时，file-symbols 与 file-flow 返回明确的 `query-unavailable`，
+而不是残缺的符号表：
 
-JS 家族的具名符号由CodeGraph节点提供事实，Alembic继续生成既有refs；同行
-同名节点不能按 SDK id 去重，确有碰撞时使用已验证的 UTF-16 列区分。AST通过真实节点位置
-对应跨行箭头绑定、私有方法占位；仅补已证实的声明方法、构造参数属性与 JS constructor
-this 属性。普通SDK声明丢失时明确返回不可用，不以全量旧结果掩盖。
+- 语法无法验证：文件带真实语法错误。语法包不认识但合法的类型层语法（`export type * from`、
+  类型实参里的 `import()` 类型）不算语法错误。
+- 声明覆盖不完整：`namespace` 成员与匿名 default 声明，这两种形式本层不提取成员。
 
-1.6.0 对匿名默认声明、namespace 的投影不完整，本入口按真实 AST 形态返回明确的覆盖
-不可用；语法错误也不能因 SDK `errors=[]` 被认证为空成功。导出标志、已有非碰撞范围与
-类别保留兼容语义。非JS语言和Guard目前继续使用原生产方。
-SourceGraph的JS/TS符号可按下节显式接入；不得把这些入口描述成全部AST或完整图索引已迁移。
+其他语言的语法包对合法源码也会报错，不据此判不可用；它们和 Guard 的行为与普通会话相同。
 
-file-flow从同一次SDK提取取得未解析的calls/instantiates候选，AST为同一文本位置提供
-实际调用范围、参数数量、await、receiver与词法owner。符号与flow共享内部完整文件分析
-入口；原有只符号的注入接口仍可用。SDK节点ID不能证明调用者身份：同行方法可能共用ID，
-匿名回调也可能归在SDK外层节点。完全等价的重复候选只有在AST位置和重数一致时才能采用，
-不能按遍历顺序配对；观察缺失或不一致时返回明确不可用。SDK 1.6未表达的JSX标签、主动
-省略的字面量receiver调用（例如数组的includes）仅通过对应AST语法形态补充，保留既有
-噪声策略；字面量调用也不能按方法裸名连到项目函数。
+`runtimeRoot` 是 `dataRoot/.asd/codegraph-sessions` 的 canonical 路径（`/var` 与
+`/private/var` 这类别名不能绕过私有目录边界），会话开始时创建。会话自己不往里写东西；索引
+接入外部引擎时在这里建临时镜像。宿主必须把位于源码范围内的 runtimeRoot 加入 inventory 排除
+策略。`privateDirectories` 在会话上只校验形式，目录发现的排除由 host port 负责（见"认证捕获
+里的目录视图与历史闭包"）。`timeoutMs` 已不使用。作用域任何阶段的 owner 取消都不能发布成功：
+开始前取消不创建目录，回调期间到达的取消在回调返回后抛出；回调结束后执行器不可再用。
 
-调用关系只在有语法证据时连接到symbol ref，证据分两类，见下节"调用链接"。未知receiver、
-参数遮蔽或歧义保留unresolved；真实顶层owner连接已有file ref。普通关系保留行级ref，
-同一ref对应多个真实调用位置时才附列消歧。callers/callees是同一文件观察的不同排序，
-不能视为跨文件反向调用索引，也不代表静态分析已证明运行时分派。
+`getCodeGraphProjectContextIdentity()` 返回自有分析引擎的身份：分析规则版本加全部语法包的
+内容哈希。它不含 Node 版本、平台或进程参数——同一套规则与语法包在任何宿主上给出相同结果，
+查询它也不启动进程。共享 Graph build 应在 acquire 前把 engineHash 放入缓存键；认证 producer
+用 engineHash 作为 parserHash。改变语法提取、文件事实或链接规则时必须提高分析规则版本
+（`infrastructure/analysis/AnalysisEngineIdentity` 的 `ANALYSIS_VERSION`），不能沿用旧身份。
 
-JS/TS imports/exports从同一棵已解析AST的模块语法节点生成，替代原文本扫描器。
-注释、字符串与模板正文不构成依赖；模板插值中的真实调用仍可提取。该投影不改变旧
-AstFileSummary或ImportRecord序列化形态，保留原解析预算与非JS生产方。
+### 符号与调用事实
 
-带来源specifier的重导出也建立文件依赖。file-flow保留其`exports`种类及原关系ID，
-通过同次查询的reader解析目标file ref；重导出不创建本地绑定，不能借同名私有函数造
-symbol端点。modules/layers/map只将这类exports纳入依赖，普通本地导出仍表示公共面。
-import与export-from共用一次目标观察，解析所需的存在性和不存在性都参与输入记录与重放。
-源码候选顺序由共享函数管理：真实`.js/.mjs/.cjs`优先，缺失时才映射到匹配TS源码；
-`feature.v2`等带点目录仍支持index入口，不能因点号被当作输出扩展名。
+符号、导入导出、调用点来自同一份文本的一次解析，symbols 与 flow 共享这次分析；原有只取符号
+的注入接口仍可用。公开符号保持既有的 ref 生成规则与按行的 range。同一行上同名同类的多个声明
+（getter 与 setter、写在一行的重载）用 UTF-16 列范围区分，签名也按列切出；没有碰撞的符号不带
+列。声明节点的语法种类、真实位置等内部证据不进入公开 SymbolSummary 或 ref。
+
+调用点带实际调用范围、参数数量、await、receiver 与词法拥有者，含 `new` 与 JSX 元素。调用关系
+只在有语法证据时连接到 symbol ref，证据的种类见下节"调用链接"。未知 receiver、参数遮蔽或歧义
+保留 unresolved，字面量上的方法调用（例如数组的 includes）不按方法裸名连到项目函数；真实顶层
+owner 连接已有 file ref。普通关系保留行级 ref，同一 ref 对应多个真实调用位置时才附列消歧，
+所以同一行上的两次相同调用各有自己的 ref。callers/callees 是同一文件观察的不同排序，不能视为
+跨文件反向调用索引，也不代表静态分析已证明运行时分派。
+
+JS/TS imports/exports 从同一棵已解析 AST 的模块语法节点生成。注释、字符串与模板正文不构成
+依赖；模板插值中的真实调用仍可提取。该投影不改变旧 AstFileSummary 或 ImportRecord 序列化
+形态，保留原解析预算与非 JS 生产方。
+
+带来源 specifier 的重导出也建立文件依赖。file-flow 保留其 `exports` 种类及原关系 ID，通过
+同次查询的 reader 解析目标 file ref；重导出不创建本地绑定，不能借同名私有函数造 symbol 端点。
+modules/layers/map 只将这类 exports 纳入依赖，普通本地导出仍表示公共面。import 与
+export-from 共用一次目标观察，解析所需的存在性和不存在性都参与输入记录与重放。源码候选顺序
+由共享函数管理：真实 `.js/.mjs/.cjs` 优先，缺失时才映射到匹配的 TS 源码；`feature.v2` 等带点
+目录仍支持 index 入口，不能因点号被当作输出扩展名。
 
 ## 调用链接
 
@@ -121,11 +121,19 @@ Python、Go、Rust 的成员调用必须写出接收者，裸调用不当成成�
 目标文件 → 导出表"找到声明。覆盖具名、default、namespace 成员、导入类的静态成员、`new`
 与 JSX 元素；跟随具名转发与 `export *`，上限 8 层。类型导入不是运行时绑定；参数或局部变量
 遮蔽时绑定范围不相等，不会连接。目标不唯一（同名的类与函数、多个 `export *` 命中不同声明）
-或 default 无法定位到声明时不产出目标，不按顺序或距离猜。只处理相对说明符。
+或 default 无法定位到声明时不产出目标，不按顺序或距离猜。
+
+说明符到文件的解析覆盖两种写法：相对路径，以及 tsconfig / jsconfig 的路径别名（`paths`、
+`baseUrl`）。别名取离导入文件最近的 `tsconfig.json`（其次 `jsconfig.json`），跟随相对路径的
+`extends`（含数组形式，最多四层），允许注释与尾随逗号；规则与 TypeScript 一致——`paths` 整体
+覆盖继承来的 `paths`，目标相对 `baseUrl`，没有 `baseUrl` 时相对声明它的配置文件。多个模式
+命中时取最具体的一个，目标按写出的顺序尝试。包名形式的 `extends`（共享预设）、workspace
+包名和 `package.json` 的 `exports` / `imports` 不解析，这类导入的调用保持 unresolved。
 
 导入绑定链接在普通实时查询和认证捕获里都执行，目标文件经同一个 reader 按需读取：实时查询
 读当前文件，捕获登记实际消费的源码版本，重放得到相同结果。它只读被引用到的文件，不需要
-预先声明项目源码清单。
+预先声明项目源码清单。别名配置同样经 reader 读取：读过的配置与"候选配置不存在"的观察都进入
+输入记录，一次会话内同一个 reader 对同一目录只解析一次。
 
 类型层级链接（JS/TS）：类与接口写出的父类型名字是模块作用域里的标识符，按同文件顶层声明或
 import 绑定（含类型导入、命名空间成员）找到声明。同名的本地声明与导入并存、表达式形式的父类
@@ -135,74 +143,29 @@ import 绑定（含类型导入、命名空间成员）找到声明。同名的�
 服务两个消费者：ProjectContext 的 `file-flow` 按需链接单个文件，SourceGraph 索引链接整个项目。
 `file-flow` 的调用方只认直接拥有者；索引另外把匿名回调、嵌套函数里的调用归到包住它的声明。
 
-## 冻结输入上的 CodeGraph 项目解析
+## 认证捕获里的目录视图与历史闭包
 
-本节的 SDK 项目解析只处理导入绑定链接没有解析的 import 调用点（tsconfig 路径别名、包入口）。
-相对导入的调用全部已有目标时不启动 SDK 项目分析；已有目标不会被 SDK 结果改写。
+认证捕获不运行任何 SDK 项目解析。跨文件目标由"调用链接"一节的链接器给出，目标文件与模块配置
+都经捕获的 reader 按需读取，读到的内容、目录观察与"不存在"的观察一起进入 input closure；
+Replay 缺少其中任何一条都会以 `PROJECT_SOURCE_INPUT_UNCAPTURED` 失败，不会把缺记录当成
+"没有这个文件"继续。Foundation 捕获仍先声明 `sourceFiles`——它是快照格式的一部分并参与
+hash——但分析不依赖这份清单，也没有按仓库的源文件数量或字节上限。
 
+宿主通过 `NodeProjectContextFoundationHostPortsOptions.privateDirectories` 声明自己的产物
+目录，例如认证存储：使用规范化的绝对路径，在捕获前创建固定目录，并纳入宿主 inventory 排除
+策略。同一数组也传给 `CodeGraphProjectContextOptions.privateDirectories`，会话只校验它的
+形式。host port 在原始 Recording/Replay reader 外提供目录发现投影，并为真实 Git status 添加
+literal exclude pathspec；策略以 `project-input-view` 配置记录保存，随源码 root 重绑定，
+Replay 使用捕获时的策略，不受本次 dataRoot 位置影响。discoverer、repo/module 目录扫描在首次
+查询前取得该策略；原始目录记录与显式文件读取保持完整，发布产物不会被回读为源码，也不会让
+无变化的源码从 clean 判为 dirty。不声明私有目录时保留原 Git 状态语义；历史闭包没有视图策略
+时重放原发现路径。这些目录必须由宿主拥有，不能覆盖源码根；Core 不创建或迁移宿主存储。新策略
+须进入宿主配置身份；历史产物的 freshness 应继续使用其已接受的版本，不能偷偷套用新排除。
 
-Main/Plugin 的原生 Foundation 捕获先声明 `sourceFiles`，再把同一 reader 交给分析会话。
-该清单只列出本次选定的源码身份；源码字节继续来自既有 blob/read receipts，配置和目录
-观察不会自动成为源码清单。旧 V1 快照没有该字段时保持旧 hash 和读取语义；普通 live
-单文件查询不因启用 SDK 自动扫描全仓。
-
-Core 在每个 reader/repo 内使用公开 `indexFiles` 与 `resolveReferences`。SDK 的同步
-文件读取通过独立进程内的冻结读集适配，tsconfig/extends/package、目录、stat、realpath
-和有限只读 Git 命令均进入同一 snapshot。缺项读取通过额外私有 pipe 同步等待父进程的
-同一个 reader 返回真实结果，然后继续当前图，不返回临时空值或假 ENOENT。
-每个 Recording/Replay 视图独立构图；Replay 缺记录、权限错误或取消立即终止项目。
-SDK 自己吞掉读取异常，也不能发布失败输入对应的结果。
-Git 验证使用当前验证 signal；重放不启动 Git。真实图数据库只存在私有临时目录。
-
-SDK 的目录发现视图会排除位于已绑定根内的宿主 `.asd` 状态目录；原始 reader 仍保存
-真实目录项，显式源码清单和文件读取不因此删减。排除策略以 `codegraph-input-view`
-配置记录，随源码 root 重绑定；Replay 使用捕获时的策略，不受本次 dataRoot 位置影响。
-Git 输入通过真实 literal exclude pathspec 获取，同一命令的不同策略有独立输入身份。
-新鲜度校验沿用已接受的策略并重新观察物理输入，不能用新宿主配置替换旧策略。
-缺少该配置的历史 V1 snapshot 保持原有发现语义，不为兼容而吞掉未捕获读取。
-runtime 根规范化真实路径，避免 `/var` 与 `/private/var` 等别名绕过私有目录边界。
-
-宿主还可通过 `CodeGraphProjectContextOptions.privateDirectories` 声明自己的产物目录，
-例如认证存储。使用规范化的绝对路径，在捕获前创建固定目录，并把同一数组传给
-`NodeProjectContextFoundationHostPortsOptions.privateDirectories`，同时纳入宿主 inventory
-排除策略。前者绑定 SDK 发现视图；后者在原始 Recording/Replay reader 外提供通用目录
-发现投影，并为真实 Git status 添加 literal exclude pathspec。通用投影以
-`project-input-view` 保存；SDK 的额外 runtime 排除保留 `codegraph-input-view` 兼容键。
-discoverer、repo/module 目录扫描在首次查询前取得该策略，原始目录记录与显式文件读取
-保持完整，发布产物不会被回读为源码或让无变化源码从 clean 判为 dirty。
-不声明私有目录时保留原 Git 状态语义；历史闭包无通用视图策略时重放原发现路径。
-这些目录必须由宿主拥有，不能覆盖源码根；Core 不创建或迁移宿主存储。新策略须进入
-宿主配置身份；历史产物的 freshness 应继续使用其已接受的版本，不能偷偷套用新排除。
-
-这是固定 SDK 1.6 的输入适配，**不是操作系统沙箱或任意插件执行环境**。不执行项目代码；
-未知 IO 形态、越出已接受 roots 的支持输入、宿主绝对路径配置和私有 runtime 输入明确
-不可用。当前每仓上限为 2,000 个 JS/TS 源文件、32 MiB 源码，单图最多 262,144 个去重
-动态支持读取。该累计上界来自旧 64 轮×4,096 的最大读取量；流式协议取消单批限制，
-并非保留旧两维准入规则。超限返回诊断，不裁剪后冒称完整。非 JS 生产方保持原行为。
-SDK timeout 保留剩余计算时间，在父端 reader 执行时暂停，不因每次读取而重置。
-父端取消会关闭通道、终止并等待 child 退出，迟到的旧 response 不进入新请求。
-
-实际跨文件目标仍投影到既有 file-flow：调用位置、词法 import 绑定、目标同文本符号和
-无碰撞身份同时成立时才接纳 SDK `import` 候选。参数遮蔽、type-only、动态 receiver、
-SDK 节点碰撞及猜测式全局匹配保持 unresolved。SDK 1.6 会把首个导出函数误作 default，
-因此默认导入还要求目标具有明确 default 导出证据；缺证据的默认重导出等形式不会补猜。
-
-不同仓库即使有相同相对路径也分开建图；导航字段按当前请求投影。缓存命中仍报告本次
-消费的源码版本，Replay 使用独立 reader 重新运行 SDK。新增目标不改变既有调用点 ref ID，
-只补 `to/targetRef`。这里仍不是跨仓反向 callers 索引，也不保证运行时动态分派正确。
-SourceGraph live SQLite 索引继续使用下节的独立能力边界。
-
-项目准备只建立 SDK 结果的文件/调用位置索引，Alembic 的目标声明证据按实际访问的目标
-文件加载。每个目标文件仍做完整 SDK 覆盖、碰撞和默认导出核验，不按单个候选省略这些
-检查。声明与符号/调用查询共用同 reader、同源码版本的紧凑语法证据；调用模式升级才
-补提取调用事实。自定义后端和公开 refs 都获得独立可变副本，不能修改会话内部缓存。
-
-已经声明的清单和 root 绑定可在 reader 生命周期内复用；每次命中仍检查取消及失败锁存，
-并保留完整源码消费收据。热查询不重新导出全部 blob；首次准备发送已有 snapshot，
-动态读取只传单项事实，由原 reader 记录，收尾再冻结完整闭包。一次 freshness 检查中的
-Git 请求共用一个只读 Replay 解码视图，实际 Git 重观察、输入 hash 校验和新闭包校验
-保持独立。新策略不执行旧 unknown 分叉，闭包可能比旧策略小；新引擎身份参与认证，
-不能用不同策略的 snapshotHash 相同作为正确性标准。
+早期版本的捕获会在闭包里留下两类观察：`codegraph-input-view`（SDK 发现视图的排除策略）与
+`codegraph-git`（SDK 发起的只读 Git 命令）。新捕获不再产生它们。带有这些记录的历史闭包仍可
+解码，`observeInputClosureHash` 仍按原策略重新观察物理输入，不用新的宿主配置替换旧策略。
+这些历史产物的 parserHash 是旧引擎的身份，与当前 engineHash 不同，宿主按既有规则重新捕获。
 
 ## SourceGraph 索引接入
 
@@ -225,8 +188,9 @@ controlRoot，保证各成员的文件路径相对于同一个根。
 
 索引按文件写三类边，全部带来源与分级（`metadata.resolution = { linker, strategy, tier }`）：
 
-- `imports`：JS/TS 的相对导入与 export-from，每个（来源文件 → 目标文件）一条，
+- `imports`：JS/TS 的相对导入、路径别名导入与 export-from，每个（来源文件 → 目标文件）一条，
   `metadata.dependencyKind` 记首条绑定的种类，任一条是 re-export 时 `metadata.reexport = true`。
+  `resolution.strategy` 是 `relative-specifier` 或 `path-alias`。
 - `extends` / `implements`：JS/TS 的父类型名字经同文件声明或 import 绑定连到声明。
   解析不到声明的父类型（包里的类型、其他语言）只把名字留在符号的 `metadata.heritage` 上。
 - `calls`：同文件链接与导入绑定链接的结果，一个调用点一条，带调用点位置。
@@ -281,14 +245,17 @@ CodeGraph 把 `extension T` 也当成类型节点——T 在项目里有唯一�
 也会报错，不据此判失败。`namespace` 成员与匿名 default 声明没有符号，文件照常入库并在文件元数据
 `uncoveredSyntax` 里记下。压缩或生成物形态的文件只留声明，记为 partial。
 
-增量构建的结果必须与同一文件集合上的全量构建相同。没改内容的文件在两种情况下也要重新链接：
-文件集合变化时，所有做相对导入解析的文件重来；只有内容变化时，重连直接导入它的文件，
+增量构建的结果必须与同一文件集合上的全量构建相同。没改内容的文件在三种情况下也要重新链接：
+文件集合变化时，所有做模块解析的文件重来；别名解析读过的配置文件内容变化时同样全部重来
+（代际元数据 `moduleConfigFiles` 记着读过哪些配置，含经 `extends` 继承、名字不限的那些；
+与别名无关的 JSON 变化不牵连源码）；只有源码内容变化时，重连直接导入它的文件，
 以及经 re-export 链拿到它声明的文件。沿用自上一代的文件被当作链接目标时按需重读声明，
 内容必须仍是上一代记录的那一份。来源文件被重新分析的边一律重算；指向内容已变文件的
 其余符号边不沿用。
 
 索引器、文件分析、链接、配置身份分别负责代际编排、单文件事实、出边、继承判定。身份包含
-SourceGraph自身提取版本、接入外部引擎时的 engineHash、有效scope/roots、扫描配置和解析预算。
+SourceGraph自身提取版本、有效scope/roots、扫描配置和解析预算；接入外部引擎时提取版本里另有
+自有分析引擎的 engineHash（与严格会话报告的是同一个值）、外部引擎版本与采用规则版本。
 旧快照缺少完整身份，或任一策略变化时，必须全量重提取；禁止保留旧符号却给新快照换版本标签。
 旧generation仍可读取，查询/分页预算和SQLite同步事务不变。
 

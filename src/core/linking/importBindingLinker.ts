@@ -37,7 +37,8 @@ const LINKABLE_SYNTAX = new Set(['call', 'new', 'jsx']);
  * 沿"说明符 → 目标文件 → 导出表"找到声明。
  *
  * 依据全部来自语法事实（词法绑定范围、import 绑定表、导出表），没有按名字相似度的推断；
- * 任何一步无法唯一确定就不产出目标。只处理相对说明符——包名与路径别名交给外部链接器。
+ * 任何一步无法唯一确定就不产出目标。说明符落到哪个文件由 access.resolveModule 决定
+ * （相对路径、路径别名）；它给不出文件的说明符（包名）没有目标。
  */
 export async function linkImportBoundCallSites(input: {
   filePath: string;
