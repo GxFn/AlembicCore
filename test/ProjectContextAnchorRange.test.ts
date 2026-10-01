@@ -51,7 +51,8 @@ describe('ProjectContext PCQ-4 anchor-range', () => {
         expect.arrayContaining(['WorkerService', 'WorkerService.run'])
       );
       expect(data.relationSites.map((relation) => relation.to?.label)).toEqual(
-        expect.arrayContaining(['runHelper', 'WorkerService.helper'])
+        // runHelper 是 helper 的导入别名；调用点现在指向真实声明。
+        expect.arrayContaining(['helper', 'WorkerService.helper'])
       );
       expectOnlySourceSliceRefs(data);
       expect(data.relatedRefs.some((ref) => ref.kind === 'file-symbol')).toBe(true);

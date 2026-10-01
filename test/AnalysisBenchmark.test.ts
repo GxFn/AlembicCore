@@ -24,20 +24,20 @@ import {
 const CURRENT_SCORES: Record<string, Record<BenchmarkLinkSource, [number, number]>> = {
   'ts-nodenext': {
     lexical: [2, 2],
-    'import-binding': [0, 7],
+    'import-binding': [7, 7],
     external: [0, 1],
     future: [0, 1],
   },
   'tsx-bundler': {
     lexical: [0, 0],
-    'import-binding': [0, 3],
+    'import-binding': [3, 3],
     external: [0, 1],
     future: [0, 0],
   },
   'swift-app': {
-    lexical: [0, 4],
+    lexical: [5, 5],
     'import-binding': [0, 0],
-    external: [0, 9],
+    external: [0, 8],
     future: [0, 2],
   },
   'objc-app': {

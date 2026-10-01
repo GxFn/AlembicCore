@@ -62,9 +62,10 @@ describe('ProjectContext PCQ-6 project map', () => {
       expect(envelope.errors).toBeUndefined();
       expect(data.repo).toMatchObject({ id: 'core', name: 'core', root: '.' });
       expect(data.modules.map((module) => module.name)).toEqual(['feature', 'shared']);
-      expect(data.dependencySummary).toMatchObject({ edgeCount: 2 });
+      // 两条 import 边之外，feature 里对导入函数 formatFeature 的调用也解析到了 shared，多一条调用边。
+      expect(data.dependencySummary).toMatchObject({ edgeCount: 3 });
       expect(data.dependencySummary.notes).toEqual(
-        expect.arrayContaining(['modules:2', 'internal-edges:2', 'external-dependencies:0'])
+        expect.arrayContaining(['modules:2', 'internal-edges:3', 'external-dependencies:0'])
       );
       expect(data.cycles).toHaveLength(1);
       expect(data.cycles[0].summary).toContain('feature');
@@ -78,6 +79,7 @@ describe('ProjectContext PCQ-6 project map', () => {
       expect(data.majorFlows.map((flow) => flow.summary)).toEqual(
         expect.arrayContaining([
           'feature -> shared via imports (1 relation)',
+          'feature -> shared via calls (1 relation)',
           'shared -> feature via imports (1 relation)',
         ])
       );

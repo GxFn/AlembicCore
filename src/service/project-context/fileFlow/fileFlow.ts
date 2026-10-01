@@ -73,6 +73,7 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     fileRef,
     imports: flowExtraction.imports,
     symbols: normalizedSymbols.symbols,
+    declarationRanges: normalizedSymbols.declarationRanges,
     signal: context?.signal,
     sourceReader: context?.sourceReader,
   });

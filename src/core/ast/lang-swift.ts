@@ -90,6 +90,13 @@ function _walkSwiftNode(node: any, ctx: any, parentClassName: any) {
         break;
       }
 
+      case 'init_declaration':
+      case 'deinit_declaration':
+      case 'subscript_declaration': {
+        ctx.methods.push(_parseSwiftSpecialMember(child, parentClassName));
+        break;
+      }
+
       case 'property_declaration': {
         const p = _parseSwiftProperty(child, parentClassName);
         if (p) {
@@ -260,6 +267,33 @@ function _parseSwiftFunction(node: any, className: any) {
     kind: 'definition',
   };
 }
+
+/**
+ * init / deinit / subscript：有函数体但没有名字的成员。它们是调用点的真实拥有者，
+ * 所以要作为成员出现在符号里；kind 不用 'definition'，不计入方法数量、模式检测与复杂度指标，
+ * 这些既有口径保持不变。
+ */
+function _parseSwiftSpecialMember(node: any, className: any) {
+  const body = node.namedChildren.find(
+    (c: any) => c.type === 'function_body' || c.type === 'computed_property'
+  );
+  return {
+    name: _SWIFT_SPECIAL_MEMBER_NAMES[node.type as keyof typeof _SWIFT_SPECIAL_MEMBER_NAMES],
+    className,
+    isClassMethod: false,
+    bodyLines: node.endPosition.row - node.startPosition.row + 1,
+    complexity: body ? _estimateComplexity(body) : 1,
+    nestingDepth: body ? _maxNesting(body, 0) : 0,
+    line: node.startPosition.row + 1,
+    kind: 'special-member',
+  };
+}
+
+const _SWIFT_SPECIAL_MEMBER_NAMES = {
+  init_declaration: 'init',
+  deinit_declaration: 'deinit',
+  subscript_declaration: 'subscript',
+} as const;
 
 function _parseSwiftProperty(node: any, className: any) {
   const name =
@@ -525,7 +559,46 @@ function extractCallSitesSwift(root: any, ctx: any, _lang: any) {
   }
 }
 
-/** 递归收集 Swift 中所有函数体作用域 */
+/** 类型声明体的节点类型；tree-sitter-swift 把 class/struct/enum/actor/extension 都归到 class_declaration。 */
+const _SWIFT_TYPE_BODIES = new Set([
+  'class_body',
+  'struct_body',
+  'enum_body',
+  'enum_class_body',
+  'extension_body',
+]);
+
+/** property_declaration 里不是初始值表达式的子节点。 */
+const _SWIFT_PROPERTY_NON_VALUE = new Set([
+  'modifiers',
+  'modifier',
+  'attribute',
+  'value_binding_pattern',
+  'pattern',
+  'simple_identifier',
+  'type_annotation',
+  'type_constraints',
+  'computed_property',
+  'willSet_didSet_block',
+]);
+
+/**
+ * 类型声明的名字。struct/class/enum/actor 直接带 type_identifier；
+ * extension 的被扩展类型在 user_type 里，取法与符号遍历（_parseSwiftExtension）一致，
+ * 这样扩展里的调用点与扩展方法的符号落在同一个类型名下。
+ */
+function _swiftDeclaredTypeName(node: any): string | undefined {
+  return (
+    node.namedChildren.find(
+      (c: any) => c.type === 'type_identifier' || c.type === 'simple_identifier'
+    )?.text ?? node.namedChildren.find((c: any) => c.type === 'user_type')?.text
+  );
+}
+
+/**
+ * 递归收集 Swift 中所有会执行代码的作用域：函数体、init/deinit、下标、
+ * 计算属性与属性观察器、属性初始值表达式。
+ */
 function _collectSwiftScopes(root: any) {
   const scopes: any[] = [];
 
@@ -533,49 +606,60 @@ function _collectSwiftScopes(root: any) {
     for (let i = 0; i < node.namedChildCount; i++) {
       const child = node.namedChild(i);
 
-      if (
-        child.type === 'class_declaration' ||
-        child.type === 'struct_declaration' ||
-        child.type === 'enum_declaration'
-      ) {
-        const name = child.namedChildren.find(
-          (c: any) => c.type === 'type_identifier' || c.type === 'simple_identifier'
-        )?.text;
-        const body = child.namedChildren.find(
-          (c: any) =>
-            c.type === 'class_body' ||
-            c.type === 'struct_body' ||
-            c.type === 'enum_body' ||
-            c.type === 'enum_class_body'
-        );
-        if (body) {
-          visit(body, name || className);
+      switch (child.type) {
+        case 'class_declaration':
+        case 'struct_declaration':
+        case 'enum_declaration':
+        case 'extension_declaration': {
+          const body = child.namedChildren.find((c: any) => _SWIFT_TYPE_BODIES.has(c.type));
+          if (body) {
+            visit(body, _swiftDeclaredTypeName(child) || className);
+          }
+          break;
         }
-      } else if (child.type === 'extension_declaration') {
-        const extName = child.namedChildren.find(
-          (c: any) => c.type === 'user_type' || c.type === 'type_identifier'
-        )?.text;
-        const body = child.namedChildren.find((c: any) => c.type === 'extension_body');
-        if (body) {
-          visit(body, extName || className);
+        case 'function_declaration': {
+          const name =
+            child.namedChildren.find((c: any) => c.type === 'simple_identifier')?.text || 'unknown';
+          const body = child.namedChildren.find((c: any) => c.type === 'function_body');
+          if (body) {
+            scopes.push({ body, className, methodName: name });
+          }
+          break;
         }
-      } else if (child.type === 'function_declaration') {
-        const name =
-          child.namedChildren.find((c: any) => c.type === 'simple_identifier')?.text || 'unknown';
-        const body = child.namedChildren.find((c: any) => c.type === 'function_body');
-        if (body) {
-          scopes.push({ body, className, methodName: name });
+        case 'init_declaration':
+        case 'deinit_declaration':
+        case 'subscript_declaration': {
+          const body = child.namedChildren.find(
+            (c: any) => c.type === 'function_body' || c.type === 'computed_property'
+          );
+          if (body) {
+            scopes.push({
+              body,
+              className,
+              methodName:
+                _SWIFT_SPECIAL_MEMBER_NAMES[child.type as keyof typeof _SWIFT_SPECIAL_MEMBER_NAMES],
+            });
+          }
+          break;
         }
-      } else if (child.type === 'property_declaration') {
-        // computed property with getter
-        const computed = child.namedChildren.find(
-          (c: any) => c.type === 'computed_property' || c.type === 'willSet_didSet_block'
-        );
-        if (computed) {
+        case 'property_declaration': {
           const propName = child.namedChildren.find(
             (c: any) => c.type === 'simple_identifier' || c.type === 'pattern'
           )?.text;
-          scopes.push({ body: computed, className, methodName: `get_${propName || 'prop'}` });
+          // 计算属性与观察器：拥有者就是属性本身（与属性符号同名，调用方可以对上）。
+          const computed = child.namedChildren.find(
+            (c: any) => c.type === 'computed_property' || c.type === 'willSet_didSet_block'
+          );
+          if (computed) {
+            scopes.push({ body: computed, className, methodName: propName || 'prop' });
+          }
+          // 初始值表达式里的调用（`let cache = Cache.build()`）同样归到属性。
+          for (const value of child.namedChildren) {
+            if (!_SWIFT_PROPERTY_NON_VALUE.has(value.type)) {
+              scopes.push({ body: value, className, methodName: propName || 'prop' });
+            }
+          }
+          break;
         }
       }
     }
@@ -586,6 +670,21 @@ function _collectSwiftScopes(root: any) {
 }
 
 /** 从 Swift function body 中递归提取调用点 */
+/** tree-sitter-swift 会把调用后缀挂到整个运算表达式上的那些表达式类型。 */
+const _SWIFT_OPERATOR_EXPRESSIONS = new Set([
+  'additive_expression',
+  'multiplicative_expression',
+  'comparison_expression',
+  'equality_expression',
+  'conjunction_expression',
+  'disjunction_expression',
+  'nil_coalescing_expression',
+  'range_expression',
+  'infix_expression',
+  'bitwise_operation',
+  'prefix_expression',
+]);
+
 function _extractSwiftCallSitesFromBody(bodyNode: any, className: any, methodName: any, ctx: any) {
   if (!bodyNode) {
     return;
@@ -616,7 +715,15 @@ function _extractSwiftCallSitesFromBody(bodyNode: any, className: any, methodNam
 
     // call_expression in Swift tree-sitter
     if (node.type === 'call_expression') {
-      const func = node.namedChildren[0];
+      let func = node.namedChildren[0];
+      // tree-sitter-swift 把 `a + b()`、`!check()` 解析成以整个运算表达式为被调的 call_expression；
+      // 真正被调的是最右操作数。左侧操作数里的调用照常收集。
+      while (func && _SWIFT_OPERATOR_EXPRESSIONS.has(func.type) && func.namedChildCount > 0) {
+        for (let i = 0; i < func.namedChildCount - 1; i++) {
+          walk(func.namedChild(i));
+        }
+        func = func.namedChild(func.namedChildCount - 1);
+      }
       if (!func) {
         walkChildren(node);
         return;
@@ -635,10 +742,16 @@ function _extractSwiftCallSitesFromBody(bodyNode: any, className: any, methodNam
 
       if (func.type === 'navigation_expression' || func.type === 'member_access') {
         // obj.method() or Type.staticMethod()
-        const parts = func.text.split('.');
-        if (parts.length >= 2) {
-          receiver = parts.slice(0, -1).join('.');
-          callee = parts[parts.length - 1];
+        const suffix = func.namedChildren.find((c: any) => c.type === 'navigation_suffix');
+        const member = suffix?.namedChildren.find((c: any) => c.type === 'simple_identifier');
+        let target = func.namedChildren[0];
+        // `!other.isReady()`：前缀运算符贴在接收者上，接收者是它的操作数。
+        while (target?.type === 'prefix_expression' && target.namedChildCount > 0) {
+          target = target.namedChild(target.namedChildCount - 1);
+        }
+        if (member && target && target !== suffix) {
+          receiver = target.text;
+          callee = member.text;
           if (receiver === 'self') {
             receiverType = className;
             callType = 'method';
@@ -651,6 +764,8 @@ function _extractSwiftCallSitesFromBody(bodyNode: any, className: any, methodNam
           } else {
             callType = 'method';
           }
+          // 链式调用的接收者本身可能含调用（`factory().send()`、`a.load().count`）。
+          walk(target);
         } else {
           callee = func.text;
           callType = 'function';
@@ -669,6 +784,8 @@ function _extractSwiftCallSitesFromBody(bodyNode: any, className: any, methodNam
       } else {
         callee = func.text?.slice(0, 80) || 'unknown';
         callType = 'function';
+        // 被调是任意表达式（闭包调用、下标结果等）时，其内部的调用仍要收集。
+        walk(func);
       }
 
       // Count arguments

@@ -7,9 +7,21 @@ const SOURCE_SUBSTITUTIONS: Readonly<Record<string, readonly string[]>> = {
   '.cjs': ['.cts'],
 };
 
+/** JS/TS 模块说明符可落到的源码扩展名；顺序即候选优先级。 */
+export const MODULE_SOURCE_EXTENSIONS: readonly string[] = [
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.mts',
+  '.cts',
+];
+
 /**
- * 文件观察与SDK索引共用的源码候选顺序。这里只处理已标准化的相对路径，
- * 范围、存在性和输入记录由调用方的reader/knownPaths负责，不暗读tsconfig或磁盘。
+ * 导入目标解析的唯一候选规则。这里只处理已标准化的相对路径，
+ * 范围、存在性和输入记录由调用方的 reader/knownPaths 负责，不暗读 tsconfig 或磁盘。
  */
 export function moduleSourceCandidates(
   requestedPath: string,
@@ -32,4 +44,16 @@ export function moduleSourceCandidates(
     ...extensions.map((candidate) => `${requestedPath}${candidate}`),
     ...extensions.map((candidate) => path.posix.join(requestedPath, `index${candidate}`)),
   ];
+}
+
+/**
+ * 相对说明符相对导入方文件的标准化基路径。
+ * 非相对说明符（包名、别名）和逃出项目根的路径返回 undefined：它们不属于相对导入解析。
+ */
+export function relativeModuleBase(importerFile: string, specifier: string): string | undefined {
+  if (!specifier.startsWith('./') && !specifier.startsWith('../') && specifier !== '.') {
+    return undefined;
+  }
+  const base = path.posix.normalize(path.posix.join(path.posix.dirname(importerFile), specifier));
+  return base === '..' || base.startsWith('../') || path.posix.isAbsolute(base) ? undefined : base;
 }

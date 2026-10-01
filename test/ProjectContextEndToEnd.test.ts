@@ -569,8 +569,9 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
         root: 'App',
       });
       expect(repoData.commands.map((command) => command.name)).toEqual(['build', 'test']);
+      // import 边加上经导入绑定解析出的跨模块调用边。
       expect(repoData.mapSummary).toMatchObject({
-        dependencyEdgeCount: 1,
+        dependencyEdgeCount: 2,
         moduleCount: 2,
       });
       expect(repoData.nextRefs.some((ref) => ref.kind === 'map')).toBe(true);
@@ -972,8 +973,9 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
       expect(space.errors).toBeUndefined();
       expect(spaceData.activeRepo?.id).toBe(appRepoRef.id);
       expect(repo.errors).toBeUndefined();
+      // import 边加上经导入绑定解析出的跨模块调用边。
       expect(repoData.mapSummary).toMatchObject({
-        dependencyEdgeCount: 1,
+        dependencyEdgeCount: 2,
         moduleCount: 2,
       });
     });

@@ -1,4 +1,10 @@
-import path from 'node:path';
+import { resolveAstParserLanguage } from '../../../core/facts/parserLanguage.js';
+import {
+  findCalleeSymbol,
+  findCallerSymbol,
+  hasImplicitMemberCalls,
+} from '../../../core/linking/lexicalLinker.js';
+import { MODULE_SOURCE_EXTENSIONS } from '../../../core/linking/moduleTargets.js';
 import type {
   FileSummary,
   ProjectContextRef,
@@ -10,7 +16,6 @@ import type {
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
-import { moduleSourceCandidates } from '../../code-analysis/moduleSourceCandidates.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileFlowRelationRef } from '../shared/fileFlow-moduleLayers/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
@@ -26,6 +31,7 @@ import type {
   FileFlowQueryFailure,
   ResolvedFileFlowImportTarget,
 } from './contracts.js';
+import { findRelativeModuleFile } from './moduleFile.js';
 
 export interface NormalizedFileFlow {
   file: FileSummary;
@@ -49,6 +55,8 @@ export async function normalizeFileFlow(input: {
   exports: readonly ExtractedFileFlowExport[];
   callSites: readonly ExtractedFileFlowCallSite[];
   symbols: readonly SymbolSummary[];
+  /** 公开符号对应的真实声明范围，见 normalizeFileSymbols。 */
+  declarationRanges?: WeakMap<SymbolSummary, SourceRangeSummary>;
   signal?: AbortSignal;
   sourceReader?: ProjectSourceReader;
 }): Promise<NormalizedFileFlow> {
@@ -262,10 +270,25 @@ function normalizeCallSites(input: {
   fileRef: ProjectContextRef;
   callSites: readonly ExtractedFileFlowCallSite[];
   symbols: readonly SymbolSummary[];
+  declarationRanges?: WeakMap<SymbolSummary, SourceRangeSummary>;
 }): RelationSummary[] {
+  // 链接用带真实声明范围的视图，产出仍是原来的公开符号对象。
+  const linkable = input.symbols.map((summary) => ({
+    name: summary.name,
+    qualifiedName: summary.qualifiedName,
+    container: summary.container,
+    range: summary.range,
+    declarationRange: input.declarationRanges?.get(summary),
+    summary,
+  }));
+  const implicitMembers = hasImplicitMemberCalls(
+    resolveAstParserLanguage(input.facts.filePath, input.facts.language)
+  );
   const entries = input.callSites.map((callSite) => {
-    const caller = findCallerSymbol(input.symbols, callSite);
-    const originalCallee = findCalleeSymbol(input.symbols, callSite);
+    const callerMatch = findCallerSymbol(linkable, callSite);
+    const calleeMatch = findCalleeSymbol(linkable, callSite, implicitMembers);
+    const caller = { ...callerMatch, symbol: callerMatch.symbol?.summary };
+    const originalCallee = { ...calleeMatch, symbol: calleeMatch.symbol?.summary };
     const callee = callSite.resolvedTarget ? { symbol: callSite.resolvedTarget } : originalCallee;
     const reason = [caller.reason, callee.reason].filter(Boolean).join('; ') || undefined;
     const relationInput: Parameters<typeof createRelationSummary>[0] = {
@@ -411,66 +434,32 @@ async function resolveModuleTarget(
   signal: AbortSignal | undefined,
   reader: ProjectSourceReader
 ): Promise<ResolvedFileFlowImportTarget> {
-  if (!isRelativeSpecifier(specifier)) {
-    return {
-      reason: 'external-or-package',
-      specifier,
-      unresolved: true,
-    };
-  }
-
-  const candidateBase = path.posix.normalize(
-    path.posix.join(path.posix.dirname(facts.filePath), specifier)
-  );
-  if (!isContainedProjectPath(candidateBase)) {
-    return {
-      reason: 'outside-scope',
-      specifier,
-      unresolved: true,
-    };
-  }
-
-  for (const candidate of moduleSourceCandidates(candidateBase, [
-    '.ts',
-    '.tsx',
-    '.js',
-    '.jsx',
-    '.mjs',
-    '.cjs',
-    '.mts',
-    '.cts',
-    '.json',
-  ])) {
-    throwIfProjectContextAborted({ signal });
-    if (!isContainedProjectPath(candidate)) {
-      continue;
-    }
-    const absolutePath = path.resolve(facts.projectRoot, candidate);
-    const relativePath = path.relative(facts.projectRoot, absolutePath);
-    if (!isContainedFilesystemPath(relativePath)) {
-      continue;
-    }
-    if (await isFile(absolutePath, reader, signal)) {
-      throwIfProjectContextAborted({ signal });
-      const filePath = toProjectContextPath(relativePath);
-      return {
-        filePath,
-        ref: createProjectContextFileRef({
-          filePath,
-          projectRoot: facts.projectRoot,
-          repoId: facts.repoId,
-          sourceFolder: facts.sourceFolder,
-        }),
-        specifier,
-        unresolved: false,
-      };
-    }
-  }
-
-  return {
-    reason: 'not-found',
+  const found = await findRelativeModuleFile({
+    importerFile: facts.filePath,
+    projectRoot: facts.projectRoot,
     specifier,
-    unresolved: true,
+    // import 关系还要能指到 JSON 模块；调用链接只看可执行源码，用的是链接层的默认列表。
+    extensions: [...MODULE_SOURCE_EXTENSIONS, '.json'],
+    reader,
+    signal,
+  });
+  if (found.status !== 'found') {
+    return {
+      reason: found.status === 'not-relative' ? 'external-or-package' : found.status,
+      specifier,
+      unresolved: true,
+    };
+  }
+  return {
+    filePath: found.filePath,
+    ref: createProjectContextFileRef({
+      filePath: found.filePath,
+      projectRoot: facts.projectRoot,
+      repoId: facts.repoId,
+      sourceFolder: facts.sourceFolder,
+    }),
+    specifier,
+    unresolved: false,
   };
 }
 
@@ -506,204 +495,6 @@ function findSymbolForExport(
       symbol.qualifiedName === exportRecord.name ||
       symbol.name === exportRecord.exportedName
   );
-}
-
-interface SymbolResolution {
-  fileCaller?: boolean;
-  symbol?: SymbolSummary;
-  reason?: string;
-}
-
-function uniqueSymbol(
-  candidates: readonly SymbolSummary[],
-  role: 'caller' | 'callee'
-): SymbolResolution {
-  return candidates.length === 1
-    ? { symbol: candidates[0] }
-    : { reason: `${role}-${candidates.length > 1 ? 'ambiguous' : 'unresolved'}` };
-}
-
-function findCallerSymbol(
-  symbols: readonly SymbolSummary[],
-  callSite: ExtractedFileFlowCallSite
-): SymbolResolution {
-  const qualifiedName =
-    callSite.callerQualifiedName ??
-    (callSite.callerClass
-      ? `${callSite.callerClass}.${callSite.callerMethod}`
-      : callSite.callerMethod);
-  if (
-    qualifiedName === '<module>' &&
-    callSite.callerRange &&
-    containsRange(callSite.callerRange, callSite.matchingRange ?? callSite.range)
-  ) {
-    // 真实program owner对应现有文件ref，不制造一个“module函数”或借SDK节点推断调用者。
-    return { fileCaller: true };
-  }
-  const named = symbols.filter((symbol) => (symbol.qualifiedName ?? symbol.name) === qualifiedName);
-  if (callSite.callerRange) {
-    // 公共symbol可能为兼容保留旧短名/行级range，真实owner声明位置负责消歧。
-    // 不能因为完整名未投影出来，就退回第一个同名函数。
-    const candidates =
-      named.length > 0 ? named : symbols.filter((symbol) => symbol.name === callSite.callerMethod);
-    const owner = callSite.callerRange;
-    if (!containsRange(owner, callSite.matchingRange ?? callSite.range)) {
-      return { reason: 'caller-range-mismatch' };
-    }
-    return uniqueSymbol(
-      candidates.filter((symbol) => matchesDeclarationRange(symbol.range, owner)),
-      'caller'
-    );
-  }
-  if (named.length === 1) {
-    return { symbol: named[0] };
-  }
-  // 老语言插件没有owner范围时，仅完整声明范围能证明某个重复候选包含调用点。
-  const candidates =
-    named.length > 0 ? named : symbols.filter((symbol) => symbol.name === callSite.callerMethod);
-  const containing = candidates.filter(
-    (symbol) =>
-      symbol.range && containsRange(symbol.range, callSite.matchingRange ?? callSite.range)
-  );
-  return uniqueSymbol(containing.length > 0 ? containing : named, 'caller');
-}
-
-function findCalleeSymbol(
-  symbols: readonly SymbolSummary[],
-  callSite: ExtractedFileFlowCallSite
-): SymbolResolution {
-  const receiver = callSite.receiver?.trim();
-  if (callSite.calleeShadowed) {
-    const candidates = symbols.filter(
-      (symbol) => (symbol.qualifiedName ?? symbol.name) === callSite.callee
-    );
-    return {
-      reason: receiver
-        ? 'callee-receiver-shadowed'
-        : candidates.length > 1
-          ? 'callee-shadowed; callee-ambiguous'
-          : 'callee-shadowed',
-    };
-  }
-  const expression = callSite.calleeExpression ?? callSite.callee;
-  const calleeName = callSite.callee.split('.').at(-1) ?? callSite.callee;
-  if (receiver === 'this' && callSite.callerClass) {
-    // 新AST区分普通nested function的动态this与arrow继承的词法this；callerClass
-    // 只表示词法包含关系，不能单独证明接收者。旧插件没有syntax元数据时保留原分支。
-    if (callSite.syntaxKind && callSite.receiverType !== callSite.callerClass) {
-      return { reason: 'callee-receiver-unresolved' };
-    }
-    return uniqueSymbol(
-      symbols.filter((symbol) => symbol.qualifiedName === `${callSite.callerClass}.${calleeName}`),
-      'callee'
-    );
-  }
-  // 任意对象成员不是文件内同名函数。receiverType仅是旧启发式数据，不是绑定证明。
-  if (receiver) {
-    return { reason: 'callee-receiver-unresolved' };
-  }
-  const bindingRange = callSite.calleeBindingRange;
-  const qualifiedName = callSite.calleeQualifiedName;
-  if (bindingRange) {
-    const candidates = symbols.filter(
-      (symbol) =>
-        ((symbol.qualifiedName ?? symbol.name) === qualifiedName || symbol.name === calleeName) &&
-        matchesDeclarationRange(symbol.range, bindingRange)
-    );
-    return uniqueSymbol(candidates, 'callee');
-  }
-  if (qualifiedName) {
-    return uniqueSymbol(
-      symbols.filter((symbol) => (symbol.qualifiedName ?? symbol.name) === qualifiedName),
-      'callee'
-    );
-  }
-  // 括号只改变callee的源码表达式；真实AST已证明的identifier绑定优先于文本形态防线。
-  if (expression.includes('.') || expression.includes('[') || expression.includes('(')) {
-    return { reason: 'callee-receiver-unresolved' };
-  }
-  if (callSite.syntaxKind) {
-    // 新AST已做词法查找但没有证明本地绑定；缺证据不能再用裸名补造一个目标。
-    const candidates = symbols.filter(
-      (symbol) => (symbol.qualifiedName ?? symbol.name) === calleeName
-    );
-    return { reason: candidates.length > 1 ? 'callee-ambiguous' : 'callee-unresolved' };
-  }
-  // 旧生产方只保留唯一、顶层的同名声明；移除跨class的后缀匹配。
-  return uniqueSymbol(
-    symbols.filter(
-      (symbol) => !symbol.container && (symbol.qualifiedName ?? symbol.name) === calleeName
-    ),
-    'callee'
-  );
-}
-
-function matchesDeclarationRange(
-  symbol: SourceRangeSummary | undefined,
-  declaration: SourceRangeSummary
-): boolean {
-  if (!symbol || symbol.startLine !== declaration.startLine) {
-    return false;
-  }
-  if (
-    symbol.startColumn !== undefined &&
-    declaration.startColumn !== undefined &&
-    symbol.startColumn !== declaration.startColumn
-  ) {
-    return false;
-  }
-  // 旧symbol行级锚点可能仅覆盖声明首行；完整多行范围存在时必须吻合。
-  return symbol.endLine === symbol.startLine || symbol.endLine === declaration.endLine;
-}
-
-function containsRange(outer: SourceRangeSummary, inner: SourceRangeSummary): boolean {
-  return (
-    outer.startLine <= inner.startLine &&
-    outer.endLine >= inner.endLine &&
-    !(
-      outer.startLine === inner.startLine &&
-      outer.startColumn !== undefined &&
-      inner.startColumn !== undefined &&
-      outer.startColumn > inner.startColumn
-    ) &&
-    !(
-      outer.endLine === inner.endLine &&
-      outer.endColumn !== undefined &&
-      inner.endColumn !== undefined &&
-      outer.endColumn < inner.endColumn
-    )
-  );
-}
-
-async function isFile(
-  filePath: string,
-  reader: ProjectSourceReader,
-  signal?: AbortSignal
-): Promise<boolean> {
-  try {
-    const stat = await reader.stat(filePath, { signal });
-    return stat.isFile();
-  } catch {
-    return false;
-  }
-}
-
-function isRelativeSpecifier(value: string): boolean {
-  return value.startsWith('./') || value.startsWith('../');
-}
-
-function isContainedProjectPath(value: string): boolean {
-  return (
-    value !== '' && !value.startsWith('../') && value !== '..' && !path.posix.isAbsolute(value)
-  );
-}
-
-function isContainedFilesystemPath(value: string): boolean {
-  return value !== '' && !value.startsWith('..') && !path.isAbsolute(value);
-}
-
-function toProjectContextPath(value: string): string {
-  return value.split(path.sep).join('/');
 }
 
 function dedupeRelations(relations: readonly RelationSummary[]): RelationSummary[] {

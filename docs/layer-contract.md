@@ -75,11 +75,14 @@ type-only imports as well.
 | --- | --- | --- |
 | Syntax | `core/ast/` (parser runtime, language plugins, `extract/`) | nothing else in `core/` |
 | File facts | `core/facts/` (one source text → symbols, imports/exports, call sites) | `core/ast/` |
+| Linking | `core/linking/` (same-file linker, import-binding linker, module target candidates) | `core/facts/` |
 | Facade | `core/AstAnalyzer.ts` | `core/ast/` (re-export only) |
 
-`core/analysis/` is a frozen export-subpath directory: its `index.ts` forwards
-to `core/ast/extract/`, and `ImportPathResolver` stays there until the linking
-layer takes it over. `service/` consumers of file facts import `core/facts/`
+Linkers are pure functions: they reach other modules only through the
+`ModuleGraphAccess` port, so a live reader, a frozen capture and the index all
+link identically. `core/analysis/` is a frozen export-subpath directory: its
+`index.ts` forwards to `core/ast/extract/`; the legacy `ImportPathResolver`
+stays there until the index stops using it. `service/` consumers of file facts import `core/facts/`
 directly; the index (`service/source-graph`) and the query protocol
 (`service/project-context`) both read the same facts instead of borrowing each
 other's internals.

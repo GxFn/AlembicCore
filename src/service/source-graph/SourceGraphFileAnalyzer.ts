@@ -8,6 +8,7 @@ import { readFileAst } from '../../core/facts/fileAst.js';
 import { extractFileFlowFromSource } from '../../core/facts/fileFlow.js';
 import { extractFileSymbolsFromSource } from '../../core/facts/fileSymbols.js';
 import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../../core/facts/parserLanguage.js';
+import { moduleSourceCandidates } from '../../core/linking/moduleTargets.js';
 import type {
   SourceFileNode,
   SourceFileNodeInput,
@@ -17,7 +18,6 @@ import type {
 } from '../../domain/source-graph/index.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import { moduleSourceCandidates } from '../code-analysis/moduleSourceCandidates.js';
 import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
 import { projectSourceGraphSymbols } from './SourceGraphCodeGraphSymbols.js';
 import {

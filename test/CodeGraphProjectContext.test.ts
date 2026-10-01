@@ -245,7 +245,7 @@ describe('CodeGraph ProjectContext production backend', () => {
     expect(await fs.readdir(path.join(dataRoot, '.asd/codegraph-sessions'))).toEqual([]);
   }, 30_000);
 
-  it('reuses prepared input metadata without exporting blobs again while preserving source receipts', async () => {
+  it('reuses linked targets without exporting blobs again and reports only consumed source versions', async () => {
     const files = {
       'sample.ts': "import { target } from './dep'; export function run() { target(); }",
       'dep.ts': 'export function target() {}',
@@ -270,12 +270,13 @@ describe('CodeGraph ProjectContext production backend', () => {
           onSourceFileVersion: (version) => used.add(version.filePath),
         })
       ).toEqual(first);
-      expect(used).toEqual(new Set(Object.keys(files)));
+      // 导入绑定链接只读被引用到的文件；未被引用的 unused.ts 不属于本次查询消费的版本。
+      expect(used).toEqual(new Set(['sample.ts', 'dep.ts']));
       expect(snapshots).not.toHaveBeenCalled();
     });
   });
 
-  it('accepts a later declared catalog and still rejects invalidated cached inputs', async () => {
+  it('links relative imports without a declared catalog and still rejects invalidated inputs', async () => {
     const files = {
       'sample.ts': "import { target } from './dep'; export function run() { target(); }",
       'dep.ts': 'export function target() {}',
@@ -291,7 +292,8 @@ describe('CodeGraph ProjectContext production backend', () => {
           payload: { filePath: 'sample.ts' },
         };
         const before = await context.execute(query, { sourceReader: reader });
-        expect((before.data as FileFlowContext).callers[0].unresolved).toBe(true);
+        // 相对导入由自有链接器经同一个读取器解析，不依赖预先声明的源码清单。
+        expect((before.data as FileFlowContext).callers[0].unresolved).toBe(false);
         for (const [file, source] of Object.entries(files)) {
           await reader.seedFile(path.join(projectRoot, file), Buffer.from(source));
         }
@@ -380,7 +382,7 @@ describe('CodeGraph ProjectContext production backend', () => {
     });
   });
 
-  it('requires captured lexical import evidence and rejects collided SDK target identities', async () => {
+  it('requires lexical import evidence for cross-file targets', async () => {
     const files = {
       'sample.ts': [
         "import { target as alias } from './dep';",
@@ -408,12 +410,13 @@ describe('CodeGraph ProjectContext production backend', () => {
       expect(result.errors ?? []).toEqual([]);
       const calls = (result.data as FileFlowContext).callers;
       expect(calls).toHaveLength(7);
-      expect(calls.filter((call) => !call.unresolved)).toHaveLength(2);
+      // alias()、ns.target() 与 new A() 有运行时 import 绑定；两个类型导入不是运行时绑定。
       expect(
         calls
           .filter((call) => !call.unresolved)
-          .every((call) => call.to?.filePath === 'dep.ts' && call.to.symbol === 'target')
-      ).toBe(true);
+          .map((call) => `${call.to?.filePath}#${call.to?.symbol}`)
+          .sort()
+      ).toEqual(['collision.ts#A', 'dep.ts#target', 'dep.ts#target']);
       expect(
         calls.filter((call) => call.from?.symbol === 'shadow').every((call) => call.unresolved)
       ).toBe(true);
@@ -421,11 +424,16 @@ describe('CodeGraph ProjectContext production backend', () => {
   }, 60_000);
 
   it('cancels captured project work and lets the healthy session retry from the same frozen reader', async () => {
+    // 路径别名不属于相对导入，仍由外部项目分析解析；这里测的是该路线的取消与重试。
     const files = {
-      'sample.ts': "import { target } from './dep'; export function run() { target(); }",
+      'sample.ts': "import { target } from '@dep'; export function run() { target(); }",
       'dep.ts': 'export function target() {}',
     };
     const { projectRoot, dataRoot } = await fixture(files);
+    await fs.writeFile(
+      path.join(projectRoot, 'tsconfig.json'),
+      '{"compilerOptions":{"baseUrl":".","paths":{"@dep":["dep.ts"]}}}'
+    );
     const entered = Promise.withResolvers<CodeGraphProcess>();
     const original = CodeGraphProcess.prototype.analyzeProject;
     vi.spyOn(CodeGraphProcess.prototype, 'analyzeProject').mockImplementation(function (
@@ -462,7 +470,7 @@ describe('CodeGraph ProjectContext production backend', () => {
     expect(await fs.readdir(path.join(dataRoot, '.asd/codegraph-sessions'))).toEqual([]);
   }, 60_000);
 
-  it('rejects the SDK default-import decoy while retaining proven default and named import targets', async () => {
+  it('resolves a default import to the real default declaration, not the first exported function', async () => {
     const files = {
       'sample.ts':
         "import invoke, { decoy as named } from './dep';\nimport valid from './valid';\nexport function run() { invoke(); named(); valid(); }",
@@ -482,13 +490,14 @@ describe('CodeGraph ProjectContext production backend', () => {
       );
       expect(result.errors ?? []).toEqual([]);
       const calls = (result.data as FileFlowContext).callers;
-      expect(calls.find((call) => call.to?.symbol === 'invoke')?.unresolved).toBe(true);
+      // invoke 是 dep.ts 的 default 导入：目标是带 default 标记的 actual，不是排在前面的 decoy。
       expect(
         calls
           .filter((call) => !call.unresolved)
           .map((call) => call.to?.symbol)
           .sort()
-      ).toEqual(['decoy', 'valid']);
+      ).toEqual(['actual', 'decoy', 'valid']);
+      expect(calls.every((call) => !call.unresolved)).toBe(true);
     });
   }, 60_000);
 

@@ -58,7 +58,9 @@ export function createCapturedCodeGraphCallResolver(
       return flow;
     }
     const imports = flow.imports.flatMap((record) => record.bindings ?? []);
-    if (!flow.callSites.some((site) => importedBinding(site, imports))) {
+    // 自有的导入绑定链接先于本后端执行并已给出相对导入的目标；这里只为它没解析的
+    // import 调用点（路径别名、包入口）启动SDK项目分析，全部已解析时不再触发。
+    if (!flow.callSites.some((site) => !site.resolvedTarget && importedBinding(site, imports))) {
       return flow;
     }
     throwIfProjectContextAborted(context);
@@ -124,7 +126,8 @@ export function createCapturedCodeGraphCallResolver(
       let resolved = 0;
       const callSites = flow.callSites.map((site) => {
         const binding = importedBinding(site, imports);
-        if (!binding || !site.matchingRange) {
+        // 已有目标来自语法证明，外部后端不得改写。
+        if (site.resolvedTarget || !binding || !site.matchingRange) {
           return site;
         }
         const candidates = project.index

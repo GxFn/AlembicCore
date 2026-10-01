@@ -123,7 +123,7 @@ func bootstrap() -> Service {
       at: 'service.initConfigure',
       toFile: 'Sources/App/Service.swift',
       toSymbol: 'Service.configure',
-      via: 'external',
+      via: 'lexical',
     },
     {
       kind: 'calls',

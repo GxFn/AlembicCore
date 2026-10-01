@@ -12,6 +12,7 @@ import type { ProjectContextHandlerExecutionContext } from '../interface/contrac
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
+import { linkImportBoundCalls } from './importBindingCalls.js';
 import { projectCallResolver } from './projectCallResolver.js';
 import type {
   ProjectContextFileAnalysis,
@@ -116,19 +117,22 @@ export class FileAnalysisSession {
     const entry = await this.extraction(facts, true, context);
     throwIfProjectContextAborted(context);
     // extraction(true) 同时生成两种投影，即使 flow unavailable 也返回完整诊断形态。
-    const flow = structuredClone(entry.flow!);
+    // 链接顺序即证据强度：先由自有的导入绑定链接给出有语法证明的跨文件目标（live 与认证会话都执行），
+    // 再交给外部后端补它没有解析的调用点；外部后端不得改写已有目标。
+    const flow = await linkImportBoundCalls(facts, structuredClone(entry.flow!), context);
+    throwIfProjectContextAborted(context);
     const resolve = projectCallResolver(this.symbolExtractor);
     return resolve ? resolve(facts, flow, context) : flow;
   }
 
-  /** 项目SDK已产出目标节点；复用同版本AST证据，不再触发单文件SDK或扩大源码清单。 */
+  /** 目标文件的声明与导出表；复用同版本AST证据，不触发单文件SDK，也不扩大源码清单。 */
   declarations(
     facts: SourceSliceFileFacts,
     context?: { signal?: AbortSignal }
   ): FileDeclarationEvidence {
     throwIfProjectContextAborted(context);
-    const { symbols, defaultExportNames } = this.syntax(facts, this.includeCallSites);
-    return structuredClone({ symbols, defaultExportNames });
+    const { symbols, defaultExportNames, exports } = this.syntax(facts, this.includeCallSites);
+    return structuredClone({ symbols, defaultExportNames, exports });
   }
 
   dispose(): void {

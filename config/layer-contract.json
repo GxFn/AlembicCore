@@ -91,6 +91,7 @@
         "src/core/AstAnalyzer",
         "src/core/analysis/",
         "src/core/facts/",
+        "src/core/linking/",
         "src/core/discovery/",
         "src/core/enhancement/",
         "src/core/capability/"
@@ -105,12 +106,28 @@
       "forbid": [
         "src/core/AstAnalyzer",
         "src/core/analysis/",
+        "src/core/linking/",
         "src/core/discovery/",
         "src/core/enhancement/",
         "src/core/capability/"
       ],
       "includeTypeOnly": true,
       "reason": "core/facts turns one source text into symbols and occurrences using only the syntax layer; linking, discovery and framework knowledge sit above it (2026-10-01 analysis re-architecture, P2).",
+      "owner": "AlembicCore window"
+    },
+    {
+      "id": "analysis-linking-reads-facts-only",
+      "from": "src/core/linking/",
+      "forbid": [
+        "src/core/AstAnalyzer",
+        "src/core/analysis/",
+        "src/core/ast/",
+        "src/core/discovery/",
+        "src/core/enhancement/",
+        "src/core/capability/"
+      ],
+      "includeTypeOnly": true,
+      "reason": "core/linking connects occurrences to declarations from file facts through ModuleGraphAccess; it never parses source or reads the filesystem itself, so the same facts always link the same way (2026-10-01 analysis re-architecture, P3).",
       "owner": "AlembicCore window"
     }
   ]

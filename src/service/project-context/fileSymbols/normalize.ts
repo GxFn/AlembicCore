@@ -12,6 +12,11 @@ export interface NormalizedFileSymbols {
   symbols: SymbolSummary[];
   symbolRefs: ProjectContextRef[];
   sourceSliceRefs: ProjectContextRef[];
+  /**
+   * 每个公开符号对应的真实声明范围。公开的 range 为兼容保留行级形态，对不上多行签名；
+   * 同文件链接用这里的范围比对。只在进程内使用，不进入公开 DTO 或 ref。
+   */
+  declarationRanges: WeakMap<SymbolSummary, SourceRangeSummary>;
 }
 
 export function normalizeFileSymbols(input: {
@@ -22,6 +27,7 @@ export function normalizeFileSymbols(input: {
   const sorted = [...dedupeSymbols(input.symbols)].sort(compareSymbols);
   const symbolRefs: ProjectContextRef[] = [];
   const sourceSliceRefs: ProjectContextRef[] = [];
+  const declarationRanges = new WeakMap<SymbolSummary, SourceRangeSummary>();
   const summaries = sorted.map((symbol) => {
     const sourceSliceRef = createProjectContextSourceRangeProjection({
       filePath: input.facts.filePath,
@@ -50,7 +56,7 @@ export function normalizeFileSymbols(input: {
     sourceSliceRefs.push(sourceSliceRef);
     symbolRefs.push(symbolRef);
 
-    return {
+    const summary = {
       container: symbol.container,
       exported: symbol.exported,
       filePath: input.facts.filePath,
@@ -61,9 +67,15 @@ export function normalizeFileSymbols(input: {
       ref: symbolRef,
       signature: symbol.signature,
     } satisfies SymbolSummary;
+    const declarationRange = symbol.declarationRange ?? symbol.matchingRange;
+    if (declarationRange) {
+      declarationRanges.set(summary, declarationRange);
+    }
+    return summary;
   });
 
   return {
+    declarationRanges,
     sourceSliceRefs: dedupeRefs(sourceSliceRefs),
     symbolRefs: dedupeRefs(symbolRefs),
     symbols: summaries,
