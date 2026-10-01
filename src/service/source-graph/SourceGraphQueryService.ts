@@ -55,6 +55,11 @@ export interface SourceGraphRankingOptions extends SourceGraphQueryTarget {
   maxSectionLines?: number;
   sourceSectionLineBudget?: number;
   edgeLimit?: number;
+  /**
+   * 是否把候选档的边也算进来。候选边来自外部引擎的低把握解析（按名字撞上的目标等），
+   * 默认不参与任何查询结果；只有明确要看候选时才打开，并应向使用者标明它们不是事实。
+   */
+  includeCandidates?: boolean;
 }
 
 export interface SourceGraphSearchInput extends SourceGraphRankingOptions {
@@ -102,6 +107,7 @@ interface NormalizedRankingOptions {
   maxSectionLines: number;
   sourceSectionLineBudget: number;
   edgeLimit: number;
+  includeCandidates: boolean;
 }
 
 interface SourceGraphQueryContext {
@@ -458,9 +464,9 @@ export class SourceGraphQueryService {
     targets: Parameters<SourceGraphRepositoryImpl['findEdgesForTargets']>[1]
   ): Promise<void> {
     if (context.snapshot) {
-      context.edges = await this.repository.findEdgesForTargets(
-        context.snapshot.generationId,
-        targets
+      context.edges = factEdges(
+        await this.repository.findEdgesForTargets(context.snapshot.generationId, targets),
+        context.options
       );
     }
   }
@@ -517,7 +523,10 @@ export class SourceGraphQueryService {
     // 不能先对全图 LIMIT 再筛选，否则其他文件会吞掉目标的全部返回预算。
     const edges =
       edgeRead === 'ranking'
-        ? await this.repository.listEdges(snapshot.generationId, { limit: options.edgeLimit })
+        ? factEdges(
+            await this.repository.listEdges(snapshot.generationId, { limit: options.edgeLimit }),
+            options
+          )
         : [];
     const diagnostics = buildFreshnessDiagnostics(snapshot);
     return {
@@ -874,6 +883,25 @@ export class SourceGraphQueryService {
   }
 }
 
+/** 候选档的边不是事实：除非查询明确要求，否则任何结果都看不到它们。 */
+function factEdges(
+  edges: SourceGraphEdge[],
+  options: Pick<NormalizedRankingOptions, 'includeCandidates'>
+): SourceGraphEdge[] {
+  if (options.includeCandidates) {
+    return edges;
+  }
+  return edges.filter((edge) => {
+    const resolution = edge.metadata.resolution;
+    return !(
+      resolution &&
+      typeof resolution === 'object' &&
+      'tier' in resolution &&
+      resolution.tier === 'candidate'
+    );
+  });
+}
+
 function normalizeRankingOptions(input: SourceGraphRankingOptions): NormalizedRankingOptions {
   const terms = createQueryTerms('query' in input ? String(input.query) : '');
   return {
@@ -889,6 +917,7 @@ function normalizeRankingOptions(input: SourceGraphRankingOptions): NormalizedRa
     maxSectionLines: normalizeBoundedInteger(input.maxSectionLines, 40, 1, 200),
     sourceSectionLineBudget: normalizeBoundedInteger(input.sourceSectionLineBudget, 80, 1, 500),
     edgeLimit: normalizeBoundedInteger(input.edgeLimit, 500, 1, 500),
+    includeCandidates: input.includeCandidates ?? false,
   };
 }
 

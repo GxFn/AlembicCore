@@ -292,7 +292,12 @@ function heritageEvidence(
     (Array.isArray(value) ? value : [])
       .map((item) => (typeof item === 'string' ? item.split('<')[0].trim() : ''))
       .filter((item) => item.length > 0);
-  const heritage = { extends: names(extended), implements: names(implemented) };
+  const superTypes = names(extended);
+  // Swift 的继承列表不区分父类与协议，插件把第一项同时记进两边；这里不重复。
+  const heritage = {
+    extends: superTypes,
+    implements: names(implemented).filter((name) => !superTypes.includes(name)),
+  };
   return heritage.extends.length > 0 || heritage.implements.length > 0 ? { heritage } : {};
 }
 

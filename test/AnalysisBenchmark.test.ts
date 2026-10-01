@@ -55,6 +55,38 @@ const CURRENT_SCORES: Record<string, Record<BenchmarkLinkSource, [number, number
   },
 };
 
+/**
+ * 同一批期望，索引接入 CodeGraph 之后的分数：lexical 与 import-binding 不变，其余由可信档的外部边贡献。
+ * 没命中的两条是有意留在候选档的：`created.run()`（接收者来自工厂方法的返回值）与
+ * `[service logout]`（不带参数的选择器，只凭名字唯一不足以采信）。
+ */
+const EXTERNAL_ENGINE_SCORES: typeof CURRENT_SCORES = {
+  'ts-nodenext': {
+    lexical: [2, 2],
+    'import-binding': [7, 7],
+    external: [1, 1],
+    future: [0, 1],
+  },
+  'tsx-bundler': {
+    lexical: [0, 0],
+    'import-binding': [3, 3],
+    external: [1, 1],
+    future: [0, 0],
+  },
+  'swift-app': {
+    lexical: [5, 5],
+    'import-binding': [0, 0],
+    external: [8, 8],
+    future: [2, 2],
+  },
+  'objc-app': {
+    lexical: [0, 0],
+    'import-binding': [0, 0],
+    external: [15, 16],
+    future: [0, 0],
+  },
+};
+
 const roots: string[] = [];
 const databases: AlembicDatabaseRuntime[] = [];
 afterEach(async () => {
@@ -110,9 +142,13 @@ async function observeFileFlowRelations(
   return observed;
 }
 
-/** 整个项目建一代索引，取其中连到声明的边。数据库放在项目之外，不进清单。 */
+/**
+ * 整个项目建一代索引，取其中连到声明的边。数据库放在项目之外，不进清单。
+ * withExternalEngine 打开 CodeGraph 这个外部链接来源；候选档的边不是事实，不计入观察。
+ */
 async function observeSourceGraphRelations(
-  fixture: AnalysisBenchmarkFixture
+  fixture: AnalysisBenchmarkFixture,
+  withExternalEngine = false
 ): Promise<ObservedRelation[]> {
   const projectRoot = await materialize(fixture);
   const dataRoot = await fs.realpath(
@@ -126,9 +162,16 @@ async function observeSourceGraphRelations(
   const result = await new SourceGraphIndexer(sourceGraphRepository).buildFull({
     projectRoot,
     generationId: `benchmark-${fixture.name}`,
+    ...(withExternalEngine ? { codeGraph: { dataRoot } } : {}),
   });
+  if (withExternalEngine) {
+    expect(result.snapshot.metadata.externalLinker).toMatchObject({ status: 'linked' });
+  }
   const symbols = new Map(result.symbols.map((symbol) => [symbol.symbolId, symbol]));
   return result.edges.flatMap((edge) => {
+    if ((edge.metadata.resolution as { tier?: string } | undefined)?.tier === 'candidate') {
+      return [];
+    }
     const target = edge.toSymbolId ? symbols.get(edge.toSymbolId) : undefined;
     const kind =
       edge.kind === 'calls'
@@ -175,6 +218,21 @@ describe('target project analysis benchmark', () => {
     expect(score.violations).toEqual([]);
     expect(score.found).toEqual(CURRENT_SCORES[fixture.name]);
   });
+
+  it.each(ANALYSIS_BENCHMARK_FIXTURES.map((fixture) => [fixture.name, fixture] as const))(
+    '%s gains only trusted relations from the external engine',
+    async (_name, fixture) => {
+      const score = scoreBenchmarkFixture(
+        fixture,
+        await observeSourceGraphRelations(fixture, true)
+      );
+
+      // 外部引擎只能增加命中，不能带来任何禁止的边，也不能让自有链接器的命中变少。
+      expect(score.violations).toEqual([]);
+      expect(score.found).toEqual(EXTERNAL_ENGINE_SCORES[fixture.name]);
+    },
+    60_000
+  );
 
   it('declares a score row for every fixture', () => {
     expect(Object.keys(CURRENT_SCORES).sort()).toEqual(

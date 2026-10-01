@@ -139,7 +139,7 @@ describe('SourceGraphIndexer', () => {
     const sdkInput = { ...input, codeGraph: { dataRoot: path.join(tmpDir, 'private') } };
     const sdk = await lifecycle.catchUpOnStartup({ ...sdkInput, generationId: 'sdk', now: 2000 });
     expect(sdk.action).toBe('built-full');
-    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v3:');
+    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v4:');
     expect(sdk.build?.symbols.some((symbol) => symbol.symbolId === 'src/index.ts#App.run')).toBe(
       true
     );

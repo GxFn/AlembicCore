@@ -38,7 +38,19 @@ function walkObjC(root: any, ctx: any) {
       }
 
       case 'protocol_declaration': {
-        ctx.protocols.push(_parseObjCProtocol(node));
+        const protocol = _parseObjCProtocol(node);
+        ctx.protocols.push(protocol);
+        // 协议方法也是可被实现、可被调用的成员，与类接口里的方法声明同样列出。
+        ctx.methods.push(...protocol.methods);
+        break;
+      }
+
+      case 'function_definition': {
+        // C 函数（`static NSURL *BuildURL(...)`）是文件级的可调用声明。
+        const fn = _parseCFunction(node);
+        if (fn) {
+          ctx.methods.push(fn);
+        }
         break;
       }
 
@@ -163,7 +175,7 @@ function _parseObjCProtocol(node: any) {
 
 function _parseObjCMethodDecl(node: any, className: any) {
   const isClassMethod = node.text.trimStart().startsWith('+');
-  const name = _findIdentifier(node) || 'unknown';
+  const name = _objcSelector(node);
 
   const params: any[] = [];
   for (const child of node.namedChildren) {
@@ -187,17 +199,9 @@ function _parseObjCMethodDecl(node: any, className: any) {
     }
   }
 
-  const selector =
-    params.length > 0
-      ? `${name}:${params
-          .slice(1)
-          .map((p) => `${p}:`)
-          .join('')}`
-      : name;
-
   return {
     name,
-    selector,
+    selector: name,
     className,
     isClassMethod,
     returnType,
@@ -209,7 +213,7 @@ function _parseObjCMethodDecl(node: any, className: any) {
 
 function _parseObjCMethodDef(node: any, className: any) {
   const isClassMethod = node.text.trimStart().startsWith('+');
-  const name = _findIdentifier(node) || 'unknown';
+  const name = _objcSelector(node);
 
   const params: any[] = [];
   for (const child of node.namedChildren) {
@@ -369,8 +373,9 @@ function detectObjCPatterns(root: any, lang: any, methods: any, properties: any,
     }
 
     // ── KVO Observer: observeValueForKeyPath / addObserver ──
+    // 方法名是完整选择器（`observeValueForKeyPath:ofObject:change:context:`），按第一段判断。
     const hasKVO = clsMethods.some((m: any) =>
-      /^observeValueForKeyPath$|^addObserver$|^removeObserver$/.test(m.name)
+      /^(observeValueForKeyPath|addObserver|removeObserver)(:|$)/.test(m.name)
     );
     if (hasKVO) {
       patterns.push({ type: 'observer', className: cls.name, line: cls.line, confidence: 0.85 });
@@ -389,6 +394,48 @@ function detectObjCPatterns(root: any, lang: any, methods: any, properties: any,
 }
 
 // ── 工具函数 ──
+
+/**
+ * 方法的完整选择器：带参数的写成 `initWithName:age:`，不带参数的写成 `isValid`。
+ * 选择器才是 ObjC 方法的名字；只取第一段会让 `initWithName:` 与 `initWithName:age:` 变成同名。
+ */
+function _objcSelector(node: any): string {
+  const keywords: string[] = [];
+  let parameters = 0;
+  for (const child of node.namedChildren) {
+    if (child.type === 'identifier') {
+      keywords.push(child.text);
+    } else if (child.type === 'method_parameter') {
+      parameters += 1;
+    }
+  }
+  if (keywords.length === 0) {
+    return 'unknown';
+  }
+  return parameters === 0 ? keywords[0] : keywords.map((keyword) => `${keyword}:`).join('');
+}
+
+/** C 函数定义的名字在声明符链的最里层。 */
+function _parseCFunction(node: any) {
+  let declarator = node.childForFieldName?.('declarator');
+  while (declarator && declarator.type !== 'function_declarator') {
+    declarator = declarator.childForFieldName?.('declarator');
+  }
+  const nameNode = declarator?.childForFieldName?.('declarator');
+  if (nameNode?.type !== 'identifier') {
+    return null;
+  }
+  const body = node.childForFieldName?.('body');
+  return {
+    name: nameNode.text,
+    isClassMethod: false,
+    bodyLines: body ? body.endPosition.row - body.startPosition.row + 1 : 0,
+    complexity: body ? _estimateComplexity(body) : 1,
+    nestingDepth: body ? _maxNesting(body, 0) : 0,
+    line: node.startPosition.row + 1,
+    kind: 'definition',
+  };
+}
 
 function _findIdentifier(node: any) {
   for (let i = 0; i < node.namedChildCount; i++) {

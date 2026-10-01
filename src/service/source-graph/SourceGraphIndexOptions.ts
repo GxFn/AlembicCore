@@ -3,10 +3,15 @@ import path from 'node:path';
 import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
 import { EXTENSION_PARSER_LANGUAGE } from '../../core/facts/parserLanguage.js';
 import { MODULE_SOURCE_EXTENSIONS } from '../../core/linking/moduleTargets.js';
+import {
+  codeGraphRuntimeRoot,
+  readCodeGraphNativeIdentity,
+} from '../../infrastructure/analysis/CodeGraphNativeIndex.js';
 import { getCodeGraphProjectContextIdentity } from '../../infrastructure/analysis/CodeGraphProcess.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { listProjectScopeFolders, type ProjectDescriptor } from '../../shared/ProjectScope.js';
+import { EXTERNAL_EDGE_RULES_VERSION } from './SourceGraphExternalEdges.js';
 import {
   createSourceGraphIndexIdentity,
   type SourceGraphIndexIdentity,
@@ -17,8 +22,8 @@ import {
  * 版本进入索引身份，旧版本的代际不会被增量沿用。
  */
 export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v2';
-// 启用外部引擎时，它的身份与本模块对其结果的投影规则一起进入提取版本。
-const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v3';
+// 启用外部引擎时，它的身份与本模块对其结果的采用规则一起进入提取版本。
+const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v4';
 
 export interface SourceGraphIndexOptions {
   projectRoot: string;
@@ -35,7 +40,8 @@ export interface SourceGraphIndexOptions {
   signal?: AbortSignal;
   /**
    * 外部引擎（CodeGraph）的接入点：宿主提供自己的私有数据目录。
-   * 符号与自有链接不依赖它；它只影响索引身份，并把私有运行目录排除在清单之外。
+   * 符号与自有链接不依赖它；启用后索引另外采用它解析出的关系（Swift / ObjC 的跨文件调用与
+   * 类型层级、TS/JS 里自有链接器解析不了的导入），引擎不可用时只是少这部分边。
    */
   codeGraph?: { dataRoot: string; timeoutMs?: number };
 }
@@ -85,6 +91,8 @@ const DEFAULT_IGNORE_DIRECTORIES = [
   '.asd',
   '.swiftpm',
 ];
+/** 外部引擎建一次索引的等待上限；超时按引擎不可用处理，不影响自有部分。 */
+export const DEFAULT_EXTERNAL_TIMEOUT_MS = 120_000;
 /** 相对导入会被解析成文件的扩展名；文件集合变化时这些文件要重新链接。 */
 export const LINKED_MODULE_EXTENSIONS: ReadonlySet<string> = new Set(MODULE_SOURCE_EXTENSIONS);
 
@@ -126,10 +134,15 @@ export async function normalizeIndexOptions(
       await fs.realpath(sourceRoot);
     }
     engineHash = (await getCodeGraphProjectContextIdentity()).engineHash;
-    privateRuntimeRoot = await canonicalFuturePath(
-      path.resolve(input.codeGraph.dataRoot, '.asd', 'codegraph-sessions')
-    );
-    extractorVersion = `${CODEGRAPH_PROJECTION_VERSION}:${extractorVersion}:${engineHash}`;
+    privateRuntimeRoot = await canonicalFuturePath(codeGraphRuntimeRoot(input.codeGraph.dataRoot));
+    const native = await readCodeGraphNativeIdentity();
+    extractorVersion = [
+      CODEGRAPH_PROJECTION_VERSION,
+      EXTERNAL_EDGE_RULES_VERSION,
+      extractorVersion,
+      engineHash,
+      native.workerHash,
+    ].join(':');
   }
   throwIfSourceReadAborted(input);
   const includeExtensions = new Set(
@@ -148,7 +161,9 @@ export async function normalizeIndexOptions(
     ignoreDirectories: [...ignoreDirectories],
     maxFileSizeBytes,
     maxParseBytes,
-    backendTimeoutMs: input.codeGraph ? (input.codeGraph.timeoutMs ?? 30_000) : undefined,
+    backendTimeoutMs: input.codeGraph
+      ? (input.codeGraph.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS)
+      : undefined,
     privateRuntimeRoot,
   });
   return {

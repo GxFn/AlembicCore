@@ -76,7 +76,7 @@ type-only imports as well.
 | Syntax | `core/ast/` (parser runtime, language plugins, `extract/`) | nothing else in `core/` |
 | File facts | `core/facts/` (one source text → symbols, imports/exports, call sites) | `core/ast/` |
 | Linking | `core/linking/` (same-file linker, import-binding linker, heritage linker, module target candidates) | `core/facts/` |
-| Index | `service/source-graph/` (inventory, file analysis, linking into edges, queries) | `core/facts/`, `core/linking/` — never `service/project-context/` or `service/code-analysis/` |
+| Index | `service/source-graph/` (inventory, file analysis, linking into edges, external edge import, queries) | `core/facts/`, `core/linking/`, `infrastructure/analysis/` (external engine process) — never `service/project-context/` or `service/code-analysis/` |
 | Facade | `core/AstAnalyzer.ts` | `core/ast/` (re-export only) |
 
 Linkers are pure functions: they reach other modules only through the

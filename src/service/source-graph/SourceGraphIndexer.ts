@@ -1,3 +1,4 @@
+import { EXTENSION_PARSER_LANGUAGE } from '../../core/facts/parserLanguage.js';
 import {
   createSourceGraphDiagnostic,
   createSourceGraphFreshness,
@@ -15,9 +16,11 @@ import type {
   SourceGraphFreshnessReport,
   SourceGraphIndexBuildResult,
 } from '../../domain/source-graph/SourceGraphContracts.js';
+import { indexWithCodeGraphNative } from '../../infrastructure/analysis/CodeGraphNativeIndex.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
+import { EXTERNAL_EDGE_RULES_VERSION, importExternalEdges } from './SourceGraphExternalEdges.js';
 import {
   analyzeInventoryFile,
   diagnosticsForRetainedFile,
@@ -26,6 +29,7 @@ import {
 } from './SourceGraphFileAnalyzer.js';
 import { compareSourceGraphIndexIdentity } from './SourceGraphIndexIdentity.js';
 import {
+  DEFAULT_EXTERNAL_TIMEOUT_MS,
   LINKED_MODULE_EXTENSIONS,
   type NormalizedIndexOptions,
   normalizeIndexOptions,
@@ -157,6 +161,10 @@ export class SourceGraphIndexer {
     const contentChanged = new Set([...changedSet, ...deletedSet]);
     const preservedEdges = baseEdges
       .filter((edge) => {
+        // 外部引擎的边每一代整体重新导入，从不沿用。
+        if (isExternalEdge(edge)) {
+          return false;
+        }
         // 来源文件被重新分析的边一律重算，不沿用。
         if (
           (edge.fromFilePath && indexedFiles.has(edge.fromFilePath)) ||
@@ -272,15 +280,26 @@ export class SourceGraphIndexer {
       })),
       ...analyzedFiles.flatMap((file) => file.symbols),
     ];
-    // 存储顺序即查询读到的顺序：文件依赖在前、跨文件关系其次、文件内关系最后，
-    // 受预算截断的查询因此先拿到跨文件信息；全量与增量构建的顺序也由此一致。
-    const edgesForReplace = [
+    const ownEdges: SourceGraphEdgeInput[] = [
       ...(input.preservedEdges ?? []).map((edge) => ({
         ...edge,
         generationId: input.generationId,
       })),
       ...linkedEdges,
-    ].sort(compareEdgesForStorage);
+    ];
+    const external = input.options.codeGraph
+      ? await this.linkExternalEdges({
+          options,
+          generationId,
+          currentByPath: input.currentByPath,
+          files: filesForReplace,
+          symbols: symbolsForReplace,
+          ownEdges,
+        })
+      : undefined;
+    // 存储顺序即查询读到的顺序：文件依赖在前、跨文件关系其次、文件内关系最后，
+    // 受预算截断的查询因此先拿到跨文件信息；全量与增量构建的顺序也由此一致。
+    const edgesForReplace = [...ownEdges, ...(external?.edges ?? [])].sort(compareEdgesForStorage);
     const status = chooseSnapshotStatus(filesForReplace, diagnostics);
     throwIfSourceReadAborted(input.options);
     const snapshot = await this.repository.replaceGeneration({
@@ -304,6 +323,7 @@ export class SourceGraphIndexer {
           deletedFiles: input.deletedFiles,
           extractorVersion: input.options.extractorVersion,
           indexIdentity: input.options.indexIdentity,
+          ...(external ? { externalLinker: external.metadata } : {}),
         },
       },
       files: filesForReplace,
@@ -332,6 +352,88 @@ export class SourceGraphIndexer {
       symbols,
       edges,
     };
+  }
+
+  /**
+   * 外部引擎（CodeGraph）的边。它是可选的补充：引擎没装、超时或出错时本代照常发布，
+   * 只是没有这部分边，并在代际元数据里写明原因。取消不算降级，照常向上抛。
+   */
+  private async linkExternalEdges(input: {
+    options: NormalizedIndexOptions;
+    generationId: string;
+    currentByPath: ReadonlyMap<string, InventoryFile>;
+    files: readonly SourceFileNodeInput[];
+    symbols: readonly SourceSymbolNode[];
+    ownEdges: readonly SourceGraphEdgeInput[];
+  }): Promise<{ edges: SourceGraphEdgeInput[]; metadata: Record<string, unknown> }> {
+    const { options } = input;
+    const base = { engine: 'codegraph', rulesVersion: EXTERNAL_EDGE_RULES_VERSION };
+    // 交给外部引擎的文件：自有分析完整解析过的源码（两边的声明才对得上），外加模块解析要读的配置。
+    const mirror = input.files.flatMap((file) => {
+      const inventory = input.currentByPath.get(file.repoRelativePath);
+      if (!inventory) {
+        return [];
+      }
+      const source =
+        file.parseStatus === 'parsed' && inventory.extension in EXTENSION_PARSER_LANGUAGE;
+      const support = MODULE_CONFIG_FILE.test(file.repoRelativePath);
+      return source || support
+        ? [{ relativePath: file.repoRelativePath, absolutePath: inventory.absolutePath }]
+        : [];
+    });
+    if (mirror.length === 0) {
+      return { edges: [], metadata: { ...base, status: 'skipped', reason: 'no-source-files' } };
+    }
+    const started = performance.now();
+    try {
+      const result = await indexWithCodeGraphNative({
+        dataRoot: options.codeGraph!.dataRoot,
+        files: mirror,
+        signal: options.signal,
+        timeoutMs: options.codeGraph!.timeoutMs ?? DEFAULT_EXTERNAL_TIMEOUT_MS,
+      });
+      throwIfSourceReadAborted(options);
+      const imported = importExternalEdges({
+        generationId: input.generationId,
+        result,
+        symbols: input.symbols,
+        contentHashes: new Map(
+          input.files.map((file) => [file.repoRelativePath, file.contentHash])
+        ),
+        ownEdges: input.ownEdges,
+      });
+      Logger.getInstance().info('Source graph imported external edges', {
+        generationId: input.generationId,
+        engine: 'codegraph',
+        sdkVersion: result.engine.sdkVersion,
+        mirrorFiles: mirror.length,
+        indexedFiles: result.files.length,
+        durationMs: Math.round(performance.now() - started),
+        ...imported.summary,
+      });
+      return {
+        edges: imported.edges,
+        metadata: {
+          ...base,
+          status: 'linked',
+          sdkVersion: result.engine.sdkVersion,
+          ...imported.summary,
+        },
+      };
+    } catch (error) {
+      throwIfSourceReadAborted(options);
+      const reason = error instanceof Error ? error.message : String(error);
+      // 降级：自有的符号与边不受影响，本代只是没有外部边。
+      Logger.getInstance().warn('Source graph external linker is unavailable; own edges only', {
+        generationId: input.generationId,
+        engine: 'codegraph',
+        code: error instanceof Error && 'code' in error ? String(error.code) : undefined,
+        reason,
+        mirrorFiles: mirror.length,
+        durationMs: Math.round(performance.now() - started),
+      });
+      return { edges: [], metadata: { ...base, status: 'unavailable', reason } };
+    }
   }
 
   /**
@@ -548,6 +650,19 @@ function edgeTouchesFiles(edge: SourceGraphEdge, impacted: Set<string>): boolean
     (edge.fromFilePath !== undefined && impacted.has(edge.fromFilePath)) ||
     (edge.toFilePath !== undefined && impacted.has(edge.toFilePath)) ||
     (edge.siteFilePath !== undefined && impacted.has(edge.siteFilePath))
+  );
+}
+
+/** 外部引擎解析模块说明符时会读的配置文件。 */
+const MODULE_CONFIG_FILE = /(^|\/)(tsconfig(\.[\w.-]+)?\.json|jsconfig\.json|package\.json)$/;
+
+function isExternalEdge(edge: SourceGraphEdge): boolean {
+  const resolution = edge.metadata.resolution;
+  return (
+    !!resolution &&
+    typeof resolution === 'object' &&
+    'linker' in resolution &&
+    resolution.linker === 'codegraph'
   );
 }
 
