@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
 import type {
+  ProjectSourceDirectoryEntry,
   ProjectSourceReader,
   ProjectSourceReadOptions,
 } from '../../types/projectSourceReader.js';
 
-// 仅关联显式signal facade与其读取器，不保存当前项目或任何文件事实。
+// 仅关联显式signal/发现view facade与原读取器，不保存当前项目或文件事实。
 const boundReaderOrigins = new WeakMap<ProjectSourceReader, ProjectSourceReader>();
 
 export function projectSourceReaderIdentity(reader: ProjectSourceReader): ProjectSourceReader {
@@ -153,6 +154,30 @@ export function bindProjectSourceReader(
   };
   boundReaderOrigins.set(bound, projectSourceReaderIdentity(reader));
   return bound;
+}
+
+/** 发现层过滤在原始记录器之外；snapshot能力、文件版本和失败锁存仍归同一底层reader。 */
+export function bindProjectSourceDirectoryView(
+  reader: ProjectSourceReader,
+  project: (
+    directory: string,
+    entries: ProjectSourceDirectoryEntry[]
+  ) => ProjectSourceDirectoryEntry[]
+): ProjectSourceReader {
+  const view: ProjectSourceReader = {
+    mode: reader.mode,
+    readFile: reader.readFile.bind(reader),
+    async readDirectory(directory, options) {
+      return project(directory, await reader.readDirectory(directory, options));
+    },
+    stat: reader.stat.bind(reader),
+    realpath: reader.realpath.bind(reader),
+    readConfiguration: reader.readConfiguration.bind(reader),
+    assertComplete: reader.assertComplete.bind(reader),
+    invalidate: reader.invalidate.bind(reader),
+  };
+  boundReaderOrigins.set(view, projectSourceReaderIdentity(reader));
+  return view;
 }
 
 export function throwIfSourceReadAborted(options?: ProjectSourceReadOptions): void {

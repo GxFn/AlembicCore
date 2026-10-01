@@ -23,6 +23,7 @@ import {
   RecordingProjectSourceReader,
   ReplayProjectSourceReader,
 } from '../../../infrastructure/io/ProjectInputSnapshot.js';
+import { createProjectInputDiscoveryView } from '../../../infrastructure/io/ProjectInputView.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
@@ -99,7 +100,7 @@ export interface NodeProjectContextFoundationPortableRoot {
 }
 
 export interface NodeProjectContextFoundationHostPortsOptions {
-  /** 与宿主inventory/SDK视图共用的私有绝对目录，仅从Git状态观察排除；默认保持历史语义。 */
+  /** 与宿主inventory/SDK共用的私有绝对目录；目录发现及Git状态排除，底层输入事实保持完整。 */
   privateDirectories?: readonly string[];
   portableRoots?: NodeProjectContextFoundationPortableRoot[];
   dependencyOwnership?: ProjectContextDependencyOwnershipV1;
@@ -173,6 +174,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
   readonly #projectContext: ProjectContextContract;
   readonly #portableRoots: NodeProjectContextFoundationPortableRoot[];
   readonly #privateDirectories: string[];
+  readonly #discoveryViews = new WeakMap<ProjectSourceReader, Promise<ProjectSourceReader>>();
   readonly #dependencyOwnership?: ProjectContextDependencyOwnershipV1;
 
   constructor(
@@ -291,17 +293,18 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
             await readCodeGraphGitInput(reader, observation.request, { signal: input.signal });
             break;
           }
+          case 'project-input-view':
           case 'codegraph-input-view': {
             // 这是已接受的视图策略，与sourceFiles一样不由freshness重新选择；其物理读集仍逐项重观测。
             prior ??= new ReplayProjectSourceReader(snapshot, roots);
             const policy = await prior.readConfiguration(
-              'codegraph-input-view',
+              observation.operation,
               absolutePath,
               () => {
                 throw new Error('Recorded input view is required');
               }
             );
-            await reader.readConfiguration('codegraph-input-view', absolutePath, () => policy, {
+            await reader.readConfiguration(observation.operation, absolutePath, () => policy, {
               signal: input.signal,
             });
             break;
@@ -650,6 +653,28 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     };
   }
 
+  async #inputDiscoveryView(
+    reader?: ProjectSourceReader,
+    signal?: AbortSignal
+  ): Promise<ProjectSourceReader | undefined> {
+    if (!reader || (reader.mode !== 'replay' && !this.#privateDirectories.length)) {
+      return reader;
+    }
+    let pending = this.#discoveryViews.get(reader);
+    if (!pending) {
+      pending = createProjectInputDiscoveryView(reader, this.#privateDirectories, signal);
+      this.#discoveryViews.set(reader, pending);
+    }
+    try {
+      return await pending;
+    } catch (error) {
+      if (this.#discoveryViews.get(reader) === pending) {
+        this.#discoveryViews.delete(reader);
+      }
+      throw error;
+    }
+  }
+
   async executeRequest(input: {
     repository: ProjectContextFoundationRepositoryInput;
     plan: ProjectContextRequestAuditPlan;
@@ -672,7 +697,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     };
     const execution: ProjectContextHandlerExecutionContext = {
       signal: input.signal,
-      sourceReader: input.sourceReader,
+      sourceReader: await this.#inputDiscoveryView(input.sourceReader, input.signal),
       // 保留自定义 ProjectContext 的旧物理读取回调；内置 reader 另通知缓存版本消费。
       onSourceFileRead: ({ projectRoot, filePath, content }) =>
         recordSourceVersion({ projectRoot, filePath, blobSha256: hashBytes(content) }),

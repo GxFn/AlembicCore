@@ -21,6 +21,7 @@ export type ProjectSourceConfigurationKind =
   | 'scope-for-control-root'
   | 'discoverer-preference'
   | 'codegraph-input-view'
+  | 'project-input-view'
   | 'codegraph-git';
 
 export interface ProjectSourceReadOptions {

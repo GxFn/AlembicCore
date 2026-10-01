@@ -788,7 +788,32 @@ describe('ProjectContext certified facts foundation', () => {
 
   it('reobserves the certified input closure for live freshness without reusing its old hash', async () => {
     const fixture = await createNodeCaptureFixture();
-    const artifact = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    const privateRelativeRoot = 'context/certified-project-facts/v2';
+    const privateRoot = path.join(fixture.repository.sourceRoot, privateRelativeRoot);
+    await fs.mkdir(privateRoot, { recursive: true });
+    fixture.ports = new NodeProjectContextFoundationHostPorts(undefined, {
+      privateDirectories: [privateRoot],
+    });
+    const artifact = await captureCertifiedProjectFactsV2(
+      {
+        ...fixture.input,
+        inventoryPolicy: {
+          ...fixture.input.inventoryPolicy,
+          excludeRelativePaths: [privateRelativeRoot],
+        },
+      },
+      fixture.ports
+    );
+    // 发现层看不到私有入口，但原始目录观察仍完整，不能用伪造FS事实通过校验。
+    expect(
+      artifact.facts.inputClosure!.snapshot.observations.find(
+        (row) =>
+          row.operation === 'directory' &&
+          row.path.relativePath === 'context/certified-project-facts'
+      )?.outcome
+    ).toEqual({ ok: true, value: [{ name: 'v2', kind: 'directory' }] });
+    // SDK之外的repo/module发现也必须遵守宿主策略，发布后不能把自己的产物变成新输入。
+    await fs.writeFile(path.join(privateRoot, 'artifact.json'), '{"owned":true}');
     const observation = {
       closure: artifact.facts.inputClosure!,
       chunks: artifact.chunks,

@@ -7,12 +7,12 @@ import {
   type CodeGraphGitObservation,
   readCodeGraphGitInput,
 } from '../../infrastructure/io/CodeGraphGitInput.js';
-import { readCodeGraphInputView } from '../../infrastructure/io/CodeGraphInputView.js';
 import {
   type ProjectInputPath,
   type ProjectInputSnapshotView,
   readProjectInputSnapshotView,
 } from '../../infrastructure/io/ProjectInputSnapshot.js';
+import { readProjectInputView } from '../../infrastructure/io/ProjectInputView.js';
 import { projectSourceReaderIdentity } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type {
@@ -264,13 +264,13 @@ async function prepare(
   if (!current) {
     throw new Error('Captured input reader lost its snapshot capability.');
   }
-  const policy = await readCodeGraphInputView(
+  const policy = await readProjectInputView(
     reader,
     current,
     logicalRoot,
-    runtimeRoot,
-    privateDirectories,
-    context?.signal
+    [path.dirname(runtimeRoot), ...privateDirectories],
+    context?.signal,
+    'codegraph-input-view'
   );
   const git: CodeGraphGitObservation[] = [];
   for (const row of current.snapshot.observations.filter(

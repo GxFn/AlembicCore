@@ -133,8 +133,12 @@ runtime 根规范化真实路径，避免 `/var` 与 `/private/var` 等别名绕
 宿主还可通过 `CodeGraphProjectContextOptions.privateDirectories` 声明自己的产物目录，
 例如认证存储。使用规范化的绝对路径，在捕获前创建固定目录，并把同一数组传给
 `NodeProjectContextFoundationHostPortsOptions.privateDirectories`，同时纳入宿主 inventory
-排除策略。前者绑定 SDK 发现视图，后者为真实 Git status 添加 literal exclude pathspec，
-避免发布私有产物把无变化源码从 clean 判为 dirty；不声明时保留原 Git 状态语义。
+排除策略。前者绑定 SDK 发现视图；后者在原始 Recording/Replay reader 外提供通用目录
+发现投影，并为真实 Git status 添加 literal exclude pathspec。通用投影以
+`project-input-view` 保存；SDK 的额外 runtime 排除保留 `codegraph-input-view` 兼容键。
+discoverer、repo/module 目录扫描在首次查询前取得该策略，原始目录记录与显式文件读取
+保持完整，发布产物不会被回读为源码或让无变化源码从 clean 判为 dirty。
+不声明私有目录时保留原 Git 状态语义；历史闭包无通用视图策略时重放原发现路径。
 这些目录必须由宿主拥有，不能覆盖源码根；Core 不创建或迁移宿主存储。新策略须进入
 宿主配置身份；历史产物的 freshness 应继续使用其已接受的版本，不能偷偷套用新排除。
 
