@@ -266,6 +266,19 @@ CodeGraph 把 `extension T` 也当成类型节点——T 在项目里有唯一�
 也会报错，不据此判失败。`namespace` 成员与匿名 default 声明没有符号，文件照常入库并在文件元数据
 `uncoveredSyntax` 里记下。压缩或生成物形态的文件只留声明，记为 partial。
 
+就绪与覆盖：清单里的文件分三类，只有第三类影响代际状态。
+
+- 文档与配置（`.md`、`.json`、`.yml`、`.toml` 等）只进清单：有内容哈希与行数，没有符号，
+  文件元数据带 `inventoryOnly`，不产生诊断。它们进清单是为了新鲜度、模块配置与正文召回。
+- 没有解析器的源码语言（如 `.rb`、`.vue`）记一条 `unsupported-language`，提示级、不阻塞就绪：
+  这是索引能力的边界，不是这一代的故障。
+- 有解析器的文件解析失败、超出解析预算或超出大小上限才是覆盖缺口：代际状态为 partial，
+  查询带 `catch-up-failed` 诊断、不算就绪。
+
+所以带 README 与 `package.json` 的项目，全部源码都解析成功时状态是 indexed、可以就绪。
+查询带不带源码正文看的是索引有没有过期，不是覆盖是否完整：fresh 与 partial 都给正文，每个文件的
+正文在读取时按索引里的内容哈希单独核对；stale、unavailable 等状态不给。
+
 增量构建的结果必须与同一文件集合上的全量构建相同。没改内容的文件在三种情况下也要重新链接：
 文件集合变化时，所有做模块解析的文件重来；说明符解析读过的配置文件内容变化时同样全部重来
 （代际元数据 `moduleConfigFiles` 记着读过哪些：tsconfig / jsconfig 及经 `extends` 继承、名字
@@ -290,8 +303,107 @@ ignoreDirectories；不会删除同目录中其它会话的资源。真实语法
 查询的低置信与歧义诊断只看查询与符号本身的匹配强度；图连通度只参与排序。被调用得多
 不能证明某个符号就是查询要找的那一个。
 
+### 按边的种类查询
+
+关系查询各读各的边，不混用：
+
+| 关系 | 读的边 | 方向 |
+|---|---|---|
+| callers / callees | `calls` | 指向起点 / 从起点出发 |
+| instantiations | `calls` 里 `callKind` 为 new 或 jsx 的 | 指向起点 |
+| supertypes / subtypes | `extends`、`implements`（及 `inherits`、`conforms`） | 从起点出发 / 指向起点 |
+| importers / imports | 文件级的 `imports` | 指向文件 / 从文件出发 |
+
+`callers` 不会把子类型或导入方当成调用方。起点可以是一个符号、一个符号连同它的成员
+（`includeMembers`）、或一个文件里的全部声明；可以沿同一种关系走多跳（最多 8），回答里带每个
+端点到起点的跳数，以及结果是否因深度或预算没走完（`truncated`）。头文件里的方法声明与实现文件里
+的定义是两个符号，由调用方把它们一起作为起点。候选档的边不参与，除非查询明确要求。
+
+`impact` 只沿"依赖它的一方"走：符号的调用方、子类型与引用方，文件的导入方，以及符号对应的测试
+（`symbol_to_test`），默认 3 跳。被起点依赖的文件不在结果里——它们不受起点变化的影响。只给符号
+不给文件时，受影响的是用到这个符号的地方，不是它所在文件的全部导入方。受影响的范围不受输出
+预算限制；返回的边受限，并如实标出 `truncated`。`affected-tests` 与 `validation-plan` 用同一个
+反向闭包走到底，所以隔着几层依赖的测试也找得到。
+
 SourceGraph是live辅助观测，不自动继承certified input closure的保证。下游库存计数提示
 同时表达freshness/ready；部分覆盖不能被计数误称为完整就绪。
+
+## 关系查询
+
+跨文件、可反向的关系经 `@alembic/core/project-context` 的 `createProjectRelations` 给出：
+
+```ts
+import { createProjectRelations } from '@alembic/core/project-context';
+
+const relations = createProjectRelations({ repository: sourceGraphRepository });
+await relations.ensureIndex({ projectRoot, codeGraph: { dataRoot } });
+const callers = await relations.query({
+  kind: 'callers',
+  scope: { projectRoot },
+  target: { filePath: 'src/math.ts', symbol: 'add' },
+});
+```
+
+九种 ProjectContext 查询按文件现算，只看得到一个文件自己的出边（`file-flow` 的 callers 与 callees
+是同一组调用点的两种排序）。关系查询的回答来自整个项目的源码索引，所以能回答"谁调用了它""改了它
+会影响谁"。索引的仓库、服务与 DTO 仍然不在任何公开出口里；这里只接收仓库对象，回答全部用协议
+自己的类型。
+
+| kind | 回答 |
+|---|---|
+| `symbols` | 一个文件里的全部声明 |
+| `search` | 按名字或路径找声明 |
+| `callers` / `callees` | 谁调用了它 / 它调用了谁 |
+| `instantiations` | 谁创建了这个类型的实例 |
+| `supertypes` / `subtypes` | 类型层级的上下两个方向 |
+| `importers` / `imports` | 谁导入了这个文件 / 它导入了谁 |
+| `impact` | 改了这些文件或这个符号会波及哪些依赖方，以及其中的测试 |
+| `module-dependencies` | 模块之间谁依赖谁 |
+| `evidence` | 一条引用对应的源码，以及它是否仍与当前内容一致 |
+
+**身份。** 符号、文件与关系沿用协议的 DTO 与引用。同一个声明，这里给的 `file-symbol` 引用与
+`file-symbols` 查询给的是同一个 id——索引为每个符号记下了协议对外用的种类与范围，内容短哈希取自
+同一份文本。关系带 `relation-site` 引用（发生位置所在的文件、行、内容哈希），以及
+`resolution = { linker, strategy, tier, confidence }`：certain 是自有链接器给出、每一步有语法或
+配置为证；trusted 是外部引擎的高准确率解析或按目录惯例找回的包入口；candidate 默认不出现，
+显式传 `includeCandidates` 才给，并且不能当事实用。
+
+**起点。** `target` 依次取用：协议引用（对象或 id 字符串）→ `filePath` + `symbol`（`line` 用来
+区分同名声明）→ 只有 `symbol`（全项目里必须唯一）→ 只有 `filePath`（文件里的全部声明；配 `line`
+时取包住这一行的声明）。找不到是 `not-found`，不唯一是 `ambiguous` 并列出候选，不取近似。同名的
+若干声明里恰好只有一个带实现（ObjC 的 `.h` 声明与 `.m` 定义）时取带实现的那个，其余声明一并
+作为起点。
+
+**索引状态。** 每个回答带 `index`：代际、新鲜度、有解析缺口的文件数、外部引擎这一代的状态。没有
+可用代际时返回 `query-unavailable` 与下一步动作，不返回空结果。`ensureIndex` 把索引追到当前
+源码（没有就建、过期就增量、已是最新则不动）；不调用它时查询读已有的最新一代。
+
+**引用复核。** `evidence` 读当前文件，把它的内容哈希与引用里记的哈希比对：一致才是当前的
+（`current`），并可带回那几行源码；不一致说明文件在引用产生之后改过，不给正文。它不依赖索引，
+`indexed` 另外说明当前文件与索引里的版本是否一致。没有哈希的引用无法判断，按不是当前的处理。
+
+**模块依赖。** 模块划分来自 `repo` 查询的 `modules`（见下），依赖来自索引里跨模块的边：
+文件导入与符号级的调用、继承、实现。每一对依赖按边的种类计数，标出其中只属于可信档的条数，并带
+几条可复核的关系。清单里声明的依赖（`RepoContext.dependencyGraph`）是另一回事，不在这里。
+没有归到任何模块的文件单独计数。
+
+**边界。** 关系查询是 live 能力。认证会话里的九种查询不读索引——索引不在认证的输入闭包里。
+成员调用不按声明类型解析（`self.repo.load()` 里 `repo` 的属性类型），这类关系在 Swift / ObjC 上
+靠外部引擎，落在可信或候选档。
+
+### 模块划分
+
+`repo` 查询的 `modules` 是源码文件的模块划分，规则只有一份
+（`shared/map-repo/modulePartition`）：
+
+- 发现层给出多个有文件的构建目标（SPM target、workspace 包）时，每个目标是一个模块，目录取它的
+  文件的公共目录。
+- 只有一个目标（或没有）时，按目录再分：源码根下的每个一级目录是一个模块。
+- 没被目标或一级目录收下的文件归到所在的源码根（或仓库根）。
+
+一个文件属于路径前缀最长的那个模块。每个模块带一个 `module` 引用，可以原样作为 `module`、
+`module-layers`、`map` 的种子——宿主不需要再从目标、源码根、顶层目录里自己推一遍。源码根自己的
+散落文件在引用里逐个列出，这样按目录扫描时不会把子目录的模块算进来。
 
 ## 捕获期间的源码读取
 

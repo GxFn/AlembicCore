@@ -31,13 +31,34 @@ export type {
   ProjectContextRequestKind,
   ProjectContextResult,
   ProjectContextScopeInput,
+  ProjectEvidenceContext,
+  ProjectImpactContext,
+  ProjectIndexState,
   ProjectMap,
   ProjectMapSummary,
+  ProjectModuleDependencyContext,
+  ProjectModuleDependencySummary,
+  ProjectRelationEnvelope,
+  ProjectRelationKind,
+  ProjectRelationRequest,
+  ProjectRelationResult,
+  ProjectRelationTarget,
+  ProjectRelationUnavailableContext,
+  ProjectRelationWalkContext,
+  ProjectRelationWalkKind,
+  ProjectSymbolListContext,
+  RelationResolutionSummary,
+  RelationSummary,
   RepoContext,
   SourceSliceContext,
   SpaceContext,
+  SymbolSummary,
 } from './domain/project-context/index.js';
-export { buildProjectContextPresenterInput } from './domain/project-context/index.js';
+export {
+  buildProjectContextPresenterInput,
+  isProjectRelationKind,
+  PROJECT_RELATION_KIND_VALUES,
+} from './domain/project-context/index.js';
 export type {
   ArchitectureCodeEntitySnapshot,
   ArchitectureDimensionCoverageSnapshot,
@@ -73,5 +94,13 @@ export {
   ProjectContext,
   withProjectContextSession,
 } from './service/project-context/ProjectContextService.js';
+// 关系查询（跨文件、可反向）：回答来自源码索引，用的是协议自己的符号与引用。
+export {
+  createProjectRelations,
+  type ParsedProjectContextRef,
+  type ProjectRelations,
+  type ProjectRelationsOptions,
+  parseProjectContextRef,
+} from './service/project-context/relations/index.js';
 // PC-F final-artifact 合约冻结 foundation 聚合面；文件引用 helper 属于 live ProjectContext 公共能力。
 export { createProjectContextFileRef } from './service/project-context/shared/sourceSlice-fileSymbols/contracts.js';

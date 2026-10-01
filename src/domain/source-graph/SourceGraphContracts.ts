@@ -99,9 +99,25 @@ export const SOURCE_GRAPH_OPERATION_KINDS = [
   'node',
   'callers',
   'callees',
+  'relations',
   'impact',
   'affected-tests',
   'validation-plan',
+] as const;
+
+/**
+ * 按边的种类区分的关系。每一种只读对应种类的边：
+ * callers / callees 是调用边；instantiations 是创建实例的调用（`new`、JSX 元素）；
+ * supertypes / subtypes 是继承与实现；importers / imports 是文件之间的导入。
+ */
+export const SOURCE_GRAPH_RELATIONS = [
+  'callers',
+  'callees',
+  'instantiations',
+  'supertypes',
+  'subtypes',
+  'importers',
+  'imports',
 ] as const;
 
 export const SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS = [
@@ -147,6 +163,7 @@ export type SourceGraphSymbolKind = (typeof SOURCE_GRAPH_SYMBOL_KINDS)[number] |
 export type SourceGraphRedactionState = (typeof SOURCE_GRAPH_REDACTION_STATES)[number];
 export type SourceGraphDiagnosticCode = (typeof SOURCE_GRAPH_DIAGNOSTIC_CODES)[number];
 export type SourceGraphOperationKind = (typeof SOURCE_GRAPH_OPERATION_KINDS)[number];
+export type SourceGraphRelation = (typeof SOURCE_GRAPH_RELATIONS)[number];
 export type SourceGraphValidationPlanBucket = (typeof SOURCE_GRAPH_VALIDATION_PLAN_BUCKETS)[number];
 export type SourceGraphValidationEvidenceKind =
   (typeof SOURCE_GRAPH_VALIDATION_EVIDENCE_KINDS)[number];
@@ -216,13 +233,15 @@ export const SOURCE_GRAPH_DIAGNOSTIC_POLICY: Record<
     invalidConclusion: 'symbol reference is unique',
     blocksReady: true,
   },
+  // 没有解析器的源码语言是索引能力的边界，不是这一代索引的故障：它提示"这个文件没有符号图"，
+  // 但不让整代索引变成未就绪——否则项目里只要有一个这样的文件，所有查询都永远到不了就绪。
   'unsupported-language': {
     code: 'unsupported-language',
-    severity: 'warning',
+    severity: 'info',
     owner: 'core',
     nextAction: 'fallback_to_file_inventory_or_add_parser',
     invalidConclusion: 'parser-backed symbol graph covers this file',
-    blocksReady: true,
+    blocksReady: false,
   },
   'parser-timeout': {
     code: 'parser-timeout',
@@ -512,12 +531,34 @@ export interface SourceGraphCalleesResult extends SourceGraphOperationBase {
   edges: SourceGraphEdge[];
 }
 
+export interface SourceGraphRelationsResult extends SourceGraphOperationBase {
+  operation: 'relations';
+  relation: SourceGraphRelation;
+  /** 起点：符号，或文件（文件级关系；对符号级关系表示这个文件里的全部声明）。 */
+  symbolId?: string;
+  filePath?: string;
+  /** 关系另一端的符号；文件级关系里是文件自身的 `#module` 符号。按离起点的跳数排列。 */
+  symbols: SourceSymbolNode[];
+  edges: SourceGraphEdge[];
+  sourceSections: SourceSection[];
+  /** 另一端到起点的跳数，键是 symbolId。 */
+  distances: Record<string, number>;
+  /** 遍历在到达深度或走完之前因预算停下：结果不是全部。 */
+  truncated: boolean;
+}
+
 export interface SourceGraphImpactResult extends SourceGraphOperationBase {
   operation: 'impact';
   changedFiles: string[];
+  /** 起点文件，加上依赖它们的文件（直接或经几跳）。被起点依赖的文件不在其中。 */
   impactedFiles: string[];
+  /** 依赖起点的符号：调用方、子类型，以及它们的调用方……按跳数排列。 */
+  impactedSymbols: SourceSymbolNode[];
   edges: SourceGraphEdge[];
   affectedValidations: string[];
+  /** 实际走到的跳数。 */
+  depth: number;
+  truncated: boolean;
 }
 
 export interface SourceGraphAffectedTestsResult extends SourceGraphOperationBase {
@@ -690,11 +731,25 @@ export interface SourceGraphCalleesResultInput extends SourceGraphOperationBaseI
   edges?: SourceGraphEdge[];
 }
 
+export interface SourceGraphRelationsResultInput extends SourceGraphOperationBaseInput {
+  relation: SourceGraphRelation;
+  symbolId?: string;
+  filePath?: string;
+  symbols?: SourceSymbolNode[];
+  edges?: SourceGraphEdge[];
+  sourceSections?: SourceSection[];
+  distances?: Record<string, number>;
+  truncated?: boolean;
+}
+
 export interface SourceGraphImpactResultInput extends SourceGraphOperationBaseInput {
   changedFiles?: string[];
   impactedFiles?: string[];
+  impactedSymbols?: SourceSymbolNode[];
   edges?: SourceGraphEdge[];
   affectedValidations?: string[];
+  depth?: number;
+  truncated?: boolean;
 }
 
 export interface SourceGraphAffectedTestsResultInput extends SourceGraphOperationBaseInput {
@@ -723,6 +778,7 @@ export type SourceGraphOperationResult =
   | SourceGraphNodeResult
   | SourceGraphCallersResult
   | SourceGraphCalleesResult
+  | SourceGraphRelationsResult
   | SourceGraphImpactResult
   | SourceGraphAffectedTestsResult
   | SourceGraphValidationPlanResult;
@@ -1117,6 +1173,29 @@ export function createSourceGraphCalleesResult(
   };
 }
 
+export function createSourceGraphRelationsResult(
+  input: SourceGraphRelationsResultInput
+): SourceGraphRelationsResult {
+  const base = createSourceGraphOperationBase('relations', input);
+  const symbolId = optionalNonEmpty(input.symbolId, 'relationsResult.symbolId');
+  const filePath = optionalNonEmpty(input.filePath, 'relationsResult.filePath');
+  if (!symbolId && !filePath) {
+    throw new Error('relationsResult requires symbolId or filePath.');
+  }
+  return {
+    ...base,
+    operation: 'relations',
+    relation: requireAllowed(input.relation, SOURCE_GRAPH_RELATIONS, 'relationsResult.relation'),
+    symbolId,
+    filePath,
+    symbols: input.symbols ?? [],
+    edges: input.edges ?? [],
+    sourceSections: input.sourceSections ?? [],
+    distances: { ...(input.distances ?? {}) },
+    truncated: input.truncated ?? false,
+  };
+}
+
 export function createSourceGraphImpactResult(
   input: SourceGraphImpactResultInput
 ): SourceGraphImpactResult {
@@ -1126,8 +1205,11 @@ export function createSourceGraphImpactResult(
     operation: 'impact',
     changedFiles: normalizeStringList(input.changedFiles ?? []),
     impactedFiles: normalizeStringList(input.impactedFiles ?? []),
+    impactedSymbols: input.impactedSymbols ?? [],
     edges: input.edges ?? [],
     affectedValidations: normalizeStringList(input.affectedValidations ?? []),
+    depth: normalizeCount(input.depth ?? 0, 'impactResult.depth'),
+    truncated: input.truncated ?? false,
   };
 }
 
@@ -1188,6 +1270,12 @@ export function validateSourceGraphCallersResult(input: SourceGraphCallersResult
 
 export function validateSourceGraphCalleesResult(input: SourceGraphCalleesResultInput): string[] {
   return collectValidationIssues(() => createSourceGraphCalleesResult(input));
+}
+
+export function validateSourceGraphRelationsResult(
+  input: SourceGraphRelationsResultInput
+): string[] {
+  return collectValidationIssues(() => createSourceGraphRelationsResult(input));
 }
 
 export function validateSourceGraphImpactResult(input: SourceGraphImpactResultInput): string[] {

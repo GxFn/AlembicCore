@@ -144,7 +144,7 @@ describe('SourceGraphIndexer', () => {
       true
     );
     expect((await repository.getSnapshot('legacy'))?.extractionVersion).toBe(
-      'source-graph-indexer-v4'
+      'source-graph-indexer-v5'
     );
     const reopen = new SourceGraphLifecycleService(repository);
     expect((await reopen.catchUpOnStartup({ ...sdkInput, now: 3000 })).action).toBe('fresh-noop');
@@ -800,6 +800,61 @@ describe('SourceGraphIndexer', () => {
         (symbol) => symbol.filePath === 'src/App.swift' && symbol.displayName === 'App'
       )
     ).toBe(true);
+  });
+
+  it('reaches ready on a project with documents, configuration and a language it cannot parse', async () => {
+    writeFixture('README.md', '# Project\n');
+    writeFixture('package.json', '{ "name": "fixture" }\n');
+    writeFixture('config/app.yaml', 'name: fixture\n');
+    writeFixture('src/app.ts', 'export function start() {}\n');
+    writeFixture('scripts/deploy.rb', 'class Deploy; end\n');
+    const { sourceGraphRepository } = createAlembicRepositories(runtime.connection);
+    const indexer = new SourceGraphIndexer(sourceGraphRepository);
+
+    const result = await indexer.buildFull({ projectRoot: tmpDir, generationId: 'ready' });
+
+    // 文档与配置只进清单：有内容哈希，没有符号，也不是解析缺口。
+    expect(
+      result.files.map((file) => [
+        file.repoRelativePath,
+        file.parseStatus,
+        file.metadata.inventoryOnly === true,
+        file.parseErrors.length,
+      ])
+    ).toEqual([
+      ['config/app.yaml', 'skipped', true, 0],
+      ['package.json', 'skipped', true, 0],
+      ['README.md', 'skipped', true, 0],
+      ['scripts/deploy.rb', 'skipped', false, 1],
+      ['src/app.ts', 'parsed', false, 0],
+    ]);
+    // 没有解析器的源码语言是一条提示，不让整代索引变成未就绪。
+    expect(
+      result.diagnostics.map((diagnostic) => [
+        diagnostic.code,
+        diagnostic.filePath,
+        diagnostic.severity,
+        diagnostic.blocksReady,
+      ])
+    ).toEqual([['unsupported-language', 'scripts/deploy.rb', 'info', false]]);
+    expect(result.snapshot).toMatchObject({
+      status: 'indexed',
+      freshness: { status: 'fresh' },
+    });
+    expect(result.snapshot.degradedReason).toBeUndefined();
+    expect(result.snapshot.freshness.nextAction).toBeUndefined();
+    expect(result.status.ready).toBe(true);
+
+    // 沿用到下一代的只进清单文件不会变成"解析覆盖不全"。
+    writeFixture('src/app.ts', 'export function start() { return 1; }\n');
+    const next = await indexer.buildIncremental({
+      projectRoot: tmpDir,
+      generationId: 'ready-next',
+    });
+    expect(next.changedFiles).toEqual(['src/app.ts']);
+    expect(next.snapshot.status).toBe('indexed');
+    expect(next.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(['unsupported-language']);
+    expect(next.status.ready).toBe(true);
   });
 
   it('retains unchanged parsing gaps and diagnostics until those files are reparsed or deleted', async () => {

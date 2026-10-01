@@ -41,6 +41,16 @@ export interface SymbolSummary {
   container?: string;
 }
 
+/** 一条关系是谁、凭什么得出的。 */
+export interface RelationResolutionSummary {
+  /** lexical、import-binding、module-import、heritage 是自有链接器；codegraph 是外部引擎。 */
+  linker: string;
+  strategy: string;
+  /** certain：有语法与配置为证；trusted：高把握但不是证明；candidate：猜测，默认不出现。 */
+  tier: 'certain' | 'trusted' | 'candidate';
+  confidence: number;
+}
+
 export interface RelationSummary {
   kind: string;
   direction?: 'inflow' | 'outflow' | 'internal';
@@ -56,6 +66,8 @@ export interface RelationSummary {
   targetRef?: ProjectContextRef;
   unresolved?: boolean;
   reason?: string;
+  /** 来自源码索引的关系带解析记录；按文件现算的关系（file-flow）都有语法证明，不带这一项。 */
+  resolution?: RelationResolutionSummary;
 }
 
 export interface RelationEndpointSummary {
@@ -261,12 +273,32 @@ export interface RepoDependencyGraphSummary {
   truncated?: boolean;
 }
 
+/**
+ * 仓库划分出的一个模块。划分规则只有一份：发现层给出多个构建目标时每个目标是一个模块；
+ * 只有一个目标时按源码根下的一级目录划分；其余文件归到所在的源码根。
+ * 一个文件属于路径前缀最长的那个模块。
+ */
+export interface RepoModuleSummary {
+  name: string;
+  /** 模块目录，仓库相对路径；仓库根写作 `.`。 */
+  path: string;
+  kind: 'target' | 'area' | 'root';
+  /** kind 为 target 时对应的构建目标。 */
+  targetName?: string;
+  targetKind?: string;
+  fileCount: number;
+  /** 可以原样作为 module / module-layers / map 的种子。 */
+  ref: ProjectContextRef;
+}
+
 export interface RepoContext {
   repo: RepoSummary;
   languages: LanguageSummary[];
   buildSystems: BuildSystemSummary[];
   packageSystems: PackageSystemSummary[];
   targets: TargetSummary[];
+  /** 源码文件的模块划分（可缺席：没有收集到任何源码文件时不带）。 */
+  modules?: RepoModuleSummary[];
   localPackages: PackageSummary[];
   sourceRoots: PathSummary[];
   entrypoints: EntrypointSummary[];

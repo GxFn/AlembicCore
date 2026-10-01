@@ -7,7 +7,7 @@ import { RESOURCES_DIR } from '../../shared/packageRoot.js';
  * 自有分析规则的版本：语法提取、文件事实、链接。凡是会改变分析输出的修改都要提高它，
  * 依赖分析结果的缓存（认证工件、索引代际、宿主的共享构建）据此失效。
  */
-const ANALYSIS_VERSION = 'alembic-analysis-v2';
+const ANALYSIS_VERSION = 'alembic-analysis-v3';
 
 export interface AnalysisEngineIdentity {
   /** 分析引擎的身份；相同的值意味着相同输入得到相同的分析结果。 */

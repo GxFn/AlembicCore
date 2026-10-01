@@ -55,6 +55,12 @@ export function projectSourceGraphSymbols(
       metadata: {
         extractorVersion,
         declarationKind,
+        // 协议对外呈现这个声明时用的种类与范围（公开引用按它们生成），与节点自己的精确范围不同。
+        outline: {
+          kind: symbol.kind,
+          range: { ...symbol.range },
+          ...(symbol.container ? { container: symbol.container } : {}),
+        },
         rangePrecision:
           range.startColumn === undefined || range.endColumn === undefined ? 'line' : 'column',
         ...(symbol.compatibilitySource ? { compatibilitySource: symbol.compatibilitySource } : {}),

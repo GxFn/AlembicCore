@@ -170,10 +170,27 @@ describe('SourceGraphQueryService', () => {
     });
     expect(impact.operation).toBe('impact');
     expect(impact.ready).toBe(true);
-    expect(impact.impactedFiles).toEqual(
-      expect.arrayContaining(['src/app.ts', 'src/dashboard.ts', 'test/app.test.ts'])
-    );
+    // 受影响的是依赖 app.ts 的一方；app.ts 自己依赖的 dashboard.ts 不受它变化的影响。
+    expect(impact.impactedFiles).toEqual(['src/app.ts', 'test/app.test.ts']);
     expect(impact.affectedValidations).toContain('test:test/app.test.ts');
+    expect(impact.truncated).toBe(false);
+
+    // 反过来：改 dashboard.ts 会波及调用它的 app.ts，再波及导入 app.ts 的测试。
+    const upstream = await service.getSourceGraphImpact({
+      generationId: 'gen-query',
+      changedFiles: ['src/dashboard.ts'],
+    });
+    expect(upstream.impactedFiles).toEqual(['src/app.ts', 'src/dashboard.ts', 'test/app.test.ts']);
+    expect(upstream.impactedSymbols.map((symbol) => symbol.symbolId)).toEqual(
+      expect.arrayContaining(['src/app.ts#AppController.start'])
+    );
+    expect(upstream.depth).toBeGreaterThanOrEqual(2);
+    // 只给符号时，受影响的是用到它的地方，不是它所在文件的全部导入方。
+    const symbolOnly = await service.getSourceGraphImpact({
+      generationId: 'gen-query',
+      symbolId: 'src/dashboard.ts#cleanOutputProjection',
+    });
+    expect(symbolOnly.impactedFiles).toEqual(['src/dashboard.ts']);
 
     const affected = await service.getSourceGraphAffectedTests({
       generationId: 'gen-query',
@@ -183,9 +200,16 @@ describe('SourceGraphQueryService', () => {
     expect(affected.ready).toBe(true);
     expect(affected.testFiles).toStrictEqual(['test/app.test.ts']);
 
-    const unknown = await service.getSourceGraphAffectedTests({
+    // 测试隔着两层依赖到 dashboard.ts，同样找得到。
+    const transitive = await service.getSourceGraphAffectedTests({
       generationId: 'gen-query',
       changedFiles: ['src/dashboard.ts'],
+    });
+    expect(transitive.testFiles).toStrictEqual(['test/app.test.ts']);
+
+    const unknown = await service.getSourceGraphAffectedTests({
+      generationId: 'gen-query',
+      changedFiles: ['src/pluginRuntime.ts'],
     });
     expect(unknown.ready).toBe(false);
     expect(unknown.unknownReason).toContain('No source_graph symbol_to_test edge');
@@ -289,8 +313,14 @@ describe('SourceGraphQueryService', () => {
     } else if (result.operation === 'callees') {
       expect(result.callees.map((symbol) => symbol.symbolId)).toEqual([target]);
     } else if (result.operation === 'impact') {
-      expect(result.impactedFiles).toEqual(['src/target.ts', 'test/target.test.ts']);
+      // 输出的边受预算限制，受影响的范围不受：调用方所在的文件仍然在内。
+      expect(result.impactedFiles).toEqual([
+        'src/caller.ts',
+        'src/target.ts',
+        'test/target.test.ts',
+      ]);
       expect(result.affectedValidations).toEqual(['test:test/target.test.ts']);
+      expect(result.truncated).toBe(true);
     } else if (result.operation === 'validation-plan') {
       expect(result.mustRun.map((recommendation) => recommendation.filePath)).toEqual([
         'test/target.test.ts',
@@ -309,11 +339,9 @@ describe('SourceGraphQueryService', () => {
     expect(plan.operation).toBe('validation-plan');
     expect(plan.ready).toBe(true);
     expect(plan.changedFiles).toStrictEqual(['src/app.ts']);
-    expect(plan.impactedFiles).toEqual(
-      expect.arrayContaining(['src/app.ts', 'src/dashboard.ts', 'test/app.test.ts'])
-    );
+    expect(plan.impactedFiles).toEqual(['src/app.ts', 'test/app.test.ts']);
     expect(plan.impactedSymbols.map((symbol) => symbol.symbolId)).toEqual(
-      expect.arrayContaining(['src/app.ts#AppController', 'src/dashboard.ts#renderDashboard'])
+      expect.arrayContaining(['src/app.ts#AppController', 'src/app.ts#bootstrapApp'])
     );
     expect(plan.mustRun[0]).toMatchObject({
       bucket: 'mustRun',
@@ -364,9 +392,10 @@ describe('SourceGraphQueryService', () => {
   it('marks validation plans unknown when no deterministic test edge exists', async () => {
     const service = await buildFixtureGraph();
 
+    // 没有任何文件依赖它，也就没有哪个测试能被证明覆盖它。
     const plan = await service.getSourceGraphValidationPlan({
       generationId: 'gen-query',
-      changedFiles: ['src/dashboard.ts'],
+      changedFiles: ['src/pluginRuntime.ts'],
     });
 
     expect(plan.ready).toBe(false);

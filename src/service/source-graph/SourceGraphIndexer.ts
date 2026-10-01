@@ -350,7 +350,9 @@ export class SourceGraphIndexer {
         startedAt: input.options.now,
         completedAt: input.options.now,
         indexedAt: input.options.now,
-        degradedReason: summarizeDegradedReason(diagnostics),
+        degradedReason: summarizeDegradedReason(
+          diagnostics.filter((diagnostic) => diagnostic.blocksReady)
+        ),
         freshness: createFreshness(status, input.generationId, input.options.now, diagnostics),
         metadata: {
           mode: input.baseGenerationId ? 'incremental' : 'full',
@@ -647,6 +649,8 @@ function createFreshness(
 ): SourceGraphFreshness {
   const freshnessStatus =
     status === 'indexed' ? 'fresh' : status === 'partial' ? 'partial' : 'degraded';
+  // 提示级诊断（没有解析器的语言）不是覆盖缺口，不写进"降级"的原因与下一步动作。
+  const gaps = diagnostics.filter((diagnostic) => diagnostic.blocksReady);
   return createSourceGraphFreshness({
     status: freshnessStatus,
     checkedAt: now,
@@ -655,19 +659,21 @@ function createFreshness(
     pendingFileCount: 0,
     staleFileCount: 0,
     reason:
-      diagnostics.length > 0
-        ? 'Source graph generation completed with degraded coverage.'
-        : undefined,
-    nextAction: diagnostics.length > 0 ? 'review_source_graph_diagnostics' : undefined,
-    degradedReason: summarizeDegradedReason(diagnostics),
+      gaps.length > 0 ? 'Source graph generation completed with degraded coverage.' : undefined,
+    nextAction: gaps.length > 0 ? 'review_source_graph_diagnostics' : undefined,
+    degradedReason: summarizeDegradedReason(gaps),
   });
 }
 
+/**
+ * 代际状态只看覆盖缺口：有解析器的文件解析失败、超预算或超大小。
+ * 只进清单的文档与配置、没有解析器的语言都不是缺口——带 README 的项目照样是 indexed。
+ */
 function chooseSnapshotStatus(
   files: SourceFileNodeInput[],
   diagnostics: SourceGraphDiagnostic[]
 ): SourceGraphSnapshotStatus {
-  if (diagnostics.length === 0) {
+  if (diagnostics.every((diagnostic) => !diagnostic.blocksReady)) {
     return 'indexed';
   }
   return files.some((file) => file.parseStatus === 'parsed' || file.parseStatus === 'partial')

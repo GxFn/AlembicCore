@@ -210,16 +210,48 @@ describe('source graph linking', () => {
       result.symbols.find((symbol) => symbol.symbolId === 'src/shapes.ts#Mixed')?.metadata.heritage
     ).toBeUndefined();
 
-    // "谁继承它、谁实现它"就是指向它的层级边。
+    // "谁继承它、谁实现它"是指向它的层级边；可以继续向下走到子类型的子类型。
     const service = new SourceGraphService(repository);
-    const subtypes = await service.getSourceGraphCallers({
+    const ids = (symbols: { symbolId: string }[]) => symbols.map((symbol) => symbol.symbolId);
+    const subtypes = await service.getSourceGraphRelations({
+      generationId: 'hierarchy',
+      relation: 'subtypes',
+      symbolId: 'src/base.ts#Port',
+    });
+    expect(ids(subtypes.symbols)).toEqual(['src/shapes.ts#Local', 'src/shapes.ts#Wide']);
+    expect(subtypes.truncated).toBe(false);
+    const transitive = await service.getSourceGraphRelations({
+      generationId: 'hierarchy',
+      relation: 'subtypes',
+      symbolId: 'src/base.ts#Port',
+      depth: 3,
+    });
+    expect(ids(transitive.symbols)).toEqual([
+      'src/shapes.ts#Local',
+      'src/shapes.ts#Wide',
+      'src/shapes.ts#Impl',
+    ]);
+    expect(transitive.distances).toEqual({
+      'src/shapes.ts#Local': 1,
+      'src/shapes.ts#Wide': 1,
+      'src/shapes.ts#Impl': 2,
+    });
+    const supertypes = await service.getSourceGraphRelations({
+      generationId: 'hierarchy',
+      relation: 'supertypes',
+      symbolId: 'src/shapes.ts#Impl',
+    });
+    expect(ids(supertypes.symbols)).toEqual([
+      'src/base.ts#Base',
+      'src/base.ts#Extra',
+      'src/shapes.ts#Local',
+    ]);
+    // 层级边不是调用：问调用方得不到子类型。
+    const callers = await service.getSourceGraphCallers({
       generationId: 'hierarchy',
       symbolId: 'src/base.ts#Port',
     });
-    expect(subtypes.callers.map((symbol) => symbol.symbolId).sort()).toEqual([
-      'src/shapes.ts#Local',
-      'src/shapes.ts#Wide',
-    ]);
+    expect(callers.callers).toEqual([]);
   });
 
   it('resolves tsconfig path aliases and re-links when the config changes', async () => {
@@ -402,6 +434,42 @@ describe('source graph linking', () => {
       generationId: 'packages-full',
     });
     expect(describe(rebuilt)).toEqual(describe(next));
+  });
+
+  it('returns verified source text for a healthy file even when another file failed to parse', async () => {
+    write({
+      'src/app.ts': "import { helper } from './lib.js';\nexport function run() { helper(); }\n",
+      'src/lib.ts': 'export function helper() {}\n',
+      'src/broken.ts': 'export function broken( {\n',
+    });
+    const built = await full('gaps');
+    expect(built.snapshot.status).toBe('partial');
+    const service = new SourceGraphService(repository);
+
+    const callers = await service.getSourceGraphCallers({
+      generationId: 'gaps',
+      symbolId: 'src/lib.ts#helper',
+    });
+
+    expect(callers.callers.map((symbol) => symbol.symbolId)).toEqual(['src/app.ts#run']);
+    // 覆盖缺口如实报告，查询不算就绪；但被引用文件的正文逐个核对过，照常给出。
+    expect(callers.ready).toBe(false);
+    expect(callers.diagnostics.map((diagnostic) => diagnostic.code)).toContain('catch-up-failed');
+    expect(callers.sourceSections.map((section) => section.text ?? null)).toEqual(
+      expect.arrayContaining([expect.stringContaining('helper()')])
+    );
+
+    // 索引过期（文件已改）时正文仍然不给。
+    write({
+      'src/app.ts':
+        "import { helper } from './lib.js';\nexport function run() { helper(); return 2; }\n",
+    });
+    const stale = await service.getSourceGraphCallers({
+      generationId: 'gaps',
+      symbolId: 'src/lib.ts#helper',
+    });
+    expect(stale.freshness.status).toBe('stale');
+    expect(stale.sourceSections.every((section) => section.text === undefined)).toBe(true);
   });
 
   it('answers callers and callees from the stored call edges', async () => {

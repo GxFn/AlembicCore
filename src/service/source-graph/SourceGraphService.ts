@@ -26,6 +26,7 @@ import {
   type SourceGraphNodeInput,
   SourceGraphQueryService,
   type SourceGraphRelationInput,
+  type SourceGraphRelationsInput,
   type SourceGraphSearchInput,
   type SourceGraphValidationPlanInput,
 } from './SourceGraphQueryService.js';
@@ -77,6 +78,11 @@ export class SourceGraphService {
 
   async getSourceGraphCallees(input: SourceGraphRelationInput) {
     return new SourceGraphQueryService(this.repository).callees(input);
+  }
+
+  /** 按边的种类取关系：调用、实例化、类型层级、文件导入，各取各的边，可走多跳。 */
+  async getSourceGraphRelations(input: SourceGraphRelationsInput) {
+    return new SourceGraphQueryService(this.repository).relations(input);
   }
 
   async getSourceGraphImpact(input: SourceGraphImpactInput) {

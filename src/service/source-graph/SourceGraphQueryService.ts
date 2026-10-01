@@ -11,6 +11,7 @@ import {
   createSourceGraphFreshness,
   createSourceGraphImpactResult,
   createSourceGraphNodeResult,
+  createSourceGraphRelationsResult,
   createSourceGraphSearchResult,
   createSourceGraphValidationPlanResult,
   createSourceSection,
@@ -25,6 +26,8 @@ import {
   type SourceGraphFreshness,
   type SourceGraphImpactResult,
   type SourceGraphNodeResult,
+  type SourceGraphRelation,
+  type SourceGraphRelationsResult,
   type SourceGraphSearchResult,
   type SourceGraphSnapshot,
   type SourceGraphValidationEvidenceInput,
@@ -77,11 +80,33 @@ export interface SourceGraphNodeInput extends SourceGraphRankingOptions {
 
 export interface SourceGraphRelationInput extends SourceGraphRankingOptions {
   symbolId: string;
+  /** 起点是类型时，把它的成员也算作起点（"这个类调用了谁"通常问的是它的方法）。 */
+  includeMembers?: boolean;
+  /** 沿同一种关系继续走几跳；默认 1，最多 8。 */
+  depth?: number;
+}
+
+export interface SourceGraphRelationsInput extends SourceGraphRankingOptions {
+  relation: SourceGraphRelation;
+  /**
+   * 起点符号。不给时用 filePath：对符号级关系是这个文件里的全部声明，
+   * 对 importers / imports 就是这个文件本身。
+   */
+  symbolId?: string;
+  /**
+   * 同一个声明在别处的落点，与 symbolId 一起作为起点。头文件里的方法声明与实现文件里的方法定义
+   * 是两个符号，"谁调用了它"问的是它们合在一起。
+   */
+  alsoSymbolIds?: readonly string[];
+  includeMembers?: boolean;
+  depth?: number;
 }
 
 export interface SourceGraphImpactInput extends SourceGraphRankingOptions {
   changedFiles?: string[];
   symbolId?: string;
+  /** 沿"依赖它的一方"走几跳；默认 3，最多 8。 */
+  depth?: number;
 }
 
 export interface SourceGraphAffectedTestsInput extends SourceGraphRankingOptions {
@@ -278,54 +303,116 @@ export class SourceGraphQueryService {
   }
 
   async callers(input: SourceGraphRelationInput): Promise<SourceGraphCallersResult> {
-    const context = await this.createContext(input, 'target');
-    await this.loadTargetEdges(context, { symbolIds: [input.symbolId], direction: 'incoming' });
-    const relation = this.collectRelationSymbols(context, input.symbolId, 'incoming');
-    const sections = await this.buildRelationSections(context, relation.symbols, relation.edges);
+    const result = await this.relations({ ...input, relation: 'callers' });
     return createSourceGraphCallersResult({
-      generationId: context.generationId,
-      projectRoot: context.projectRoot,
-      repoId: context.repoId,
+      generationId: result.generationId,
+      projectRoot: result.projectRoot,
+      repoId: result.repoId,
       symbolId: input.symbolId,
-      callers: relation.symbols,
-      sourceSections: finalizeSourceSections(context, sections),
-      edges: context.options.includeEdges === false ? [] : relation.edges,
-      freshness: context.freshness,
-      diagnostics: [...context.diagnostics, ...relation.diagnostics],
+      callers: result.symbols,
+      sourceSections: result.sourceSections,
+      edges: result.edges,
+      freshness: result.freshness,
+      diagnostics: result.diagnostics,
     });
   }
 
   async callees(input: SourceGraphRelationInput): Promise<SourceGraphCalleesResult> {
-    const context = await this.createContext(input, 'target');
-    await this.loadTargetEdges(context, { symbolIds: [input.symbolId], direction: 'outgoing' });
-    const relation = this.collectRelationSymbols(context, input.symbolId, 'outgoing');
-    const sections = await this.buildRelationSections(context, relation.symbols, relation.edges);
+    const result = await this.relations({ ...input, relation: 'callees' });
     return createSourceGraphCalleesResult({
+      generationId: result.generationId,
+      projectRoot: result.projectRoot,
+      repoId: result.repoId,
+      symbolId: input.symbolId,
+      callees: result.symbols,
+      sourceSections: result.sourceSections,
+      edges: result.edges,
+      freshness: result.freshness,
+      diagnostics: result.diagnostics,
+    });
+  }
+
+  /**
+   * 一种关系的另一端：从起点出发，只沿这一种关系的边走，可走多跳。
+   * 候选档的边不参与，除非查询明确要求。
+   */
+  async relations(input: SourceGraphRelationsInput): Promise<SourceGraphRelationsResult> {
+    const context = await this.createContext(input, 'target');
+    const rule = RELATION_RULES[input.relation];
+    const symbolId = input.symbolId?.trim() || undefined;
+    const filePath = context.options.filePath;
+    const diagnostics: SourceGraphDiagnostic[] = [];
+    const anchor = this.resolveRelationAnchor(context, rule, symbolId, input.includeMembers);
+    if (rule.level === 'symbol' && symbolId && !anchor.missing) {
+      anchor.symbolIds.push(
+        ...(input.alsoSymbolIds ?? []).filter(
+          (id) => context.symbolById.has(id) && !anchor.symbolIds.includes(id)
+        )
+      );
+    }
+    if (anchor.missing) {
+      diagnostics.push(
+        createSourceGraphDiagnostic({
+          code: 'source-ref-unproven',
+          message: anchor.missing,
+          nextAction: 'search_source_graph_or_rebuild_index',
+        })
+      );
+    }
+    // 实例化只有"谁创建了它"这一层含义，不存在第二跳。
+    const maxDepth =
+      input.relation === 'instantiations' ? 1 : normalizeBoundedInteger(input.depth, 1, 1, 8);
+    const walk = context.snapshot
+      ? await this.walkRelation(context, rule, anchor, maxDepth)
+      : { edges: [], distances: new Map<string, number>(), truncated: false };
+    const symbols = [...walk.distances.entries()]
+      .map(([id, distance]) => ({ symbol: context.symbolById.get(id), distance }))
+      .filter(
+        (entry): entry is { symbol: SourceSymbolNode; distance: number } =>
+          entry.symbol !== undefined
+      )
+      .sort(
+        (left, right) =>
+          left.distance - right.distance ||
+          left.symbol.filePath.localeCompare(right.symbol.filePath) ||
+          left.symbol.symbolId.localeCompare(right.symbol.symbolId)
+      )
+      .map((entry) => entry.symbol);
+    const edges = walk.edges.slice(0, context.options.edgeLimit);
+    const sections = await this.buildRelationSections(context, symbols, edges);
+    return createSourceGraphRelationsResult({
       generationId: context.generationId,
       projectRoot: context.projectRoot,
       repoId: context.repoId,
-      symbolId: input.symbolId,
-      callees: relation.symbols,
+      relation: input.relation,
+      symbolId,
+      // 没有任何起点的请求也要能如实返回"缺起点"的诊断。
+      filePath: filePath ?? (symbolId ? undefined : 'unknown'),
+      symbols,
+      edges: context.options.includeEdges === false ? [] : edges,
       sourceSections: finalizeSourceSections(context, sections),
-      edges: context.options.includeEdges === false ? [] : relation.edges,
+      distances: Object.fromEntries(walk.distances),
+      truncated: walk.truncated || walk.edges.length > edges.length,
       freshness: context.freshness,
-      diagnostics: [...context.diagnostics, ...relation.diagnostics],
+      diagnostics: [...context.diagnostics, ...diagnostics],
     });
   }
 
   async impact(input: SourceGraphImpactInput): Promise<SourceGraphImpactResult> {
     const context = await this.createContext(input, 'target');
-    const seedFiles = this.resolveImpactSeedFiles(context, input);
-    await this.loadTargetEdges(context, {
-      filePaths: seedFiles,
-      symbolIds: input.symbolId ? [input.symbolId] : [],
-    });
-    const impactedEdges = collectImpactEdges(context, seedFiles, input.symbolId).slice(
-      0,
-      context.options.edgeLimit
+    const changedFiles = this.resolveImpactSeedFiles(context, input);
+    // 只给了符号时，受影响的是用到这个符号的地方，不是它所在文件的全部导入方。
+    const seedFiles =
+      input.symbolId && !(input.changedFiles?.length || input.filePath) ? [] : changedFiles;
+    const closure = await this.collectDependents(
+      context,
+      seedFiles,
+      input.symbolId ? [input.symbolId] : [],
+      normalizeBoundedInteger(input.depth, 3, 1, 8)
     );
-    const impactedFiles = normalizeStringList([...seedFiles, ...edgeFilePaths(impactedEdges)]);
-    const testFiles = collectTestFiles(context, impactedFiles, impactedEdges);
+    const impactedEdges = closure.edges.slice(0, context.options.edgeLimit);
+    const impactedFiles = normalizeStringList([...changedFiles, ...closure.files.keys()]);
+    const testFiles = collectTestFiles(context, impactedFiles, closure.edges);
     const diagnostics = [...context.diagnostics];
     if (testFiles.length === 0) {
       diagnostics.push(
@@ -333,7 +420,7 @@ export class SourceGraphQueryService {
           code: 'affected-tests-unknown',
           message:
             'No deterministic source graph test edge or indexed test file covers this impact.',
-          metadata: { changedFiles: seedFiles, impactedFiles },
+          metadata: { changedFiles, impactedFiles },
         })
       );
     }
@@ -344,10 +431,25 @@ export class SourceGraphQueryService {
       repoId: context.repoId,
       freshness: context.freshness,
       diagnostics,
-      changedFiles: seedFiles,
+      changedFiles,
       impactedFiles,
+      impactedSymbols: [...closure.symbols.entries()]
+        .filter(([, distance]) => distance > 0)
+        .map(([id, distance]) => ({ symbol: context.symbolById.get(id), distance }))
+        .filter(
+          (entry): entry is { symbol: SourceSymbolNode; distance: number } =>
+            entry.symbol !== undefined && entry.symbol.kind !== 'module'
+        )
+        .sort(
+          (left, right) =>
+            left.distance - right.distance ||
+            left.symbol.symbolId.localeCompare(right.symbol.symbolId)
+        )
+        .map((entry) => entry.symbol),
       edges: context.options.includeEdges === false ? [] : impactedEdges,
       affectedValidations: testFiles.map((filePath) => `test:${filePath}`),
+      depth: closure.depth,
+      truncated: closure.truncated || closure.edges.length > impactedEdges.length,
     });
   }
 
@@ -356,13 +458,10 @@ export class SourceGraphQueryService {
   ): Promise<SourceGraphAffectedTestsResult> {
     const context = await this.createContext(input, 'target');
     const changedFiles = normalizeStringList(input.changedFiles.map(normalizeRepoPath));
-    await this.loadTargetEdges(context, { filePaths: changedFiles });
-    const impactedEdges = collectImpactEdges(context, changedFiles, undefined).slice(
-      0,
-      context.options.edgeLimit
-    );
-    const impactedFiles = normalizeStringList([...changedFiles, ...edgeFilePaths(impactedEdges)]);
-    const testFiles = collectTestFiles(context, impactedFiles, impactedEdges);
+    // 测试可以隔着好几层才依赖到被改的文件：一直走到没有新的依赖方为止。
+    const closure = await this.collectDependents(context, changedFiles, [], MAX_RELATION_DEPTH);
+    const impactedFiles = normalizeStringList([...changedFiles, ...closure.files.keys()]);
+    const testFiles = collectTestFiles(context, impactedFiles, closure.edges);
     const diagnostics = [...context.diagnostics];
     const unknownReason =
       testFiles.length === 0
@@ -399,19 +498,20 @@ export class SourceGraphQueryService {
     const seedSymbols = normalizeStringList(input.symbolIds ?? []);
     const missingSeedSymbols = seedSymbols.filter((symbolId) => !context.symbolById.has(symbolId));
     const seedFiles = this.resolveValidationSeedFiles(context, input, changedFiles, seedSymbols);
-    await this.loadTargetEdges(context, { filePaths: seedFiles, symbolIds: seedSymbols });
-    const impactedEdges = collectImpactEdges(context, seedFiles, seedSymbols).slice(
-      0,
-      context.options.edgeLimit
-    );
-    const impactedFiles = normalizeStringList([...seedFiles, ...edgeFilePaths(impactedEdges)]);
-    const impactedSymbols = collectImpactedSymbols(
+    const closure = await this.collectDependents(
       context,
-      impactedFiles,
-      impactedEdges,
-      seedSymbols
+      seedFiles,
+      seedSymbols,
+      MAX_RELATION_DEPTH
     );
-    const testFiles = collectTestFiles(context, impactedFiles, impactedEdges);
+    const impactedEdges = closure.edges.slice(0, context.options.edgeLimit);
+    const impactedFiles = normalizeStringList([...seedFiles, ...closure.files.keys()]);
+    const impactedSymbols = uniqueSymbols(
+      [...closure.symbols.keys()]
+        .map((id) => context.symbolById.get(id))
+        .filter((symbol): symbol is SourceSymbolNode => symbol !== undefined)
+    );
+    const testFiles = collectTestFiles(context, impactedFiles, closure.edges);
     const packageScripts = {
       ...(await readPackageScripts(context.projectRoot)),
       ...normalizeScriptRecord(input.packageScripts),
@@ -801,46 +901,265 @@ export class SourceGraphQueryService {
     return sections;
   }
 
-  private collectRelationSymbols(
+  /** 关系查询的起点：符号级关系是一组符号，文件级关系是一组文件。 */
+  private resolveRelationAnchor(
     context: SourceGraphQueryContext,
-    symbolId: string,
-    direction: 'incoming' | 'outgoing'
-  ): {
-    symbols: SourceSymbolNode[];
-    edges: SourceGraphEdge[];
-    diagnostics: SourceGraphDiagnostic[];
-  } {
-    const symbol = context.symbolById.get(symbolId);
-    if (!symbol) {
+    rule: RelationRule,
+    symbolId: string | undefined,
+    includeMembers: boolean | undefined
+  ): { symbolIds: string[]; filePaths: string[]; missing?: string } {
+    const filePath = context.options.filePath;
+    const symbol = symbolId ? context.symbolById.get(symbolId) : undefined;
+    if (symbolId && !symbol) {
       return {
-        symbols: [],
-        edges: [],
-        diagnostics: [
-          createSourceGraphDiagnostic({
-            code: 'source-ref-unproven',
-            message: `Source graph symbol not found: ${symbolId}`,
-            nextAction: 'search_source_graph_or_rebuild_index',
-          }),
-        ],
+        symbolIds: [],
+        filePaths: [],
+        missing: `Source graph symbol not found: ${symbolId}`,
       };
     }
-    const relationEdges = context.edges
-      .filter((edge) =>
-        direction === 'incoming' ? edge.toSymbolId === symbolId : edge.fromSymbolId === symbolId
-      )
-      .slice(0, context.options.edgeLimit);
-    const relationSymbols = relationEdges
-      .map((edge) =>
-        direction === 'incoming'
-          ? symbolForRelationEndpoint(context, edge.fromSymbolId, edge.fromFilePath)
-          : symbolForRelationEndpoint(context, edge.toSymbolId, edge.toFilePath)
-      )
-      .filter((candidate): candidate is SourceSymbolNode => candidate !== undefined);
-    return {
-      symbols: uniqueSymbols(relationSymbols),
-      edges: relationEdges,
-      diagnostics: [],
-    };
+    if (rule.level === 'file') {
+      const file = symbol?.filePath ?? filePath;
+      return file && context.fileByPath.has(file)
+        ? { symbolIds: [], filePaths: [file] }
+        : {
+            symbolIds: [],
+            filePaths: [],
+            missing: file
+              ? `Source graph file not found: ${file}`
+              : 'Source graph relation query needs a symbolId or filePath.',
+          };
+    }
+    if (symbol) {
+      const members = includeMembers
+        ? context.symbols
+            .filter((candidate) => candidate.containerSymbolId === symbol.symbolId)
+            .map((candidate) => candidate.symbolId)
+        : [];
+      return { symbolIds: [symbol.symbolId, ...members], filePaths: [] };
+    }
+    if (!filePath) {
+      return {
+        symbolIds: [],
+        filePaths: [],
+        missing: 'Source graph relation query needs a symbolId or filePath.',
+      };
+    }
+    const declared = context.symbols
+      .filter((candidate) => candidate.filePath === filePath)
+      .map((candidate) => candidate.symbolId);
+    return declared.length > 0
+      ? { symbolIds: declared, filePaths: [] }
+      : { symbolIds: [], filePaths: [], missing: `Source graph file not found: ${filePath}` };
+  }
+
+  /** 从起点出发沿一种关系逐层走；每层只读与当前前沿有关的边。 */
+  private async walkRelation(
+    context: SourceGraphQueryContext,
+    rule: RelationRule,
+    anchor: { symbolIds: string[]; filePaths: string[] },
+    maxDepth: number
+  ): Promise<{ edges: SourceGraphEdge[]; distances: Map<string, number>; truncated: boolean }> {
+    const generationId = context.snapshot?.generationId;
+    const edges = new Map<string, SourceGraphEdge>();
+    const distances = new Map<string, number>();
+    const incoming = rule.direction === 'incoming';
+    // 文件级关系按文件走，结果用文件自身的 #module 符号表示。
+    const visited = new Set(rule.level === 'file' ? anchor.filePaths : anchor.symbolIds);
+    let frontier = [...visited];
+    let truncated = false;
+    for (let depth = 1; depth <= maxDepth && frontier.length > 0 && generationId; depth += 1) {
+      const current = new Set(frontier);
+      const found = factEdges(
+        await this.repository.findEdgesForTargets(
+          generationId,
+          rule.level === 'file'
+            ? { filePaths: frontier }
+            : { symbolIds: frontier, direction: rule.direction }
+        ),
+        context.options
+      );
+      const next: string[] = [];
+      for (const edge of found) {
+        if (!rule.kinds.has(edge.kind) || (rule.accepts && !rule.accepts(edge))) {
+          continue;
+        }
+        const near =
+          rule.level === 'file'
+            ? incoming
+              ? edge.toFilePath
+              : edge.fromFilePath
+            : incoming
+              ? edge.toSymbolId
+              : edge.fromSymbolId;
+        const far =
+          rule.level === 'file'
+            ? incoming
+              ? edge.fromFilePath
+              : edge.toFilePath
+            : incoming
+              ? edge.fromSymbolId
+              : edge.toSymbolId;
+        if (!near || !current.has(near) || !far) {
+          continue;
+        }
+        edges.set(edge.edgeId, edge);
+        if (!visited.has(far)) {
+          visited.add(far);
+          next.push(far);
+          distances.set(rule.level === 'file' ? `${far}#module` : far, depth);
+        }
+        if (edges.size >= MAX_TRAVERSAL_EDGES) {
+          truncated = true;
+          break;
+        }
+      }
+      if (truncated) {
+        break;
+      }
+      // 到了深度上限而前沿还没走完，也要如实说明结果不是全部。
+      truncated = depth === maxDepth && next.length > 0 && maxDepth > 1;
+      frontier = next;
+    }
+    return { edges: [...edges.values()], distances, truncated };
+  }
+
+  /**
+   * 依赖起点的一方，逐层向外：符号的调用方、子类型及引用方；文件的导入方；符号对应的测试。
+   * 只沿"谁依赖它"的方向走——被起点依赖的文件与符号不受起点变化的影响。
+   */
+  private async collectDependents(
+    context: SourceGraphQueryContext,
+    seedFiles: readonly string[],
+    seedSymbolIds: readonly string[],
+    maxDepth: number
+  ): Promise<{
+    edges: SourceGraphEdge[];
+    files: Map<string, number>;
+    symbols: Map<string, number>;
+    depth: number;
+    truncated: boolean;
+  }> {
+    const generationId = context.snapshot?.generationId;
+    const edges = new Map<string, SourceGraphEdge>();
+    const files = new Map<string, number>(seedFiles.map((filePath) => [filePath, 0]));
+    const seedFileSet = new Set(seedFiles);
+    const symbols = new Map<string, number>(
+      [
+        ...seedSymbolIds.filter((id) => context.symbolById.has(id)),
+        // 文件变了，它里面的任何声明都可能变。
+        ...context.symbols
+          .filter((symbol) => seedFileSet.has(symbol.filePath))
+          .map((symbol) => symbol.symbolId),
+      ].map((id) => [id, 0])
+    );
+    let symbolFrontier = [...symbols.keys()];
+    let fileFrontier = [...files.keys()];
+    let depth = 0;
+    let truncated = false;
+    while (
+      generationId &&
+      depth < maxDepth &&
+      (symbolFrontier.length > 0 || fileFrontier.length > 0)
+    ) {
+      depth += 1;
+      const currentSymbols = new Set(symbolFrontier);
+      const currentFiles = new Set(fileFrontier);
+      const found = factEdges(
+        await this.repository.findEdgesForTargets(generationId, {
+          symbolIds: symbolFrontier,
+          filePaths: fileFrontier,
+        }),
+        context.options
+      );
+      const nextSymbols: string[] = [];
+      const nextFiles: string[] = [];
+      const reach = (filePath: string | undefined, symbolId: string | undefined) => {
+        if (symbolId && !symbols.has(symbolId)) {
+          symbols.set(symbolId, depth);
+          nextSymbols.push(symbolId);
+        }
+        if (filePath && !files.has(filePath)) {
+          files.set(filePath, depth);
+        }
+      };
+      for (const edge of found) {
+        if (edge.kind === 'imports') {
+          // 文件依赖：导入方依赖被导入的文件。
+          if (edge.toFilePath && currentFiles.has(edge.toFilePath) && edge.fromFilePath) {
+            edges.set(edge.edgeId, edge);
+            if (!files.has(edge.fromFilePath)) {
+              files.set(edge.fromFilePath, depth);
+              nextFiles.push(edge.fromFilePath);
+            }
+          }
+        } else if (edge.kind === 'symbol_to_test') {
+          // "这个符号由那个测试覆盖"：测试依赖符号，边的方向是符号 → 测试。
+          if (edge.fromSymbolId && currentSymbols.has(edge.fromSymbolId)) {
+            edges.set(edge.edgeId, edge);
+            reach(edge.toFilePath, undefined);
+          }
+        } else if (
+          SYMBOL_DEPENDENCY_KINDS.has(edge.kind) &&
+          edge.toSymbolId &&
+          currentSymbols.has(edge.toSymbolId)
+        ) {
+          edges.set(edge.edgeId, edge);
+          reach(edge.fromFilePath, edge.fromSymbolId);
+        }
+        if (edges.size >= MAX_TRAVERSAL_EDGES) {
+          truncated = true;
+          break;
+        }
+      }
+      if (truncated) {
+        break;
+      }
+      symbolFrontier = nextSymbols;
+      fileFrontier = nextFiles;
+    }
+    if (
+      !truncated &&
+      depth === maxDepth &&
+      (symbolFrontier.length > 0 || fileFrontier.length > 0)
+    ) {
+      // 再往外可能还有依赖方；只在确实还有下一层时才报告没走完。
+      truncated = await this.hasFurtherDependents(context, symbolFrontier, fileFrontier);
+    }
+    if (truncated) {
+      Logger.debug('Source graph dependent closure stopped before exhausting the graph', {
+        generationId,
+        seedFiles: seedFiles.length,
+        seedSymbols: seedSymbolIds.length,
+        depth,
+        maxDepth,
+        edges: edges.size,
+        edgeCap: MAX_TRAVERSAL_EDGES,
+      });
+    }
+    return { edges: [...edges.values()], files, symbols, depth, truncated };
+  }
+
+  private async hasFurtherDependents(
+    context: SourceGraphQueryContext,
+    symbolIds: readonly string[],
+    filePaths: readonly string[]
+  ): Promise<boolean> {
+    const generationId = context.snapshot?.generationId;
+    if (!generationId) {
+      return false;
+    }
+    const symbols = new Set(symbolIds);
+    const files = new Set(filePaths);
+    return factEdges(
+      await this.repository.findEdgesForTargets(generationId, { symbolIds, filePaths }),
+      context.options
+    ).some((edge) =>
+      edge.kind === 'imports'
+        ? edge.toFilePath !== undefined && files.has(edge.toFilePath)
+        : SYMBOL_DEPENDENCY_KINDS.has(edge.kind) &&
+          edge.toSymbolId !== undefined &&
+          symbols.has(edge.toSymbolId)
+    );
   }
 
   private resolveImpactSeedFiles(
@@ -882,6 +1201,57 @@ export class SourceGraphQueryService {
     return normalizeStringList(Array.from(files));
   }
 }
+
+interface RelationRule {
+  direction: 'incoming' | 'outgoing';
+  kinds: ReadonlySet<string>;
+  /** symbol：端点是符号；file：端点是文件（导入关系）。 */
+  level: 'symbol' | 'file';
+  accepts?: (edge: SourceGraphEdge) => boolean;
+}
+
+const CALL_KINDS: ReadonlySet<string> = new Set(['calls']);
+const HIERARCHY_KINDS: ReadonlySet<string> = new Set([
+  'extends',
+  'implements',
+  'inherits',
+  'conforms',
+]);
+const IMPORT_KINDS: ReadonlySet<string> = new Set(['imports']);
+
+/** 创建实例的调用：`new T()`、JSX 元素，以及没有语法种类的语言里目标是类型的调用。 */
+function isInstantiation(edge: SourceGraphEdge): boolean {
+  return edge.metadata.callKind === 'new' || edge.metadata.callKind === 'jsx';
+}
+
+const RELATION_RULES: Record<SourceGraphRelation, RelationRule> = {
+  callers: { direction: 'incoming', kinds: CALL_KINDS, level: 'symbol' },
+  callees: { direction: 'outgoing', kinds: CALL_KINDS, level: 'symbol' },
+  instantiations: {
+    direction: 'incoming',
+    kinds: CALL_KINDS,
+    level: 'symbol',
+    accepts: isInstantiation,
+  },
+  supertypes: { direction: 'outgoing', kinds: HIERARCHY_KINDS, level: 'symbol' },
+  subtypes: { direction: 'incoming', kinds: HIERARCHY_KINDS, level: 'symbol' },
+  importers: { direction: 'incoming', kinds: IMPORT_KINDS, level: 'file' },
+  imports: { direction: 'outgoing', kinds: IMPORT_KINDS, level: 'file' },
+};
+
+/** 一个符号变化会波及它的使用方的那些边：调用、继承与实现、引用、数据流、路由。 */
+const SYMBOL_DEPENDENCY_KINDS: ReadonlySet<string> = new Set([
+  'calls',
+  ...HIERARCHY_KINDS,
+  'references',
+  'data_flow',
+  'route_to_handler',
+  'depends_on',
+]);
+
+const MAX_RELATION_DEPTH = 8;
+/** 一次遍历最多读这么多条边；到了就停并如实标记，不让病态的图把查询拖垮。 */
+const MAX_TRAVERSAL_EDGES = 20_000;
 
 /** 候选档的边不是事实：除非查询明确要求，否则任何结果都看不到它们。 */
 function factEdges(
@@ -1127,8 +1497,16 @@ function symbolsInRange(
   );
 }
 
+/**
+ * 正文能不能给，看的是索引有没有过期，不是覆盖是否完整：partial 只说明别的文件有解析缺口，
+ * 而每个被引用文件的正文在读取时都按索引里的内容哈希单独核对过。
+ */
 function canIncludeSourceText(context: SourceGraphQueryContext): boolean {
-  return context.options.includeText && context.freshness.status === 'fresh';
+  return context.options.includeText && isCurrentFreshness(context.freshness.status);
+}
+
+function isCurrentFreshness(status: SourceGraphFreshness['status']): boolean {
+  return status === 'fresh' || status === 'partial';
 }
 
 async function readProjectFileLines(
@@ -1253,7 +1631,7 @@ function finalizeSourceSections(
   context: SourceGraphQueryContext,
   sections: SourceSection[]
 ): SourceSection[] {
-  if (context.freshness.status === 'fresh') {
+  if (isCurrentFreshness(context.freshness.status)) {
     return sections;
   }
   // 后续文本召回也可能发现漂移；先前已生成的 section 必须服从同一查询的降级状态。
@@ -1558,45 +1936,6 @@ function appendSeedAndScriptUnknowns(
   }
 }
 
-function collectImpactEdges(
-  context: SourceGraphQueryContext,
-  seedFiles: string[],
-  symbolIds: string | string[] | undefined
-): SourceGraphEdge[] {
-  const files = new Set(seedFiles.map(normalizeRepoPath));
-  const symbols = new Set(normalizeStringList(Array.isArray(symbolIds) ? symbolIds : [symbolIds]));
-  return uniqueEdges(
-    context.edges.filter((edge) => {
-      const symbolMatch =
-        symbols.size > 0 &&
-        ((edge.fromSymbolId !== undefined && symbols.has(edge.fromSymbolId)) ||
-          (edge.toSymbolId !== undefined && symbols.has(edge.toSymbolId)));
-      return symbolMatch || edgeFilePaths([edge]).some((filePath) => files.has(filePath));
-    })
-  );
-}
-
-function collectImpactedSymbols(
-  context: SourceGraphQueryContext,
-  impactedFiles: string[],
-  impactedEdges: SourceGraphEdge[],
-  seedSymbolIds: string[]
-): SourceSymbolNode[] {
-  const files = new Set(impactedFiles.map(normalizeRepoPath));
-  const symbolIds = new Set(seedSymbolIds);
-  for (const edge of impactedEdges) {
-    if (edge.fromSymbolId) {
-      symbolIds.add(edge.fromSymbolId);
-    }
-    if (edge.toSymbolId) {
-      symbolIds.add(edge.toSymbolId);
-    }
-  }
-  return uniqueSymbols(
-    context.symbols.filter((symbol) => files.has(symbol.filePath) || symbolIds.has(symbol.symbolId))
-  );
-}
-
 function collectTestFiles(
   context: SourceGraphQueryContext,
   impactedFiles: string[],
@@ -1765,20 +2104,6 @@ function normalizeScriptRecord(value: unknown): Record<string, string> {
     }
   }
   return scripts;
-}
-
-function symbolForRelationEndpoint(
-  context: SourceGraphQueryContext,
-  symbolId: string | undefined,
-  filePath: string | undefined
-): SourceSymbolNode | undefined {
-  if (symbolId) {
-    return context.symbolById.get(symbolId);
-  }
-  if (!filePath) {
-    return undefined;
-  }
-  return context.symbols.find((symbol) => symbol.filePath === filePath && symbol.kind === 'module');
 }
 
 function collectImpactedFiles(

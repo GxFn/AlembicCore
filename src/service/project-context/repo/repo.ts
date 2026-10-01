@@ -30,6 +30,7 @@ import type {
   RepoDependencyGraphEdge,
   RepoDependencyGraphNode,
   RepoDependencyGraphSummary,
+  RepoModuleSummary,
   RepoSummary,
   TargetSummary,
 } from '../../../domain/project-context/index.js';
@@ -56,8 +57,10 @@ import { mapProjectContextHandler } from '../map/index.js';
 import {
   createProjectContextMapRepoSummary,
   type ProjectContextMapRepoSummary,
+  partitionRepoModules,
   selectProjectContextMapRef,
 } from '../shared/map-repo/index.js';
+import { createProjectContextModuleRefId } from '../shared/moduleLayers-module/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
 import { createProjectContextRepoSpaceRepoRef } from '../shared/repo-space/index.js';
 import {
@@ -156,6 +159,7 @@ interface RepoContextFacts {
   errors: ProjectContextQueryError[];
   localPackages: PackageSummary[];
   mapSummary?: ProjectContextMapRepoSummary;
+  modules: RepoModuleSummary[];
   packageSystems: PackageSystemSummary[];
   repo: RepoIdentity;
   sourceFiles: SourceFileFact[];
@@ -328,6 +332,12 @@ async function collectRepoContextFacts(input: {
     errors,
     localPackages,
     mapSummary: mapFacts.summary,
+    modules: createModuleSummaries({
+      repo: input.repo,
+      sourceFiles: sourceFacts.sourceFiles,
+      sourceRoots: sourceFacts.sourceRoots,
+      targets: sourceFacts.discovery.targets,
+    }),
     packageSystems,
     repo: input.repo,
     sourceFiles: sourceFacts.sourceFiles,
@@ -392,6 +402,7 @@ function createRepoContextData(facts: RepoContextFacts): RepoContext {
     localPackages: facts.localPackages,
     mapRef: facts.mapSummary?.mapRef,
     mapSummary: facts.mapSummary,
+    ...(facts.modules.length > 0 ? { modules: facts.modules } : {}),
     nextRefs: createNextRefs(facts),
     packageSystems: facts.packageSystems,
     repo: facts.repo.repo,
@@ -1113,6 +1124,66 @@ function createTargetSummaries(input: {
       };
     })
     .sort(compareTargets);
+}
+
+/**
+ * 源码文件的模块划分。规则在 shared/map-repo/modulePartition 里只有一份；这里把它投影成
+ * 可以直接当种子用的模块引用，宿主不需要再从目标、源码根、顶层目录里自己推一遍。
+ */
+function createModuleSummaries(input: {
+  repo: RepoIdentity;
+  sourceFiles: readonly SourceFileFact[];
+  sourceRoots: readonly PathSummary[];
+  targets: readonly DiscoveredTarget[];
+}): RepoModuleSummary[] {
+  return partitionRepoModules({
+    files: input.sourceFiles,
+    sourceRoots: input.sourceRoots.map((root) => root.path),
+    targets: input.targets.map((target) => ({
+      name: target.name,
+      kind: readString(target.type),
+    })),
+  }).map((module) => {
+    const modulePath = toRepoFilePath(input.repo, module.path);
+    return {
+      name: module.name,
+      path: module.path,
+      kind: module.kind,
+      ...(module.targetName ? { targetName: module.targetName } : {}),
+      ...(module.targetKind ? { targetKind: module.targetKind } : {}),
+      fileCount: module.files.length,
+      ref: {
+        id: createProjectContextModuleRefId({
+          moduleName: module.name,
+          modulePath,
+          repoId: input.repo.repoId,
+        }),
+        kind: 'module',
+        label: module.name,
+        level: 'module',
+        metadata: {
+          kind: module.kind,
+          moduleName: module.name,
+          modulePath,
+          ownedFileCount: module.files.length,
+          // 目录下还有别的模块时（源码根自己的散落文件），目录扫描会把它们一并算进来，
+          // 所以这类模块在引用里列出自己的文件；其余模块就是"目录下的全部源码"。
+          ...(module.kind === 'root'
+            ? { ownedFiles: module.files.map((file) => toRepoFilePath(input.repo, file)) }
+            : {}),
+        },
+        parentRef: input.repo.repo.ref?.id,
+        scope: {
+          ...createProjectScope({
+            projectRoot: input.repo.projectRoot,
+            repoId: input.repo.repoId,
+            sourceFolder: input.repo.sourceFolder,
+          }),
+          filePath: modulePath,
+        },
+      },
+    };
+  });
 }
 
 function createLocalPackageSummaries(input: {

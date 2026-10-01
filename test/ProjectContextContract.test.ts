@@ -40,13 +40,19 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       'AST_PARSER_LANGUAGES',
       'EXTENSION_PARSER_LANGUAGE',
       'JS_FAMILY_LANGUAGES',
+      // 关系查询（2026-10-01）：跨文件、可反向的关系经本门面给出，回答来自源码索引；
+      // 索引的仓库、服务与 DTO 仍然不在任何公开出口里。
+      'PROJECT_RELATION_KIND_VALUES',
       'ProjectContext',
       'ProjectContextCapabilities',
       'buildProjectContextPresenterInput',
       'createProjectContextCapabilities',
       'createProjectContextFileRef',
+      'createProjectRelations',
       // 宿主启动前身份与真实SDK作用域；保持精确门面清单，不开放第三方内部类型。
       'getCodeGraphProjectContextIdentity',
+      'isProjectRelationKind',
+      'parseProjectContextRef',
       'resolveAstParserLanguage',
       'withCodeGraphProjectContextSession',
       'withProjectContextSession',

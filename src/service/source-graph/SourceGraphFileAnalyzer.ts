@@ -15,6 +15,7 @@ import type {
 } from '../../domain/source-graph/index.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
+import { LanguageService } from '../../shared/LanguageService.js';
 import type { NormalizedIndexOptions } from './SourceGraphIndexOptions.js';
 import {
   createModuleSymbol,
@@ -103,11 +104,15 @@ export async function analyzeInventoryFile(
   // 解析器只按扩展名选：语言标签更宽（.vue、.svelte 也标成 javascript），不能当作语法依据。
   const parserLanguage = resolveAstParserLanguage(file.repoRelativePath);
   if (!parserLanguage) {
-    return skippedFile(
-      baseFile,
-      'unsupported-language',
-      `Unsupported source graph language: ${file.language}.`
-    );
+    // 文档与配置进清单是为了新鲜度、模块配置与正文召回，本来就不该有符号图：不是缺口，不记诊断。
+    // 没有解析器的源码语言才是"这个文件没被覆盖"，记一条提示级诊断。
+    return LanguageService.isSourceExt(file.extension)
+      ? skippedFile(
+          baseFile,
+          'unsupported-language',
+          `Unsupported source graph language: ${file.language}.`
+        )
+      : inventoryOnlyFile(baseFile);
   }
   if (file.sizeBytes > options.maxParseBytes) {
     return partialFile(baseFile, 'File exceeded source graph parser budget.');
@@ -204,6 +209,20 @@ export async function analyzeInventoryFile(
   };
 }
 
+/** 只进清单的文件：有内容哈希与行数，没有符号，也不算解析缺口。 */
+function inventoryOnlyFile(file: SourceFileNodeInput): AnalyzedFile {
+  return {
+    file: {
+      ...file,
+      parseStatus: 'skipped',
+      parseErrors: [],
+      metadata: { ...file.metadata, inventoryOnly: true },
+    },
+    symbols: [],
+    diagnostics: [],
+  };
+}
+
 function skippedFile(
   file: SourceFileNodeInput,
   code: 'large-file-skipped' | 'unsupported-language',
@@ -260,7 +279,7 @@ function failedFile(file: SourceFileNodeInput, message: string): AnalyzedFile {
 
 export function diagnosticsForRetainedFile(file: SourceFileNode): SourceGraphDiagnosticInput[] {
   if (file.parseErrors.length === 0) {
-    return file.parseStatus === 'parsed'
+    return file.parseStatus === 'parsed' || file.metadata.inventoryOnly === true
       ? []
       : [
           {
