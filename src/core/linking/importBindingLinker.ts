@@ -3,7 +3,11 @@ import type {
   ExtractedFileFlowImport,
   ExtractedFileSymbol,
 } from '../facts/contracts.js';
-import { type ModuleGraphAccess, resolveExportedDeclaration } from './exportTable.js';
+import {
+  type ModuleGraphAccess,
+  type ModuleTarget,
+  resolveExportedDeclaration,
+} from './exportTable.js';
 
 /** 目标是如何从一条 import 绑定推到声明的；随关系一起记录，供索引与诊断区分证据强度。 */
 export type ImportBindingStrategy =
@@ -23,6 +27,8 @@ export interface ImportBoundTarget {
   symbol: ExtractedFileSymbol;
   strategy: ImportBindingStrategy;
   viaReexport: boolean;
+  /** 到达声明的路上有一步是按目录惯例解析的模块；这样的目标不算有配置证明。 */
+  conventional?: boolean;
 }
 
 type ImportBinding = NonNullable<ExtractedFileFlowImport['bindings']>[number] & {
@@ -38,7 +44,7 @@ const LINKABLE_SYNTAX = new Set(['call', 'new', 'jsx']);
  *
  * 依据全部来自语法事实（词法绑定范围、import 绑定表、导出表），没有按名字相似度的推断；
  * 任何一步无法唯一确定就不产出目标。说明符落到哪个文件由 access.resolveModule 决定
- * （相对路径、路径别名）；它给不出文件的说明符（包名）没有目标。
+ * （相对路径、路径别名、项目内的包）；它给不出文件的说明符（项目外的包）没有目标。
  */
 export async function linkImportBoundCallSites(input: {
   filePath: string;
@@ -52,7 +58,7 @@ export async function linkImportBoundCallSites(input: {
   if (bindings.length === 0) {
     return [];
   }
-  const modules = new Map<string, Promise<string | undefined>>();
+  const modules = new Map<string, Promise<ModuleTarget | undefined>>();
   const moduleOf = (specifier: string) => {
     let pending = modules.get(specifier);
     if (!pending) {
@@ -68,13 +74,17 @@ export async function linkImportBoundCallSites(input: {
     if (!binding) {
       continue;
     }
-    const targetFile = await moduleOf(binding.specifier);
-    if (!targetFile || targetFile === input.filePath) {
+    const module = await moduleOf(binding.specifier);
+    if (!module || module.filePath === input.filePath) {
       continue;
     }
-    const target = await resolveSite(input.access, targetFile, site, binding);
+    const target = await resolveSite(input.access, module.filePath, site, binding);
     if (target) {
-      targets.push({ index, ...target });
+      targets.push({
+        index,
+        ...target,
+        ...(module.conventional || target.conventional ? { conventional: true } : {}),
+      });
     }
   }
   return targets;
@@ -135,6 +145,7 @@ async function resolveSite(
         symbol: members[0],
         strategy: 'imported-member',
         viaReexport: owner.viaReexport,
+        ...(owner.conventional ? { conventional: true } : {}),
       }
     : undefined;
 }

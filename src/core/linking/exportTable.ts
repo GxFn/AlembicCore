@@ -8,6 +8,16 @@ export interface ModuleDeclarations {
   defaultExportNames: readonly string[];
 }
 
+/** 一个说明符落到的项目内文件。 */
+export interface ModuleTarget {
+  filePath: string;
+  /**
+   * 目标是按目录惯例从构建产物换回的源码（包入口写的是 `dist/…`，实际取了 `src/…`），
+   * 没有配置为证。经它得到的声明要带着这个标记，不能当成有语法与配置证明的事实。
+   */
+  conventional?: boolean;
+}
+
 /**
  * 链接器访问其他模块的唯一通道。实现方决定文件从哪里来（live 读取器、冻结快照、索引），
  * 链接器本身不读磁盘，因此同一份输入必得同一份结果。
@@ -15,8 +25,8 @@ export interface ModuleDeclarations {
 export interface ModuleGraphAccess {
   /** 取模块的声明事实；文件不存在或语法不可用时返回 undefined。 */
   declarations(filePath: string): Promise<ModuleDeclarations | undefined>;
-  /** 把相对说明符解析成项目内文件；非相对说明符或找不到时返回 undefined。 */
-  resolveModule(importerFile: string, specifier: string): Promise<string | undefined>;
+  /** 把说明符解析成项目内文件；项目外的包或找不到时返回 undefined。 */
+  resolveModule(importerFile: string, specifier: string): Promise<ModuleTarget | undefined>;
 }
 
 export interface ExportedDeclaration {
@@ -24,6 +34,8 @@ export interface ExportedDeclaration {
   symbol: ExtractedFileSymbol;
   /** 是否经过 re-export（具名转发或 `export *`）才到达声明。 */
   viaReexport: boolean;
+  /** 到达声明的路上有一步是按目录惯例解析的模块。 */
+  conventional?: boolean;
 }
 
 /** re-export 链的跟随上限；真实项目的 barrel 层数远低于此，超过即视为无法证明。 */
@@ -39,7 +51,7 @@ export async function resolveExportedDeclaration(
   filePath: string,
   exportedName: string
 ): Promise<ExportedDeclaration | undefined> {
-  return resolve(access, filePath, exportedName, 0, new Set(), false);
+  return resolve(access, filePath, exportedName, 0, new Set(), false, false);
 }
 
 async function resolve(
@@ -48,7 +60,8 @@ async function resolve(
   exportedName: string,
   depth: number,
   visited: Set<string>,
-  viaReexport: boolean
+  viaReexport: boolean,
+  conventional: boolean
 ): Promise<ExportedDeclaration | undefined> {
   const key = `${filePath}\u0000${exportedName}`;
   if (depth > MAX_REEXPORT_DEPTH || visited.has(key)) {
@@ -71,7 +84,15 @@ async function resolve(
   if (forwarded.length === 1) {
     const target = await access.resolveModule(filePath, forwarded[0].specifier as string);
     return target
-      ? resolve(access, target, forwarded[0].name, depth + 1, visited, true)
+      ? resolve(
+          access,
+          target.filePath,
+          forwarded[0].name,
+          depth + 1,
+          visited,
+          true,
+          conventional || target.conventional === true
+        )
       : undefined;
   }
 
@@ -80,7 +101,7 @@ async function resolve(
   if (localName !== undefined) {
     const declared = uniqueTopLevelDeclaration(module.symbols, localName);
     if (declared) {
-      return { filePath, symbol: declared, viaReexport };
+      return { filePath, symbol: declared, viaReexport, ...(conventional ? { conventional } : {}) };
     }
   }
   if (exportedName === 'default') {
@@ -96,10 +117,22 @@ async function resolve(
     }
     const target = await access.resolveModule(filePath, star.specifier);
     const hit = target
-      ? await resolve(access, target, exportedName, depth + 1, new Set(visited), true)
+      ? await resolve(
+          access,
+          target.filePath,
+          exportedName,
+          depth + 1,
+          new Set(visited),
+          true,
+          conventional || target.conventional === true
+        )
       : undefined;
     if (hit) {
-      hits.set(`${hit.filePath}\u0000${hit.symbol.name}\u0000${hit.symbol.range.startLine}`, hit);
+      const key = `${hit.filePath}\u0000${hit.symbol.name}\u0000${hit.symbol.range.startLine}`;
+      // 同一个声明经两条路到达时，有配置证明的那条为准。
+      if (!hits.has(key) || !hit.conventional) {
+        hits.set(key, hit);
+      }
     }
   }
   return hits.size === 1 ? [...hits.values()][0] : undefined;

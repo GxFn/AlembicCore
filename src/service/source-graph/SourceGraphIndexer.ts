@@ -44,6 +44,7 @@ import {
   normalizeRepoPathList,
 } from './SourceGraphInventory.js';
 import { linkFile, type SourceGraphLinkContext } from './SourceGraphLinker.js';
+import { createInventoryModuleAccess } from './SourceGraphModuleAccess.js';
 
 export type {
   SourceGraphFreshnessReport,
@@ -255,18 +256,21 @@ export class SourceGraphIndexer {
       }
       return pending;
     };
+    // 说明符解析读过的配置文件：它们的内容决定链接结果，随代际记下来供增量构建判断。
+    const consultedConfigs = new Set<string>();
     const linkContext: SourceGraphLinkContext = {
       generationId,
-      knownPaths,
       factsOf,
-      moduleConfigs: new Map(),
-      moduleConfigFiles: new Set(),
-      readText: async (filePath) => {
-        const file = input.currentByPath.get(filePath);
-        return file
-          ? fs.readFile(file.absolutePath, { encoding: 'utf8', signal: options.signal })
-          : undefined;
-      },
+      modules: createInventoryModuleAccess({
+        knownPaths,
+        consulted: consultedConfigs,
+        readText: async (filePath) => {
+          const file = input.currentByPath.get(filePath);
+          return file
+            ? fs.readFile(file.absolutePath, { encoding: 'utf8', signal: options.signal })
+            : undefined;
+        },
+      }),
     };
     const linkedEdges: SourceGraphEdgeInput[] = [];
     for (const analyzed of analyzedFiles) {
@@ -285,7 +289,7 @@ export class SourceGraphIndexer {
     const moduleConfigFiles = [
       ...new Set([
         ...(input.baseModuleConfigFiles ?? []).filter((filePath) => knownPaths.has(filePath)),
-        ...linkContext.moduleConfigFiles,
+        ...consultedConfigs,
       ]),
     ].sort();
     // 未重解析的文件仍保留上一代的解析缺口。只汇总本轮 diagnostics 会把

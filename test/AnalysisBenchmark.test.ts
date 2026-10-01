@@ -19,72 +19,77 @@ import {
 } from './fixtures/analysis-benchmark/index.js';
 
 /**
- * 目标项目分析基准：四种主要语言各一个小项目，逐条核对"调用点 → 目标声明"。
+ * 目标项目分析基准：四种主要语言的小项目，逐条核对"调用点 → 目标声明"。
  *
  * 这里的数字是棘轮，不是愿望：每一格是当前引擎的实际命中数 [命中, 期望总数]。
  * 能力提升时由对应阶段把数字抬高；数字下降或出现禁止的边都算回归。
  * 列含义见 fixtures/analysis-benchmark/types.ts 的 BenchmarkLinkSource。
  *
  * 同一批期望在两个观察面上各算一次：ProjectContext 的 file-flow（按文件现算）与
- * SourceGraph 索引（整个项目入库后的边）。两者共用同一组链接器，分数必须一致。
+ * SourceGraph 索引（整个项目入库后的边）。两者共用同一组链接器，只有 convention 一列不同：
+ * 按目录惯例找回源码的包入口只进索引（可信档），file-flow 不给。
  */
-const CURRENT_SCORES: Record<string, Record<BenchmarkLinkSource, [number, number]>> = {
+type Scores = Record<string, Record<BenchmarkLinkSource, [number, number]>>;
+
+const FILE_FLOW_SCORES: Scores = {
   'ts-nodenext': {
     lexical: [2, 2],
     'import-binding': [7, 7],
+    convention: [0, 0],
     external: [0, 1],
     future: [0, 1],
   },
   'tsx-bundler': {
     lexical: [0, 0],
     'import-binding': [4, 4],
+    convention: [0, 0],
+    external: [0, 0],
+    future: [0, 0],
+  },
+  'ts-monorepo': {
+    lexical: [0, 0],
+    'import-binding': [4, 4],
+    convention: [0, 1],
     external: [0, 0],
     future: [0, 0],
   },
   'swift-app': {
     lexical: [5, 5],
     'import-binding': [0, 0],
+    convention: [0, 0],
     external: [0, 8],
     future: [0, 2],
   },
   'objc-app': {
     lexical: [0, 0],
     'import-binding': [0, 0],
+    convention: [0, 0],
     external: [0, 16],
     future: [0, 0],
   },
 };
 
+/** 索引在 file-flow 的基础上多出按惯例找回的包入口。 */
+const withConventions = (scores: Scores): Scores =>
+  Object.fromEntries(
+    Object.entries(scores).map(([name, row]) => [
+      name,
+      { ...row, convention: [row.convention[1], row.convention[1]] as [number, number] },
+    ])
+  );
+
+const SOURCE_GRAPH_SCORES = withConventions(FILE_FLOW_SCORES);
+
 /**
- * 同一批期望，索引接入 CodeGraph 之后的分数：lexical 与 import-binding 不变，其余由可信档的外部边贡献。
+ * 同一批期望，索引接入 CodeGraph 之后的分数：自有链接器的各列不变，其余由可信档的外部边贡献。
  * 没命中的两条是有意留在候选档的：`created.run()`（接收者来自工厂方法的返回值）与
  * `[service logout]`（不带参数的选择器，只凭名字唯一不足以采信）。
  */
-const EXTERNAL_ENGINE_SCORES: typeof CURRENT_SCORES = {
-  'ts-nodenext': {
-    lexical: [2, 2],
-    'import-binding': [7, 7],
-    external: [1, 1],
-    future: [0, 1],
-  },
-  'tsx-bundler': {
-    lexical: [0, 0],
-    'import-binding': [4, 4],
-    external: [0, 0],
-    future: [0, 0],
-  },
-  'swift-app': {
-    lexical: [5, 5],
-    'import-binding': [0, 0],
-    external: [8, 8],
-    future: [2, 2],
-  },
-  'objc-app': {
-    lexical: [0, 0],
-    'import-binding': [0, 0],
-    external: [15, 16],
-    future: [0, 0],
-  },
+const EXTERNAL_ENGINE_SCORES: Scores = {
+  ...SOURCE_GRAPH_SCORES,
+  'ts-nodenext': { ...SOURCE_GRAPH_SCORES['ts-nodenext'], external: [1, 1] },
+  'swift-app': { ...SOURCE_GRAPH_SCORES['swift-app'], external: [8, 8], future: [2, 2] },
+  'objc-app': { ...SOURCE_GRAPH_SCORES['objc-app'], external: [15, 16] },
 };
 
 const roots: string[] = [];
@@ -201,8 +206,8 @@ describe('target project analysis benchmark', () => {
   });
 
   const observers = {
-    'file-flow': observeFileFlowRelations,
-    'source-graph': observeSourceGraphRelations,
+    'file-flow': { observe: observeFileFlowRelations, scores: FILE_FLOW_SCORES },
+    'source-graph': { observe: observeSourceGraphRelations, scores: SOURCE_GRAPH_SCORES },
   };
 
   it.each(
@@ -212,11 +217,11 @@ describe('target project analysis benchmark', () => {
       )
     )
   )('%s keeps its resolved relations and reports no forbidden edge on %s', async (_name, surface, fixture) => {
-    const score = scoreBenchmarkFixture(fixture, await observers[surface](fixture));
+    const score = scoreBenchmarkFixture(fixture, await observers[surface].observe(fixture));
 
     // 误报优先于召回：禁止行上出现任何已解析关系都直接失败。
     expect(score.violations).toEqual([]);
-    expect(score.found).toEqual(CURRENT_SCORES[fixture.name]);
+    expect(score.found).toEqual(observers[surface].scores[fixture.name]);
   });
 
   it.each(ANALYSIS_BENCHMARK_FIXTURES.map((fixture) => [fixture.name, fixture] as const))(
@@ -235,7 +240,7 @@ describe('target project analysis benchmark', () => {
   );
 
   it('declares a score row for every fixture', () => {
-    expect(Object.keys(CURRENT_SCORES).sort()).toEqual(
+    expect(Object.keys(FILE_FLOW_SCORES).sort()).toEqual(
       ANALYSIS_BENCHMARK_FIXTURES.map((fixture) => fixture.name).sort()
     );
   });

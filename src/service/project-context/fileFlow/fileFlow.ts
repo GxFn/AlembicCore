@@ -6,14 +6,12 @@ import type {
   ProjectContextRef,
   ProjectContextUnavailableData,
 } from '../../../domain/project-context/index.js';
-import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import { normalizeFileSymbols } from '../fileSymbols/normalize.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileRef } from '../shared/sourceSlice-fileSymbols/index.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 import type { FileFlowQueryFailure, FileFlowRequestPayload } from './contracts.js';
-import { loadModuleAliasConfig } from './moduleAliasConfig.js';
 import { normalizeFileFlow } from './normalize.js';
 
 export const fileFlowProjectContextHandler: ProjectContextHandler = async (
@@ -78,14 +76,7 @@ export const fileFlowProjectContextHandler: ProjectContextHandler = async (
     declarationRanges: normalizedSymbols.declarationRanges,
     signal: context?.signal,
     sourceReader: context?.sourceReader,
-    aliases: () =>
-      loadModuleAliasConfig({
-        importerFile: fileAccess.facts.filePath,
-        projectRoot: fileAccess.facts.projectRoot,
-        reader: context?.sourceReader ?? nodeProjectSourceReader,
-        signal: context?.signal,
-        analysis: context?.analysis,
-      }),
+    analysis: context?.analysis,
   });
   throwIfProjectContextAborted(context);
   const errors = [

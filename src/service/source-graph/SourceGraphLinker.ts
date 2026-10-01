@@ -1,25 +1,19 @@
-import path from 'node:path';
 import type { ExtractedFileFlowCallSite, ExtractedFileSymbol } from '../../core/facts/contracts.js';
 import { JS_FAMILY_LANGUAGES } from '../../core/facts/parserLanguage.js';
 import {
-  aliasModuleBases,
   findCalleeSymbol,
   findCallerSymbol,
   findEnclosingDeclaration,
   hasImplicitMemberCalls,
   type ImportBindingStrategy,
-  inheritedModuleConfigPath,
   isCallSiteOwner,
   linkHeritage,
   linkImportBoundCallSites,
-  MODULE_CONFIG_FILE_NAMES,
   MODULE_SOURCE_EXTENSIONS,
-  type ModuleAliasConfig,
   type ModuleGraphAccess,
-  moduleSourceCandidates,
-  parseModuleConfig,
-  relativeModuleBase,
-  resolveModuleAliasConfig,
+  type ModuleResolution,
+  type ModuleResolutionAccess,
+  resolveModuleSpecifier,
 } from '../../core/linking/index.js';
 import type { SourceGraphEdgeInput, SourceSymbolNode } from '../../domain/source-graph/index.js';
 import Logger from '../../infrastructure/logging/Logger.js';
@@ -28,19 +22,10 @@ import type { FileLinkFacts } from './SourceGraphFileAnalyzer.js';
 /** 链接一个文件时能看到的本代其余部分。 */
 export interface SourceGraphLinkContext {
   generationId: string;
-  /** 本代全部文件路径；相对导入只能落到这里面。 */
-  knownPaths: ReadonlySet<string>;
   /** 任意文件的链接事实。未完整解析的文件返回 undefined，它不能作为链接目标。 */
   factsOf(filePath: string): Promise<FileLinkFacts | undefined>;
-  /** 清单里某个文件的正文，用来读模块配置（tsconfig / jsconfig）；读不到返回 undefined。 */
-  readText(filePath: string): Promise<string | undefined>;
-  /** 本代共用：目录 → 它适用的别名配置。同一目录只读一次。 */
-  moduleConfigs: Map<string, Promise<ModuleAliasConfig | undefined>>;
-  /**
-   * 别名解析实际读过的配置文件（含经 extends 继承来的，名字不限于 tsconfig / jsconfig）。
-   * 它们的内容决定了链接结果：增量构建据此判断没改内容的源码要不要重新链接。
-   */
-  moduleConfigFiles: Set<string>;
+  /** 说明符解析的读取通道：目标与配置都只认本代清单里的文件，整代共用一份缓存。 */
+  modules: ModuleResolutionAccess;
 }
 
 export interface LinkedFile {
@@ -51,12 +36,32 @@ export interface LinkedFile {
 
 /**
  * 边的解析记录。tier 是对外呈现时的分级：
- * certain = 自有链接器给出、有语法证明；trusted / candidate 留给外部链接器的边。
+ * certain = 自有链接器给出，每一步都有语法或配置为证；
+ * trusted = 高把握但不是证明：外部引擎的高准确率解析，或自有链接器经"构建产物目录对应 src"的
+ * 惯例找到的包入口；candidate 只属于外部引擎的低把握解析，默认不出现在查询结果里。
  */
 export interface EdgeResolution {
   linker: 'lexical' | 'import-binding' | 'module-import' | 'heritage';
   strategy: string;
   tier: 'certain' | 'trusted' | 'candidate';
+}
+
+/** 经目录惯例解析的模块上的边：自有链接器给出，但中间有一步没有配置为证。 */
+const CONVENTIONAL_CONFIDENCE = 0.9;
+
+function proofOf(conventional: boolean | undefined): {
+  provenance: 'deterministic' | 'heuristic';
+  confidence: number;
+  tier: EdgeResolution['tier'];
+} {
+  return conventional
+    ? { provenance: 'heuristic', confidence: CONVENTIONAL_CONFIDENCE, tier: 'trusted' }
+    : { provenance: 'deterministic', confidence: 1, tier: 'certain' };
+}
+
+/** 链接器看其他模块的通道，另带完整的解析记录（文件级依赖边要写明说明符是怎么落到文件的）。 */
+interface ModuleLinkAccess extends ModuleGraphAccess {
+  resolution(importerFile: string, specifier: string): Promise<ModuleResolution>;
 }
 
 /** 一个文件的全部出边：文件级依赖、类型层级、调用。 */
@@ -75,31 +80,25 @@ export async function linkFile(
 
 /**
  * 链接器看其他模块的通道：目标文件只能是本代清单里的文件，声明来自目标自己的事实。
- * 相对说明符按导入方目录解析；非相对说明符经最近的 tsconfig / jsconfig 的别名配置解析，
- * 配置不能把它映射到清单内文件的就是包名。
+ * 说明符怎么落到文件由链接层唯一的解析规则决定（相对路径、路径别名、项目内的包）。
  */
-function moduleAccess(context: SourceGraphLinkContext): ModuleGraphAccess {
+function moduleAccess(context: SourceGraphLinkContext): ModuleLinkAccess {
+  const resolution = (importerFile: string, specifier: string) =>
+    resolveModuleSpecifier(context.modules, importerFile, specifier, {
+      extensions: MODULE_SOURCE_EXTENSIONS,
+      // 索引收下按目录惯例换回源码的包入口，并把经它得到的边标为可信档。
+      conventions: true,
+    });
   return {
+    resolution,
     async resolveModule(importerFile, specifier) {
-      const relative = relativeModuleBase(importerFile, specifier);
-      const bases =
-        relative !== undefined
-          ? [relative]
-          : specifier.startsWith('.')
-            ? []
-            : aliasModuleBases(
-                (await aliasConfigFor(context, path.posix.dirname(importerFile))) ?? { paths: [] },
-                specifier
-              );
-      for (const base of bases) {
-        const target = moduleSourceCandidates(base, MODULE_SOURCE_EXTENSIONS).find((candidate) =>
-          context.knownPaths.has(candidate)
-        );
-        if (target) {
-          return target;
-        }
-      }
-      return undefined;
+      const resolved = await resolution(importerFile, specifier);
+      return resolved.status === 'found'
+        ? {
+            filePath: resolved.filePath,
+            ...(resolved.conventional ? { conventional: true } : {}),
+          }
+        : undefined;
     },
     async declarations(filePath) {
       const target = await context.factsOf(filePath);
@@ -112,67 +111,6 @@ function moduleAccess(context: SourceGraphLinkContext): ModuleGraphAccess {
         : undefined;
     },
   };
-}
-
-/** 某个目录适用的别名配置：本目录的配置文件，没有就沿用上级目录的。 */
-function aliasConfigFor(
-  context: SourceGraphLinkContext,
-  directory: string
-): Promise<ModuleAliasConfig | undefined> {
-  const normalized = directory === '.' ? '' : directory;
-  let pending = context.moduleConfigs.get(normalized);
-  if (!pending) {
-    pending = (async () => {
-      for (const name of MODULE_CONFIG_FILE_NAMES) {
-        const configFile = normalized ? `${normalized}/${name}` : name;
-        const config = await readAliasConfig(context, configFile, 0);
-        if (config) {
-          return config;
-        }
-      }
-      return normalized === ''
-        ? undefined
-        : aliasConfigFor(context, path.posix.dirname(normalized));
-    })();
-    context.moduleConfigs.set(normalized, pending);
-  }
-  return pending;
-}
-
-async function readAliasConfig(
-  context: SourceGraphLinkContext,
-  configFile: string,
-  depth: number
-): Promise<ModuleAliasConfig | undefined> {
-  if (!context.knownPaths.has(configFile)) {
-    return undefined;
-  }
-  // 读不出内容的配置也算读过：它被修好之后，解析结果会不一样。
-  context.moduleConfigFiles.add(configFile);
-  const text = await context.readText(configFile);
-  const source = text === undefined ? undefined : parseModuleConfig(text);
-  if (!source) {
-    Logger.debug('Source graph ignores a module config it cannot read or parse', { configFile });
-    return undefined;
-  }
-  let inherited: ModuleAliasConfig | undefined;
-  for (const reference of source.extends) {
-    const parent = inheritedModuleConfigPath(configFile, reference);
-    // 只跟随清单内的相对 extends，最多四层；包名形式的共享预设不解析。
-    const loaded =
-      parent && depth < 4 ? await readAliasConfig(context, parent, depth + 1) : undefined;
-    if (loaded) {
-      inherited = {
-        ...(loaded.baseUrl === undefined
-          ? inherited?.baseUrl === undefined
-            ? {}
-            : { baseUrl: inherited.baseUrl }
-          : { baseUrl: loaded.baseUrl }),
-        paths: loaded.paths.length > 0 ? loaded.paths : (inherited?.paths ?? []),
-      };
-    }
-  }
-  return resolveModuleAliasConfig(configFile, source, inherited);
 }
 
 /** 声明对象 → 它在索引里的节点；目标可能在别的文件里。 */
@@ -190,7 +128,7 @@ async function nodeFor(
 async function linkTypeHierarchy(
   facts: FileLinkFacts,
   context: SourceGraphLinkContext,
-  access: ModuleGraphAccess
+  access: ModuleLinkAccess
 ): Promise<SourceGraphEdgeInput[]> {
   const symbols = facts.declarations.map((declaration) => declaration.symbol);
   if (!symbols.some((symbol) => symbol.heritage)) {
@@ -209,6 +147,7 @@ async function linkTypeHierarchy(
       continue;
     }
     const edgeId = `${facts.filePath}:${target.relation}:${from.symbolId}->${to.symbolId}`;
+    const proof = proofOf(target.conventional);
     edges.set(edgeId, {
       generationId: context.generationId,
       edgeId,
@@ -225,14 +164,14 @@ async function linkTypeHierarchy(
         endLine: from.range.startLine,
         endColumn: from.range.startColumn,
       },
-      provenance: 'deterministic',
-      confidence: 1,
+      provenance: proof.provenance,
+      confidence: proof.confidence,
       source: target.name,
       metadata: {
         resolution: {
           linker: 'heritage',
-          strategy: target.viaReexport ? `${target.strategy}+re-export` : target.strategy,
-          tier: 'certain',
+          strategy: strategyLabel(target.strategy, target),
+          tier: proof.tier,
         } satisfies EdgeResolution,
       },
     });
@@ -240,11 +179,28 @@ async function linkTypeHierarchy(
   return [...edges.values()];
 }
 
+/** 边的策略标签：基础策略后面依次注明经过了 re-export、目标模块是按目录惯例找到的。 */
+function strategyLabel(
+  strategy: string,
+  target: { viaReexport: boolean; conventional?: boolean }
+): string {
+  return `${strategy}${target.viaReexport ? '+re-export' : ''}${
+    target.conventional ? '+source-convention' : ''
+  }`;
+}
+
+const DEPENDENCY_STRATEGIES = {
+  relative: 'relative-specifier',
+  'path-alias': 'path-alias',
+  'package-entry': 'package-entry',
+  'package-import': 'package-import',
+} as const;
+
 /** JS/TS 的导入与 re-export：每个（来源文件 → 目标文件）一条文件级依赖边。 */
 async function linkModuleDependencies(
   facts: FileLinkFacts,
   context: SourceGraphLinkContext,
-  access: ModuleGraphAccess
+  access: ModuleLinkAccess
 ): Promise<SourceGraphEdgeInput[]> {
   const dependencies = [
     ...facts.imports.map((item) => ({
@@ -259,11 +215,13 @@ async function linkModuleDependencies(
   const byTarget = new Map<string, SourceGraphEdgeInput>();
   let unlinked = 0;
   for (const dependency of dependencies) {
-    const target = await access.resolveModule(facts.filePath, dependency.specifier);
-    if (!target) {
+    const resolved = await access.resolution(facts.filePath, dependency.specifier);
+    if (resolved.status !== 'found') {
       unlinked += 1;
       continue;
     }
+    const target = resolved.filePath;
+    const proof = proofOf(resolved.conventional);
     const existing = byTarget.get(target);
     if (existing) {
       // 多条绑定指向同一个文件仍是一个文件依赖；只补记"这里还有 re-export"。
@@ -287,16 +245,18 @@ async function linkModuleDependencies(
         endLine: dependency.range.endLine,
         endColumn: dependency.range.endColumn ?? 0,
       },
-      provenance: 'deterministic',
-      confidence: 1,
+      provenance: proof.provenance,
+      confidence: proof.confidence,
       source: dependency.specifier,
       metadata: {
         dependencyKind: dependency.reexport ? 're-export' : 'import',
         ...(dependency.reexport ? { reexport: true } : {}),
         resolution: {
           linker: 'module-import',
-          strategy: dependency.specifier.startsWith('.') ? 'relative-specifier' : 'path-alias',
-          tier: 'certain',
+          strategy: resolved.conventional
+            ? 'package-source-convention'
+            : DEPENDENCY_STRATEGIES[resolved.via],
+          tier: proof.tier,
         } satisfies EdgeResolution,
       },
     });
@@ -313,7 +273,7 @@ async function linkModuleDependencies(
 async function linkCalls(
   facts: FileLinkFacts,
   context: SourceGraphLinkContext,
-  access: ModuleGraphAccess | undefined
+  access: ModuleLinkAccess | undefined
 ): Promise<LinkedFile> {
   const callSites = facts.callSites ?? [];
   if (callSites.length === 0) {
@@ -324,10 +284,15 @@ async function linkCalls(
     facts.declarations.map((declaration) => [declaration.symbol, declaration])
   );
 
-  // 跨文件：调用点的词法绑定是一条相对导入。目标声明来自目标文件自己的事实。
+  // 跨文件：调用点的词法绑定是一条 import。目标声明来自目标文件自己的事实。
   const imported = new Map<
     number,
-    { node: SourceSymbolNode; strategy: ImportBindingStrategy; viaReexport: boolean }
+    {
+      node: SourceSymbolNode;
+      strategy: ImportBindingStrategy;
+      viaReexport: boolean;
+      conventional?: boolean;
+    }
   >();
   if (access) {
     for (const target of await linkImportBoundCallSites({
@@ -342,6 +307,7 @@ async function linkCalls(
           node,
           strategy: target.strategy,
           viaReexport: target.viaReexport,
+          conventional: target.conventional,
         });
       }
     }
@@ -364,6 +330,7 @@ async function linkCalls(
     const range = site.matchingRange ?? site.range;
     // 同一位置连到同一目标只有一条边；只有行号的语言里，同行的重复调用因此合并。
     const edgeId = `${facts.filePath}:calls:${range.startLine}:${range.startColumn ?? 0}:${target.symbolId}`;
+    const proof = proofOf(crossFile?.conventional);
     edges.set(edgeId, {
       generationId: context.generationId,
       edgeId,
@@ -379,17 +346,15 @@ async function linkCalls(
         endLine: range.endLine,
         endColumn: range.endColumn ?? 0,
       },
-      provenance: 'deterministic',
-      confidence: 1,
+      provenance: proof.provenance,
+      confidence: proof.confidence,
       source: site.calleeExpression ?? site.callee,
       metadata: {
         resolution: (crossFile
           ? {
               linker: 'import-binding',
-              strategy: crossFile.viaReexport
-                ? `${crossFile.strategy}+re-export`
-                : crossFile.strategy,
-              tier: 'certain',
+              strategy: strategyLabel(crossFile.strategy, crossFile),
+              tier: proof.tier,
             }
           : {
               linker: 'lexical',

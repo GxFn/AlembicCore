@@ -21,8 +21,9 @@ import {
  * 提取与链接规则的版本。版本进入索引身份，旧版本的代际不会被增量沿用。
  * v2：所有语言统一读文件事实，调用边由自有链接器写入。
  * v3：解析 tsconfig / jsconfig 的路径别名；同一行上的多个同名声明各有列范围。
+ * v4：解析项目内的包（workspace 成员、自引用、`#` 说明符）；按目录惯例找回的入口记为可信档。
  */
-export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v3';
+export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v4';
 // 启用外部引擎时，它的身份与本模块对其结果的采用规则一起进入提取版本。
 const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v4';
 

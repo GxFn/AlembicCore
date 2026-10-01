@@ -17,6 +17,8 @@ export interface HeritageTarget {
   symbol: ExtractedFileSymbol;
   strategy: HeritageStrategy;
   viaReexport: boolean;
+  /** 到达声明的路上有一步是按目录惯例解析的模块。 */
+  conventional?: boolean;
 }
 
 /** 可以出现在 extends / implements 位置的声明种类。 */
@@ -27,7 +29,7 @@ const TYPE_LIKE_KINDS = new Set(['class', 'interface', 'type', 'enum']);
  * 要么是同文件的顶层声明，要么是一条 import 绑定。两种情形都有语法证明。
  *
  * 类型导入（`import type`）在这里有效：implements 与接口继承只需要类型。
- * 包名与路径别名导入的父类型不解析；找不到唯一声明时不产出。
+ * 说明符落不到项目内文件（项目外的包）或找不到唯一声明时不产出。
  */
 export async function linkHeritage(input: {
   filePath: string;
@@ -68,7 +70,10 @@ async function resolveTypeName(
     specifier: string;
   }[],
   name: string
-): Promise<Pick<HeritageTarget, 'filePath' | 'symbol' | 'strategy' | 'viaReexport'> | undefined> {
+): Promise<
+  | Pick<HeritageTarget, 'filePath' | 'symbol' | 'strategy' | 'viaReexport' | 'conventional'>
+  | undefined
+> {
   const parts = name.split('.');
   if (parts.length > 2 || parts.some((part) => !/^[A-Za-z_$][\w$]*$/.test(part))) {
     // 表达式形式的父类（mixin 调用等）没有可指向的声明。
@@ -80,11 +85,17 @@ async function resolveTypeName(
     if (binding.length !== 1 || binding[0].imported !== '*') {
       return undefined;
     }
-    const targetFile = await input.access.resolveModule(input.filePath, binding[0].specifier);
-    const declared = targetFile
-      ? await resolveExportedDeclaration(input.access, targetFile, parts[1])
+    const module = await input.access.resolveModule(input.filePath, binding[0].specifier);
+    const declared = module
+      ? await resolveExportedDeclaration(input.access, module.filePath, parts[1])
       : undefined;
-    return declared ? { ...declared, strategy: 'namespace-member' } : undefined;
+    return declared
+      ? {
+          ...declared,
+          strategy: 'namespace-member',
+          ...(module?.conventional || declared.conventional ? { conventional: true } : {}),
+        }
+      : undefined;
   }
 
   const local = input.symbols.filter(
@@ -102,15 +113,20 @@ async function resolveTypeName(
   if (local.length > 0 || binding.length !== 1 || binding[0].imported === '*') {
     return undefined;
   }
-  const targetFile = await input.access.resolveModule(input.filePath, binding[0].specifier);
-  if (!targetFile || targetFile === input.filePath) {
+  const module = await input.access.resolveModule(input.filePath, binding[0].specifier);
+  if (!module || module.filePath === input.filePath) {
     return undefined;
   }
-  const declared = await resolveExportedDeclaration(input.access, targetFile, binding[0].imported);
+  const declared = await resolveExportedDeclaration(
+    input.access,
+    module.filePath,
+    binding[0].imported
+  );
   return declared
     ? {
         ...declared,
         strategy: binding[0].imported === 'default' ? 'default-import' : 'named-import',
+        ...(module.conventional || declared.conventional ? { conventional: true } : {}),
       }
     : undefined;
 }

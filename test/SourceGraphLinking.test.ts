@@ -339,6 +339,71 @@ describe('source graph linking', () => {
     );
   });
 
+  it('links workspace packages and marks entries found by convention as trusted', async () => {
+    const manifest = (value: object) => JSON.stringify(value);
+    write({
+      'package.json': manifest({ name: 'root', private: true, workspaces: ['packages/*'] }),
+      'packages/app/package.json': manifest({ name: '@demo/app' }),
+      'packages/app/src/main.ts': [
+        "import { createStore, Store } from '@demo/core';",
+        "import { render } from '@demo/ui';",
+        "import { external } from 'left-pad';",
+        'export class AppStore extends Store {}',
+        'export function main() { createStore(); render(); external(); }',
+      ].join('\n'),
+      'packages/core/package.json': manifest({ name: '@demo/core', exports: './src/index.ts' }),
+      'packages/core/src/index.ts': 'export function createStore() {}\nexport class Store {}\n',
+      // 入口指向构建产物，没有编译配置：源码按 dist 对应 src 的惯例找回。
+      'packages/ui/package.json': manifest({ name: '@demo/ui', main: 'dist/index.js' }),
+      'packages/ui/src/index.ts': 'export function render() {}\n',
+      'packages/ui/src/next.ts': 'export function render() {}\n',
+    });
+    const indexer = () => new SourceGraphIndexer(repository);
+    const describe = (result: SourceGraphIndexBuildResult) =>
+      result.edges
+        .map((edge) => {
+          const resolution = edge.metadata.resolution as { strategy: string; tier: string };
+          return `${edge.kind} ${edge.fromSymbolId} -> ${edge.toSymbolId ?? edge.toFilePath} [${resolution.strategy} / ${resolution.tier} / ${edge.provenance} ${edge.confidence}]`;
+        })
+        .sort();
+
+    const result = await indexer().buildFull({ projectRoot: tmpDir, generationId: 'packages' });
+
+    expect(describe(result)).toEqual([
+      'calls packages/app/src/main.ts#main -> packages/core/src/index.ts#createStore [named-import / certain / deterministic 1]',
+      'calls packages/app/src/main.ts#main -> packages/ui/src/index.ts#render [named-import+source-convention / trusted / heuristic 0.9]',
+      'extends packages/app/src/main.ts#AppStore -> packages/core/src/index.ts#Store [named-import / certain / deterministic 1]',
+      'imports packages/app/src/main.ts#module -> packages/core/src/index.ts [package-entry / certain / deterministic 1]',
+      'imports packages/app/src/main.ts#module -> packages/ui/src/index.ts [package-source-convention / trusted / heuristic 0.9]',
+    ]);
+    // 清单决定了导入落到哪个文件：它们与 tsconfig 一样记在代际上。
+    expect(result.snapshot.metadata.moduleConfigFiles).toEqual([
+      'package.json',
+      'packages/app/package.json',
+      'packages/core/package.json',
+      'packages/ui/package.json',
+    ]);
+
+    // 只改包的清单：main.ts 没变，但 @demo/ui 的入口换了文件，它的出边要重算。
+    write({
+      'packages/ui/package.json': manifest({ name: '@demo/ui', exports: './src/next.ts' }),
+    });
+    const next = await indexer().buildIncremental({
+      projectRoot: tmpDir,
+      generationId: 'packages-next',
+    });
+    expect(next.changedFiles).toEqual(['packages/ui/package.json']);
+    expect(describe(next).filter((edge) => edge.includes('@') || edge.includes('ui/'))).toEqual([
+      'calls packages/app/src/main.ts#main -> packages/ui/src/next.ts#render [named-import / certain / deterministic 1]',
+      'imports packages/app/src/main.ts#module -> packages/ui/src/next.ts [package-entry / certain / deterministic 1]',
+    ]);
+    const rebuilt = await indexer().buildFull({
+      projectRoot: tmpDir,
+      generationId: 'packages-full',
+    });
+    expect(describe(rebuilt)).toEqual(describe(next));
+  });
+
   it('answers callers and callees from the stored call edges', async () => {
     write({
       'src/app.ts': [

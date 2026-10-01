@@ -370,6 +370,70 @@ describe('strict analysis session', () => {
     });
   });
 
+  it('links calls into another workspace package only when its entry is backed by configuration', async () => {
+    const manifest = (value: object) => JSON.stringify(value);
+    const files = {
+      'package.json': manifest({ name: 'root', private: true, workspaces: ['packages/*'] }),
+      'packages/app/package.json': manifest({ name: '@demo/app' }),
+      'packages/app/src/main.ts': [
+        "import { createStore } from '@demo/core';",
+        "import { render } from '@demo/ui';",
+        'export function main() { createStore(); render(); }',
+      ].join('\n'),
+      'packages/core/package.json': manifest({ name: '@demo/core', exports: './src/index.ts' }),
+      'packages/core/src/index.ts': 'export function createStore() {}\n',
+      // 入口指向构建产物且没有编译配置：协议不按目录惯例猜，调用保持未解析。
+      'packages/ui/package.json': manifest({ name: '@demo/ui', main: 'dist/index.js' }),
+      'packages/ui/src/index.ts': 'export function render() {}\n',
+    };
+    const { projectRoot, dataRoot } = await fixture(files);
+    const request = flowRequest(projectRoot, 'packages/app/src/main.ts');
+    const describeCalls = (flow: FileFlowContext) =>
+      flow.callers.map((call) =>
+        call.unresolved ? `${call.label} -> unresolved` : `${call.label} -> ${call.to?.filePath}`
+      );
+
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const live = await context.execute(request);
+      expect(live.errors ?? []).toEqual([]);
+      expect(describeCalls(live.data as FileFlowContext)).toEqual([
+        'main calls createStore -> packages/core/src/index.ts',
+        'main calls render -> unresolved',
+      ]);
+
+      // 捕获记下读过的清单与目录；重放在源码目录消失后得到逐字节相同的结果。
+      const capture = await new NodeProjectContextFoundationHostPorts(context).createInputCapture({
+        repositories: [
+          { repoId: 'repo', scopeId: 'repo', relativeRoot: '.', sourceRoot: projectRoot },
+        ],
+        files: Object.entries(files)
+          .filter(([relativePath]) => relativePath.endsWith('.ts'))
+          .map(([relativePath, source]) => ({
+            repoId: 'repo',
+            relativePath,
+            content: Buffer.from(source),
+          })),
+      });
+      if (!capture) {
+        throw new Error('Expected native capture');
+      }
+      const recorded = await context.execute(request, { sourceReader: capture.reader });
+      expect(describeCalls(recorded.data as FileFlowContext)).toEqual(
+        describeCalls(live.data as FileFlowContext)
+      );
+      const snapshot = await capture.snapshot();
+      const observed = new Set(snapshot.observations.map((row) => row.path.relativePath));
+      for (const consulted of ['package.json', 'packages/core/package.json', 'packages']) {
+        expect(observed.has(consulted)).toBe(true);
+      }
+      await capture.verify();
+      await fs.rm(projectRoot, { recursive: true });
+      const replay = capture.createReplay(snapshot);
+      expect(await context.execute(request, { sourceReader: replay })).toEqual(recorded);
+      replay.assertComplete();
+    });
+  });
+
   it('exposes a stable engine identity and a private runtime directory, and starts no process', async () => {
     const input = await fixture();
     const identity = await getCodeGraphProjectContextIdentity();

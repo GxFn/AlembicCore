@@ -144,7 +144,7 @@ describe('SourceGraphIndexer', () => {
       true
     );
     expect((await repository.getSnapshot('legacy'))?.extractionVersion).toBe(
-      'source-graph-indexer-v3'
+      'source-graph-indexer-v4'
     );
     const reopen = new SourceGraphLifecycleService(repository);
     expect((await reopen.catchUpOnStartup({ ...sdkInput, now: 3000 })).action).toBe('fresh-noop');

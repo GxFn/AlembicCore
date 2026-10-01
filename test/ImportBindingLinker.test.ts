@@ -12,9 +12,11 @@ import {
   moduleSourceCandidates,
   relativeModuleBase,
   resolveExportedDeclaration,
+  resolveModuleSpecifier,
 } from '../src/core/linking/index.js';
 import type { FileFlowContext } from '../src/domain/project-context/index.js';
 import { ProjectContext } from '../src/project-context.js';
+import { createInventoryModuleAccess } from '../src/service/source-graph/SourceGraphModuleAccess.js';
 
 /** 内存里的小项目：文件事实来自真实 AST，模块解析只看这组文件名。 */
 function project(files: Record<string, string>) {
@@ -24,6 +26,11 @@ function project(files: Record<string, string>) {
       readFileSyntaxEvidence({ text, filePath, lineCount: text.split('\n').length }, true),
     ])
   );
+  const modules = createInventoryModuleAccess({
+    knownPaths: new Set(Object.keys(files)),
+    readText: async (filePath) => files[filePath],
+    consulted: new Set(),
+  });
   const access: ModuleGraphAccess = {
     async declarations(filePath) {
       const facts = evidence.get(filePath);
@@ -36,12 +43,11 @@ function project(files: Record<string, string>) {
         : undefined;
     },
     async resolveModule(importerFile, specifier) {
-      const base = relativeModuleBase(importerFile, specifier);
-      return base === undefined
-        ? undefined
-        : moduleSourceCandidates(base, MODULE_SOURCE_EXTENSIONS).find((candidate) =>
-            evidence.has(candidate)
-          );
+      const resolved = await resolveModuleSpecifier(modules, importerFile, specifier, {
+        extensions: MODULE_SOURCE_EXTENSIONS,
+        conventions: true,
+      });
+      return resolved.status === 'found' ? resolved : undefined;
     },
   };
   return {

@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { objcAppFixture } from './objcApp.js';
 import { swiftAppFixture } from './swiftApp.js';
+import { tsMonorepoFixture } from './tsMonorepo.js';
 import { tsNodeNextFixture } from './tsNodeNext.js';
 import { tsxBundlerFixture } from './tsxBundler.js';
 import type {
@@ -18,10 +19,11 @@ export type {
   BenchmarkRelationKind,
 } from './types.js';
 
-/** 四种主要语言各一个夹具；顺序即报告顺序。 */
+/** 四种主要语言各至少一个夹具；顺序即报告顺序。 */
 export const ANALYSIS_BENCHMARK_FIXTURES: readonly AnalysisBenchmarkFixture[] = [
   tsNodeNextFixture,
   tsxBundlerFixture,
+  tsMonorepoFixture,
   swiftAppFixture,
   objcAppFixture,
 ];
@@ -109,7 +111,13 @@ export function scoreBenchmarkFixture(
 ): BenchmarkScore {
   const markers = locateBenchmarkMarkers(fixture);
   const score: BenchmarkScore = {
-    found: { lexical: [0, 0], 'import-binding': [0, 0], external: [0, 0], future: [0, 0] },
+    found: {
+      lexical: [0, 0],
+      'import-binding': [0, 0],
+      convention: [0, 0],
+      external: [0, 0],
+      future: [0, 0],
+    },
     missing: [],
     violations: [],
   };

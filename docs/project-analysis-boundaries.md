@@ -123,17 +123,35 @@ Python、Go、Rust 的成员调用必须写出接收者，裸调用不当成成�
 遮蔽时绑定范围不相等，不会连接。目标不唯一（同名的类与函数、多个 `export *` 命中不同声明）
 或 default 无法定位到声明时不产出目标，不按顺序或距离猜。
 
-说明符到文件的解析覆盖两种写法：相对路径，以及 tsconfig / jsconfig 的路径别名（`paths`、
-`baseUrl`）。别名取离导入文件最近的 `tsconfig.json`（其次 `jsconfig.json`），跟随相对路径的
-`extends`（含数组形式，最多四层），允许注释与尾随逗号；规则与 TypeScript 一致——`paths` 整体
-覆盖继承来的 `paths`，目标相对 `baseUrl`，没有 `baseUrl` 时相对声明它的配置文件。多个模式
-命中时取最具体的一个，目标按写出的顺序尝试。包名形式的 `extends`（共享预设）、workspace
-包名和 `package.json` 的 `exports` / `imports` 不解析，这类导入的调用保持 unresolved。
+说明符到文件的解析只有一份规则（`core/linking/moduleResolver`），协议与索引各自只提供读取通道。
+它依次认四种写法：
+
+- 相对路径（含 `.`、`..`）。
+- tsconfig / jsconfig 的路径别名（`paths`、`baseUrl`）。取离导入文件最近的 `tsconfig.json`
+  （其次 `jsconfig.json`），跟随相对路径的 `extends`（含数组形式，最多四层），允许注释与尾随
+  逗号；规则与 TypeScript 一致——`paths` 整体覆盖继承来的 `paths`，目标相对 `baseUrl`，没有
+  `baseUrl` 时相对声明它的配置文件。多个模式命中时取最具体的一个，目标按写出的顺序尝试。
+- 项目内的包。包目录的来源有三个：导入方所在的包自己（自引用）；它用 `file:` / `link:` 声明的
+  本地依赖；导入方所属 workspace 里同名的成员。workspace 成员由根清单声明（`package.json` 的
+  `workspaces`、`pnpm-workspace.yaml`、`lerna.json` 的 `packages`，支持 `*`、`**` 与 `!` 排除），
+  不在成员模式里的同名清单不算；同名成员不止一个时不选。入口取 `exports`（子路径、带 `*` 的
+  模式、条件对象），没有 `exports` 时依次取 `source`、`types`、`module`、`main`，子路径直接对应
+  包目录下的路径。
+- `#` 开头的说明符：导入方所在包的 `imports`。
+
+包入口常常写的是构建产物（`./dist/index.js`、`./dist/index.d.ts`），分析要的是源码。包自己的
+tsconfig 同时写明 `outDir` 与 `rootDir` 时按它换回源码，这有配置为证。两者缺一时只剩目录惯例
+（`dist`、`build`、`out`、`lib` 等对应 `src` 或包根）：协议不按惯例猜，这类导入的调用保持
+unresolved；索引收下惯例找到的目标，但把经它得到的边标为可信档（见"SourceGraph 索引接入"）。
+`dist`、`build`、`out` 与 tsconfig 的 `outDir` 之下的文件本身从不作为包入口的目标。
+
+都不是的说明符是项目外的包（或包名形式的 `extends` 共享预设），没有目标。
 
 导入绑定链接在普通实时查询和认证捕获里都执行，目标文件经同一个 reader 按需读取：实时查询
 读当前文件，捕获登记实际消费的源码版本，重放得到相同结果。它只读被引用到的文件，不需要
-预先声明项目源码清单。别名配置同样经 reader 读取：读过的配置与"候选配置不存在"的观察都进入
-输入记录，一次会话内同一个 reader 对同一目录只解析一次。
+预先声明项目源码清单。模块配置（tsconfig / jsconfig、各级 `package.json`、workspace 清单）与
+workspace 成员目录同样经 reader 读取：读过的内容与"候选不存在"的观察都进入输入记录，一次会话内
+同一个 reader 对同一目录只解析一次。
 
 类型层级链接（JS/TS）：类与接口写出的父类型名字是模块作用域里的标识符，按同文件顶层声明或
 import 绑定（含类型导入、命名空间成员）找到声明。同名的本地声明与导入并存、表达式形式的父类
@@ -188,9 +206,10 @@ controlRoot，保证各成员的文件路径相对于同一个根。
 
 索引按文件写三类边，全部带来源与分级（`metadata.resolution = { linker, strategy, tier }`）：
 
-- `imports`：JS/TS 的相对导入、路径别名导入与 export-from，每个（来源文件 → 目标文件）一条，
+- `imports`：JS/TS 的导入与 export-from，每个（来源文件 → 目标文件）一条，
   `metadata.dependencyKind` 记首条绑定的种类，任一条是 re-export 时 `metadata.reexport = true`。
-  `resolution.strategy` 是 `relative-specifier` 或 `path-alias`。
+  `resolution.strategy` 说明说明符是怎么落到文件的：`relative-specifier`、`path-alias`、
+  `package-entry`、`package-import`，或按目录惯例找回的 `package-source-convention`。
 - `extends` / `implements`：JS/TS 的父类型名字经同文件声明或 import 绑定连到声明。
   解析不到声明的父类型（包里的类型、其他语言）只把名字留在符号的 `metadata.heritage` 上。
 - `calls`：同文件链接与导入绑定链接的结果，一个调用点一条，带调用点位置。
@@ -199,7 +218,9 @@ controlRoot，保证各成员的文件路径相对于同一个根。
   enclosing 是拥有者为匿名回调、嵌套函数、对象字面量方法或初始化表达式时，归到包住它的
   最内层声明；module 是没有任何声明包住它，归文件自身。
 
-自有链接器的边 tier 为 certain、provenance 为 deterministic。未解析的调用点不入库，
+自有链接器的边 tier 为 certain、provenance 为 deterministic。唯一的例外是经过"按目录惯例找回的
+包入口"的边（文件依赖，以及穿过这个模块的调用与层级边）：tier 为 trusted、provenance 为
+heuristic、confidence 0.9，策略带 `+source-convention` 后缀。未解析的调用点不入库，
 文件元数据的 `callSites = { total, linked }` 记数量。存储顺序是文件依赖、跨文件符号边、
 文件内符号边，受预算截断的查询因此先拿到跨文件信息。
 
@@ -246,9 +267,9 @@ CodeGraph 把 `extension T` 也当成类型节点——T 在项目里有唯一�
 `uncoveredSyntax` 里记下。压缩或生成物形态的文件只留声明，记为 partial。
 
 增量构建的结果必须与同一文件集合上的全量构建相同。没改内容的文件在三种情况下也要重新链接：
-文件集合变化时，所有做模块解析的文件重来；别名解析读过的配置文件内容变化时同样全部重来
-（代际元数据 `moduleConfigFiles` 记着读过哪些配置，含经 `extends` 继承、名字不限的那些；
-与别名无关的 JSON 变化不牵连源码）；只有源码内容变化时，重连直接导入它的文件，
+文件集合变化时，所有做模块解析的文件重来；说明符解析读过的配置文件内容变化时同样全部重来
+（代际元数据 `moduleConfigFiles` 记着读过哪些：tsconfig / jsconfig 及经 `extends` 继承、名字
+不限的配置，各级 `package.json` 与 workspace 清单；与解析无关的 JSON 变化不牵连源码）；只有源码内容变化时，重连直接导入它的文件，
 以及经 re-export 链拿到它声明的文件。沿用自上一代的文件被当作链接目标时按需重读声明，
 内容必须仍是上一代记录的那一份。来源文件被重新分析的边一律重算；指向内容已变文件的
 其余符号边不沿用。

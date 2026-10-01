@@ -9,8 +9,13 @@
 export type BenchmarkLinkSource =
   /** 同文件词法解析（隐式 self、同文件函数）。 */
   | 'lexical'
-  /** TS/JS 的 import 绑定跨文件解析（含 re-export、default、namespace）。 */
+  /** TS/JS 的 import 绑定跨文件解析（含 re-export、default、namespace、别名与项目内的包）。 */
   | 'import-binding'
+  /**
+   * 同样经 import 绑定，但包入口写的是构建产物，源码是按"产物目录对应 src"的惯例找回的。
+   * 只有索引给出这类关系，并标为可信档；file-flow 只给有配置为证的目标。
+   */
+  | 'convention'
   /** 外部索引器（CodeGraph）的可信档：限定名、类型接收者、路径别名导入。 */
   | 'external'
   /** 现有两套引擎都给不出可信结果，留给"按声明类型解析成员"的后续阶段。 */

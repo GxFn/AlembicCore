@@ -4,7 +4,6 @@ import {
   findCallerSymbol,
   hasImplicitMemberCalls,
 } from '../../../core/linking/lexicalLinker.js';
-import type { ModuleAliasConfig } from '../../../core/linking/moduleAliases.js';
 import { MODULE_SOURCE_EXTENSIONS } from '../../../core/linking/moduleTargets.js';
 import type {
   FileSummary,
@@ -17,6 +16,7 @@ import type {
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
+import type { FileAnalysisSession } from '../analysis/FileAnalysisSession.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileFlowRelationRef } from '../shared/fileFlow-moduleLayers/index.js';
 import { dedupeProjectContextRefs as dedupeRefs } from '../shared/refs.js';
@@ -60,8 +60,8 @@ export async function normalizeFileFlow(input: {
   declarationRanges?: WeakMap<SymbolSummary, SourceRangeSummary>;
   signal?: AbortSignal;
   sourceReader?: ProjectSourceReader;
-  /** 本文件适用的模块别名配置；只在遇到非相对说明符时才加载。 */
-  aliases?: () => Promise<ModuleAliasConfig | undefined>;
+  /** 模块配置与 workspace 成员表在这个会话内只读一次。 */
+  analysis?: FileAnalysisSession;
 }): Promise<NormalizedFileFlow> {
   throwIfProjectContextAborted(input);
   // 同次文件投影中的import/export-from共用目标观察，避免同一specifier重复读存在性。
@@ -75,7 +75,7 @@ export async function normalizeFileFlow(input: {
         specifier,
         input.signal,
         input.sourceReader ?? nodeProjectSourceReader,
-        input.aliases
+        input.analysis
       );
       targets.set(specifier, pending);
     } else {
@@ -437,7 +437,7 @@ async function resolveModuleTarget(
   specifier: string,
   signal: AbortSignal | undefined,
   reader: ProjectSourceReader,
-  aliases: (() => Promise<ModuleAliasConfig | undefined>) | undefined
+  analysis: FileAnalysisSession | undefined
 ): Promise<ResolvedFileFlowImportTarget> {
   const found = await findModuleFile({
     importerFile: facts.filePath,
@@ -447,7 +447,7 @@ async function resolveModuleTarget(
     extensions: [...MODULE_SOURCE_EXTENSIONS, '.json'],
     reader,
     signal,
-    aliases,
+    analysis,
   });
   if (found.status !== 'found') {
     return {

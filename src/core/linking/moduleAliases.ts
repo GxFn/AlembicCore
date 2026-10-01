@@ -9,12 +9,17 @@ export interface ModuleAliasConfig {
   baseUrl?: string;
   /** `paths` 的每一条：模式最多含一个 `*`，目标是项目相对路径（同样最多含一个 `*`）。 */
   paths: { pattern: string; targets: string[] }[];
+  /** 编译输出目录与源码根目录；包入口指向构建产物时据此换回源码。没写的不带。 */
+  outDir?: string;
+  rootDir?: string;
 }
 
 /** 配置文件里读出的原始内容，尚未换算路径。 */
 export interface ModuleConfigSource {
   baseUrl?: string;
   paths?: Record<string, string[]>;
+  outDir?: string;
+  rootDir?: string;
   /** `extends` 指向的其他配置文件（原样）。 */
   extends: string[];
 }
@@ -49,14 +54,16 @@ export function parseModuleConfig(text: string): ModuleConfigSource | undefined 
   return {
     ...(typeof options.baseUrl === 'string' ? { baseUrl: options.baseUrl } : {}),
     ...(isRecord(options.paths) ? { paths } : {}),
+    ...(typeof options.outDir === 'string' ? { outDir: options.outDir } : {}),
+    ...(typeof options.rootDir === 'string' ? { rootDir: options.rootDir } : {}),
     extends: inherited.filter((item): item is string => typeof item === 'string'),
   };
 }
 
 /**
  * 把一份配置换算成项目相对路径，并叠加在它继承的配置之上。
- * 规则与 TypeScript 一致：baseUrl 相对声明它的配置文件所在目录；paths 整体覆盖继承来的 paths，
- * 目标相对 baseUrl，没有 baseUrl 时相对声明 paths 的配置文件所在目录。
+ * 规则与 TypeScript 一致：baseUrl、outDir、rootDir 相对声明它的配置文件所在目录，没写的沿用继承值；
+ * paths 整体覆盖继承来的 paths，目标相对 baseUrl，没有 baseUrl 时相对声明 paths 的配置文件所在目录。
  */
 export function resolveModuleAliasConfig(
   configFilePath: string,
@@ -64,10 +71,18 @@ export function resolveModuleAliasConfig(
   inherited?: ModuleAliasConfig
 ): ModuleAliasConfig {
   const directory = path.posix.dirname(configFilePath);
-  const baseUrl =
-    source.baseUrl === undefined ? inherited?.baseUrl : joinProjectPath(directory, source.baseUrl);
+  const own = (value: string | undefined, fallback: string | undefined) =>
+    value === undefined ? fallback : joinProjectPath(directory, value);
+  const baseUrl = own(source.baseUrl, inherited?.baseUrl);
+  const outDir = own(source.outDir, inherited?.outDir);
+  const rootDir = own(source.rootDir, inherited?.rootDir);
+  const shared = {
+    ...(baseUrl === undefined ? {} : { baseUrl }),
+    ...(outDir === undefined ? {} : { outDir }),
+    ...(rootDir === undefined ? {} : { rootDir }),
+  };
   if (source.paths === undefined) {
-    return { ...(baseUrl === undefined ? {} : { baseUrl }), paths: inherited?.paths ?? [] };
+    return { ...shared, paths: inherited?.paths ?? [] };
   }
   const anchor = baseUrl ?? directory;
   const paths = Object.entries(source.paths).flatMap(([pattern, targets]) => {
@@ -77,7 +92,29 @@ export function resolveModuleAliasConfig(
     });
     return isUsablePattern(pattern) && resolved.length > 0 ? [{ pattern, targets: resolved }] : [];
   });
-  return { ...(baseUrl === undefined ? {} : { baseUrl }), paths };
+  return { ...shared, paths };
+}
+
+/**
+ * 一份配置继承多份配置（`extends` 是数组）时，把它们合成一份：后面的覆盖前面的，
+ * 与 TypeScript 一致。paths 为空的那份不覆盖已有的 paths。
+ */
+export function mergeInheritedModuleConfigs(
+  configs: readonly ModuleAliasConfig[]
+): ModuleAliasConfig | undefined {
+  let merged: ModuleAliasConfig | undefined;
+  for (const config of configs) {
+    const baseUrl = config.baseUrl ?? merged?.baseUrl;
+    const outDir = config.outDir ?? merged?.outDir;
+    const rootDir = config.rootDir ?? merged?.rootDir;
+    merged = {
+      ...(baseUrl === undefined ? {} : { baseUrl }),
+      ...(outDir === undefined ? {} : { outDir }),
+      ...(rootDir === undefined ? {} : { rootDir }),
+      paths: config.paths.length > 0 ? config.paths : (merged?.paths ?? []),
+    };
+  }
+  return merged;
 }
 
 /**

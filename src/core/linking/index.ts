@@ -5,4 +5,6 @@ export * from './heritageLinker.js';
 export * from './importBindingLinker.js';
 export * from './lexicalLinker.js';
 export * from './moduleAliases.js';
+export * from './moduleResolver.js';
 export * from './moduleTargets.js';
+export * from './packageEntries.js';
