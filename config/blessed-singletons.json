@@ -106,7 +106,7 @@
     },
     {
       "id": "ast-analyzer-caches",
-      "module": "src/core/AstAnalyzer.ts",
+      "module": "src/core/ast/languageRegistry.ts",
       "export": "_langPlugins (plugin registry), _parserCache (parser cache)",
       "kind": "bounded-cache",
       "owner": "AlembicCore window",
@@ -134,13 +134,13 @@
   },
   "lintExemptions": [
     {
-      "file": "src/core/AstAnalyzer.ts",
+      "file": "src/core/ast/languageRegistry.ts",
       "binding": "_langPlugins",
       "blessedId": "ast-analyzer-caches",
       "reason": "Plugin registry bounded by the registered language set (AD4 S11)."
     },
     {
-      "file": "src/core/AstAnalyzer.ts",
+      "file": "src/core/ast/languageRegistry.ts",
       "binding": "_parserCache",
       "blessedId": "ast-analyzer-caches",
       "reason": "Parser cache bounded by language set; replacement/reset disposes native instances; test reset hook present (AD4 S11)."

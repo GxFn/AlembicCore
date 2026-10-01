@@ -1,8 +1,6 @@
 import type {
   ProjectContextQueryErrorCode,
   ProjectContextRef,
-  SourceRangeSummary,
-  SymbolSummary,
 } from '../../../domain/project-context/index.js';
 
 export type {
@@ -23,62 +21,13 @@ export interface FileFlowQueryFailure {
   retryable?: boolean;
 }
 
-export type FileFlowImportKind = 'named' | 'default' | 'namespace' | 'side-effect' | 'dynamic';
-
-export interface ExtractedFileFlowImport {
-  specifier: string;
-  kind: FileFlowImportKind;
-  range: SourceRangeSummary;
-  statement: string;
-  symbols: string[];
-  alias?: string;
-  typeOnly?: boolean;
-  bindings?: { local: string; imported: string; range: SourceRangeSummary; typeOnly: boolean }[];
-}
-
-export interface ExtractedFileFlowExport {
-  name: string;
-  kind: string;
-  range: SourceRangeSummary;
-  statement: string;
-  exportedName?: string;
-  specifier?: string;
-}
-
-export interface ExtractedFileFlowCallSite {
-  callee: string;
-  /** 同次冻结输入与实际SDK解析证明的跨文件目标，公开层仍使用原SymbolSummary/ref。 */
-  resolvedTarget?: SymbolSummary;
-  callerMethod: string;
-  callerClass?: string;
-  callType: string;
-  range: SourceRangeSummary;
-  argCount?: number;
-  receiver?: string;
-  receiverType?: string;
-  isAwait?: boolean;
-  /** 同文本真实AST证据，仅供后端对应/端点消歧，不直接扩展公开RelationSummary。 */
-  matchingRange?: SourceRangeSummary;
-  callerRange?: SourceRangeSummary;
-  callerQualifiedName?: string;
-  calleeExpression?: string;
-  receiverSyntax?: string;
-  syntaxKind?: 'call' | 'new' | 'jsx';
-  omissionReason?: string;
-  calleeShadowed?: boolean;
-  calleeQualifiedName?: string;
-  calleeBindingRange?: SourceRangeSummary;
-}
-
-export interface FileFlowExtractionResult {
-  imports: ExtractedFileFlowImport[];
-  exports: ExtractedFileFlowExport[];
-  callSites: ExtractedFileFlowCallSite[];
-  unavailableReason?: string;
-  /** 含显式策略省略项的完整观察，用于证明SDK候选，不作为公开调用列表。 */
-  callSiteEvidence?: ExtractedFileFlowCallSite[];
-  callSitesComplete?: boolean;
-}
+export type {
+  ExtractedFileFlowCallSite,
+  ExtractedFileFlowExport,
+  ExtractedFileFlowImport,
+  FileFlowExtractionResult,
+  FileFlowImportKind,
+} from '../../../core/facts/contracts.js';
 
 export interface ResolvedFileFlowImportTarget {
   specifier: string;

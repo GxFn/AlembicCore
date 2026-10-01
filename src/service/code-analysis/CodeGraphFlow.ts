@@ -1,9 +1,9 @@
+import type { FileAstInput } from '../../core/facts/fileAst.js';
 import type {
   CodeGraphCallReference,
   CodeGraphExtraction,
 } from '../../infrastructure/analysis/CodeGraphProcess.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type { ProjectContextAstInput } from '../project-context/analysis/astFacts.js';
 import type {
   ExtractedFileFlowCallSite,
   FileFlowExtractionResult,
@@ -29,7 +29,7 @@ const SDK_LITERAL_RECEIVERS = new Set([
  * 不使用SDK node id推断caller：同行节点可共用id，匿名回调也可能只归到SDK外层节点。
  */
 export function normalizeCodeGraphFlow(
-  input: ProjectContextAstInput,
+  input: FileAstInput,
   extraction: CodeGraphExtraction,
   legacy: FileFlowExtractionResult
 ): FileFlowExtractionResult {

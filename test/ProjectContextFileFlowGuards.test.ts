@@ -14,10 +14,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { analyzeFile, registerLanguage } from '../src/core/AstAnalyzer.js';
-import type { ModuleSyntaxFacts } from '../src/core/analysis/ModuleSyntaxCollector.js';
+import type { ModuleSyntaxFacts } from '../src/core/ast/extract/ModuleSyntaxCollector.js';
 import { plugin as typescriptPlugin } from '../src/core/ast/lang-typescript.js';
+import { readFileAst } from '../src/core/facts/fileAst.js';
 import { ProjectContext } from '../src/project-context.js';
-import { readProjectContextAst } from '../src/service/project-context/analysis/astFacts.js';
 import type {
   FileFlowContext,
   ModuleContext,
@@ -277,7 +277,7 @@ describe('fileFlow JS 模块语法事实', () => {
       },
     });
     try {
-      const facts = readProjectContextAst(
+      const facts = readFileAst(
         {
           text: 'export function run() { helper(); }',
           filePath: 'src/example.ts',

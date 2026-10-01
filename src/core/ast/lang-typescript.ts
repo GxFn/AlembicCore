@@ -8,8 +8,8 @@
  * Phase 5: 新增 ImportRecord 结构化导入 + extractCallSites 调用点提取
  */
 
-import { extractCallSitesTS } from '../analysis/CallSiteExtractor.js';
-import { ImportRecord, type ImportRecordMeta } from '../analysis/ImportRecord.js';
+import { extractCallSitesTS } from './extract/CallSiteExtractor.js';
+import { ImportRecord, type ImportRecordMeta } from './extract/ImportRecord.js';
 import { astNodeRange } from './nodeRange.js';
 
 function walkTypeScript(root: any, ctx: any) {

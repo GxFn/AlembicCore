@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../../core/facts/parserLanguage.js';
 import type {
   CodeGraphInputOutcome,
   CodeGraphInputRequest,
@@ -28,10 +29,6 @@ import type {
 import { normalizeFileSymbols } from '../project-context/fileSymbols/normalize.js';
 import type { ProjectContextHandlerExecutionContext } from '../project-context/interface/contracts.js';
 import { throwIfProjectContextAborted } from '../project-context/interface/execution.js';
-import {
-  JS_FAMILY_LANGUAGES,
-  resolveAstParserLanguage,
-} from '../project-context/shared/parserLanguage.js';
 import { createProjectContextFileRef } from '../project-context/shared/sourceSlice-fileSymbols/index.js';
 import type { SourceSliceFileFacts } from '../project-context/sourceSlice/contracts.js';
 import { loadSourceSliceFile } from '../project-context/sourceSlice/fileAccess.js';

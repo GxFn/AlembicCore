@@ -4,7 +4,7 @@ import {
   sign as signDetached,
   verify as verifyDetached,
 } from 'node:crypto';
-import { hashBytes, hashCanonicalJson } from '../project-context/foundation/canonical.js';
+import { hashBytes, hashCanonicalJson } from '../../shared/canonicalJson.js';
 import type { StrictAcceptedCorpusInspectionV1 } from './ProductionPersistenceContracts.js';
 import {
   assertSemanticDispositionReviewExecutionStructureV2ForDurableTrust,

@@ -64,6 +64,26 @@ bridge layers without creating runtime coupling. Mixed imports
   (`parseToTree`) with graceful fallback when grammars are absent. Extends the
   core-as-leaf ruling to vector chunking; scope: this file only.
 
+## Sub-area rules inside the analysis leaf (2026-10-01)
+
+The area matrix cannot see imports between directories of the same area. The
+analysis leaf (`core/`) therefore carries explicit direction rules, enforced by
+the same lint from `subAreaRules` in `config/layer-contract.json`. They apply to
+type-only imports as well.
+
+| Layer | Directory | May import inside `core/` |
+| --- | --- | --- |
+| Syntax | `core/ast/` (parser runtime, language plugins, `extract/`) | nothing else in `core/` |
+| File facts | `core/facts/` (one source text → symbols, imports/exports, call sites) | `core/ast/` |
+| Facade | `core/AstAnalyzer.ts` | `core/ast/` (re-export only) |
+
+`core/analysis/` is a frozen export-subpath directory: its `index.ts` forwards
+to `core/ast/extract/`, and `ImportPathResolver` stays there until the linking
+layer takes it over. `service/` consumers of file facts import `core/facts/`
+directly; the index (`service/source-graph`) and the query protocol
+(`service/project-context`) both read the same facts instead of borrowing each
+other's internals.
+
 ## Known exception (D3) — host-agent session ↔ persistence straddle
 
 `workflows/surfaces/host-agent/session/GenerateSession.ts` ↔

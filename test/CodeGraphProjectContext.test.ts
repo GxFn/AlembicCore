@@ -4,6 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadPlugins } from '../src/core/ast/index.js';
+import { readFileAst } from '../src/core/facts/fileAst.js';
+import { extractFileFlowFromSource } from '../src/core/facts/fileFlow.js';
+import { extractFileSymbolsFromSource } from '../src/core/facts/fileSymbols.js';
 import type { FileFlowContext, FileSymbolContext } from '../src/domain/project-context/index.js';
 import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
 import {
@@ -14,13 +17,10 @@ import { ProjectContext } from '../src/project-context.js';
 import { NodeProjectContextFoundationHostPorts } from '../src/projectContextFoundation.js';
 import { normalizeCodeGraphFlow } from '../src/service/code-analysis/CodeGraphFlow.js';
 import { withCodeGraphAnalysis } from '../src/service/code-analysis/withCodeGraphAnalysis.js';
-import { readProjectContextAst } from '../src/service/project-context/analysis/astFacts.js';
 import {
   getCodeGraphProjectContextIdentity,
   withCodeGraphProjectContextSession,
 } from '../src/service/project-context/analysis/codeGraphSession.js';
-import { extractFileFlowFromSource } from '../src/service/project-context/fileFlow/extract.js';
-import { extractFileSymbolsFromSource } from '../src/service/project-context/fileSymbols/extract.js';
 import {
   freezeProjectContextInputClosure,
   hydrateProjectContextInputClosure,
@@ -687,7 +687,7 @@ describe('CodeGraph ProjectContext production backend', () => {
     const worker = await CodeGraphProcess.open({ dataRoot });
     try {
       const input = { text, filePath: 'sample.ts', lineCount: 1 };
-      const ast = readProjectContextAst(input, true);
+      const ast = readFileAst(input, true);
       const legacy = extractFileFlowFromSource(input, ast);
       const extracted = await worker.extract(input.filePath, text);
       if (!extracted.references?.[0]) {
@@ -1426,7 +1426,7 @@ async function declarationEvidence(text: string, filePath: string) {
   const { dataRoot } = await fixture();
   await loadPlugins();
   const input = { text, filePath, lineCount: text.split(/\r\n|\n|\r/).length };
-  const ast = readProjectContextAst(input, false);
+  const ast = readFileAst(input, false);
   const legacy = extractFileSymbolsFromSource(input, ast);
   return withCodeGraphAnalysis({ dataRoot }, (extractor) =>
     extractor.extractSymbols(input, legacy)
@@ -1438,7 +1438,7 @@ async function flowEvidence(text: string, filePath = 'sample.ts') {
   const { dataRoot } = await fixture(text);
   return withCodeGraphAnalysis({ dataRoot }, async (backend) => {
     const input = { text, filePath, lineCount: text.split(/\r\n|\n|\r/).length };
-    const ast = readProjectContextAst(input, true);
+    const ast = readFileAst(input, true);
     if (!backend.analyzeFile) {
       throw new Error('CodeGraph must provide complete file analysis');
     }

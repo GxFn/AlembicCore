@@ -8,8 +8,8 @@
  * Phase 5: 新增 ImportRecord 结构化导入 + extractCallSites 调用点提取
  */
 
-import { extractCallSitesPython } from '../analysis/CallSiteExtractor.js';
-import { ImportRecord } from '../analysis/ImportRecord.js';
+import { extractCallSitesPython } from './extract/CallSiteExtractor.js';
+import { ImportRecord } from './extract/ImportRecord.js';
 
 function walkPython(root: any, ctx: any) {
   _walkPyNode(root, ctx, null);

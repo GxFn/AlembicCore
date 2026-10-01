@@ -1,3 +1,4 @@
+import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../../core/facts/parserLanguage.js';
 import {
   type CodeGraphIdentity,
   CodeGraphProcess,
@@ -15,10 +16,6 @@ import type {
   ProjectContextSymbolExtractor,
 } from '../project-context/analysis/SymbolExtractor.js';
 import { throwIfProjectContextAborted } from '../project-context/interface/execution.js';
-import {
-  JS_FAMILY_LANGUAGES,
-  resolveAstParserLanguage,
-} from '../project-context/shared/parserLanguage.js';
 import { normalizeCodeGraphFlow } from './CodeGraphFlow.js';
 
 /** 内部共享的SDK提取作用域身份；不引入图存储或ProjectContext公开envelope。 */

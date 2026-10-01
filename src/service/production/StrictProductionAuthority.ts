@@ -1,5 +1,5 @@
+import { hashCanonicalJson } from '../../shared/canonicalJson.js';
 import type { MiningWorkScheduleV1 } from '../plan/intent/coldStartProductionPlan.js';
-import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 import {
   assertSemanticDispositionReviewDurableAttestationV3,
   assertSemanticDispositionReviewDurableAttestationV4,

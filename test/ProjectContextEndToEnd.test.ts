@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import * as AstAnalyzer from '../src/core/AstAnalyzer.js';
+import * as AstAnalyzer from '../src/core/ast/analyzeFile.js';
 import { resetDiscovererRegistry } from '../src/core/discovery/index.js';
 import {
   type AnchorRangeContext,

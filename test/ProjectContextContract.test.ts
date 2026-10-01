@@ -290,7 +290,8 @@ describe('ProjectContext PCU-2 contract and path authority', () => {
     const projectContextDir = fileURLToPath(
       new URL('../src/service/project-context', import.meta.url)
     );
-    const allowedBasicSyntaxConsumers = new Set(['analysis/astFacts.ts', 'repo/repo.ts']);
+    // 文件事实已下沉到 core/facts；ProjectContext 内只剩 repo 直接使用发现层。
+    const allowedBasicSyntaxConsumers = new Set(['repo/repo.ts']);
     const offenders = readTypeScriptFiles(projectContextDir)
       .filter((file) =>
         /from ['"].*(?:core\/AstAnalyzer|core\/ast|core\/discovery)/.test(file.source)

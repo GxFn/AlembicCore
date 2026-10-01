@@ -1,10 +1,11 @@
-import '../../../core/ast/index.js';
-import { analyzeFile, isAvailable as isAstAvailable } from '../../../core/AstAnalyzer.js';
-import type { CallSiteInfo } from '../../../core/analysis/CallSiteExtractor.js';
-import type { ModuleSyntaxFacts } from '../../../core/analysis/ModuleSyntaxCollector.js';
-import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
+import '../ast/index.js';
+import { analyzeFile } from '../ast/analyzeFile.js';
+import type { CallSiteInfo } from '../ast/extract/CallSiteExtractor.js';
+import type { ModuleSyntaxFacts } from '../ast/extract/ModuleSyntaxCollector.js';
+import { isAvailable as isAstAvailable } from '../ast/languageRegistry.js';
+import { resolveAstParserLanguage } from './parserLanguage.js';
 
-export interface ProjectContextAstInput {
+export interface FileAstInput {
   text: string;
   filePath: string;
   language?: string;
@@ -15,7 +16,7 @@ export interface ProjectContextAstInput {
  * 文件级 AST 读取结果。ready 可以包含合法的空符号集；empty 只表示解析器没有返回摘要。
  * 这里只保留读取状态，file-symbols/file-flow 各自投影原有诊断文案和输出字段。
  */
-export type ProjectContextAstFacts =
+export type FileAstFacts =
   | {
       status: 'ready';
       parserLanguage: string;
@@ -33,10 +34,7 @@ export type ProjectContextAstFacts =
  * 单一真实 AST producer；会话可复用结果，旧独立调用仍按 false/true 选择是否提取调用点。
  * 不在这里执行 flow 的形态防线，调用方须在需要调用点之前保留原来的输入预算检查。
  */
-export function readProjectContextAst(
-  input: ProjectContextAstInput,
-  extractCallSites: boolean
-): ProjectContextAstFacts {
+export function readFileAst(input: FileAstInput, extractCallSites: boolean): FileAstFacts {
   const parserLanguage = resolveAstParserLanguage(input.filePath, input.language);
   if (!parserLanguage) {
     return { status: 'unsupported' };

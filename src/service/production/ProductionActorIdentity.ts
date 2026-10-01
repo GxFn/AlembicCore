@@ -1,4 +1,4 @@
-import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
+import { hashCanonicalJson } from '../../shared/canonicalJson.js';
 
 export interface ProductionActorIdentityInputV1 {
   readonly providerId: string;

@@ -1,5 +1,5 @@
+import { hashCanonicalJson } from '../../shared/canonicalJson.js';
 import type { AnalysisScale } from '../plan/intent/coldStartProductionPlan.js';
-import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 
 export interface StrictFactFileExecutionV1 {
   readonly repoId: string;

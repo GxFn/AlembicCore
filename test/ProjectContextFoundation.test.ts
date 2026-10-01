@@ -7,7 +7,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import * as AstAnalyzer from '../src/core/AstAnalyzer.js';
+import * as AstAnalyzer from '../src/core/ast/analyzeFile.js';
 import { ReplayProjectSourceReader } from '../src/infrastructure/io/ProjectInputSnapshot.js';
 import { withProjectContextSession } from '../src/project-context.js';
 import {

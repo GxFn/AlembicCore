@@ -1,17 +1,17 @@
+import { extractFileFlowFromSource } from '../../../core/facts/fileFlow.js';
+import { extractFileSymbolsFromSource } from '../../../core/facts/fileSymbols.js';
 import type {
   FileFlowContext,
   ProjectContextQueryError,
   ProjectContextRef,
   ProjectContextUnavailableData,
 } from '../../../domain/project-context/index.js';
-import { extractFileSymbolsFromSource } from '../fileSymbols/extract.js';
 import { normalizeFileSymbols } from '../fileSymbols/normalize.js';
 import type { ProjectContextHandler, ProjectContextHandlerResult } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileRef } from '../shared/sourceSlice-fileSymbols/index.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 import type { FileFlowQueryFailure, FileFlowRequestPayload } from './contracts.js';
-import { extractFileFlowFromSource } from './extract.js';
 import { normalizeFileFlow } from './normalize.js';
 
 export const fileFlowProjectContextHandler: ProjectContextHandler = async (

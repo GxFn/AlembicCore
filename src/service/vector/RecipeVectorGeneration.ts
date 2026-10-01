@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { VectorStore } from '../../infrastructure/vector/VectorStore.js';
+import { hashCanonicalJson } from '../../shared/canonicalJson.js';
 import { RECIPE_RETRIEVAL_PROJECTION_SCHEMA_VERSION } from '../knowledge/RecipeRetrieval.js';
-import { hashCanonicalJson } from '../project-context/foundation/canonical.js';
 import { asEmbeddingPort, type EmbeddingCapabilityDescriptor } from './EmbeddingPort.js';
 import {
   buildRecipeSemanticRegionChunks,

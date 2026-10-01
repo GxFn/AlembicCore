@@ -1,10 +1,10 @@
+import type { FileAstInput } from '../../../core/facts/fileAst.js';
 import type {
   CodeGraphExtraction,
   CodeGraphNode,
 } from '../../../infrastructure/analysis/CodeGraphProcess.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { ExtractedFileSymbol, FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
-import type { ProjectContextAstInput } from './astFacts.js';
 
 const kinds: ReadonlyMap<string, string> = new Map([
   ['class', 'class'],
@@ -26,7 +26,7 @@ const kinds: ReadonlyMap<string, string> = new Map([
  * legacy只补真实AST明确标记的缺口，不能用全量补回掩盖SDK丢失主声明。
  */
 export function normalizeCodeGraphSymbols(
-  input: ProjectContextAstInput,
+  input: FileAstInput,
   extraction: CodeGraphExtraction,
   legacy: FileSymbolsExtractionResult
 ): FileSymbolsExtractionResult {

@@ -1,3 +1,4 @@
+import { extractFileSymbolsFromSource } from '../../../core/facts/fileSymbols.js';
 import type {
   FileSummary,
   FileSymbolContext,
@@ -10,7 +11,6 @@ import { throwIfProjectContextAborted } from '../interface/execution.js';
 import { createProjectContextFileRef } from '../shared/sourceSlice-fileSymbols/index.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 import type { FileSymbolsQueryFailure, FileSymbolsRequestPayload } from './contracts.js';
-import { extractFileSymbolsFromSource } from './extract.js';
 import { summarizeFileSymbolNaming } from './naming.js';
 import { normalizeFileSymbols } from './normalize.js';
 

@@ -1,8 +1,8 @@
+import { resolveAstParserLanguage } from '../../../core/facts/parserLanguage.js';
 import {
   PROJECT_CONTEXT_REQUEST_KIND_VALUES,
   type ProjectContextRequestKind,
 } from '../../../domain/project-context/index.js';
-import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import {
   hashCanonicalJson,
   normalizePortableRelativePath,

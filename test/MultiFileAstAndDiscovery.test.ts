@@ -13,9 +13,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { analyzeFile, isAvailable, parseToTree } from '../src/core/AstAnalyzer.js';
-import { type CallSiteInfo, extractCallSitesTS } from '../src/core/analysis/CallSiteExtractor.js';
 import { ImportPathResolver } from '../src/core/analysis/ImportPathResolver.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
+import {
+  type CallSiteInfo,
+  extractCallSitesTS,
+} from '../src/core/ast/extract/CallSiteExtractor.js';
 import { GenericDiscoverer } from '../src/core/discovery/GenericDiscoverer.js';
 import { getDiscovererRegistry, resetDiscovererRegistry } from '../src/core/discovery/index.js';
 import { NodeDiscoverer } from '../src/core/discovery/NodeDiscoverer.js';

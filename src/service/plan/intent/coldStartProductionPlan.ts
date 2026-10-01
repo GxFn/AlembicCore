@@ -7,10 +7,10 @@ import {
   UNIVERSAL_DIM_IDS,
 } from '../../../domain/dimension/UnifiedDimension.js';
 import {
+  type CanonicalSha256,
   canonicalJsonStringify,
   hashCanonicalJson,
-} from '../../project-context/foundation/canonical.js';
-import type { CanonicalSha256 } from '../../project-context/foundation/contracts.js';
+} from '../../../shared/canonicalJson.js';
 import type { PlanIntent } from './contracts.js';
 
 export const ANATOMY_LENS_IDS = [

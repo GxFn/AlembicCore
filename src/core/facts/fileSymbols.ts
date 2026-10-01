@@ -1,11 +1,7 @@
-import Logger from '../../../infrastructure/logging/Logger.js';
-import {
-  type ProjectContextAstFacts,
-  type ProjectContextAstInput,
-  readProjectContextAst,
-} from '../analysis/astFacts.js';
+import Logger from '../../infrastructure/logging/Logger.js';
 import type { ExtractedFileSymbol, FileSymbolsExtractionResult } from './contracts.js';
-import { createSourceLineRange } from './ranges.js';
+import { type FileAstFacts, type FileAstInput, readFileAst } from './fileAst.js';
+import { createSourceLineRange } from './sourceLineRange.js';
 
 interface AstSymbolRecord {
   name?: unknown;
@@ -31,10 +27,10 @@ interface AstFileSummaryLike {
 }
 
 export function extractFileSymbolsFromSource(
-  input: ProjectContextAstInput,
-  ast?: ProjectContextAstFacts
+  input: FileAstInput,
+  ast?: FileAstFacts
 ): FileSymbolsExtractionResult {
-  const facts = ast ?? readProjectContextAst(input, false);
+  const facts = ast ?? readFileAst(input, false);
   if (facts.status !== 'ready') {
     return {
       symbols: [],

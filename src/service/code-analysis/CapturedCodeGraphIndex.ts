@@ -1,3 +1,4 @@
+import { readFileSyntaxEvidence } from '../../core/facts/fileSyntaxEvidence.js';
 import type {
   CodeGraphProjectBinding,
   CodeGraphProjectResult,
@@ -5,7 +6,6 @@ import type {
 import Logger from '../../infrastructure/logging/Logger.js';
 import { hashBytes } from '../../shared/canonicalJson.js';
 import { normalizeCodeGraphSymbols } from '../project-context/analysis/codeGraphSymbols.js';
-import { readFileSyntaxEvidence } from '../project-context/analysis/FileSyntaxEvidence.js';
 import type { ExtractedFileSymbol } from '../project-context/fileSymbols/contracts.js';
 import type { ProjectContextHandlerExecutionContext } from '../project-context/interface/contracts.js';
 import type { SourceSliceFileFacts } from '../project-context/sourceSlice/contracts.js';

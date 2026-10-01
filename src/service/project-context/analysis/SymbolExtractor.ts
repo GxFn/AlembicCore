@@ -1,6 +1,6 @@
+import type { FileAstInput } from '../../../core/facts/fileAst.js';
 import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
 import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
-import type { ProjectContextAstInput } from './astFacts.js';
 
 /**
  * 单次分析会话固定的异步符号生产方。只消费已经读取的字符串，不自行扫描项目或替换 refs。
@@ -9,13 +9,13 @@ import type { ProjectContextAstInput } from './astFacts.js';
  */
 export interface ProjectContextSymbolExtractor {
   extractSymbols(
-    input: ProjectContextAstInput,
+    input: FileAstInput,
     legacy: FileSymbolsExtractionResult,
     context?: { signal?: AbortSignal }
   ): Promise<FileSymbolsExtractionResult>;
   /** 完整后端一次生产符号和flow；旧只符号注入者仍沿用上面的兼容接口。 */
   analyzeFile?(
-    input: ProjectContextAstInput,
+    input: FileAstInput,
     legacy: ProjectContextFileAnalysis,
     context?: { signal?: AbortSignal }
   ): Promise<ProjectContextFileAnalysis>;

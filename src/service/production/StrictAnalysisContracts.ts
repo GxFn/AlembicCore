@@ -1,11 +1,14 @@
 import type { EvidenceRange } from '../../domain/knowledge/evidence-ledger/EvidenceLedgerContract.js';
 import { EVIDENCE_ID_RE } from '../../domain/knowledge/evidence-ledger/EvidenceLedgerContract.js';
 import {
+  hashCanonicalJson,
+  toCanonicalJson as toProjectFactsJson,
+} from '../../shared/canonicalJson.js';
+import {
   ANATOMY_LENS_IDS,
   type AnalysisScale,
   type AnatomyLensId,
 } from '../plan/intent/coldStartProductionPlan.js';
-import { hashCanonicalJson, toProjectFactsJson } from '../project-context/foundation/canonical.js';
 import {
   assertProductionActorIdentityV1,
   type ProductionActorIdentityV1,

@@ -1,9 +1,3 @@
-import {
-  type ProjectContextAstFacts,
-  type ProjectContextAstInput,
-  readProjectContextAst,
-} from '../analysis/astFacts.js';
-import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import type {
   ExtractedFileFlowCallSite,
   ExtractedFileFlowExport,
@@ -11,6 +5,8 @@ import type {
   FileFlowExtractionResult,
   FileFlowImportKind,
 } from './contracts.js';
+import { type FileAstFacts, type FileAstInput, readFileAst } from './fileAst.js';
+import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from './parserLanguage.js';
 
 interface AstImportRecordLike {
   path?: unknown;
@@ -87,7 +83,7 @@ function detectPathologicalSourceShape(
 }
 
 /** 会话和独立调用共用同一防线：先语言，再形态，均发生在调用点 AST 读取之前。 */
-export function getFileFlowUnavailableReason(input: ProjectContextAstInput): string | undefined {
+export function getFileFlowUnavailableReason(input: FileAstInput): string | undefined {
   const parserLanguage = resolveParserLanguage(input.filePath, input.language);
   if (!parserLanguage) {
     return `file-flow parser is unavailable for language ${input.language ?? 'unknown'}.`;
@@ -103,8 +99,8 @@ export function getFileFlowUnavailableReason(input: ProjectContextAstInput): str
 }
 
 export function extractFileFlowFromSource(
-  input: ProjectContextAstInput,
-  ast?: ProjectContextAstFacts
+  input: FileAstInput,
+  ast?: FileAstFacts
 ): FileFlowExtractionResult {
   const unavailableReason = getFileFlowUnavailableReason(input);
   if (unavailableReason) {
@@ -116,7 +112,7 @@ export function extractFileFlowFromSource(
     };
   }
 
-  const facts = ast ?? readProjectContextAst(input, true);
+  const facts = ast ?? readFileAst(input, true);
   if (facts.status !== 'ready') {
     return {
       callSites: [],

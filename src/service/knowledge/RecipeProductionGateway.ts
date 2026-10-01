@@ -17,6 +17,10 @@ import type { RecipeRetrievalProfile } from '../../domain/knowledge/RecipeRetrie
 import { UnifiedValidator } from '../../domain/knowledge/UnifiedValidator.js';
 import { RELATION_BUCKETS } from '../../domain/knowledge/values/Relations.js';
 import {
+  type CanonicalJsonValue as ProjectFactsJson,
+  toCanonicalJson as toProjectFactsJson,
+} from '../../shared/canonicalJson.js';
+import {
   type CanonicalGatewaySource,
   type GatewaySource,
   getGatewaySourceLabel,
@@ -43,8 +47,6 @@ import {
   type StrictG1ReceiptV1,
   type StrictG2ReceiptV1,
 } from '../production/ProductionPersistenceContracts.js';
-import { toProjectFactsJson } from '../project-context/foundation/canonical.js';
-import type { ProjectFactsJson } from '../project-context/foundation/contracts.js';
 import type { RetrievalReadinessReport } from './RecipeRetrieval.js';
 
 /** Lightweight log interface — avoids importing static-only Logger class. */

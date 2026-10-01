@@ -1,4 +1,4 @@
-import { astNodeRange } from '../ast/nodeRange.js';
+import { astNodeRange } from '../nodeRange.js';
 import type { CallSiteInfo } from './CallSiteExtractor.js';
 import { callSiteOmissionReason } from './CallSiteNoisePolicy.js';
 

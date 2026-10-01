@@ -1,3 +1,8 @@
+import {
+  type FileDeclarationEvidence,
+  type FileSyntaxEvidence,
+  readFileSyntaxEvidence,
+} from '../../../core/facts/fileSyntaxEvidence.js';
 import { projectSourceReaderIdentity } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
@@ -7,11 +12,6 @@ import type { ProjectContextHandlerExecutionContext } from '../interface/contrac
 import { throwIfProjectContextAborted } from '../interface/execution.js';
 import type { SourceSliceFileFacts, SourceSliceFileIdentity } from '../sourceSlice/contracts.js';
 import type { SourceSliceFileAccessResult } from '../sourceSlice/fileAccess.js';
-import {
-  type FileDeclarationEvidence,
-  type FileSyntaxEvidence,
-  readFileSyntaxEvidence,
-} from './FileSyntaxEvidence.js';
 import { projectCallResolver } from './projectCallResolver.js';
 import type {
   ProjectContextFileAnalysis,

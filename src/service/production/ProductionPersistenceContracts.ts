@@ -10,13 +10,13 @@ import {
   type AlembicDatabaseRuntime,
   openAlembicDatabase,
 } from '../../infrastructure/database/openAlembicDatabase.js';
-import type { WorkspaceResolver } from '../../shared/WorkspaceResolver.js';
 import {
   canonicalJsonStringify,
   hashBytes,
   hashCanonicalJson,
-  toProjectFactsJson,
-} from '../project-context/foundation/canonical.js';
+  toCanonicalJson as toProjectFactsJson,
+} from '../../shared/canonicalJson.js';
+import type { WorkspaceResolver } from '../../shared/WorkspaceResolver.js';
 import {
   createPrivateCorpusRevisionResolverInternal,
   resolveExistingPrivateCorpusRevisionInternal,

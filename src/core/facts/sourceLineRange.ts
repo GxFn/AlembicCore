@@ -1,4 +1,4 @@
-import type { SourceRangeSummary } from '../../../domain/project-context/index.js';
+import type { SourceRangeSummary } from '../../domain/project-context/index.js';
 
 export function createSourceLineRange(input: {
   startLine?: unknown;

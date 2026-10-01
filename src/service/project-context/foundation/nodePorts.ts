@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { resolveAstParserLanguage } from '../../../core/facts/parserLanguage.js';
 import type {
   ProjectContext as ProjectContextContract,
   ProjectContextEnvelope,
@@ -29,7 +30,6 @@ import { LanguageService } from '../../../shared/LanguageService.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { ProjectContext, supportsProjectContextSourceReader } from '../ProjectContextService.js';
-import { resolveAstParserLanguage } from '../shared/parserLanguage.js';
 import {
   readSourceControlRootScope,
   readSourceFolderScope,

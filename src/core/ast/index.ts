@@ -23,8 +23,9 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { RESOURCES_DIR } from '../../shared/packageRoot.js';
-import { analyzeFile, registerLanguage } from '../AstAnalyzer.js';
+import { analyzeFile } from './analyzeFile.js';
 import { ensureGrammars, inferLanguagesFromStats, reloadPlugins } from './ensureGrammars.js';
+import { registerLanguage } from './languageRegistry.js';
 import { initParser, isParserReady, loadLanguageWasm } from './parserInit.js';
 
 export { getParserClass, isParserReady } from './parserInit.js';

@@ -3,6 +3,9 @@
 // Runtime imports between src/ areas must follow allowedRuntimeImports;
 // type-only imports (import type / export type … from) are exempt as type
 // bridges; file-level blessed exceptions need a written reason in the config.
+// subAreaRules add direction rules INSIDE an area (e.g. the analysis leaf's
+// syntax layer must not import the layers built on top of it); they apply to
+// same-area imports too, which the area matrix cannot see.
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -32,6 +35,22 @@ function areaOf(relativePath) {
     return undefined;
   }
   return segments.length === 2 ? 'root-facade' : segments[1];
+}
+
+// Returns the first sub-area rule broken by importing `resolved` from `relative`.
+// Paths are compared as prefixes without extension, so a rule entry may name a
+// directory (`src/core/facts/`) or a single module (`src/core/AstAnalyzer`).
+function brokenSubAreaRule(rules, relative, resolved, typeOnly) {
+  const target = resolved.replace(/\.(js|mjs|cjs|ts|mts|cts)$/, '');
+  for (const rule of rules) {
+    if (!relative.startsWith(rule.from) || (typeOnly && !rule.includeTypeOnly)) {
+      continue;
+    }
+    if (rule.forbid.some((prefix) => target.startsWith(prefix))) {
+      return rule;
+    }
+  }
+  return undefined;
 }
 
 function collectSourceFiles(dir, files = []) {
@@ -69,6 +88,12 @@ function main() {
   const blessedByFile = new Map(
     (config.blessedImports ?? []).map((entry) => [`${entry.file}->${entry.to}`, entry]),
   );
+  const subAreaRules = config.subAreaRules ?? [];
+  for (const rule of subAreaRules) {
+    if (!rule.id || !rule.from || !Array.isArray(rule.forbid) || !rule.reason) {
+      throw new Error('config/layer-contract.json subAreaRules entries need id, from, forbid[] and reason');
+    }
+  }
   const violations = [];
   let runtimeEdges = 0;
   let typeOnlyEdges = 0;
@@ -89,6 +114,15 @@ function main() {
       const resolved = path.posix.normalize(
         path.posix.join(path.posix.dirname(relative), found.specifier),
       );
+      const brokenRule = brokenSubAreaRule(subAreaRules, relative, resolved, found.typeOnly);
+      if (brokenRule) {
+        violations.push({
+          file: relative,
+          line: lineAt(content, found.index),
+          message: `import ${found.specifier} breaks sub-area rule "${brokenRule.id}": ${brokenRule.reason}`,
+        });
+        continue;
+      }
       const toArea = areaOf(resolved);
       if (!toArea || toArea === fromArea) {
         continue;
@@ -125,7 +159,7 @@ function main() {
   }
 
   console.log(
-    `Layer contract OK: ${runtimeEdges} cross-area runtime imports within the allowed matrix; ${typeOnlyEdges} type-only bridges exempt.`,
+    `Layer contract OK: ${runtimeEdges} cross-area runtime imports within the allowed matrix; ${typeOnlyEdges} type-only bridges exempt; ${subAreaRules.length} sub-area rule(s) enforced.`,
   );
 }
 

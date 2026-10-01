@@ -1,5 +1,5 @@
 import type { EvidenceEntry } from '../../domain/knowledge/evidence-ledger/EvidenceLedgerContract.js';
-import { hashBytes, hashCanonicalJson } from '../project-context/foundation/canonical.js';
+import { hashBytes, hashCanonicalJson } from '../../shared/canonicalJson.js';
 import {
   assertProductionActorIdentityV1,
   createProductionActorIdentityV1,

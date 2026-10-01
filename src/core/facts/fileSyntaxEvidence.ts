@@ -1,8 +1,7 @@
-import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
-import { extractFileFlowFromSource, getFileFlowUnavailableReason } from '../fileFlow/extract.js';
-import type { FileSymbolsExtractionResult } from '../fileSymbols/contracts.js';
-import { extractFileSymbolsFromSource } from '../fileSymbols/extract.js';
-import { type ProjectContextAstInput, readProjectContextAst } from './astFacts.js';
+import type { FileFlowExtractionResult, FileSymbolsExtractionResult } from './contracts.js';
+import { type FileAstInput, readFileAst } from './fileAst.js';
+import { extractFileFlowFromSource, getFileFlowUnavailableReason } from './fileFlow.js';
+import { extractFileSymbolsFromSource } from './fileSymbols.js';
 
 export interface FileDeclarationEvidence {
   symbols: FileSymbolsExtractionResult;
@@ -15,10 +14,10 @@ export interface FileSyntaxEvidence extends FileDeclarationEvidence {
 
 /** 一次AST只留下消费者所需的声明/调用证据，不缓存tree或完整分析摘要。 */
 export function readFileSyntaxEvidence(
-  input: ProjectContextAstInput,
+  input: FileAstInput,
   includeCalls: boolean
 ): FileSyntaxEvidence {
-  const ast = readProjectContextAst(input, includeCalls && !getFileFlowUnavailableReason(input));
+  const ast = readFileAst(input, includeCalls && !getFileFlowUnavailableReason(input));
   return {
     symbols: extractFileSymbolsFromSource(input, ast),
     flow: includeCalls ? extractFileFlowFromSource(input, ast) : undefined,

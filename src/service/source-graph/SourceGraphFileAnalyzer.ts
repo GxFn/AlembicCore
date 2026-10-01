@@ -4,6 +4,10 @@ import path from 'node:path';
 import '../../core/ast/index.js';
 import { analyzeFile, isAvailable as isAstAvailable } from '../../core/AstAnalyzer.js';
 import { ImportPathResolver } from '../../core/analysis/ImportPathResolver.js';
+import { readFileAst } from '../../core/facts/fileAst.js';
+import { extractFileFlowFromSource } from '../../core/facts/fileFlow.js';
+import { extractFileSymbolsFromSource } from '../../core/facts/fileSymbols.js';
+import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../../core/facts/parserLanguage.js';
 import type {
   SourceFileNode,
   SourceFileNodeInput,
@@ -14,14 +18,7 @@ import type {
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import { moduleSourceCandidates } from '../code-analysis/moduleSourceCandidates.js';
-import { readProjectContextAst } from '../project-context/analysis/astFacts.js';
 import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
-import { extractFileFlowFromSource } from '../project-context/fileFlow/extract.js';
-import { extractFileSymbolsFromSource } from '../project-context/fileSymbols/extract.js';
-import {
-  JS_FAMILY_LANGUAGES,
-  resolveAstParserLanguage,
-} from '../project-context/shared/parserLanguage.js';
 import { projectSourceGraphSymbols } from './SourceGraphCodeGraphSymbols.js';
 import {
   CODEGRAPH_PARSABLE_EXTENSIONS,
@@ -153,7 +150,7 @@ async function parseCodeGraphFile(
     lineCount,
   };
   // 所有投影共享本次已读文本；不调用会重新读取live文件的ProjectContext envelope。
-  const ast = readProjectContextAst(input, false);
+  const ast = readFileAst(input, false);
   const legacy = extractFileSymbolsFromSource(input, ast);
   const extracted = await extractor.extractSymbols(input, legacy, { signal: options.signal });
   throwIfSourceReadAborted(options);

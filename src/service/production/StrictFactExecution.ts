@@ -6,6 +6,7 @@ import {
   parseNxWorkspace,
   parseReactNativeProject,
 } from '../../core/discovery/index.js';
+import { resolveAstParserLanguage } from '../../core/facts/parserLanguage.js';
 import {
   type EvidenceEntry,
   isValidEvidenceEntry,
@@ -15,6 +16,11 @@ import type {
   ProjectContextRequestKind,
 } from '../../domain/project-context/index.js';
 import {
+  hashBytes,
+  hashCanonicalJson,
+  toCanonicalJson as toProjectFactsJson,
+} from '../../shared/canonicalJson.js';
+import {
   buildFactQueryCatalogSnapshot,
   type CertifiedPlanningFactsV1,
   type FactHarvestObligationV1,
@@ -22,11 +28,6 @@ import {
   type FactQueryFamilyV1,
   type MiningWorkScheduleV1,
 } from '../plan/intent/coldStartProductionPlan.js';
-import {
-  hashBytes,
-  hashCanonicalJson,
-  toProjectFactsJson,
-} from '../project-context/foundation/canonical.js';
 import { verifyCertifiedProjectFactsArtifact } from '../project-context/foundation/capture.js';
 import type {
   CanonicalSha256,
@@ -35,7 +36,6 @@ import type {
   ProjectFactsJson,
 } from '../project-context/foundation/contracts.js';
 import { readCertifiedProjectFactsFrozenFile } from '../project-context/foundation/frozen.js';
-import { resolveAstParserLanguage } from '../project-context/shared/parserLanguage.js';
 import { createProjectContextFileRef } from '../project-context/shared/sourceSlice-fileSymbols/contracts.js';
 import {
   createFactRecordV1,
