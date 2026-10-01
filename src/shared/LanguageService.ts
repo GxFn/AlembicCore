@@ -42,6 +42,8 @@ const EXT_TO_LANG: Record<string, string> = Object.freeze({
   '.jsx': 'javascript',
   '.ts': 'typescript',
   '.tsx': 'typescript',
+  '.mts': 'typescript',
+  '.cts': 'typescript',
   '.vue': 'javascript',
   '.svelte': 'javascript',
 
@@ -64,6 +66,7 @@ const EXT_TO_LANG: Record<string, string> = Object.freeze({
 
   // Markup / Data (常用)
   '.md': 'markdown',
+  '.mdx': 'markdown',
   '.json': 'json',
   '.yaml': 'yaml',
   '.yml': 'yaml',
@@ -93,6 +96,8 @@ const BARE_EXT_TO_LANG: Record<string, string> = Object.freeze({
   jsx: 'javascript',
   ts: 'typescript',
   tsx: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
   vue: 'javascript',
   svelte: 'javascript',
   py: 'python',
@@ -178,6 +183,8 @@ const SOURCE_CODE_EXTS = Object.freeze(
     '.jsx',
     '.ts',
     '.tsx',
+    '.mts',
+    '.cts',
     '.vue',
     '.svelte',
     '.py',

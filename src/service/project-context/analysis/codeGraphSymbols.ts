@@ -28,8 +28,11 @@ const kinds: ReadonlyMap<string, string> = new Map([
 export function normalizeCodeGraphSymbols(
   input: FileAstInput,
   extraction: CodeGraphExtraction,
-  legacy: FileSymbolsExtractionResult
+  observed: FileSymbolsExtractionResult
 ): FileSymbolsExtractionResult {
+  // 自有补充声明（顶层变量、接口成员）在 SDK 侧有等价节点，不参与合并与覆盖判定，
+  // 这条路线的输出因此与补充声明出现之前一致。
+  const legacy = { ...observed, symbols: observed.symbols.filter((symbol) => !symbol.supplement) };
   if (extraction.errors.length > 0) {
     return { symbols: [], unavailableReason: `CodeGraph extraction failed for ${input.filePath}.` };
   }

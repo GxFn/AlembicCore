@@ -26,6 +26,16 @@ export interface ExtractedFileSymbol {
     | 'method-declaration'
     | 'constructor-parameter-property'
     | 'constructor-this-assignment';
+  /**
+   * 类型声明写出的父类型名字，原样保留（去掉泛型实参）。extends：父类、被扩展的接口；
+   * implements：实现的接口或遵循的协议。名字到声明的解析由链接层完成。
+   */
+  heritage?: { extends: string[]; implements: string[] };
+  /**
+   * 自有补充声明（顶层变量、接口成员）。SDK 符号合并时忽略这些记录：SDK 自己产出等价节点，
+   * 两份并存会被判成覆盖缺口。SDK 符号路线删除后此标记随之移除。
+   */
+  supplement?: boolean;
 }
 
 export interface FileSymbolsExtractionResult {

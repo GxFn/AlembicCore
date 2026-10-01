@@ -21,7 +21,12 @@ import {
   defaultExtractCallSites,
   getCallSiteExtractor,
 } from './extract/CallSiteExtractor.js';
+import {
+  collectJsDeclarations,
+  type SupplementalDeclaration,
+} from './extract/JsDeclarationCollector.js';
 import { collectModuleSyntax, type ModuleSyntaxFacts } from './extract/ModuleSyntaxCollector.js';
+import { hasOnlyTolerableSyntaxErrors } from './extract/SyntaxTolerance.js';
 import { getLanguageParser, getLanguagePlugin } from './languageRegistry.js';
 
 interface InheritanceEdge {
@@ -61,6 +66,8 @@ export interface AnalyzeFileOptions {
   onSyntaxValidity?: (valid: boolean | undefined, features: readonly string[]) => void;
   /** 树内投影的模块事实，不改变 AstFileSummary 的既有 JSON/持久化形态。 */
   onModuleSyntax?: (facts: ModuleSyntaxFacts) => void;
+  /** 摘要没有承载的模块级声明（顶层变量、接口成员）；同样不进入 AstFileSummary。 */
+  onDeclarations?: (declarations: SupplementalDeclaration[]) => void;
   /** 与过滤后的 callSites 分离；未执行调用点 pass 时不回调，不能伪装为完整空集。 */
   onCallSiteEvidence?: (facts: { callSites: CallSiteInfo[]; complete: boolean }) => void;
 }
@@ -117,8 +124,12 @@ export function analyzeFile(
           features.push('anonymous-default-declaration');
         }
       }
+      const jsFamily = ['typescript', 'javascript', 'tsx', 'jsx'].includes(lang);
       options.onSyntaxValidity(
-        typeof root.hasError === 'boolean' ? !root.hasError : undefined,
+        typeof root.hasError === 'boolean'
+          ? // 语法包不认识的类型层新语法不算语法错误；其余语言保持原判定。
+            !root.hasError || (jsFamily && hasOnlyTolerableSyntaxErrors(root))
+          : undefined,
         features
       );
     }
@@ -142,6 +153,9 @@ export function analyzeFile(
 
     if (options.onModuleSyntax && ['typescript', 'javascript', 'tsx', 'jsx'].includes(lang)) {
       options.onModuleSyntax(collectModuleSyntax(root));
+    }
+    if (options.onDeclarations && ['typescript', 'javascript', 'tsx', 'jsx'].includes(lang)) {
+      options.onDeclarations(collectJsDeclarations(root));
     }
 
     // Phase 5: 可选的 call site 提取 pass (post-walk extraction)

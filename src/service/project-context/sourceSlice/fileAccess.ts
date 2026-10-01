@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { EXTENSION_PARSER_LANGUAGE } from '../../../core/facts/parserLanguage.js';
 import type { ProjectContextExecutionContext } from '../../../domain/project-context/index.js';
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import { computeContentHash } from '../../../shared/contentHash.js';
+import { LanguageService } from '../../../shared/LanguageService.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { FileAnalysisSession } from '../analysis/FileAnalysisSession.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
@@ -279,27 +281,22 @@ function readErrorCode(error: unknown): string | undefined {
   return typeof code === 'string' ? code : undefined;
 }
 
+/**
+ * 文件的语言标签。有解析器的源码扩展名与全仓唯一的扩展名表（LanguageService）一致，
+ * 因此 ObjC、Kotlin、Java、Go、Rust、Dart 文件也有标签；文档与配置只认下面几种。
+ * 没有解析器的源码扩展名（.vue、.rb 等）不给标签：标签会被当作可解析语言使用。
+ */
 function inferLanguage(filePath: string): string | undefined {
-  switch (path.extname(filePath).toLowerCase()) {
-    case '.ts':
-    case '.tsx':
-    case '.mts':
-    case '.cts':
-      return 'typescript';
-    case '.js':
-    case '.jsx':
-    case '.mjs':
-    case '.cjs':
-      return 'javascript';
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension in EXTENSION_PARSER_LANGUAGE) {
+    return LanguageService.langFromExt(extension);
+  }
+  switch (extension) {
     case '.json':
       return 'json';
     case '.md':
     case '.mdx':
       return 'markdown';
-    case '.py':
-      return 'python';
-    case '.swift':
-      return 'swift';
     case '.yml':
     case '.yaml':
       return 'yaml';

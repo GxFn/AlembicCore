@@ -1,7 +1,3 @@
-import crypto from 'node:crypto';
-import type { Dirent } from 'node:fs';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import {
   createSourceGraphDiagnostic,
   createSourceGraphFreshness,
@@ -10,6 +6,7 @@ import {
   type SourceFileNodeInput,
   type SourceGraphDiagnostic,
   type SourceGraphEdge,
+  type SourceGraphEdgeInput,
   type SourceGraphFreshness,
   type SourceGraphSnapshotStatus,
   type SourceSymbolNode,
@@ -21,26 +18,27 @@ import type {
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
 import type { SourceGraphRepositoryImpl } from '../../repository/source-graph/SourceGraphRepository.js';
-import { withCodeGraphAnalysis } from '../code-analysis/withCodeGraphAnalysis.js';
-import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
 import {
+  analyzeInventoryFile,
   diagnosticsForRetainedFile,
+  type FileLinkFacts,
   type InventoryFile,
-  type ParsedFile,
-  parseInventoryFile,
 } from './SourceGraphFileAnalyzer.js';
 import { compareSourceGraphIndexIdentity } from './SourceGraphIndexIdentity.js';
 import {
-  CODEGRAPH_PARSABLE_EXTENSIONS,
+  LINKED_MODULE_EXTENSIONS,
   type NormalizedIndexOptions,
-  normalizeExtension,
   normalizeIndexOptions,
-  normalizeRepoRelative,
-  PARSABLE_EXTENSIONS,
   type SourceGraphFreshnessOptions,
   type SourceGraphIncrementalIndexOptions,
   type SourceGraphIndexOptions,
 } from './SourceGraphIndexOptions.js';
+import {
+  collectInventory,
+  detectChangedFiles,
+  normalizeRepoPathList,
+} from './SourceGraphInventory.js';
+import { linkFile } from './SourceGraphLinker.js';
 
 export type {
   SourceGraphFreshnessReport,
@@ -63,6 +61,7 @@ export class SourceGraphIndexer {
       options,
       generationId: input.generationId ?? createGenerationId(options.repoId, options.now),
       inventory,
+      currentByPath: new Map(inventory.map((file) => [file.repoRelativePath, file])),
       changedFiles: inventory.map((file) => file.repoRelativePath),
       deletedFiles: [],
       baseGenerationId: undefined,
@@ -113,31 +112,39 @@ export class SourceGraphIndexer {
     const deletedSet = new Set(deletedFiles);
     const basePaths = new Set(baseFiles.map((file) => file.repoRelativePath));
     const addedFiles = changedFiles.filter((filePath) => !basePaths.has(filePath));
-    // import 边属于来源文件：只改目标内容不使边失效。文件集合变化则可能改变相对路径
-    // 解析（目标消失/恢复或同名入口优先级变化），需要重新解析未修改的 JS/TS 来源文件。
-    const reparsedFiles =
-      addedFiles.length > 0 || deletedFiles.length > 0
-        ? inventory
-            .filter(
-              (file) =>
-                (options.codeGraph ? CODEGRAPH_PARSABLE_EXTENSIONS : PARSABLE_EXTENSIONS).has(
-                  file.extension
-                ) &&
-                !changedSet.has(file.repoRelativePath) &&
-                !deletedSet.has(file.repoRelativePath)
-            )
-            .map((file) => file.repoRelativePath)
-        : [];
+    const baseEdges = await this.repository.listGenerationEdges(baseSnapshot.generationId);
+    // 没改内容的文件也可能要重新链接，因为它的出边依赖别的文件：
+    // - 文件集合变了：相对导入可能落到别的文件（目标消失/恢复、同名入口优先级变化），
+    //   所有会做模块解析的文件都重来。
+    // - 只有内容变了：直接导入它的文件，以及经 re-export 链拿到它声明的文件，调用目标可能变化。
+    const fileSetChanged = addedFiles.length > 0 || deletedFiles.length > 0;
+    const relinkCandidates = fileSetChanged
+      ? inventory
+          .filter((file) => LINKED_MODULE_EXTENSIONS.has(file.extension))
+          .map((file) => file.repoRelativePath)
+      : [...collectImporterClosure(baseEdges, new Set(changedFiles))];
+    const reparsedFiles = relinkCandidates
+      .filter(
+        (filePath) =>
+          currentByPath.has(filePath) && !changedSet.has(filePath) && !deletedSet.has(filePath)
+      )
+      .sort();
     const indexedFiles = new Set([...changedFiles, ...reparsedFiles]);
     const impacted = new Set([...indexedFiles, ...deletedSet]);
     if (reparsedFiles.length > 0) {
-      Logger.getInstance().info('Source graph re-resolves imports after file inventory changed', {
-        baseGenerationId: baseSnapshot.generationId,
-        addedFiles,
-        deletedFiles,
-        reparsedFiles,
-        reason: 'relative-import-targets-changed',
-      });
+      Logger.getInstance().info(
+        'Source graph re-links unchanged files after their inputs changed',
+        {
+          baseGenerationId: baseSnapshot.generationId,
+          addedFiles,
+          deletedFiles,
+          changedFiles,
+          reparsedFiles,
+          reason: fileSetChanged
+            ? 'relative-import-targets-changed'
+            : 'imported-declarations-changed',
+        }
+      );
     }
     const preservedFiles = baseFiles
       .filter(
@@ -147,18 +154,23 @@ export class SourceGraphIndexer {
     const preservedSymbols = (await this.repository.listSymbols(baseSnapshot.generationId))
       .filter((symbol) => !impacted.has(symbol.filePath))
       .map((symbol) => ({ ...symbol, generationId: input.generationId ?? '' }));
-    const preservedEdges = (await this.repository.listGenerationEdges(baseSnapshot.generationId))
+    const contentChanged = new Set([...changedSet, ...deletedSet]);
+    const preservedEdges = baseEdges
       .filter((edge) => {
-        // 只有文件级 import 在目标内容变化后仍成立；符号边可能指向已删除/改名的声明，
-        // 沿用旧失效规则，不能随 import 修复一起保留到新的 fresh generation。
-        if (edge.kind !== 'imports' || edge.toSymbolId !== undefined) {
-          return !edgeTouchesFiles(edge, impacted);
+        // 来源文件被重新分析的边一律重算，不沿用。
+        if (
+          (edge.fromFilePath && indexedFiles.has(edge.fromFilePath)) ||
+          (edge.siteFilePath && indexedFiles.has(edge.siteFilePath))
+        ) {
+          return false;
         }
-        return (
-          !edgeTouchesFiles(edge, deletedSet) &&
-          !(edge.fromFilePath && indexedFiles.has(edge.fromFilePath)) &&
-          !(edge.siteFilePath && indexedFiles.has(edge.siteFilePath))
-        );
+        if (edge.kind === 'imports' && edge.toSymbolId === undefined) {
+          // 文件级依赖在目标内容变化后仍成立，只有目标被删除才失效。
+          return !edgeTouchesFiles(edge, deletedSet);
+        }
+        // 符号边：目标文件内容变了，声明可能已删除或改名，不能留到新的 fresh generation。
+        // 目标只是被重连（内容没变）时声明和标识都没变，边继续成立。
+        return !edgeTouchesFiles(edge, contentChanged);
       })
       .map((edge) => ({ ...edge, generationId: input.generationId ?? '' }));
     const changedInventory = [...indexedFiles]
@@ -170,6 +182,7 @@ export class SourceGraphIndexer {
       options,
       generationId: input.generationId ?? createGenerationId(options.repoId, options.now),
       inventory: changedInventory,
+      currentByPath,
       changedFiles,
       deletedFiles,
       baseGenerationId: baseSnapshot.generationId,
@@ -182,7 +195,10 @@ export class SourceGraphIndexer {
   private async buildGeneration(input: {
     options: NormalizedIndexOptions;
     generationId: string;
+    /** 本次要分析的文件；增量构建里是变化的文件加上需要重连的文件。 */
     inventory: InventoryFile[];
+    /** 当前磁盘上的完整清单，供链接时按需读取沿用自上一代的目标文件。 */
+    currentByPath: ReadonlyMap<string, InventoryFile>;
     changedFiles: string[];
     deletedFiles: string[];
     baseGenerationId?: string;
@@ -190,67 +206,54 @@ export class SourceGraphIndexer {
     preservedSymbols?: SourceSymbolNode[];
     preservedEdges?: SourceGraphEdge[];
   }): Promise<SourceGraphIndexBuildResult> {
+    const { options, generationId } = input;
+    const analyzedFiles = await mapInOrder(input.inventory, ANALYSIS_CONCURRENCY, (file) =>
+      analyzeInventoryFile(file, options, generationId)
+    );
+    throwIfSourceReadAborted(options);
+
     const knownPaths = new Set([
       ...input.inventory.map((file) => file.repoRelativePath),
       ...(input.preservedFiles ?? []).map((file) => file.repoRelativePath),
     ]);
-    const parseFiles = async (extractor?: ProjectContextSymbolExtractor) => {
-      if (!extractor) {
-        return Promise.all(
-          input.inventory.map((file) =>
-            parseInventoryFile(file, input.options, input.generationId, knownPaths)
-          )
-        );
-      }
-      const parsed: ParsedFile[] = [];
-      // 单个SDK worker本来按序提取；逐文件读取避免同时把整仓文本堆入宿主/IPC队列。
-      for (const file of input.inventory) {
-        throwIfSourceReadAborted(input.options);
-        parsed.push(
-          await parseInventoryFile(file, input.options, input.generationId, knownPaths, extractor)
-        );
-      }
-      return parsed;
-    };
-    const codeGraph = input.options.codeGraph;
-    const hasEligibleFiles = input.inventory.some(
-      (file) =>
-        CODEGRAPH_PARSABLE_EXTENSIONS.has(file.extension) &&
-        file.sizeBytes <= input.options.maxParseBytes &&
-        file.sizeBytes <= input.options.maxFileSizeBytes
+    const facts = new Map<string, Promise<FileLinkFacts | undefined>>(
+      analyzedFiles.map((file) => [file.file.repoRelativePath, Promise.resolve(file.facts)])
     );
-    let parsedFiles: ParsedFile[];
-    if (codeGraph && hasEligibleFiles) {
-      parsedFiles = await withCodeGraphAnalysis(
-        { ...codeGraph, signal: input.options.signal },
-        async (extractor, runtime) => {
-          if (runtime.engineHash !== input.options.engineHash) {
-            throw new Error('Source graph CodeGraph identity changed before extraction.');
-          }
-          return parseFiles(extractor);
-        }
-      );
-    } else {
-      if (codeGraph) {
-        Logger.debug(
-          'Source graph does not open SDK without eligible JavaScript or TypeScript files',
-          {
-            generationId: input.generationId,
-            files: input.inventory.length,
-            reason: 'no-eligible-sdk-input',
-          }
+    const preservedByPath = new Map(
+      (input.preservedFiles ?? []).map((file) => [file.repoRelativePath, file])
+    );
+    const factsOf = (filePath: string): Promise<FileLinkFacts | undefined> => {
+      let pending = facts.get(filePath);
+      if (!pending) {
+        pending = this.readPreservedFacts(
+          input.currentByPath.get(filePath),
+          preservedByPath.get(filePath),
+          options,
+          generationId
         );
+        facts.set(filePath, pending);
       }
-      parsedFiles = await parseFiles();
+      return pending;
+    };
+    const linkedEdges: SourceGraphEdgeInput[] = [];
+    for (const analyzed of analyzedFiles) {
+      throwIfSourceReadAborted(options);
+      if (!analyzed.facts) {
+        continue;
+      }
+      const linked = await linkFile(analyzed.facts, { generationId, knownPaths, factsOf });
+      linkedEdges.push(...linked.edges);
+      analyzed.file.metadata = { ...analyzed.file.metadata, callSites: linked.callSites };
+      // 调用点只为链接而留；声明与导出表继续供后面的文件当链接目标。
+      analyzed.facts.callSites = undefined;
     }
-    // worker真实退出后才提交SQLite；取消或清理失败不能留下一个“成功”的新generation。
-    throwIfSourceReadAborted(input.options);
+    throwIfSourceReadAborted(options);
     // 未重解析的文件仍保留上一代的解析缺口。只汇总本轮 diagnostics 会把
     // failed/skipped/partial 文件误报为 fresh；诊断从持久化 parseErrors 恢复，
     // 文件被重解析或删除后自然消失，不永久继承上一代整体降级状态。
     const diagnostics = [
       ...(input.preservedFiles ?? []).flatMap(diagnosticsForRetainedFile),
-      ...parsedFiles.flatMap((file) => file.diagnostics),
+      ...analyzedFiles.flatMap((file) => file.diagnostics),
     ]
       .map(createSourceGraphDiagnostic)
       .sort((left, right) => (left.filePath ?? '').localeCompare(right.filePath ?? ''));
@@ -260,22 +263,24 @@ export class SourceGraphIndexer {
         generationId: input.generationId,
         projectRoot: input.options.projectRoot,
       })),
-      ...parsedFiles.map((file) => file.file),
+      ...analyzedFiles.map((file) => file.file),
     ];
     const symbolsForReplace = [
       ...(input.preservedSymbols ?? []).map((symbol) => ({
         ...symbol,
         generationId: input.generationId,
       })),
-      ...parsedFiles.flatMap((file) => file.symbols),
+      ...analyzedFiles.flatMap((file) => file.symbols),
     ];
+    // 存储顺序即查询读到的顺序：文件依赖在前、跨文件关系其次、文件内关系最后，
+    // 受预算截断的查询因此先拿到跨文件信息；全量与增量构建的顺序也由此一致。
     const edgesForReplace = [
       ...(input.preservedEdges ?? []).map((edge) => ({
         ...edge,
         generationId: input.generationId,
       })),
-      ...parsedFiles.flatMap((file) => file.edges),
-    ];
+      ...linkedEdges,
+    ].sort(compareEdgesForStorage);
     const status = chooseSnapshotStatus(filesForReplace, diagnostics);
     throwIfSourceReadAborted(input.options);
     const snapshot = await this.repository.replaceGeneration({
@@ -327,6 +332,36 @@ export class SourceGraphIndexer {
       symbols,
       edges,
     };
+  }
+
+  /**
+   * 沿用自上一代的文件被本次分析的文件导入时，按需读一遍它的声明作为链接目标。
+   * 内容必须仍是上一代记录的那一份；清单检查之后又被改动的文件不当目标，
+   * 下一次新鲜度检查会把它判成变化并重连它的导入方。
+   */
+  private async readPreservedFacts(
+    file: InventoryFile | undefined,
+    preserved: SourceFileNode | undefined,
+    options: NormalizedIndexOptions,
+    generationId: string
+  ): Promise<FileLinkFacts | undefined> {
+    if (!file || !preserved || preserved.parseStatus !== 'parsed') {
+      return undefined;
+    }
+    const analyzed = await analyzeInventoryFile(file, options, generationId, true);
+    if (analyzed.file.contentHash !== preserved.contentHash) {
+      Logger.getInstance().warn(
+        'Source graph skipped a link target that changed during the build',
+        {
+          filePath: file.repoRelativePath,
+          indexedHash: preserved.contentHash,
+          contentHash: analyzed.file.contentHash,
+          nextAction: 'run_incremental_source_graph_index',
+        }
+      );
+      return undefined;
+    }
+    return analyzed.facts;
   }
 }
 
@@ -465,121 +500,6 @@ export class SourceGraphFreshnessService {
   }
 }
 
-async function collectInventory(options: NormalizedIndexOptions): Promise<InventoryFile[]> {
-  throwIfSourceReadAborted(options);
-  const files: InventoryFile[] = [];
-  for (const graphRoot of options.graphRoots) {
-    await walkDirectory(graphRoot, options, files);
-  }
-  return files.sort((left, right) => left.repoRelativePath.localeCompare(right.repoRelativePath));
-}
-
-async function walkDirectory(
-  directory: string,
-  options: NormalizedIndexOptions,
-  files: InventoryFile[]
-): Promise<void> {
-  throwIfSourceReadAborted(options);
-  let entries: Dirent[];
-  try {
-    if (
-      options.privateRuntimeRoot &&
-      (await fs.realpath(directory)) === options.privateRuntimeRoot
-    ) {
-      Logger.debug('Source graph excludes its private SDK runtime directory', {
-        directory,
-        reason: 'codegraph-runtime',
-      });
-      return;
-    }
-    entries = await fs.readdir(directory, { withFileTypes: true });
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return;
-    }
-    // 不完整清单不能被解释成“文件已删除”，否则增量索引会发布空的新一代事实。
-    Logger.getInstance().error('Source graph inventory failed; previous generation retained', {
-      directory,
-      projectRoot: options.projectRoot,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    throwIfSourceReadAborted(options);
-    const absolutePath = path.join(directory, entry.name);
-    if (entry.isDirectory()) {
-      if (!options.ignoreDirectories.has(entry.name)) {
-        await walkDirectory(absolutePath, options, files);
-      }
-      continue;
-    }
-    if (!entry.isFile()) {
-      continue;
-    }
-    const extension = normalizeExtension(path.extname(entry.name));
-    if (!options.includeExtensions.has(extension)) {
-      continue;
-    }
-    const stat = await fs.stat(absolutePath);
-    files.push({
-      absolutePath,
-      repoRelativePath: toRepoRelative(options.projectRoot, absolutePath),
-      language: languageForExtension(extension),
-      classification: classificationForPath(absolutePath),
-      sizeBytes: stat.size,
-      mtimeMs: Math.trunc(stat.mtimeMs),
-      extension,
-    });
-  }
-}
-
-async function detectChangedFiles(
-  options: NormalizedIndexOptions,
-  baseFiles: SourceFileNode[],
-  currentByPath: Map<string, InventoryFile>
-): Promise<{ changedFiles: string[]; deletedFiles: string[] }> {
-  const changedFiles = new Set<string>();
-  const deletedFiles = new Set<string>();
-  const baseByPath = new Map(baseFiles.map((file) => [file.repoRelativePath, file]));
-
-  for (const baseFile of baseFiles) {
-    throwIfSourceReadAborted(options);
-    const current = currentByPath.get(baseFile.repoRelativePath);
-    if (!current) {
-      deletedFiles.add(baseFile.repoRelativePath);
-      continue;
-    }
-    // size/mtime可被编辑器或恢复操作保持，不能证明事实仍对应正文；hash语义与索引时一致。
-    const content = await fs.readFile(current.absolutePath, {
-      encoding: 'utf8',
-      signal: options.signal,
-    });
-    const hash = crypto.createHash('sha256').update(content).digest('hex');
-    if (hash !== baseFile.contentHash) {
-      changedFiles.add(current.repoRelativePath);
-      Logger.getInstance().debug('Source graph detected changed source content', {
-        filePath: current.repoRelativePath,
-        previousHash: baseFile.contentHash,
-        contentHash: hash,
-        metadataUnchanged:
-          current.sizeBytes === baseFile.sizeBytes && current.mtimeMs === baseFile.mtimeMs,
-      });
-    }
-  }
-
-  for (const repoPath of currentByPath.keys()) {
-    if (!baseByPath.has(repoPath)) {
-      changedFiles.add(repoPath);
-    }
-  }
-
-  return {
-    changedFiles: Array.from(changedFiles).sort(),
-    deletedFiles: Array.from(deletedFiles).sort(),
-  };
-}
-
 function createFreshness(
   status: SourceGraphSnapshotStatus,
   generationId: string,
@@ -631,82 +551,76 @@ function edgeTouchesFiles(edge: SourceGraphEdge, impacted: Set<string>): boolean
   );
 }
 
-function normalizeRepoPathList(paths: string[], projectRoot: string): string[] {
-  return Array.from(new Set(paths.map((item) => normalizeInputPath(item, projectRoot)))).sort();
+/** 分析是 CPU 密集的同步解析；并发只为重叠文件读取，并限制同时打开的文件数。 */
+const ANALYSIS_CONCURRENCY = 16;
+
+async function mapInOrder<T, R>(
+  items: readonly T[],
+  concurrency: number,
+  map: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await map(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
-function normalizeInputPath(input: string, projectRoot: string): string {
-  const trimmed = input.trim();
-  if (path.isAbsolute(trimmed)) {
-    return toRepoRelative(projectRoot, trimmed);
+/**
+ * 内容变化的文件要连带重连哪些文件：直接导入它的文件；如果导入方又把它 re-export 出去，
+ * 变化继续传给导入方的导入方。只做普通导入的文件不再往上传——它的导入方拿不到这些声明。
+ */
+function collectImporterClosure(
+  baseEdges: readonly SourceGraphEdge[],
+  changedFiles: ReadonlySet<string>
+): Set<string> {
+  const importers = new Map<string, { filePath: string; reexport: boolean }[]>();
+  for (const edge of baseEdges) {
+    if (
+      edge.kind !== 'imports' ||
+      edge.toSymbolId !== undefined ||
+      !edge.fromFilePath ||
+      !edge.toFilePath
+    ) {
+      continue;
+    }
+    const list = importers.get(edge.toFilePath) ?? [];
+    list.push({ filePath: edge.fromFilePath, reexport: edge.metadata.reexport === true });
+    importers.set(edge.toFilePath, list);
   }
-  return normalizeRepoRelative(trimmed);
+  const relink = new Set<string>();
+  const propagated = new Set(changedFiles);
+  const queue = [...changedFiles];
+  for (let target = queue.pop(); target !== undefined; target = queue.pop()) {
+    for (const importer of importers.get(target) ?? []) {
+      relink.add(importer.filePath);
+      if (importer.reexport && !propagated.has(importer.filePath)) {
+        propagated.add(importer.filePath);
+        queue.push(importer.filePath);
+      }
+    }
+  }
+  return relink;
 }
 
-function toRepoRelative(projectRoot: string, absolutePath: string): string {
-  return normalizeRepoRelative(path.relative(projectRoot, absolutePath));
+function compareEdgesForStorage(left: SourceGraphEdgeInput, right: SourceGraphEdgeInput): number {
+  return (
+    edgeStorageRank(left) - edgeStorageRank(right) ||
+    (left.edgeId < right.edgeId ? -1 : left.edgeId > right.edgeId ? 1 : 0)
+  );
 }
 
-function languageForExtension(extension: string): string {
-  switch (extension) {
-    case '.ts':
-    case '.tsx':
-    case '.mts':
-    case '.cts':
-      return 'typescript';
-    case '.js':
-    case '.jsx':
-    case '.mjs':
-    case '.cjs':
-      return 'javascript';
-    case '.json':
-      return 'json';
-    case '.md':
-    case '.mdx':
-      return 'markdown';
-    case '.yml':
-    case '.yaml':
-      return 'yaml';
-    case '.swift':
-      return 'swift';
-    case '.py':
-      return 'python';
-    case '.rb':
-      return 'ruby';
-    case '.java':
-      return 'java';
-    case '.kt':
-      return 'kotlin';
-    case '.go':
-      return 'go';
-    case '.rs':
-      return 'rust';
-    case '.toml':
-      return 'toml';
-    default:
-      return 'unknown';
+function edgeStorageRank(edge: SourceGraphEdgeInput): number {
+  if (edge.kind === 'imports') {
+    return 0;
   }
-}
-
-function classificationForPath(filePath: string): SourceFileNodeInput['classification'] {
-  const normalized = filePath.replaceAll(path.sep, '/').toLowerCase();
-  if (
-    normalized.includes('/test/') ||
-    normalized.includes('/tests/') ||
-    /\.test\.[jt]sx?$/.test(normalized)
-  ) {
-    return 'test';
-  }
-  if (normalized.endsWith('.md') || normalized.endsWith('.mdx')) {
-    return 'documentation';
-  }
-  if (/\.(json|ya?ml|toml)$/.test(normalized)) {
-    return 'config';
-  }
-  if (normalized.includes('/dist/') || normalized.includes('/generated/')) {
-    return 'generated';
-  }
-  return 'source';
+  return edge.fromFilePath !== undefined && edge.fromFilePath === edge.toFilePath ? 2 : 1;
 }
 
 function createGenerationId(repoId: string, now: number): string {

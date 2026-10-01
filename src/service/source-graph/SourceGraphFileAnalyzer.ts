@@ -1,31 +1,27 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import path from 'node:path';
-import '../../core/ast/index.js';
-import { analyzeFile, isAvailable as isAstAvailable } from '../../core/AstAnalyzer.js';
-import { ImportPathResolver } from '../../core/analysis/ImportPathResolver.js';
-import { readFileAst } from '../../core/facts/fileAst.js';
-import { extractFileFlowFromSource } from '../../core/facts/fileFlow.js';
-import { extractFileSymbolsFromSource } from '../../core/facts/fileSymbols.js';
+import type {
+  ExtractedFileFlowCallSite,
+  ExtractedFileFlowExport,
+  ExtractedFileFlowImport,
+} from '../../core/facts/contracts.js';
+import { readFileSyntaxEvidence } from '../../core/facts/fileSyntaxEvidence.js';
 import { JS_FAMILY_LANGUAGES, resolveAstParserLanguage } from '../../core/facts/parserLanguage.js';
-import { moduleSourceCandidates } from '../../core/linking/moduleTargets.js';
 import type {
   SourceFileNode,
   SourceFileNodeInput,
   SourceGraphDiagnosticInput,
-  SourceGraphEdgeInput,
   SourceSymbolNode,
 } from '../../domain/source-graph/index.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
-import type { ProjectContextSymbolExtractor } from '../project-context/analysis/SymbolExtractor.js';
-import { projectSourceGraphSymbols } from './SourceGraphCodeGraphSymbols.js';
+import type { NormalizedIndexOptions } from './SourceGraphIndexOptions.js';
 import {
-  CODEGRAPH_PARSABLE_EXTENSIONS,
-  type NormalizedIndexOptions,
-  normalizeRepoRelative,
-  PARSABLE_EXTENSIONS,
-} from './SourceGraphIndexOptions.js';
+  createModuleSymbol,
+  type IndexedDeclaration,
+  moduleSymbolId,
+  projectSourceGraphSymbols,
+} from './SourceGraphSymbols.js';
 
 export interface InventoryFile {
   absolutePath: string;
@@ -37,34 +33,55 @@ export interface InventoryFile {
   extension: string;
 }
 
-export interface ParsedFile {
-  file: SourceFileNodeInput;
-  symbols: SourceSymbolNode[];
-  edges: SourceGraphEdgeInput[];
-  diagnostics: SourceGraphDiagnosticInput[];
+/**
+ * 一个文件留给链接阶段的事实：声明（连同索引节点）、模块导入导出、调用点。
+ * 链接完成后调用点即被释放，声明与导出表留作其他文件的链接目标。
+ */
+export interface FileLinkFacts {
+  filePath: string;
+  parserLanguage: string;
+  moduleSymbolId: string;
+  declarations: IndexedDeclaration[];
+  imports: ExtractedFileFlowImport[];
+  exports: ExtractedFileFlowExport[];
+  defaultExportNames: string[];
+  callSites?: ExtractedFileFlowCallSite[];
 }
 
-export async function parseInventoryFile(
+export interface AnalyzedFile {
+  file: SourceFileNodeInput;
+  symbols: SourceSymbolNode[];
+  diagnostics: SourceGraphDiagnosticInput[];
+  /** 只有完整解析的文件才参与链接；跳过、失败、超预算的文件没有这一项。 */
+  facts?: FileLinkFacts;
+}
+
+/**
+ * 读一次文件，产出它的索引节点与链接事实。
+ *
+ * 所有语言走同一条路：core/facts 的文件事实。内容哈希、符号、调用点都来自这一次读取到的文本，
+ * 读取之后文件再变化不会让它们互相错位。
+ */
+export async function analyzeInventoryFile(
   file: InventoryFile,
   options: NormalizedIndexOptions,
   generationId: string,
-  knownPaths: Set<string>,
-  symbolExtractor?: ProjectContextSymbolExtractor
-): Promise<ParsedFile> {
+  /** 只当链接目标用：只要声明与导出表，不提取导入与调用点。 */
+  declarationsOnly = false
+): Promise<AnalyzedFile> {
   throwIfSourceReadAborted(options);
   const content = await fs.readFile(file.absolutePath, {
     encoding: 'utf8',
     signal: options.signal,
   });
   throwIfSourceReadAborted(options);
-  const contentHash = crypto.createHash('sha256').update(content).digest('hex');
   const lineCount = countLines(content);
   const baseFile: SourceFileNodeInput = {
     generationId,
     projectRoot: options.projectRoot,
     repoRelativePath: file.repoRelativePath,
     language: file.language,
-    contentHash,
+    contentHash: crypto.createHash('sha256').update(content).digest('hex'),
     sizeBytes: file.sizeBytes,
     mtimeMs: file.mtimeMs,
     indexedAt: options.now,
@@ -83,21 +100,9 @@ export async function parseInventoryFile(
       'File exceeded source graph index size limit.'
     );
   }
-  const parsableExtensions = options.codeGraph
-    ? CODEGRAPH_PARSABLE_EXTENSIONS
-    : PARSABLE_EXTENSIONS;
-  if (!parsableExtensions.has(file.extension)) {
-    // Track2-b(2026-07-11 决策③生态补全):非 JS 系但 AstAnalyzer 支持的语言
-    // (swift/objectivec/kotlin/python/go/rust/dart…)走 AST 符号抽取——此前一律
-    // skipped,BiliDili(纯 Swift)source_graph 恒 0 实体。预算闸(maxParseBytes)
-    // 对 AST 路径同样生效;AST 不可用/解析失败按 failed 降级,files 行保留。
-    const astLanguage = resolveAstParserLanguage(file.repoRelativePath, file.language);
-    if (astLanguage && !JS_FAMILY_LANGUAGES.has(astLanguage)) {
-      if (file.sizeBytes > options.maxParseBytes) {
-        return partialFile(baseFile, 'parser-timeout', 'File exceeded source graph parser budget.');
-      }
-      return parseAstFile(content, baseFile, file, generationId, options, lineCount, astLanguage);
-    }
+  // 解析器只按扩展名选：语言标签更宽（.vue、.svelte 也标成 javascript），不能当作语法依据。
+  const parserLanguage = resolveAstParserLanguage(file.repoRelativePath);
+  if (!parserLanguage) {
     return skippedFile(
       baseFile,
       'unsupported-language',
@@ -105,251 +110,97 @@ export async function parseInventoryFile(
     );
   }
   if (file.sizeBytes > options.maxParseBytes) {
-    return partialFile(baseFile, 'parser-timeout', 'File exceeded source graph parser budget.');
-  }
-  if (symbolExtractor) {
-    return parseCodeGraphFile(
-      content,
-      baseFile,
-      file,
-      generationId,
-      options,
-      lineCount,
-      knownPaths,
-      symbolExtractor
-    );
-  }
-  if (content.includes('SOURCE_GRAPH_PARSE_FAILURE')) {
-    return failedFile(baseFile, 'Source graph parser failed for this file.');
+    return partialFile(baseFile, 'File exceeded source graph parser budget.');
   }
 
-  const symbols = extractSymbols(content, file, generationId, options.extractorVersion, lineCount);
-  const edges = extractImportEdges(content, file, generationId, knownPaths);
-  return {
-    file: baseFile,
-    symbols,
-    edges,
-    diagnostics: [],
-  };
-}
-
-async function parseCodeGraphFile(
-  content: string,
-  baseFile: SourceFileNodeInput,
-  file: InventoryFile,
-  generationId: string,
-  options: NormalizedIndexOptions,
-  lineCount: number,
-  knownPaths: Set<string>,
-  extractor: ProjectContextSymbolExtractor
-): Promise<ParsedFile> {
-  const input = {
-    text: content,
-    filePath: file.repoRelativePath,
-    language: file.language,
-    lineCount,
-  };
-  // 所有投影共享本次已读文本；不调用会重新读取live文件的ProjectContext envelope。
-  const ast = readFileAst(input, false);
-  const legacy = extractFileSymbolsFromSource(input, ast);
-  const extracted = await extractor.extractSymbols(input, legacy, { signal: options.signal });
-  throwIfSourceReadAborted(options);
-  if (extracted.unavailableReason) {
-    return failedFile(baseFile, extracted.unavailableReason);
+  const evidence = readFileSyntaxEvidence(
+    { text: content, filePath: file.repoRelativePath, lineCount },
+    !declarationsOnly
+  );
+  if (evidence.symbols.unavailableReason) {
+    return failedFile(baseFile, evidence.symbols.unavailableReason);
   }
-  let symbols: SourceSymbolNode[];
+  if (JS_FAMILY_LANGUAGES.has(parserLanguage) && evidence.symbols.syntaxValid === false) {
+    // 带语法错误的树会产出残缺或错位的声明。其他语言的语法包对合法源码也常报错（宏、预处理），
+    // 所以只对 JS 家族按失败处理，保持这条路线原有的状态语义。
+    return failedFile(baseFile, 'Source graph parser found syntax errors in this file.');
+  }
+
+  let declarations: IndexedDeclaration[];
   try {
-    symbols = [
-      moduleSymbolFromInventory(file, generationId, options.extractorVersion, lineCount),
-      ...projectSourceGraphSymbols(
-        extracted.symbols,
-        file.repoRelativePath,
-        generationId,
-        options.extractorVersion
-      ),
-    ];
+    declarations = projectSourceGraphSymbols(
+      evidence.symbols.symbols,
+      file.repoRelativePath,
+      generationId,
+      options.extractorVersion
+    );
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     Logger.warn('Source graph rejected ambiguous symbol persistence', {
       filePath: file.repoRelativePath,
-      reason: error instanceof Error ? error.message : String(error),
+      reason,
     });
-    return failedFile(baseFile, error instanceof Error ? error.message : String(error));
+    return failedFile(baseFile, reason);
   }
-  // SDK符号与模块语法各自生产同文本事实；export-from同样建立文件依赖，不能在barrel处断链。
-  const flow = extractFileFlowFromSource(input, ast);
-  if (flow.unavailableReason) {
-    const partial = partialFile(baseFile, 'parser-timeout', flow.unavailableReason);
+  const symbols = [
+    createModuleSymbol({
+      generationId,
+      filePath: file.repoRelativePath,
+      language: file.language,
+      lineCount,
+      extractorVersion: options.extractorVersion,
+    }),
+    ...new Set(declarations.map((declaration) => declaration.node)),
+  ];
+  const uncoveredSyntax = evidence.symbols.syntaxFeatures ?? [];
+  if (uncoveredSyntax.length > 0) {
+    // 这些声明形态（namespace 成员、匿名 default）没有符号；文件其余部分照常入库。
+    Logger.debug('Source graph indexed a file with declaration forms it does not cover', {
+      filePath: file.repoRelativePath,
+      uncoveredSyntax,
+    });
+    baseFile.metadata = { ...baseFile.metadata, uncoveredSyntax };
+  }
+
+  if (declarationsOnly) {
+    return {
+      file: baseFile,
+      symbols,
+      diagnostics: [],
+      facts: {
+        filePath: file.repoRelativePath,
+        parserLanguage,
+        moduleSymbolId: moduleSymbolId(file.repoRelativePath),
+        declarations,
+        imports: [],
+        exports: evidence.exports,
+        defaultExportNames: evidence.defaultExportNames,
+      },
+    };
+  }
+  const flow = evidence.flow;
+  if (!flow || flow.unavailableReason) {
+    // 压缩或生成物形态的文件不做调用点提取；声明仍然入库，但不参与链接。
+    const partial = partialFile(
+      baseFile,
+      flow?.unavailableReason ?? 'Source graph call extraction is unavailable.'
+    );
     return { ...partial, symbols };
   }
-  const edges: SourceGraphEdgeInput[] = [];
-  const dependencies = [
-    ...flow.imports.map((item) => ({
-      specifier: item.specifier,
-      range: item.range,
-      dependencyKind: 'import',
-    })),
-    ...flow.exports.flatMap((item) =>
-      item.specifier
-        ? [{ specifier: item.specifier, range: item.range, dependencyKind: 're-export' }]
-        : []
-    ),
-  ];
-  const seenTargets = new Set<string>();
-  let unlinked = 0;
-  let coalesced = 0;
-  for (const item of dependencies) {
-    const target = item.specifier.startsWith('.')
-      ? moduleSourceCandidates(
-          path.posix.normalize(
-            path.posix.join(path.posix.dirname(file.repoRelativePath), item.specifier)
-          ),
-          [...CODEGRAPH_PARSABLE_EXTENSIONS]
-        ).find((candidate) => knownPaths.has(candidate))
-      : undefined;
-    if (!target) {
-      unlinked += 1;
-      continue;
-    }
-    // 持久图延用一条来源文件→目标文件的imports边；多个re-export绑定不是多个文件依赖。
-    if (seenTargets.has(target)) {
-      coalesced += 1;
-      continue;
-    }
-    seenTargets.add(target);
-    edges.push({
-      generationId,
-      edgeId: `${file.repoRelativePath}:imports:${target}`,
-      kind: 'imports',
-      fromSymbolId: `${file.repoRelativePath}#module`,
-      fromFilePath: file.repoRelativePath,
-      toFilePath: target,
-      siteFilePath: file.repoRelativePath,
-      site: {
-        startLine: item.range.startLine,
-        startColumn: item.range.startColumn ?? 0,
-        endLine: item.range.endLine,
-        endColumn: item.range.endColumn ?? 0,
-      },
-      provenance: 'deterministic',
-      confidence: 1,
-      source: item.specifier,
-      metadata: { dependencyKind: item.dependencyKind },
-    });
-  }
-  Logger.debug('Source graph projected module dependencies', {
-    filePath: file.repoRelativePath,
-    declarations: dependencies.length,
-    edges: edges.length,
-    coalesced,
-    outsideInventoryOrPackage: unlinked,
-  });
-  return { file: baseFile, symbols, edges, diagnostics: [] };
-}
-
-/** AstAnalyzer 的 summary 记录最小读取形态(与 fileSymbols 适配层同源语义)。 */
-interface AstSymbolRecordLike {
-  name?: unknown;
-  kind?: unknown;
-  line?: unknown;
-  endLine?: unknown;
-  className?: unknown;
-}
-
-interface AstSummaryLike {
-  classes?: AstSymbolRecordLike[];
-  protocols?: AstSymbolRecordLike[];
-  methods?: AstSymbolRecordLike[];
-  properties?: AstSymbolRecordLike[];
-  imports?: Array<{ specifier?: unknown } | string>;
-}
-
-/**
- * Track2-b:AST 语言的符号/导入抽取。产出契约与正则版 extractSymbols 完全同型
- * (symbolId=path#name/range/provenance),消费方(仓储/查询)零改动。
- * Swift 等模块名导入解析不到仓内文件(与 JS 相对导入语义不同),本期不产伪 file
- * 边——imports 证据留待模块名 join 需求(与 Track1 同语义)单独立项。
- */
-function parseAstFile(
-  content: string,
-  baseFile: SourceFileNodeInput,
-  file: InventoryFile,
-  generationId: string,
-  options: NormalizedIndexOptions,
-  lineCount: number,
-  astLanguage: string
-): ParsedFile {
-  if (!isAstAvailable()) {
-    return failedFile(baseFile, `AST runtime unavailable for language ${astLanguage}.`);
-  }
-  let summary: AstSummaryLike | null = null;
-  try {
-    summary = analyzeFile(content, astLanguage, { extractCallSites: false }) as AstSummaryLike;
-  } catch (error) {
-    return failedFile(
-      baseFile,
-      `AST parse failed for ${astLanguage}: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-  if (!summary) {
-    return failedFile(baseFile, `AST parser returned no summary for ${astLanguage}.`);
-  }
-
-  const symbols: SourceSymbolNode[] = [
-    moduleSymbolFromInventory(file, generationId, options.extractorVersion, lineCount),
-  ];
-  const pushSymbol = (record: AstSymbolRecordLike, kind: string) => {
-    const name = typeof record.name === 'string' && record.name.trim() ? record.name.trim() : null;
-    if (!name) {
-      return;
-    }
-    const startLine =
-      typeof record.line === 'number' && record.line >= 1 ? Math.trunc(record.line) : 1;
-    const endLine =
-      typeof record.endLine === 'number' && record.endLine >= startLine
-        ? Math.trunc(record.endLine)
-        : startLine;
-    const container =
-      typeof record.className === 'string' && record.className.trim()
-        ? record.className.trim()
-        : null;
-    symbols.push({
-      generationId,
-      symbolId: `${file.repoRelativePath}#${container ? `${container}.` : ''}${name}`,
-      displayName: name,
-      qualifiedName: container ? `${container}.${name}` : name,
-      kind,
-      filePath: file.repoRelativePath,
-      range: { startLine, startColumn: 0, endLine, endColumn: 0 },
-      exported: false,
-      imported: false,
-      metadata: {
-        extractorVersion: options.extractorVersion,
-        declarationKind: kind,
-        astLanguage,
-      },
-      provenance: {
-        extractor: 'source-graph-ast-symbols',
-      },
-    });
-  };
-  for (const record of summary.classes ?? []) {
-    pushSymbol(record, 'class');
-  }
-  for (const record of summary.protocols ?? []) {
-    pushSymbol(record, 'interface');
-  }
-  for (const record of summary.methods ?? []) {
-    pushSymbol(record, 'function');
-  }
-  for (const record of summary.properties ?? []) {
-    pushSymbol(record, 'variable');
-  }
-
   return {
     file: baseFile,
     symbols,
-    edges: [],
     diagnostics: [],
+    facts: {
+      filePath: file.repoRelativePath,
+      parserLanguage,
+      moduleSymbolId: moduleSymbolId(file.repoRelativePath),
+      declarations,
+      imports: flow.imports,
+      exports: evidence.exports,
+      defaultExportNames: evidence.defaultExportNames,
+      callSites: flow.callSites,
+    },
   };
 }
 
@@ -357,7 +208,7 @@ function skippedFile(
   file: SourceFileNodeInput,
   code: 'large-file-skipped' | 'unsupported-language',
   message: string
-): ParsedFile {
+): AnalyzedFile {
   return {
     file: {
       ...file,
@@ -365,41 +216,30 @@ function skippedFile(
       parseErrors: [{ message, severity: 'warning', code }],
     },
     symbols: [],
-    edges: [],
-    diagnostics: [
-      {
-        code,
-        message,
-        filePath: file.repoRelativePath,
-      },
-    ],
+    diagnostics: [{ code, message, filePath: file.repoRelativePath }],
   };
 }
 
-function partialFile(
-  file: SourceFileNodeInput,
-  code: 'parser-timeout',
-  message: string
-): ParsedFile {
+function partialFile(file: SourceFileNodeInput, message: string): AnalyzedFile {
   return {
     file: {
       ...file,
       parseStatus: 'partial',
-      parseErrors: [{ message, severity: 'warning', code }],
+      parseErrors: [{ message, severity: 'warning', code: 'parser-timeout' }],
     },
-    symbols: [moduleSymbol(file, 1)],
-    edges: [],
-    diagnostics: [
-      {
-        code,
-        message,
+    symbols: [
+      createModuleSymbol({
+        generationId: file.generationId,
         filePath: file.repoRelativePath,
-      },
+        language: file.language ?? 'unknown',
+        lineCount: 1,
+      }),
     ],
+    diagnostics: [{ code: 'parser-timeout', message, filePath: file.repoRelativePath }],
   };
 }
 
-function failedFile(file: SourceFileNodeInput, message: string): ParsedFile {
+function failedFile(file: SourceFileNodeInput, message: string): AnalyzedFile {
   return {
     file: {
       ...file,
@@ -407,7 +247,6 @@ function failedFile(file: SourceFileNodeInput, message: string): ParsedFile {
       parseErrors: [{ message, severity: 'error', code: 'parse-failed' }],
     },
     symbols: [],
-    edges: [],
     diagnostics: [
       {
         code: 'catch-up-failed',
@@ -449,181 +288,6 @@ export function diagnosticsForRetainedFile(file: SourceFileNode): SourceGraphDia
       metadata: error.code ? { parseErrorCode: error.code } : undefined,
     };
   });
-}
-
-function extractSymbols(
-  content: string,
-  file: InventoryFile,
-  generationId: string,
-  extractorVersion: string,
-  lineCount: number
-): SourceSymbolNode[] {
-  const symbols: SourceSymbolNode[] = [
-    moduleSymbolFromInventory(file, generationId, extractorVersion, lineCount),
-  ];
-  const lines = content.split(/\r\n|\n|\r/);
-  const symbolPattern =
-    /\b(export\s+)?(?:abstract\s+)?(class|interface|enum|function|type|const|let|var)\s+([A-Za-z_$][\w$]*)/g;
-  for (const [index, line] of lines.entries()) {
-    for (const match of line.matchAll(symbolPattern)) {
-      const kind = symbolKindForDeclaration(match[2]);
-      const displayName = match[3];
-      symbols.push({
-        generationId,
-        symbolId: `${file.repoRelativePath}#${displayName}`,
-        displayName,
-        qualifiedName: displayName,
-        kind,
-        filePath: file.repoRelativePath,
-        range: {
-          startLine: index + 1,
-          startColumn: match.index ?? 0,
-          endLine: index + 1,
-          endColumn: (match.index ?? 0) + match[0].length,
-        },
-        exported: Boolean(match[1]),
-        imported: false,
-        metadata: {
-          extractorVersion,
-          declarationKind: match[2],
-        },
-        provenance: {
-          extractor: 'source-graph-regex-symbols',
-        },
-      });
-    }
-  }
-  return symbols;
-}
-
-function moduleSymbolFromInventory(
-  file: InventoryFile,
-  generationId: string,
-  extractorVersion: string,
-  lineCount: number
-): SourceSymbolNode {
-  return {
-    generationId,
-    symbolId: `${file.repoRelativePath}#module`,
-    displayName: path.basename(file.repoRelativePath),
-    qualifiedName: file.repoRelativePath,
-    kind: 'module',
-    filePath: file.repoRelativePath,
-    range: { startLine: 1, startColumn: 0, endLine: Math.max(1, lineCount), endColumn: 0 },
-    exported: true,
-    imported: false,
-    metadata: {
-      extractorVersion,
-      language: file.language,
-    },
-    provenance: {
-      extractor: 'source-graph-file-inventory',
-    },
-  };
-}
-
-function moduleSymbol(file: SourceFileNodeInput, lineCount: number): SourceSymbolNode {
-  return {
-    generationId: file.generationId,
-    symbolId: `${file.repoRelativePath}#module`,
-    displayName: path.basename(file.repoRelativePath),
-    qualifiedName: file.repoRelativePath,
-    kind: 'module',
-    filePath: file.repoRelativePath,
-    range: { startLine: 1, startColumn: 0, endLine: Math.max(1, lineCount), endColumn: 0 },
-    exported: true,
-    imported: false,
-    metadata: {
-      language: file.language,
-    },
-    provenance: {
-      extractor: 'source-graph-file-inventory',
-    },
-  };
-}
-
-function extractImportEdges(
-  content: string,
-  file: InventoryFile,
-  generationId: string,
-  knownPaths: Set<string>
-): SourceGraphEdgeInput[] {
-  const lines = content.split(/\r\n|\n|\r/);
-  const edges: SourceGraphEdgeInput[] = [];
-  const importPattern =
-    /\bimport\s+(?:type\s+)?(?:[^'"()]*?\s+from\s+)?['"]([^'"]+)['"]|\brequire\(\s*['"]([^'"]+)['"]\s*\)/g;
-  for (const [index, line] of lines.entries()) {
-    for (const match of line.matchAll(importPattern)) {
-      const specifier = match[1] ?? match[2];
-      const target = resolveRelativeImport(file.repoRelativePath, specifier, knownPaths);
-      if (!target) {
-        continue;
-      }
-      edges.push({
-        generationId,
-        edgeId: `${file.repoRelativePath}:imports:${target}`,
-        kind: 'imports',
-        fromSymbolId: `${file.repoRelativePath}#module`,
-        fromFilePath: file.repoRelativePath,
-        toFilePath: target,
-        siteFilePath: file.repoRelativePath,
-        site: {
-          startLine: index + 1,
-          startColumn: match.index ?? 0,
-          endLine: index + 1,
-          endColumn: (match.index ?? 0) + match[0].length,
-        },
-        provenance: 'deterministic',
-        confidence: 1,
-        source: specifier,
-      });
-    }
-  }
-  return edges;
-}
-
-function resolveRelativeImport(
-  currentFile: string,
-  specifier: string,
-  knownPaths: Set<string>
-): string | undefined {
-  if (!specifier.startsWith('.')) {
-    return undefined;
-  }
-  const base = normalizeRepoRelative(
-    path.posix.normalize(path.posix.join(path.posix.dirname(currentFile), specifier))
-  );
-  return (
-    ImportPathResolver.resolveIndexedFile(base, (requestedPath) => {
-      const candidates = [
-        requestedPath,
-        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}${extension}`),
-        ...Array.from(PARSABLE_EXTENSIONS).map((extension) => `${requestedPath}/index${extension}`),
-      ];
-      return candidates.find((candidate) => knownPaths.has(candidate));
-    }) ?? undefined
-  );
-}
-
-function symbolKindForDeclaration(kind: string): SourceSymbolNode['kind'] {
-  switch (kind) {
-    case 'class':
-      return 'class';
-    case 'interface':
-      return 'interface';
-    case 'enum':
-      return 'enum';
-    case 'function':
-      return 'function';
-    case 'type':
-      return 'type';
-    case 'const':
-    case 'let':
-    case 'var':
-      return 'variable';
-    default:
-      return 'unknown';
-  }
 }
 
 function countLines(content: string): number {

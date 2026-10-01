@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { COMMON_SOURCE_SCAN_EXCLUDE_DIRS } from '../../core/discovery/SourceScanExclusions.js';
+import { EXTENSION_PARSER_LANGUAGE } from '../../core/facts/parserLanguage.js';
+import { MODULE_SOURCE_EXTENSIONS } from '../../core/linking/moduleTargets.js';
 import { getCodeGraphProjectContextIdentity } from '../../infrastructure/analysis/CodeGraphProcess.js';
 import { throwIfSourceReadAborted } from '../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../infrastructure/logging/Logger.js';
@@ -10,9 +12,13 @@ import {
   type SourceGraphIndexIdentity,
 } from './SourceGraphIndexIdentity.js';
 
-export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v1';
-// SDK身份还不足以描述SourceGraph的ID、kind和导入投影；此版本归本模块自身所有。
-const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v2';
+/**
+ * 提取与链接规则的版本。v2：所有语言统一读文件事实，调用边由自有链接器写入。
+ * 版本进入索引身份，旧版本的代际不会被增量沿用。
+ */
+export const SOURCE_GRAPH_INDEXER_VERSION = 'source-graph-indexer-v2';
+// 启用外部引擎时，它的身份与本模块对其结果的投影规则一起进入提取版本。
+const CODEGRAPH_PROJECTION_VERSION = 'source-graph-codegraph-v3';
 
 export interface SourceGraphIndexOptions {
   projectRoot: string;
@@ -27,7 +33,10 @@ export interface SourceGraphIndexOptions {
   maxFileSizeBytes?: number;
   maxParseBytes?: number;
   signal?: AbortSignal;
-  /** 显式接入SDK；旧入口保持Node 22.0和既有提取行为，宿主提供自己的私有数据目录。 */
+  /**
+   * 外部引擎（CodeGraph）的接入点：宿主提供自己的私有数据目录。
+   * 符号与自有链接不依赖它；它只影响索引身份，并把私有运行目录排除在清单之外。
+   */
   codeGraph?: { dataRoot: string; timeoutMs?: number };
 }
 
@@ -58,26 +67,16 @@ export interface NormalizedIndexOptions {
   indexIdentity: SourceGraphIndexIdentity;
 }
 
+/** 有解析器的扩展名来自文件事实层的唯一映射；其余是只做清单、不做解析的文档与配置。 */
 const DEFAULT_INCLUDE_EXTENSIONS = [
-  '.ts',
-  '.tsx',
-  '.js',
-  '.jsx',
-  '.mjs',
-  '.cjs',
+  ...Object.keys(EXTENSION_PARSER_LANGUAGE),
   '.json',
   '.md',
   '.mdx',
   '.yml',
   '.yaml',
-  '.swift',
-  '.py',
-  '.rb',
-  '.java',
-  '.kt',
-  '.go',
-  '.rs',
   '.toml',
+  '.rb',
 ];
 const DEFAULT_IGNORE_DIRECTORIES = [
   ...COMMON_SOURCE_SCAN_EXCLUDE_DIRS,
@@ -86,8 +85,8 @@ const DEFAULT_IGNORE_DIRECTORIES = [
   '.asd',
   '.swiftpm',
 ];
-export const PARSABLE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs']);
-export const CODEGRAPH_PARSABLE_EXTENSIONS = new Set([...PARSABLE_EXTENSIONS, '.mts', '.cts']);
+/** 相对导入会被解析成文件的扩展名；文件集合变化时这些文件要重新链接。 */
+export const LINKED_MODULE_EXTENSIONS: ReadonlySet<string> = new Set(MODULE_SOURCE_EXTENSIONS);
 
 export async function normalizeIndexOptions(
   input: SourceGraphIndexOptions
@@ -131,21 +130,10 @@ export async function normalizeIndexOptions(
       path.resolve(input.codeGraph.dataRoot, '.asd', 'codegraph-sessions')
     );
     extractorVersion = `${CODEGRAPH_PROJECTION_VERSION}:${extractorVersion}:${engineHash}`;
-  } else {
-    Logger.debug('Source graph retains its explicit legacy extraction contract', {
-      projectRoot,
-      extractorVersion,
-      reason: 'codegraph-option-absent',
-    });
   }
   throwIfSourceReadAborted(input);
   const includeExtensions = new Set(
-    (
-      input.includeExtensions ?? [
-        ...DEFAULT_INCLUDE_EXTENSIONS,
-        ...(input.codeGraph ? ['.mts', '.cts'] : []),
-      ]
-    ).map(normalizeExtension)
+    (input.includeExtensions ?? DEFAULT_INCLUDE_EXTENSIONS).map(normalizeExtension)
   );
   const ignoreDirectories = new Set(input.ignoreDirectories ?? DEFAULT_IGNORE_DIRECTORIES);
   const maxFileSizeBytes = input.maxFileSizeBytes ?? 512 * 1024;

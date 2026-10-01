@@ -1,6 +1,7 @@
 import '../ast/index.js';
 import { analyzeFile } from '../ast/analyzeFile.js';
 import type { CallSiteInfo } from '../ast/extract/CallSiteExtractor.js';
+import type { SupplementalDeclaration } from '../ast/extract/JsDeclarationCollector.js';
 import type { ModuleSyntaxFacts } from '../ast/extract/ModuleSyntaxCollector.js';
 import { isAvailable as isAstAvailable } from '../ast/languageRegistry.js';
 import { resolveAstParserLanguage } from './parserLanguage.js';
@@ -24,6 +25,8 @@ export type FileAstFacts =
       syntaxValid?: boolean;
       syntaxFeatures?: string[];
       moduleSyntax?: ModuleSyntaxFacts;
+      /** JS/TS 摘要之外的模块级声明；其他语言没有这一项。 */
+      declarations?: SupplementalDeclaration[];
       callSiteEvidence?: CallSiteInfo[];
       callSitesComplete?: boolean;
     }
@@ -46,6 +49,7 @@ export function readFileAst(input: FileAstInput, extractCallSites: boolean): Fil
     let syntaxValid: boolean | undefined;
     let syntaxFeatures: string[] = [];
     let moduleSyntax: ModuleSyntaxFacts | undefined;
+    let declarations: SupplementalDeclaration[] | undefined;
     let callSiteEvidence: CallSiteInfo[] | undefined;
     let callSitesComplete: boolean | undefined;
     const summary = analyzeFile(input.text, parserLanguage, {
@@ -56,6 +60,9 @@ export function readFileAst(input: FileAstInput, extractCallSites: boolean): Fil
       },
       onModuleSyntax: (facts) => {
         moduleSyntax = facts;
+      },
+      onDeclarations: (facts) => {
+        declarations = facts;
       },
       onCallSiteEvidence: (facts) => {
         callSiteEvidence = facts.callSites;
@@ -70,6 +77,7 @@ export function readFileAst(input: FileAstInput, extractCallSites: boolean): Fil
           syntaxValid,
           syntaxFeatures,
           moduleSyntax,
+          declarations,
           callSiteEvidence,
           callSitesComplete,
         }

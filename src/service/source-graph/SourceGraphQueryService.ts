@@ -133,7 +133,13 @@ interface QueryTerms {
 interface RankedSymbol {
   symbol: SourceSymbolNode;
   file?: SourceFileNode;
+  /** 排序用的总分，含图连通度加成。 */
   score: number;
+  /**
+   * 查询与符号本身的匹配强度，不含图连通度。诊断（低置信、歧义）只看它：
+   * 被调用得多只说明符号重要，不能证明它就是查询要找的那一个。
+   */
+  matchScore: number;
   reasons: string[];
   edges: SourceGraphEdge[];
 }
@@ -235,6 +241,7 @@ export class SourceGraphQueryService {
               symbol,
               file: context.fileByPath.get(symbol.filePath),
               score: 100,
+              matchScore: 100,
               reasons: ['node:symbol'],
               edges: collectEdgesForSymbols(context, [symbol], context.options.edgeLimit),
             }),
@@ -555,8 +562,14 @@ export class SourceGraphQueryService {
       .map((symbol) => {
         const file = context.fileByPath.get(symbol.filePath);
         const edges = collectEdgesForSymbols(context, [symbol], context.options.edgeLimit);
-        const { score, reasons } = scoreSymbol(symbol, file, edges, terms, context.options);
-        return { symbol, file, score, reasons, edges };
+        const { score, matchScore, reasons } = scoreSymbol(
+          symbol,
+          file,
+          edges,
+          terms,
+          context.options
+        );
+        return { symbol, file, score, matchScore, reasons, edges };
       })
       .filter((rankedSymbol) => rankedSymbol.score > 0)
       .sort(compareRankedSymbols);
@@ -603,16 +616,16 @@ export class SourceGraphQueryService {
 
     const [first, second] = rankedSymbols;
     const diagnostics: SourceGraphDiagnostic[] = [];
-    if (first.score < 35) {
+    if (first.matchScore < 35) {
       diagnostics.push(
         createSourceGraphDiagnostic({
           code: 'low-confidence-query',
           message: `Top source graph match is low confidence for query: ${terms.query}`,
-          metadata: { topScore: first.score, topSymbolId: first.symbol.symbolId },
+          metadata: { topScore: first.matchScore, topSymbolId: first.symbol.symbolId },
         })
       );
     }
-    if (second && first.score - second.score < 10) {
+    if (second && first.matchScore - second.matchScore < 10) {
       diagnostics.push(
         createSourceGraphDiagnostic({
           code: 'ambiguous-symbol',
@@ -672,6 +685,7 @@ export class SourceGraphQueryService {
         symbol,
         file: context.fileByPath.get(symbol.filePath),
         score: 100,
+        matchScore: 100,
         reasons: ['graph-relation'],
         edges,
       })
@@ -884,7 +898,7 @@ function scoreSymbol(
   edges: SourceGraphEdge[],
   terms: QueryTerms,
   options: NormalizedRankingOptions
-): { score: number; reasons: string[] } {
+): { score: number; matchScore: number; reasons: string[] } {
   const reasons: string[] = [];
   const haystacks = [
     symbol.displayName,
@@ -949,7 +963,7 @@ function scoreSymbol(
     score += penalty;
     reasons.push(`classification:${classification}`);
   }
-  return { score, reasons };
+  return { score, matchScore: score - connectivity, reasons };
 }
 
 function scoreFileTextMatch(

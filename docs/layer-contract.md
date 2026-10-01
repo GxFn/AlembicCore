@@ -75,17 +75,19 @@ type-only imports as well.
 | --- | --- | --- |
 | Syntax | `core/ast/` (parser runtime, language plugins, `extract/`) | nothing else in `core/` |
 | File facts | `core/facts/` (one source text → symbols, imports/exports, call sites) | `core/ast/` |
-| Linking | `core/linking/` (same-file linker, import-binding linker, module target candidates) | `core/facts/` |
+| Linking | `core/linking/` (same-file linker, import-binding linker, heritage linker, module target candidates) | `core/facts/` |
+| Index | `service/source-graph/` (inventory, file analysis, linking into edges, queries) | `core/facts/`, `core/linking/` — never `service/project-context/` or `service/code-analysis/` |
 | Facade | `core/AstAnalyzer.ts` | `core/ast/` (re-export only) |
 
 Linkers are pure functions: they reach other modules only through the
 `ModuleGraphAccess` port, so a live reader, a frozen capture and the index all
-link identically. `core/analysis/` is a frozen export-subpath directory: its
-`index.ts` forwards to `core/ast/extract/`; the legacy `ImportPathResolver`
-stays there until the index stops using it. `service/` consumers of file facts import `core/facts/`
-directly; the index (`service/source-graph`) and the query protocol
-(`service/project-context`) both read the same facts instead of borrowing each
-other's internals.
+link identically. `core/analysis/` is a frozen export-subpath directory with no
+implementation left: its `index.ts` only forwards to `core/ast/extract/`.
+`service/` consumers of file facts import `core/facts/` directly; the index
+(`service/source-graph`) and the query protocol (`service/project-context`)
+both read the same facts and the same linkers instead of borrowing each
+other's internals. The index sits below the protocol: it must not import the
+protocol or the external-engine session code.
 
 ## Known exception (D3) — host-agent session ↔ persistence straddle
 

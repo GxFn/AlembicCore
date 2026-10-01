@@ -1,9 +1,13 @@
 import Logger from '../../infrastructure/logging/Logger.js';
+import type { SupplementalDeclaration } from '../ast/extract/JsDeclarationCollector.js';
 import type { ExtractedFileSymbol, FileSymbolsExtractionResult } from './contracts.js';
 import { type FileAstFacts, type FileAstInput, readFileAst } from './fileAst.js';
 import { createSourceLineRange } from './sourceLineRange.js';
 
 interface AstSymbolRecord {
+  superclass?: unknown;
+  protocols?: unknown;
+  inherits?: unknown;
   name?: unknown;
   kind?: unknown;
   line?: unknown;
@@ -46,12 +50,27 @@ export function extractFileSymbolsFromSource(
   }
 
   try {
+    const lines = input.text.split(/\r\n|\n|\r/);
     const symbols = collectExtractedSymbols({
       filePath: input.filePath,
       lineCount: input.lineCount,
-      lines: input.text.split(/\r\n|\n|\r/),
+      lines,
       summary: facts.summary,
     });
+    symbols.push(
+      ...collectSupplementalSymbols({
+        declarations: facts.declarations ?? [],
+        filePath: input.filePath,
+        lineCount: input.lineCount,
+        lines,
+        // `export { x }` 形式的本地导出：声明语句自身不带 export，由导出表证明。
+        locallyExported: new Set(
+          (facts.moduleSyntax?.exports ?? [])
+            .filter((item) => item.specifier === undefined)
+            .map((item) => item.name)
+        ),
+      })
+    );
     if (facts.moduleSyntax) {
       const local = new Set(
         facts.moduleSyntax.exports
@@ -115,6 +134,10 @@ function collectExtractedSymbols(input: {
     const kind = normalizeClassKind(record.kind);
     symbols.push({
       ...declarationEvidence(record),
+      ...heritageEvidence(
+        record.superclass === undefined ? [] : [record.superclass],
+        record.protocols
+      ),
       exported: isExported(name, range.startLine, input.lines, exportedNames),
       filePath: input.filePath,
       kind,
@@ -137,6 +160,7 @@ function collectExtractedSymbols(input: {
     }
     symbols.push({
       ...declarationEvidence(record),
+      ...heritageEvidence(record.inherits, []),
       exported: isExported(name, range.startLine, input.lines, exportedNames),
       filePath: input.filePath,
       kind: 'interface',
@@ -210,6 +234,45 @@ function collectExtractedSymbols(input: {
   return symbols;
 }
 
+/** 摘要之外的模块级声明（顶层变量、接口成员）投影成同一种符号记录。 */
+function collectSupplementalSymbols(input: {
+  declarations: readonly SupplementalDeclaration[];
+  filePath: string;
+  lineCount: number;
+  lines: string[];
+  locallyExported: ReadonlySet<string>;
+}): ExtractedFileSymbol[] {
+  const symbols: ExtractedFileSymbol[] = [];
+  for (const declaration of input.declarations) {
+    const range = createSourceLineRange({
+      endLine: declaration.range.endLine,
+      lineCount: input.lineCount,
+      startLine: declaration.range.startLine,
+    });
+    if (!range) {
+      continue;
+    }
+    symbols.push({
+      ...(declaration.container ? { container: declaration.container } : {}),
+      declarationKind: declaration.declarationKind,
+      declarationRange: { ...declaration.range },
+      exported:
+        declaration.exported ||
+        (!declaration.container && input.locallyExported.has(declaration.name)),
+      filePath: input.filePath,
+      kind: declaration.kind,
+      name: declaration.name,
+      qualifiedName: declaration.container
+        ? `${declaration.container}.${declaration.name}`
+        : declaration.name,
+      range,
+      signature: readSignature(input.lines, range),
+      supplement: true,
+    });
+  }
+  return symbols;
+}
+
 function declarationEvidence(
   record: AstSymbolRecord
 ): Pick<ExtractedFileSymbol, 'declarationKind' | 'declarationRange'> {
@@ -218,6 +281,19 @@ function declarationEvidence(
     ...(declarationKind ? { declarationKind } : {}),
     ...(record.declarationRange ? { declarationRange: { ...record.declarationRange } } : {}),
   };
+}
+
+/** 父类型名字：去掉泛型实参与空白，丢弃空值；两类都没有时不带这个字段。 */
+function heritageEvidence(
+  extended: unknown,
+  implemented: unknown
+): Pick<ExtractedFileSymbol, 'heritage'> {
+  const names = (value: unknown): string[] =>
+    (Array.isArray(value) ? value : [])
+      .map((item) => (typeof item === 'string' ? item.split('<')[0].trim() : ''))
+      .filter((item) => item.length > 0);
+  const heritage = { extends: names(extended), implements: names(implemented) };
+  return heritage.extends.length > 0 || heritage.implements.length > 0 ? { heritage } : {};
 }
 
 function normalizeClassKind(value: unknown): string {

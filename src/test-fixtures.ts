@@ -41,9 +41,9 @@ export {
   parseToTree,
   supportedLanguages as supportedAstLanguages,
 } from './core/AstAnalyzer.js';
-// 旧调用图引擎（CallGraphAnalyzer 一线）与项目级 AST 聚合已移除：四个仓库均无生产调用方。
-// 跨文件关系由 SourceGraph 索引与链接器提供；这里只保留仍在使用的导入记录与路径解析。
-export { ImportPathResolver, ImportRecord } from './core/analysis/index.js';
+// 旧调用图引擎（CallGraphAnalyzer 一线）、项目级 AST 聚合与 ImportPathResolver 已移除：
+// 四个仓库均无生产调用方。跨文件关系由 SourceGraph 索引与 core/linking 提供；这里只保留导入记录。
+export { ImportRecord } from './core/analysis/index.js';
 export type {
   CoreGrammarResourceFile,
   EnsureProjectGrammarResourcesResult,

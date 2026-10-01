@@ -184,6 +184,70 @@ export function findCalleeSymbol<T extends LinkableSymbol>(
   );
 }
 
+/**
+ * 调用点所在的最内层声明。调用发生在匿名回调、嵌套函数、对象字面量方法或模块级初始化里时，
+ * 它的直接拥有者不是任何符号；索引把这样的调用归到包住它的具名声明上，不让它在图里消失。
+ * 没有任何声明包住调用点时返回 undefined，调用属于模块顶层。
+ */
+export function findEnclosingDeclaration<T extends LinkableSymbol>(
+  symbols: readonly T[],
+  callSite: ExtractedFileFlowCallSite
+): T | undefined {
+  const position = callSite.matchingRange ?? callSite.range;
+  let innermost: T | undefined;
+  let innermostRange: LinkableRange | undefined;
+  for (const symbol of symbols) {
+    const range = symbol.declarationRange ?? symbol.range;
+    if (!range || !containsRange(range, position)) {
+      continue;
+    }
+    // 声明范围来自同一棵树，互相只会嵌套；起点更晚（或起点相同而终点更早）的就是更内层。
+    if (!innermostRange || startsAfter(range, innermostRange)) {
+      innermost = symbol;
+      innermostRange = range;
+    }
+  }
+  return innermost;
+}
+
+/**
+ * 符号是否就是调用点的直接拥有者（而不只是包住它的外层声明）。
+ * 名字与范围都要对上：单行代码里匿名回调的范围也落在外层声明之内，只比范围会把它认成拥有者。
+ */
+export function isCallSiteOwner(
+  symbol: LinkableSymbol,
+  callSite: ExtractedFileFlowCallSite
+): boolean {
+  const owner =
+    callSite.callerQualifiedName ??
+    (callSite.callerClass
+      ? `${callSite.callerClass}.${callSite.callerMethod}`
+      : callSite.callerMethod);
+  return (
+    (symbol.qualifiedName ?? symbol.name) === owner &&
+    callSite.callerRange !== undefined &&
+    matchesDeclarationRange(symbol, callSite.callerRange)
+  );
+}
+
+function startsAfter(candidate: LinkableRange, current: LinkableRange): boolean {
+  if (candidate.startLine !== current.startLine) {
+    return candidate.startLine > current.startLine;
+  }
+  const candidateColumn = candidate.startColumn ?? 0;
+  const currentColumn = current.startColumn ?? 0;
+  if (candidateColumn !== currentColumn) {
+    return candidateColumn > currentColumn;
+  }
+  if (candidate.endLine !== current.endLine) {
+    return candidate.endLine < current.endLine;
+  }
+  return (
+    (candidate.endColumn ?? Number.MAX_SAFE_INTEGER) <
+    (current.endColumn ?? Number.MAX_SAFE_INTEGER)
+  );
+}
+
 function matchesDeclarationRange(symbol: LinkableSymbol, declaration: LinkableRange): boolean {
   const precise = symbol.declarationRange;
   if (precise && precise.endLine === declaration.endLine && containsRange(precise, declaration)) {

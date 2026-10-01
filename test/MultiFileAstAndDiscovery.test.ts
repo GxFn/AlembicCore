@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { analyzeFile, isAvailable, parseToTree } from '../src/core/AstAnalyzer.js';
-import { ImportPathResolver } from '../src/core/analysis/ImportPathResolver.js';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
 import {
   type CallSiteInfo,
@@ -24,6 +23,7 @@ import { getDiscovererRegistry, resetDiscovererRegistry } from '../src/core/disc
 import { NodeDiscoverer } from '../src/core/discovery/NodeDiscoverer.js';
 import type { ProjectDiscoverer } from '../src/core/discovery/ProjectDiscoverer.js';
 import { SpmDiscoverer } from '../src/core/discovery/SpmDiscoverer.js';
+import { MODULE_SOURCE_EXTENSIONS, moduleSourceCandidates } from '../src/core/linking/index.js';
 import {
   RecordingProjectSourceReader,
   ReplayProjectSourceReader,
@@ -306,11 +306,15 @@ describe('multi-file AST analysis (RIC-4b — was RealProjectAst/GoSupport)', ()
   });
 
   it('resolves NodeNext JavaScript specifiers to TypeScript without overriding real JavaScript', () => {
-    const sourceFirst = new ImportPathResolver('/project', ['src/util.tsx', 'src/util.ts']);
-    expect(sourceFirst.resolve('./util.js', 'src/main.ts')).toBe('src/util.tsx');
-    const withJavaScript = new ImportPathResolver('/project', ['src/util.ts', 'src/util.js']);
-    expect(withJavaScript.resolve('./util.js', 'src/main.ts')).toBe('src/util.js');
-    expect(withJavaScript.resolve('./util', 'src/main.ts')).toBe('src/util.ts');
+    // 导入目标的候选顺序只有一处规则：真实存在的文件优先，其次才是同名 TypeScript 源码。
+    const resolve = (requested: string, files: string[]) =>
+      moduleSourceCandidates(requested, MODULE_SOURCE_EXTENSIONS).find((candidate) =>
+        files.includes(candidate)
+      );
+    expect(resolve('src/util.js', ['src/util.tsx', 'src/util.ts'])).toBe('src/util.ts');
+    expect(resolve('src/util.js', ['src/util.tsx'])).toBe('src/util.tsx');
+    expect(resolve('src/util.js', ['src/util.ts', 'src/util.js'])).toBe('src/util.js');
+    expect(resolve('src/util', ['src/util.ts', 'src/util.js'])).toBe('src/util.ts');
   });
 
   it('keeps per-file classes, inheritance edges, and metrics across TypeScript files', () => {

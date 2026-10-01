@@ -127,7 +127,13 @@ Python、Go、Rust 的成员调用必须写出接收者，裸调用不当成成�
 读当前文件，捕获登记实际消费的源码版本，重放得到相同结果。它只读被引用到的文件，不需要
 预先声明项目源码清单。
 
-链接器是纯函数，通过 `ModuleGraphAccess` 取其他模块的声明事实，自己不读磁盘。
+类型层级链接（JS/TS）：类与接口写出的父类型名字是模块作用域里的标识符，按同文件顶层声明或
+import 绑定（含类型导入、命名空间成员）找到声明。同名的本地声明与导入并存、表达式形式的父类
+都不产出目标。
+
+链接器是纯函数，通过 `ModuleGraphAccess` 取其他模块的声明事实，自己不读磁盘。同一组链接器
+服务两个消费者：ProjectContext 的 `file-flow` 按需链接单个文件，SourceGraph 索引链接整个项目。
+`file-flow` 的调用方只认直接拥有者；索引另外把匿名回调、嵌套函数里的调用归到包住它的声明。
 
 ## 冻结输入上的 CodeGraph 项目解析
 
@@ -203,42 +209,69 @@ Git 请求共用一个只读 Replay 解码视图，实际 Git 重观察、输入
 已有 `SourceGraphLifecycleService` 接受
 `{ projectRoot, projectScopeDescriptor, codeGraph: { dataRoot }, signal }`。
 `dataRoot` 是宿主的绝对私有数据目录；传完整ProjectScope时，projectRoot应锚到它的
-controlRoot，保证各成员的文件路径相对于同一个根。未传codeGraph的旧入口保留原默认
-扫描范围和Node 22.0兼容；显式SDK入口需要Node 22.5+，并支持.mts/.cts。
+controlRoot，保证各成员的文件路径相对于同一个根。
 明确声明的ProjectScope没有源码folder时直接报告错误，不回退扫描controlRoot，也不发布
 空壳generation。未声明descriptor的旧单目录调用仍以projectRoot作为来源。
 
-ProjectContext和SourceGraph共用内部CodeGraph分析作用域，不重复维护worker生命周期。
-SourceGraph文件分析只读一次文本，符号、导入关系和裸SHA256文本hash都从该版本产生；
-它不借公共ProjectContext envelope重新读取live文件，也不创建第二份活动SDK源码数据库。
-SDK路径的导入证据复用上述模块语法投影及ImportPathResolver，未引入SDK调用关系的
-猜测值。JS/TS按worker的串行处理节奏读取，避免把全仓文本同时排入IPC。
+索引的事实只有一个来源：`core/facts` 的文件事实。所有语言走同一条路径，没有按语言或按
+是否接入外部引擎分叉的提取实现。每个文件只读一次文本，内容 hash、符号、导入导出、调用点
+都从这一份文本产生；它不借公共 ProjectContext envelope 重新读取 live 文件。
+`codeGraph` 选项不影响符号与自有链接的结果，只进入索引身份并把私有运行目录排除在清单之外；
+外部引擎的边作为独立的链接来源接入。
 
-SDK SourceGraph将import与export-from统一投影为既有文件级`imports`边，metadata记录
-`dependencyKind`；同一来源到同一目标只保留一条依赖。目标内容变化时边继续成立，
-目标增删或实际输出文件出现/消失时重新解析。其路径候选与file-flow共用，存在性限定在
-本次索引库存内；这不等于完整TypeScript模块解析或跨文件调用绑定。
+清单默认包含有解析器的全部扩展名（来自 `core/facts/parserLanguage` 的唯一映射，含
+`.m`/`.mm`/`.h`、`.mts`/`.cts`、`.dart`、`.kts`），外加只做清单不做解析的文档与配置文件。
+语言标签取自 `LanguageService`。
 
-普通符号ID保持path#name，新成员使用qualifiedName；真正碰撞才增加声明kind和真实范围。
-文件的#module锚点保留给库存/导入边，用户同名变量另行消歧。变量箭头绑定仍保持既有
-SourceGraph的variable类别。内部声明kind/range不进入ProjectContext公开SymbolSummary/ref。
+索引按文件写三类边，全部带来源与分级（`metadata.resolution = { linker, strategy, tier }`）：
 
-索引器、文件分析、配置身份分别负责代际编排、文本生产、继承判定。身份包含实际SDK
-engineHash、SourceGraph自身投影版本、有效scope/roots、扫描配置和解析预算。旧快照缺少
-完整身份，或任一策略变化时，必须全量重提取；禁止保留旧符号却给新快照换版本标签。
+- `imports`：JS/TS 的相对导入与 export-from，每个（来源文件 → 目标文件）一条，
+  `metadata.dependencyKind` 记首条绑定的种类，任一条是 re-export 时 `metadata.reexport = true`。
+- `extends` / `implements`：JS/TS 的父类型名字经同文件声明或 import 绑定连到声明。
+  解析不到声明的父类型（包里的类型、其他语言）只把名字留在符号的 `metadata.heritage` 上。
+- `calls`：同文件链接与导入绑定链接的结果，一个调用点一条，带调用点位置。
+  `metadata.callKind` 区分 call / new / jsx；实例化就是目标为类型的调用边。
+  `metadata.callerAttribution` 说明调用方怎么定的：declaration 是调用点的直接拥有者；
+  enclosing 是拥有者为匿名回调、嵌套函数、对象字面量方法或初始化表达式时，归到包住它的
+  最内层声明；module 是没有任何声明包住它，归文件自身。
+
+自有链接器的边 tier 为 certain、provenance 为 deterministic。未解析的调用点不入库，
+文件元数据的 `callSites = { total, linked }` 记数量。存储顺序是文件依赖、跨文件符号边、
+文件内符号边，受预算截断的查询因此先拿到跨文件信息。
+
+普通符号ID保持path#name，成员使用qualifiedName；真正碰撞才增加声明kind和真实范围。
+文件的#module锚点保留给库存/导入边与模块顶层的调用，用户同名变量另行消歧。变量箭头绑定
+保持 variable 类别。成员在同文件有唯一容器声明时带 `containerSymbolId`。接口只收方法签名，
+属性签名不产出符号。内部声明kind/range不进入ProjectContext公开SymbolSummary/ref。
+
+解析状态：JS/TS 带真实语法错误的文件记为 failed，不入符号；语法包不认识但合法的类型层语法
+（`export type * from`、类型实参里的 `import()` 类型）不算语法错误。其他语言的语法包对合法源码
+也会报错，不据此判失败。`namespace` 成员与匿名 default 声明没有符号，文件照常入库并在文件元数据
+`uncoveredSyntax` 里记下。压缩或生成物形态的文件只留声明，记为 partial。
+
+增量构建的结果必须与同一文件集合上的全量构建相同。没改内容的文件在两种情况下也要重新链接：
+文件集合变化时，所有做相对导入解析的文件重来；只有内容变化时，重连直接导入它的文件，
+以及经 re-export 链拿到它声明的文件。沿用自上一代的文件被当作链接目标时按需重读声明，
+内容必须仍是上一代记录的那一份。来源文件被重新分析的边一律重算；指向内容已变文件的
+其余符号边不沿用。
+
+索引器、文件分析、链接、配置身份分别负责代际编排、单文件事实、出边、继承判定。身份包含
+SourceGraph自身提取版本、接入外部引擎时的 engineHash、有效scope/roots、扫描配置和解析预算。
+旧快照缺少完整身份，或任一策略变化时，必须全量重提取；禁止保留旧符号却给新快照换版本标签。
 旧generation仍可读取，查询/分页预算和SQLite同步事务不变。
 
 freshness检查以与索引一致的UTF-8正文hash核对实际内容，size/mtime相等不再跳过核验。
 因此等长修改并恢复时间戳仍会进入增量追赶；仅触碰时间戳且正文相同仍noop。这个检查
 需要读取库存文件的正文，不是单纯stat优化，也不声称得到原子的全项目快照。
 
-SDK作用域完全关闭、owner取消检查通过后才能提交generation；关闭失败或取消不得发布
-新代际。固定私有runtime父目录始终排除，即使调用方自定义ignoreDirectories；不会删除
-同目录中其它会话的资源。SDK覆盖缺口和真实语法失败会持久化为明确解析诊断。
+构建被取消时不发布新代际。固定私有runtime父目录始终排除，即使调用方自定义
+ignoreDirectories；不会删除同目录中其它会话的资源。真实语法失败会持久化为明确解析诊断。
+
+查询的低置信与歧义诊断只看查询与符号本身的匹配强度；图连通度只参与排序。被调用得多
+不能证明某个符号就是查询要找的那一个。
 
 SourceGraph是live辅助观测，不自动继承certified input closure的保证。下游库存计数提示
-同时表达freshness/ready；部分覆盖不能被计数误称为完整就绪。旧默认提取分支的退出条件
-是所有公开lifecycle消费方明确提供私有目录，并统一Core最低Node版本后完成兼容迁移。
+同时表达freshness/ready；部分覆盖不能被计数误称为完整就绪。
 
 ## 捕获期间的源码读取
 

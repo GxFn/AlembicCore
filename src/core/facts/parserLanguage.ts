@@ -15,6 +15,8 @@ export const EXTENSION_PARSER_LANGUAGE: Record<string, string> = {
   '.cts': 'typescript',
   '.dart': 'dart',
   '.go': 'go',
+  // ObjC 的类型声明写在头文件里；C/C++ 头文件也按 ObjC 语法包解析（C 是它的子集）。
+  '.h': 'objectivec',
   '.java': 'java',
   '.js': 'javascript',
   '.jsx': 'javascript',

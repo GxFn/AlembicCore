@@ -51,6 +51,70 @@ describe('SourceGraphRepository', () => {
     expect(await repo.getSnapshot('ignored-generation')).toBeNull();
   });
 
+  it('writes a whole generation in batches and lets a later duplicate replace an earlier one', async () => {
+    const repo = createAlembicRepositories(runtime.connection).sourceGraphRepository;
+    const generationId = 'batched-generation';
+    // 行数跨过多个批次；最后追加的重复键必须覆盖前面的记录，而不是报唯一键冲突或静默保留旧值。
+    const count = 450;
+    const symbol = (index: number, displayName = `symbol${index}`) => ({
+      generationId,
+      symbolId: `src/file.ts#symbol${index}`,
+      displayName,
+      kind: 'function',
+      filePath: 'src/file.ts',
+      range: { startLine: index + 1, startColumn: 0, endLine: index + 1, endColumn: 1 },
+    });
+    const edge = (index: number, confidence = 1) => ({
+      generationId,
+      edgeId: `edge-${index}`,
+      kind: 'calls',
+      fromSymbolId: `src/file.ts#symbol${index}`,
+      toSymbolId: 'src/file.ts#symbol0',
+      fromFilePath: 'src/file.ts',
+      toFilePath: 'src/file.ts',
+      confidence,
+    });
+    const file = (contentHash: string) => ({
+      generationId,
+      projectRoot: tmpDir,
+      repoRelativePath: 'src/file.ts',
+      contentHash,
+    });
+
+    const snapshot = await repo.replaceGeneration({
+      snapshot: { generationId, projectRoot: tmpDir },
+      files: [file('first'), file('second')],
+      symbols: [
+        ...Array.from({ length: count }, (_, index) => symbol(index)),
+        symbol(3, 'renamed'),
+      ],
+      edges: [...Array.from({ length: count }, (_, index) => edge(index)), edge(7, 0.5)],
+    });
+
+    expect(snapshot).toMatchObject({ fileCount: 1, symbolCount: count, edgeCount: count });
+    expect((await repo.findFile(generationId, 'src/file.ts'))?.contentHash).toBe('second');
+    const symbols = await repo.listSymbols(generationId);
+    expect(symbols).toHaveLength(count);
+    expect(symbols.find((item) => item.symbolId === 'src/file.ts#symbol3')?.displayName).toBe(
+      'renamed'
+    );
+    // 被覆盖的记录留在首次出现的位置，读取顺序不变。
+    expect(symbols.slice(0, 5).map((item) => item.symbolId)).toEqual(
+      [0, 1, 2, 3, 4].map((index) => `src/file.ts#symbol${index}`)
+    );
+    const edges = await repo.listGenerationEdges(generationId);
+    expect(edges).toHaveLength(count);
+    expect(edges.find((item) => item.edgeId === 'edge-7')?.confidence).toBe(0.5);
+
+    // 再写一次同一代：旧行整体替换，不残留。
+    await repo.replaceGeneration({
+      snapshot: { generationId, projectRoot: tmpDir },
+      symbols: [symbol(1)],
+    });
+    expect(await repo.listSymbols(generationId)).toHaveLength(1);
+    expect(await repo.listGenerationEdges(generationId)).toEqual([]);
+  });
+
   it('separates complete generation edges from bounded query results without crossing generations', async () => {
     const repo = createAlembicRepositories(runtime.connection).sourceGraphRepository;
     const generationId = 'complete-edge-read';

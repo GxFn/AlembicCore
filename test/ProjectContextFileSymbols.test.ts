@@ -86,6 +86,8 @@ describe('ProjectContext PCQ-2 file-symbols', () => {
         data.symbols.map((symbol) => [symbol.kind, symbol.qualifiedName ?? symbol.name])
       ).toEqual([
         ['interface', 'ServicePort'],
+        // 接口成员与类成员一样列在所属类型之后。
+        ['method', 'ServicePort.run'],
         ['type', 'ServiceState'],
         ['class', 'WorkerService'],
         ['property', 'WorkerService.state'],
@@ -102,7 +104,7 @@ describe('ProjectContext PCQ-2 file-symbols', () => {
         range: { endLine: 12, startLine: 5 },
       });
       expect(data.symbols.every((symbol) => symbol.ref?.kind === 'file-symbol')).toBe(true);
-      expect(data.naming.convention).toBe('typescript symbols: 4 exported / 11 total');
+      expect(data.naming.convention).toBe('typescript symbols: 4 exported / 12 total');
       expect(new Set(data.symbols.map((symbol) => symbol.ref?.id)).size).toBe(data.symbols.length);
       expect(data.nextRefs.every((ref) => ref.kind === 'source-slice')).toBe(true);
       expect(data.nextRefs.length).toBeLessThanOrEqual(data.symbols.length);

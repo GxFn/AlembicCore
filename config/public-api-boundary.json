@@ -152,10 +152,9 @@
           "decision": "consumer-ready-stable",
           "targetFacade": "./test-fixtures",
           "symbols": [
-            "ImportPathResolver",
             "ImportRecord"
           ],
-          "reason": "CO-5B exposes import records and path resolution through the test-only fixture facade. The legacy call-graph engine (CallGraphAnalyzer, CallEdgeResolver, DataFlowInferrer, SymbolTableBuilder) was removed on 2026-10-01: no production caller in any repository; cross-file relations are owned by the source-graph index."
+          "reason": "CO-5B exposes import records through the test-only fixture facade. The legacy call-graph engine (CallGraphAnalyzer, CallEdgeResolver, DataFlowInferrer, SymbolTableBuilder) and ImportPathResolver were removed on 2026-10-01: no production caller in any repository; cross-file relations are owned by the source-graph index and import targets are resolved by core/linking."
         },
         "@alembic/core/core/ast": {
           "decision": "consumer-ready-stable",

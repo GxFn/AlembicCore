@@ -189,15 +189,26 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
         tx.delete(sourceGraphFiles)
           .where(eq(sourceGraphFiles.generationId, preparedSnapshot.generationId))
           .run();
-        for (const file of preparedFiles) {
-          this.writeFile(file, tx);
-        }
-        for (const symbol of preparedSymbols) {
-          this.writeSymbol(symbol, preparedSnapshot.projectRoot, tx);
-        }
-        for (const edge of preparedEdges) {
-          this.writeEdge(edge, preparedSnapshot.projectRoot, tx);
-        }
+        // 这一代的旧行已在上面删除，冲突只可能来自输入内部的重复键。按键合并（后者覆盖前者、
+        // 保留首次出现的位置，与逐行 upsert 的结果相同）之后整批写入：一代图有上万行，
+        // 逐行构造语句是构建里最慢的一段。
+        const projectRoot = preparedSnapshot.projectRoot;
+        insertInChunks(
+          lastByKey(preparedFiles, (file) => file.repoRelativePath).map(fileValues),
+          (rows) => tx.insert(sourceGraphFiles).values(rows).run()
+        );
+        insertInChunks(
+          lastByKey(preparedSymbols, (symbol) => symbol.symbolId).map((symbol) =>
+            symbolValues(symbol, projectRoot)
+          ),
+          (rows) => tx.insert(sourceGraphSymbols).values(rows).run()
+        );
+        insertInChunks(
+          lastByKey(preparedEdges, (edge) => edge.edgeId).map((edge) =>
+            edgeValues(edge, projectRoot)
+          ),
+          (rows) => tx.insert(sourceGraphEdges).values(rows).run()
+        );
         return (
           this.refreshGenerationStats(preparedSnapshot.generationId, tx) ??
           this.getRequiredSnapshot(preparedSnapshot.generationId, tx)
@@ -585,37 +596,13 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
   }
 
   private writeFile(node: SourceFileNode, db: GraphWriteDatabase = this.drizzle): void {
+    const values = fileValues(node);
+    const { generationId: _generationId, repoRelativePath: _path, ...set } = values;
     db.insert(sourceGraphFiles)
-      .values({
-        generationId: node.generationId,
-        projectRoot: node.projectRoot,
-        repoRelativePath: node.repoRelativePath,
-        language: node.language,
-        contentHash: node.contentHash,
-        sizeBytes: node.sizeBytes,
-        mtimeMs: node.mtimeMs,
-        indexedAt: node.indexedAt,
-        classification: node.classification,
-        parseStatus: node.parseStatus,
-        parseErrorsJson: JSON.stringify(node.parseErrors),
-        lineCount: node.lineCount,
-        metadataJson: JSON.stringify(node.metadata),
-      })
+      .values(values)
       .onConflictDoUpdate({
         target: [sourceGraphFiles.generationId, sourceGraphFiles.repoRelativePath],
-        set: {
-          projectRoot: node.projectRoot,
-          language: node.language,
-          contentHash: node.contentHash,
-          sizeBytes: node.sizeBytes,
-          mtimeMs: node.mtimeMs,
-          indexedAt: node.indexedAt,
-          classification: node.classification,
-          parseStatus: node.parseStatus,
-          parseErrorsJson: JSON.stringify(node.parseErrors),
-          lineCount: node.lineCount,
-          metadataJson: JSON.stringify(node.metadata),
-        },
+        set,
       })
       .run();
   }
@@ -625,53 +612,13 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
     projectRoot: string,
     db: GraphWriteDatabase = this.drizzle
   ): void {
+    const values = symbolValues(node, projectRoot);
+    const { generationId: _generationId, symbolId: _symbolId, ...set } = values;
     db.insert(sourceGraphSymbols)
-      .values({
-        generationId: node.generationId,
-        projectRoot,
-        symbolId: node.symbolId,
-        displayName: node.displayName,
-        qualifiedName: node.qualifiedName,
-        kind: node.kind,
-        filePath: node.filePath,
-        startLine: node.range.startLine,
-        startColumn: node.range.startColumn,
-        endLine: node.range.endLine,
-        endColumn: node.range.endColumn,
-        selectionStartLine: node.selectionRange?.startLine,
-        selectionStartColumn: node.selectionRange?.startColumn,
-        selectionEndLine: node.selectionRange?.endLine,
-        selectionEndColumn: node.selectionRange?.endColumn,
-        signature: node.signature,
-        containerSymbolId: node.containerSymbolId,
-        exported: node.exported ? 1 : 0,
-        imported: node.imported ? 1 : 0,
-        metadataJson: JSON.stringify(node.metadata),
-        provenanceJson: JSON.stringify(node.provenance),
-      })
+      .values(values)
       .onConflictDoUpdate({
         target: [sourceGraphSymbols.generationId, sourceGraphSymbols.symbolId],
-        set: {
-          projectRoot,
-          displayName: node.displayName,
-          qualifiedName: node.qualifiedName,
-          kind: node.kind,
-          filePath: node.filePath,
-          startLine: node.range.startLine,
-          startColumn: node.range.startColumn,
-          endLine: node.range.endLine,
-          endColumn: node.range.endColumn,
-          selectionStartLine: node.selectionRange?.startLine,
-          selectionStartColumn: node.selectionRange?.startColumn,
-          selectionEndLine: node.selectionRange?.endLine,
-          selectionEndColumn: node.selectionRange?.endColumn,
-          signature: node.signature,
-          containerSymbolId: node.containerSymbolId,
-          exported: node.exported ? 1 : 0,
-          imported: node.imported ? 1 : 0,
-          metadataJson: JSON.stringify(node.metadata),
-          provenanceJson: JSON.stringify(node.provenance),
-        },
+        set,
       })
       .run();
   }
@@ -681,45 +628,13 @@ export class SourceGraphRepositoryImpl extends RepositoryBase<
     projectRoot: string,
     db: GraphWriteDatabase = this.drizzle
   ): void {
+    const values = edgeValues(edge, projectRoot);
+    const { generationId: _generationId, edgeId: _edgeId, ...set } = values;
     db.insert(sourceGraphEdges)
-      .values({
-        generationId: edge.generationId,
-        projectRoot,
-        edgeId: edge.edgeId,
-        kind: edge.kind,
-        fromSymbolId: edge.fromSymbolId,
-        toSymbolId: edge.toSymbolId,
-        fromFilePath: edge.fromFilePath,
-        toFilePath: edge.toFilePath,
-        siteFilePath: edge.siteFilePath,
-        siteStartLine: edge.site?.startLine,
-        siteStartColumn: edge.site?.startColumn,
-        siteEndLine: edge.site?.endLine,
-        siteEndColumn: edge.site?.endColumn,
-        provenance: edge.provenance,
-        confidence: edge.confidence,
-        source: edge.source,
-        metadataJson: JSON.stringify(edge.metadata),
-      })
+      .values(values)
       .onConflictDoUpdate({
         target: [sourceGraphEdges.generationId, sourceGraphEdges.edgeId],
-        set: {
-          projectRoot,
-          kind: edge.kind,
-          fromSymbolId: edge.fromSymbolId,
-          toSymbolId: edge.toSymbolId,
-          fromFilePath: edge.fromFilePath,
-          toFilePath: edge.toFilePath,
-          siteFilePath: edge.siteFilePath,
-          siteStartLine: edge.site?.startLine,
-          siteStartColumn: edge.site?.startColumn,
-          siteEndLine: edge.site?.endLine,
-          siteEndColumn: edge.site?.endColumn,
-          provenance: edge.provenance,
-          confidence: edge.confidence,
-          source: edge.source,
-          metadataJson: JSON.stringify(edge.metadata),
-        },
+        set,
       })
       .run();
   }
@@ -1026,6 +941,90 @@ function parseJsonArray<T>(raw: string | null): T[] {
 
 function countRows(rows: Array<{ cnt: number }>): number {
   return rows[0]?.cnt ?? 0;
+}
+
+/** 每批行数。列最多的表有 21 列，200 行远低于 SQLite 的单语句变量上限。 */
+const INSERT_CHUNK_ROWS = 200;
+
+function insertInChunks<T>(rows: readonly T[], insert: (chunk: T[]) => void): void {
+  for (let offset = 0; offset < rows.length; offset += INSERT_CHUNK_ROWS) {
+    insert(rows.slice(offset, offset + INSERT_CHUNK_ROWS));
+  }
+}
+
+/** 同键的记录只留最后一条，位置取首次出现处。 */
+function lastByKey<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
+  const byKey = new Map<string, T>();
+  for (const item of items) {
+    byKey.set(keyOf(item), item);
+  }
+  return [...byKey.values()];
+}
+
+function fileValues(node: SourceFileNode) {
+  return {
+    generationId: node.generationId,
+    projectRoot: node.projectRoot,
+    repoRelativePath: node.repoRelativePath,
+    language: node.language,
+    contentHash: node.contentHash,
+    sizeBytes: node.sizeBytes,
+    mtimeMs: node.mtimeMs,
+    indexedAt: node.indexedAt,
+    classification: node.classification,
+    parseStatus: node.parseStatus,
+    parseErrorsJson: JSON.stringify(node.parseErrors),
+    lineCount: node.lineCount,
+    metadataJson: JSON.stringify(node.metadata),
+  };
+}
+
+function symbolValues(node: SourceSymbolNode, projectRoot: string) {
+  return {
+    generationId: node.generationId,
+    projectRoot,
+    symbolId: node.symbolId,
+    displayName: node.displayName,
+    qualifiedName: node.qualifiedName,
+    kind: node.kind,
+    filePath: node.filePath,
+    startLine: node.range.startLine,
+    startColumn: node.range.startColumn,
+    endLine: node.range.endLine,
+    endColumn: node.range.endColumn,
+    selectionStartLine: node.selectionRange?.startLine,
+    selectionStartColumn: node.selectionRange?.startColumn,
+    selectionEndLine: node.selectionRange?.endLine,
+    selectionEndColumn: node.selectionRange?.endColumn,
+    signature: node.signature,
+    containerSymbolId: node.containerSymbolId,
+    exported: node.exported ? 1 : 0,
+    imported: node.imported ? 1 : 0,
+    metadataJson: JSON.stringify(node.metadata),
+    provenanceJson: JSON.stringify(node.provenance),
+  };
+}
+
+function edgeValues(edge: SourceGraphEdge, projectRoot: string) {
+  return {
+    generationId: edge.generationId,
+    projectRoot,
+    edgeId: edge.edgeId,
+    kind: edge.kind,
+    fromSymbolId: edge.fromSymbolId,
+    toSymbolId: edge.toSymbolId,
+    fromFilePath: edge.fromFilePath,
+    toFilePath: edge.toFilePath,
+    siteFilePath: edge.siteFilePath,
+    siteStartLine: edge.site?.startLine,
+    siteStartColumn: edge.site?.startColumn,
+    siteEndLine: edge.site?.endLine,
+    siteEndColumn: edge.site?.endColumn,
+    provenance: edge.provenance,
+    confidence: edge.confidence,
+    source: edge.source,
+    metadataJson: JSON.stringify(edge.metadata),
+  };
 }
 
 function normalizeLimit(limit: number | undefined): number {

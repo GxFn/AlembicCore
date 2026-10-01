@@ -10,6 +10,7 @@
 
 import { extractCallSitesTS } from './extract/CallSiteExtractor.js';
 import { ImportRecord, type ImportRecordMeta } from './extract/ImportRecord.js';
+import { FUNCTION_VALUE_TYPES } from './extract/JsDeclarationCollector.js';
 import { astNodeRange } from './nodeRange.js';
 
 function walkTypeScript(root: any, ctx: any) {
@@ -283,9 +284,11 @@ function _parseTSFunction(node: any, className: any) {
 }
 
 function _parseTSMethod(node: any, className: any) {
+  // `#name` 是真实的成员名（private_property_identifier），与调用点里的 this.#name 同形。
   const nameNode = node.namedChildren.find(
     (c: any) =>
       c.type === 'property_identifier' ||
+      c.type === 'private_property_identifier' ||
       c.type === 'identifier' ||
       c.type === 'computed_property_name'
   );
@@ -316,7 +319,10 @@ function _parseTSMethod(node: any, className: any) {
 }
 
 function _parseTSProperty(node: any, className: any) {
-  const name = node.namedChildren.find((c: any) => c.type === 'property_identifier')?.text || null;
+  const name =
+    node.namedChildren.find(
+      (c: any) => c.type === 'property_identifier' || c.type === 'private_property_identifier'
+    )?.text || null;
   if (!name) {
     return null;
   }
@@ -452,9 +458,7 @@ function _parseTSVariableDecl(node: any, ctx: any, parentClassName: any) {
   for (const child of node.namedChildren) {
     if (child.type === 'variable_declarator') {
       const nameNode = child.namedChildren.find((c: any) => c.type === 'identifier');
-      const valueNode = child.namedChildren.find(
-        (c: any) => c.type === 'arrow_function' || c.type === 'function'
-      );
+      const valueNode = child.namedChildren.find((c: any) => FUNCTION_VALUE_TYPES.has(c.type));
       if (nameNode && valueNode) {
         const body = valueNode.namedChildren.find((c: any) => c.type === 'statement_block');
         ctx.methods.push({

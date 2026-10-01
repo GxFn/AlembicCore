@@ -7,6 +7,7 @@
 
 // JavaScript walker 与 TypeScript walker 结构相同
 // 复用 lang-typescript 的 walker 逻辑
+import { FUNCTION_VALUE_TYPES } from './extract/JsDeclarationCollector.js';
 import { astNodeRange } from './nodeRange.js';
 
 function walkJavaScript(root: any, ctx: any) {
@@ -72,8 +73,12 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
   for (let i = 0; i < body.namedChildCount; i++) {
     const child = body.namedChild(i);
     if (child.type === 'method_definition') {
+      // `#name` 是真实的成员名（private_property_identifier），与调用点里的 this.#name 同形。
       const nameNode = child.namedChildren.find(
-        (c: any) => c.type === 'property_identifier' || c.type === 'identifier'
+        (c: any) =>
+          c.type === 'property_identifier' ||
+          c.type === 'private_property_identifier' ||
+          c.type === 'identifier'
       );
       const name = nameNode?.text || 'unknown';
 
@@ -96,7 +101,9 @@ function _walkJSClassBody(body: any, ctx: any, className: any) {
         kind: 'definition',
       });
     } else if (child.type === 'field_definition' || child.type === 'public_field_definition') {
-      const name = child.namedChildren.find((c: any) => c.type === 'property_identifier')?.text;
+      const name = child.namedChildren.find(
+        (c: any) => c.type === 'property_identifier' || c.type === 'private_property_identifier'
+      )?.text;
       if (name) {
         const isStatic = child.text.trimStart().startsWith('static');
         ctx.properties.push({
@@ -234,9 +241,7 @@ function _parseJSVariableDecl(node: any, ctx: any, parentClassName: any) {
   for (const child of node.namedChildren) {
     if (child.type === 'variable_declarator') {
       const nameNode = child.namedChildren.find((c: any) => c.type === 'identifier');
-      const valueNode = child.namedChildren.find(
-        (c: any) => c.type === 'arrow_function' || c.type === 'function'
-      );
+      const valueNode = child.namedChildren.find((c: any) => FUNCTION_VALUE_TYPES.has(c.type));
       if (nameNode && valueNode) {
         const body = valueNode.namedChildren.find((c: any) => c.type === 'statement_block');
         ctx.methods.push({

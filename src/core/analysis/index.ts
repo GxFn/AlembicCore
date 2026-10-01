@@ -1,5 +1,4 @@
-// 冻结的导出子路径 ./core/analysis：提取器已搬入 core/ast/extract（语法层自包含，
-// 不再反向依赖本目录），这里只为保持导出键而转发。导入目标解析仍在本目录，后续并入链接层。
+// 冻结的导出子路径 ./core/analysis：提取器在 core/ast/extract（语法层自包含），
+// 导入目标解析在 core/linking。本目录不再有实现，只为保持导出键而转发。
 export * from '../ast/extract/CallSiteExtractor.js';
 export * from '../ast/extract/ImportRecord.js';
-export * from './ImportPathResolver.js';

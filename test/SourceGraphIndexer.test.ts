@@ -6,7 +6,6 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
-import { CodeGraphProcess } from '../src/infrastructure/analysis/CodeGraphProcess.js';
 import { pathGuard } from '../src/io.js';
 import { createAlembicRepositories } from '../src/repositories.js';
 import {
@@ -41,7 +40,10 @@ describe('SourceGraphIndexer', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('persists actual SDK declarations without comment symbols, lost collisions or a replaced module anchor', async () => {
+  it.each([
+    false,
+    true,
+  ])('persists real declarations without comment symbols, lost collisions or a replaced module anchor (codeGraph option=%s)', async (withCodeGraph) => {
     const content = [
       'import {',
       '  helper,',
@@ -64,21 +66,13 @@ describe('SourceGraphIndexer', () => {
     writeFixture('src/util.ts', 'export function helper() { return 1; }');
     writeFixture('src/ghost.ts', 'export const ghost = 1;');
     const { sourceGraphRepository } = createAlembicRepositories(runtime.connection);
-    const dataRoot = path.join(tmpDir, 'private');
-    const runtimeRoot = path.join(dataRoot, '.asd/codegraph-sessions');
-    const originalReplace = sourceGraphRepository.replaceGeneration.bind(sourceGraphRepository);
-    const publish = vi
-      .spyOn(sourceGraphRepository, 'replaceGeneration')
-      .mockImplementation(async (input) => {
-        // 最后一条符号不是提交点；SDK scope 必须先关闭，清理失败不能事后留下成功generation。
-        expect(fs.readdirSync(runtimeRoot)).toEqual([]);
-        return originalReplace(input);
-      });
+    const publish = vi.spyOn(sourceGraphRepository, 'replaceGeneration');
+    // 声明来自自有的文件事实；是否接入外部引擎不改变符号与自有链接的结果。
     const result = await new SourceGraphIndexer(sourceGraphRepository).buildFull({
       projectRoot: tmpDir,
       projectScope: 'src',
-      generationId: 'sdk-declarations',
-      codeGraph: { dataRoot },
+      generationId: 'declarations',
+      ...(withCodeGraph ? { codeGraph: { dataRoot: path.join(tmpDir, 'private') } } : {}),
     });
     expect(publish).toHaveBeenCalledOnce();
     expect(result.status.ready).toBe(true);
@@ -106,14 +100,29 @@ describe('SourceGraphIndexer', () => {
     expect(symbols.filter((symbol) => symbol.qualifiedName === 'A.value')).toHaveLength(2);
     expect(new Set(symbols.map((symbol) => symbol.symbolId)).size).toBe(symbols.length);
     // 验证实际SQLite代际，不只校验构建器返回值；正文/模板/同名成员不能持久化成伪import。
-    const persistedEdges = await sourceGraphRepository.listGenerationEdges('sdk-declarations');
-    expect(persistedEdges.map((edge) => [edge.fromFilePath, edge.toFilePath])).toEqual([
-      ['src/index.ts', 'src/util.ts'],
-    ]);
+    const persistedEdges = await sourceGraphRepository.listGenerationEdges('declarations');
+    expect(
+      persistedEdges
+        .filter((edge) => edge.kind === 'imports')
+        .map((edge) => [edge.fromFilePath, edge.toFilePath])
+    ).toEqual([['src/index.ts', 'src/util.ts']]);
+    expect(persistedEdges.some((edge) => edge.toFilePath === 'src/ghost.ts')).toBe(false);
     expect(result.edges[0].fromSymbolId).toBe('src/index.ts#module');
+    // `export const load = () => helper()`：调用经 import 绑定连到 util 里的声明。
+    expect(persistedEdges.filter((edge) => edge.kind === 'calls')).toEqual([
+      expect.objectContaining({
+        fromSymbolId: 'src/index.ts#load',
+        toSymbolId: 'src/util.ts#helper',
+        provenance: 'deterministic',
+        metadata: expect.objectContaining({
+          resolution: { linker: 'import-binding', strategy: 'named-import', tier: 'certain' },
+          callerAttribution: 'declaration',
+        }),
+      }),
+    ]);
   });
 
-  it('rebuilds a legacy generation with the actual SDK identity then reuses only the matching generation', async () => {
+  it('rebuilds when the external engine enters the index identity, then reuses only the matching generation', async () => {
     writeFixture('src/index.ts', 'export class App { run() { return 1; } }');
     const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
     const lifecycle = new SourceGraphLifecycleService(repository);
@@ -123,18 +132,19 @@ describe('SourceGraphIndexer', () => {
       generationId: 'legacy',
       now: 1000,
     });
+    // 成员声明不依赖外部引擎；两条路线的符号相同，区别只在索引身份。
     expect(legacy.build?.symbols.some((symbol) => symbol.symbolId === 'src/index.ts#App.run')).toBe(
-      false
+      true
     );
     const sdkInput = { ...input, codeGraph: { dataRoot: path.join(tmpDir, 'private') } };
     const sdk = await lifecycle.catchUpOnStartup({ ...sdkInput, generationId: 'sdk', now: 2000 });
     expect(sdk.action).toBe('built-full');
-    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v2:');
+    expect(sdk.build?.snapshot.extractionVersion).toContain('source-graph-codegraph-v3:');
     expect(sdk.build?.symbols.some((symbol) => symbol.symbolId === 'src/index.ts#App.run')).toBe(
       true
     );
     expect((await repository.getSnapshot('legacy'))?.extractionVersion).toBe(
-      'source-graph-indexer-v1'
+      'source-graph-indexer-v2'
     );
     const reopen = new SourceGraphLifecycleService(repository);
     expect((await reopen.catchUpOnStartup({ ...sdkInput, now: 3000 })).action).toBe('fresh-noop');
@@ -271,38 +281,29 @@ describe('SourceGraphIndexer', () => {
     expect(result.symbols.map((symbol) => symbol.displayName)).not.toContain('laterVersion');
   });
 
-  it.each([
-    'abort',
-    'failure',
-  ])('does not publish a generation when SDK cleanup ends with %s', async (mode) => {
+  it('does not publish a generation when the build is cancelled before publication', async () => {
     writeFixture('src/index.ts', 'export const value = 1;');
     const repository = createAlembicRepositories(runtime.connection).sourceGraphRepository;
     const indexer = new SourceGraphIndexer(repository);
     const input = { projectRoot: tmpDir, projectScope: 'src' };
     await indexer.buildFull({ ...input, generationId: 'prior' });
     const controller = new AbortController();
-    const dataRoot = path.join(tmpDir, 'private');
-    const close = CodeGraphProcess.prototype.close;
     const reason = new DOMException('Cancelled before generation publication', 'AbortError');
-    vi.spyOn(CodeGraphProcess.prototype, 'close').mockImplementation(async function (...args) {
-      await close.apply(this, args);
-      if (mode === 'abort') {
+    const filePath = path.join(tmpDir, 'src/index.ts');
+    const read = fsPromises.readFile.bind(fsPromises);
+    vi.spyOn(fsPromises, 'readFile').mockImplementation(async (...args) => {
+      const result = await read(...args);
+      if (args[0] === filePath) {
+        // 文件已经读完、分析尚未提交时取消：不能留下一个"成功"的新代际。
         controller.abort(reason);
-      } else {
-        throw new Error('SDK cleanup failed');
       }
+      return result;
     });
     await expect(
-      indexer.buildFull({
-        ...input,
-        generationId: 'cancelled',
-        codeGraph: { dataRoot },
-        signal: controller.signal,
-      })
-    ).rejects.toMatchObject({ message: mode === 'abort' ? reason.message : 'SDK cleanup failed' });
+      indexer.buildFull({ ...input, generationId: 'cancelled', signal: controller.signal })
+    ).rejects.toMatchObject({ message: reason.message });
     expect(await repository.getSnapshot('cancelled')).toBeNull();
     expect(await repository.getSnapshot('prior')).not.toBeNull();
-    expect(fs.readdirSync(path.join(dataRoot, '.asd/codegraph-sessions'))).toEqual([]);
   });
 
   it('excludes the shared private runtime with custom exclusions and leaves another session untouched', async () => {
@@ -342,7 +343,7 @@ describe('SourceGraphIndexer', () => {
     expect(fs.existsSync(path.join(dataRoot, '.asd/codegraph-sessions'))).toBe(false);
   });
 
-  it('reports real syntax and SDK coverage failures while a parser-marker string remains valid source', async () => {
+  it('fails only files with real syntax errors and records declaration forms it does not cover', async () => {
     writeFixture('src/broken.ts', 'export class Broken {');
     writeFixture('src/namespace.ts', 'export namespace Models { export class Box {} }');
     writeFixture('src/valid.ts', 'export const marker = "SOURCE_GRAPH_PARSE_FAILURE";');
@@ -356,9 +357,14 @@ describe('SourceGraphIndexer', () => {
     expect(result.status.ready).toBe(false);
     expect(result.files.map((file) => [file.repoRelativePath, file.parseStatus])).toEqual([
       ['src/broken.ts', 'failed'],
-      ['src/namespace.ts', 'failed'],
+      ['src/namespace.ts', 'parsed'],
       ['src/valid.ts', 'parsed'],
     ]);
+    // namespace 的成员没有符号；文件照常入库，缺口记在文件元数据里而不是伪装成完整覆盖。
+    expect(
+      result.files.find((file) => file.repoRelativePath === 'src/namespace.ts')?.metadata
+    ).toMatchObject({ uncoveredSyntax: ['namespace'] });
+    expect(result.symbols.map((symbol) => symbol.displayName)).not.toContain('Box');
     expect(result.symbols.map((symbol) => symbol.displayName)).toContain('marker');
     expect(result.diagnostics.every((diagnostic) => diagnostic.code === 'catch-up-failed')).toBe(
       true
@@ -389,7 +395,7 @@ describe('SourceGraphIndexer', () => {
       projectScope: 'src',
       status: 'indexed',
       fileCount: 2,
-      edgeCount: 1,
+      edgeCount: 2,
     });
     expect(result.status.ready).toBe(true);
     expect(result.files.map((file) => file.repoRelativePath)).toStrictEqual([
@@ -399,11 +405,22 @@ describe('SourceGraphIndexer', () => {
     expect(result.symbols.map((symbol) => symbol.displayName)).toEqual(
       expect.arrayContaining(['index.ts', 'util.ts', 'App', 'helper'])
     );
+    // 文件依赖排在前面；模块顶层的 helper() 调用归文件自身。
     expect(result.edges[0]).toMatchObject({
       kind: 'imports',
       fromFilePath: 'src/index.ts',
       toFilePath: 'src/util.ts',
     });
+    expect(result.edges[1]).toMatchObject({
+      kind: 'calls',
+      fromSymbolId: 'src/index.ts#module',
+      toSymbolId: 'src/util.ts#helper',
+      site: { startLine: 3 },
+      metadata: { callerAttribution: 'module', callKind: 'call' },
+    });
+    expect(
+      result.files.find((file) => file.repoRelativePath === 'src/index.ts')?.metadata
+    ).toMatchObject({ callSites: { total: 1, linked: 1 } });
   });
 
   it('retains every generation edge across full and unchanged incremental builds beyond query limits', async () => {
@@ -658,11 +675,12 @@ describe('SourceGraphIndexer', () => {
 
     expect(incremental.changedFiles).toStrictEqual(['src/new.ts', 'src/util.ts']);
     expect(incremental.deletedFiles).toStrictEqual(['src/index.ts']);
+    // new.ts 对 util.ts 的文件依赖，加上 next() 里对 helper 的调用。
     expect(incremental.snapshot).toMatchObject({
       generationId: 'gen-incremental',
       status: 'indexed',
       fileCount: 2,
-      edgeCount: 1,
+      edgeCount: 2,
     });
     expect(await sourceGraphRepository.findFile('gen-incremental', 'src/index.ts')).toBeNull();
     expect(
@@ -674,7 +692,7 @@ describe('SourceGraphIndexer', () => {
     expect(incremental.status.ready).toBe(true);
   });
 
-  it('preserves unchanged importers when their target changes, disappears, and returns', async () => {
+  it('keeps unchanged importers linked when their target changes, disappears, and returns', async () => {
     writeFixture(
       'src/index.ts',
       "import { helper } from './util';\nexport const value = helper();\n"
@@ -684,12 +702,23 @@ describe('SourceGraphIndexer', () => {
     const indexer = new SourceGraphIndexer(repository);
     const options = { projectRoot: tmpDir, repoId: 'fixture', projectScope: 'src' };
     const full = await indexer.buildFull({ ...options, generationId: 'imports-full', now: 1000 });
-    const expectedEdge = {
-      kind: 'imports',
-      fromFilePath: 'src/index.ts',
-      toFilePath: 'src/util.ts',
-    };
-    expect(full.edges).toEqual([expect.objectContaining(expectedEdge)]);
+    const expectedEdges = (generationId: string) => [
+      expect.objectContaining({
+        generationId,
+        kind: 'imports',
+        fromFilePath: 'src/index.ts',
+        toFilePath: 'src/util.ts',
+      }),
+      // 初始化表达式里的调用归到被初始化的声明。
+      expect.objectContaining({
+        generationId,
+        kind: 'calls',
+        fromSymbolId: 'src/index.ts#value',
+        toSymbolId: 'src/util.ts#helper',
+        metadata: expect.objectContaining({ callerAttribution: 'enclosing' }),
+      }),
+    ];
+    expect(full.edges).toEqual(expectedEdges('imports-full'));
 
     writeFixture('src/util.ts', 'export function helper() { return 222; }\n');
     const edited = await indexer.buildIncremental({
@@ -698,9 +727,7 @@ describe('SourceGraphIndexer', () => {
       now: 2000,
     });
     expect(edited.changedFiles).toEqual(['src/util.ts']);
-    expect(edited.edges).toEqual([
-      expect.objectContaining({ ...expectedEdge, generationId: 'imports-edited' }),
-    ]);
+    expect(edited.edges).toEqual(expectedEdges('imports-edited'));
 
     fs.unlinkSync(path.join(tmpDir, 'src/util.ts'));
     const deleted = await indexer.buildIncremental({
@@ -719,16 +746,14 @@ describe('SourceGraphIndexer', () => {
       now: 4000,
     });
     expect(restored.changedFiles).toEqual(['src/util.ts']);
-    expect(restored.edges).toEqual([
-      expect.objectContaining({ ...expectedEdge, generationId: 'imports-restored' }),
-    ]);
+    expect(restored.edges).toEqual(expectedEdges('imports-restored'));
   });
 
   it('records partial and degraded accounting for large, unsupported, timeout, and parse-failed files', async () => {
     writeFixture('src/ok.ts', 'export const ok = true;\n');
     writeFixture('src/large.ts', `export const large = '${'x'.repeat(120)}';\n`);
     writeFixture('src/timeout.ts', `export const slow = '${'y'.repeat(60)}';\n`);
-    writeFixture('src/Broken.ts', 'SOURCE_GRAPH_PARSE_FAILURE\n');
+    writeFixture('src/Broken.ts', 'export class Broken {\n');
     // Track2-b(2026-07-11):Swift 走 AST 解析(不再 unsupported)——正向断言其 parsed;
     // 真正 unsupported 的样本换 ruby(不在 AST_PARSER_LANGUAGES)。
     writeFixture('src/App.swift', 'struct App {}\n');
@@ -779,7 +804,7 @@ describe('SourceGraphIndexer', () => {
 
   it('retains unchanged parsing gaps and diagnostics until those files are reparsed or deleted', async () => {
     writeFixture('src/ok.ts', 'export const ok = 1;\n');
-    writeFixture('src/broken.ts', 'SOURCE_GRAPH_PARSE_FAILURE\n');
+    writeFixture('src/broken.ts', 'export class Broken {\n');
     writeFixture('src/legacy.rb', 'class Legacy; end\n');
     writeFixture('src/partial.ts', `export const partial = '${'p'.repeat(60)}';\n`);
     writeFixture('src/large.ts', `export const large = '${'l'.repeat(120)}';\n`);
