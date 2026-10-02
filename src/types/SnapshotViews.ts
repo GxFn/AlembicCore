@@ -72,25 +72,3 @@ export interface PipelineFillView {
   /** 跳过会写入目标项目根目录的 Cursor/Wiki/Agent instruction 交付步骤 */
   readonly skipTargetDelivery?: boolean;
 }
-
-// ─── 视图 1: toSessionCache ──────────────────────────────────
-
-/**
- * 从 ProjectSnapshot 提取 GenerateSession 的 phase cache 数据。
- *
- * 替代当前 handler 中手动拼装的 setSnapshotCache({...}) 调用。
- */
-export function toSessionCache(snapshot: ProjectSnapshot): SessionCacheShape {
-  return {
-    allFiles: snapshot.allFiles,
-    astProjectSummary: snapshot.ast,
-    codeEntityResult: snapshot.codeEntityGraph,
-    callGraphResult: snapshot.callGraph,
-    depGraphData: snapshot.dependencyGraph,
-    guardAudit: snapshot.guardAudit,
-    langStats: snapshot.language.stats,
-    primaryLang: snapshot.language.primaryLang,
-    targetsSummary: snapshot.targetsSummary,
-    localPackageModules: snapshot.localPackageModules,
-  };
-}

@@ -1,6 +1,6 @@
 import type { ProjectContextRef } from '../../../../../domain/project-context/index.js';
 import { sortUnique } from './StableIdentity.js';
-import type { HostAgentStructuralEvidenceKind, HostAgentStructuralEvidenceRef } from './Types.js';
+import type { HostAgentStructuralEvidenceRef } from './Types.js';
 
 export function scoreProjectContextRef(ref: ProjectContextRef): number {
   switch (ref.kind) {
@@ -22,28 +22,6 @@ export function scoreProjectContextRef(ref: ProjectContextRef): number {
     default:
       return 60;
   }
-}
-
-export function preferredEvidenceKinds(dimensionId: string): Set<HostAgentStructuralEvidenceKind> {
-  if (dimensionId.includes('architecture') || dimensionId.includes('module')) {
-    return new Set(['dependency', 'module', 'ast', 'panorama']);
-  }
-  if (
-    dimensionId.includes('flow') ||
-    dimensionId.includes('event') ||
-    dimensionId.includes('data') ||
-    dimensionId.includes('call')
-  ) {
-    return new Set(['callgraph', 'dependency', 'ast']);
-  }
-  if (
-    dimensionId.includes('quality') ||
-    dimensionId.includes('guard') ||
-    dimensionId.includes('standard')
-  ) {
-    return new Set(['guard', 'ast', 'file']);
-  }
-  return new Set(['ast', 'dependency', 'guard', 'module', 'file']);
 }
 
 export function expectedEvidenceForDimension(

@@ -15,7 +15,7 @@ const exactExportPaths = Object.keys(pkg.exports).filter((exportPath) => !export
 const requiredRootExports = [
   'DEFAULT_FOLDER_NAMES',
   'KnowledgeRepositoryImpl',
-  'createHostAgentWorkflowSession',
+  'buildProjectContextMissionBriefing',
 ];
 const forbiddenRootExports = [
   'buildIDEAgentAnalysisPacket',

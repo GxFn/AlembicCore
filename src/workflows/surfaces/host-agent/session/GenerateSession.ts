@@ -405,8 +405,8 @@ export class GenerateSession {
   // ── Snapshot 缓存 ──────────────────────────────────────────
 
   /**
-   * 缓存 Phase 1-4 分析结果（ProjectSnapshot 的 session cache 形式）
-   * @param cache toSessionCache(snapshot) 的返回值
+   * 缓存 Phase 1-4 分析结果（旧 ProjectSnapshot 的 session cache 形式）。
+   * 生产路径已不再写入这份缓存；保留它是为了读回旧会话文件里已有的缓存，以及维度完成流程的只读兼容。
    */
   setSnapshotCache(cache: SessionCacheShape | null) {
     this.snapshotCache = cache;

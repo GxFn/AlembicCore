@@ -343,10 +343,10 @@ export interface MissionBriefingResult {
  * 3. **类型化** — 每个字段有明确的接口，不使用 `any`
  * 4. **单一定义** — 这是项目分析数据的唯一类型来源
  *
- * 用法：
- * - `buildProjectSnapshot()` 从分析快照输入构建
- * - 4 个 handler 从 snapshot 读取数据，不再解构/重组
- * - `SnapshotViews.ts` 提供面向消费者的衍生视图
+ * 现状（2026-10）：项目信息已由 ProjectContext 提供，生产路径不再构建 ProjectSnapshot，
+ * 构建器与基于它的简报 / 分析包 / 呈现分支已删除。这个类型只剩两处类型层面的引用：
+ * `SnapshotViews.ts` 里 GenerateSession 快照缓存的形状，以及公共 API 收口记录登记过的
+ * `PipelineFillView`。新代码不要再以它为输入。
  */
 export interface ProjectSnapshot {
   // ─── 元数据 ───

@@ -1,11 +1,9 @@
-import type { DimensionDef, GuardAudit, ProjectSnapshot } from '../../types/ProjectSnapshot.js';
+import type { DimensionDef } from '../../types/ProjectSnapshot.js';
 import { envelope } from '../shared/WorkflowEnvelope.js';
 import type {
   HostAgentRescanEvidencePlan,
-  InternalRescanGapPlan,
   RelevanceAuditSummary,
 } from '../surfaces/planning/knowledge/KnowledgeRescanPlanner.js';
-import { buildTargetFileMap as buildProjectTargetFileMap } from '../surfaces/presentation/TargetFileMapBuilder.js';
 import type { CleanupResult, RecipeSnapshot } from '../surfaces/RecipeSnapshotTypes.js';
 
 /**
@@ -27,8 +25,6 @@ function presentRescanArchive(cleanResult: CleanupResult): {
   };
 }
 
-export type KnowledgeRescanTargetFileMap = Record<string, Array<Record<string, unknown>>>;
-
 export function presentInternalKnowledgeRescanEmptyProject({
   responseTimeMs,
 }: {
@@ -49,139 +45,6 @@ export function presentHostAgentKnowledgeRescanEmptyProject({
   return envelope({
     success: true,
     data: { message: 'No source files found. Nothing to rescan.' },
-    meta: { tool: 'alembic_rescan', responseTimeMs },
-  });
-}
-
-export function buildInternalKnowledgeRescanTargetFileMap(
-  snapshot: ProjectSnapshot,
-  contentMaxLines: number
-): KnowledgeRescanTargetFileMap {
-  return buildProjectTargetFileMap(
-    snapshot.allFiles as unknown as Array<{
-      name: string;
-      relativePath: string;
-      targetName: string;
-      content: string;
-    }>,
-    contentMaxLines
-  ) as unknown as KnowledgeRescanTargetFileMap;
-}
-
-export function presentInternalKnowledgeRescanResponse({
-  recipeSnapshot,
-  cleanResult,
-  auditSummary,
-  gapPlan,
-  snapshot,
-  bootstrapSession,
-  sessionId,
-  evolutionAudit,
-  reason,
-  responseTimeMs,
-}: {
-  recipeSnapshot: RecipeSnapshot;
-  cleanResult: CleanupResult;
-  auditSummary: RelevanceAuditSummary;
-  gapPlan: InternalRescanGapPlan;
-  snapshot: ProjectSnapshot;
-  bootstrapSession: { toJSON(): Record<string, unknown> } | null;
-  sessionId: string | null;
-  evolutionAudit?: {
-    proposed: number;
-    deprecated: number;
-    skipped: number;
-    iterations: number;
-    toolCalls: number;
-  } | null;
-  reason?: string | null;
-  responseTimeMs: number;
-}) {
-  const executionDimensionCount = gapPlan.executionDimensions.length;
-  const responseData = {
-    rescan: {
-      preservedRecipes: recipeSnapshot.count,
-      cleanedTables: cleanResult.clearedTables.length,
-      cleanedFiles: cleanResult.deletedFiles,
-      reason: reason || null,
-      ...presentRescanArchive(cleanResult),
-    },
-    relevanceAudit: presentRelevanceAudit(auditSummary),
-    evolutionAudit: evolutionAudit
-      ? {
-          proposed: evolutionAudit.proposed,
-          deprecated: evolutionAudit.deprecated,
-          skipped: evolutionAudit.skipped,
-          iterations: evolutionAudit.iterations,
-          toolCalls: evolutionAudit.toolCalls,
-        }
-      : null,
-    gapAnalysis: {
-      totalDimensions: gapPlan.requestedDimensions.length,
-      executionDimensions: executionDimensionCount,
-      produceDimensions: gapPlan.produceDimensions.length,
-      gapDimensions: gapPlan.gapDimensions.length,
-      skippedDimensions: gapPlan.skippedDimensions.map((dimension) => dimension.id),
-      targetPerDimension: gapPlan.targetPerDimension,
-      executionReasons: gapPlan.executionReasons,
-      executionDecisions: gapPlan.executionDecisions.map((decision) => ({
-        dimensionId: decision.dimensionId,
-        mode: decision.mode,
-        existing: decision.existingCount,
-        gap: decision.gap,
-        createBudget: decision.createBudget,
-        reasons: decision.reasons.map((reason) => reason.kind),
-      })),
-      gaps: gapPlan.gapDimensions.map((dimension) => ({
-        dimensionId: dimension.id,
-        label: dimension.label,
-        existing: gapPlan.coverageByDimension[dimension.id] || 0,
-        gap: Math.max(
-          0,
-          gapPlan.targetPerDimension - (gapPlan.coverageByDimension[dimension.id] || 0)
-        ),
-      })),
-    },
-    languageStats: snapshot.language.stats || null,
-    primaryLanguage: snapshot.language.primaryLang,
-    guardSummary: presentGuardSummary(snapshot.guardAudit),
-    astSummary: snapshot.ast
-      ? {
-          classes: snapshot.ast.classes?.length || 0,
-          protocols: snapshot.ast.protocols?.length || 0,
-          categories: snapshot.ast.categories?.length || 0,
-        }
-      : null,
-    codeEntityGraph: snapshot.codeEntityGraph
-      ? {
-          totalEntities:
-            snapshot.codeEntityGraph.entityCount ?? snapshot.codeEntityGraph.entitiesUpserted ?? 0,
-          totalEdges:
-            snapshot.codeEntityGraph.edgeCount ?? snapshot.codeEntityGraph.edgesCreated ?? 0,
-        }
-      : null,
-    callGraph: snapshot.callGraph
-      ? {
-          entitiesUpserted: snapshot.callGraph.entitiesUpserted || 0,
-          edgesCreated: snapshot.callGraph.edgesCreated || 0,
-        }
-      : null,
-    panorama: null,
-    bootstrapSession: bootstrapSession ? bootstrapSession.toJSON() : null,
-    sessionId,
-    asyncFill: executionDimensionCount > 0,
-    status: executionDimensionCount > 0 ? 'filling' : 'complete',
-    files: snapshot.allFiles.length,
-    targets: snapshot.allTargets.length,
-  };
-
-  return envelope({
-    success: true,
-    data: responseData,
-    message:
-      executionDimensionCount > 0
-        ? `知识重扫骨架已创建：保留 ${recipeSnapshot.count} 个 Recipe，${executionDimensionCount} 个维度需要处理，正在后台填充...`
-        : `知识重扫完成：保留 ${recipeSnapshot.count} 个 Recipe，所有维度已充分覆盖。`,
     meta: { tool: 'alembic_rescan', responseTimeMs },
   });
 }
@@ -242,14 +105,4 @@ function presentRelevanceAudit(auditSummary: RelevanceAuditSummary) {
     proposalsCreated: auditSummary.proposalsCreated,
     immediateDeprecated: auditSummary.immediateDeprecated,
   };
-}
-
-function presentGuardSummary(guardAudit: GuardAudit | null) {
-  return guardAudit
-    ? {
-        totalViolations: guardAudit.summary?.totalViolations || 0,
-        errors: guardAudit.summary?.errors || 0,
-        warnings: guardAudit.summary?.warnings || 0,
-      }
-    : null;
 }

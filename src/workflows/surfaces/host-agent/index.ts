@@ -64,11 +64,7 @@ export {
   runHostAgentDimensionCompletionWorkflow,
 } from './session/HostAgentDimensionCompletionWorkflow.js';
 export {
-  buildHostAgentMissionBriefing,
-  createHostAgentWorkflowSession,
   getActiveHostAgentWorkflowSession,
-  type HostAgentMissionBriefingInput,
-  type HostAgentMissionBriefingResult,
   type HostAgentSessionContainer as HostAgentMissionSessionContainer,
   type HostAgentWorkflowSession as HostAgentMissionWorkflowSession,
 } from './session/HostAgentMissionWorkflow.js';

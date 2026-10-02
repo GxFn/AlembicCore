@@ -7,7 +7,7 @@ import {
   getCursorDeliverySpec,
 } from '../src/domain/knowledge/FieldSpec.js';
 import {
-  createHostAgentWorkflowSession,
+  buildProjectContextMissionBriefing,
   DEFAULT_FOLDER_NAMES,
   KnowledgeRepositoryImpl,
   resolveFolderNames,
@@ -56,7 +56,7 @@ describe('Core package baseline', () => {
     const rootModule = await import('../src/index.js');
 
     expect(KnowledgeRepositoryImpl).toBeDefined();
-    expect(createHostAgentWorkflowSession).toBeDefined();
+    expect(buildProjectContextMissionBriefing).toBeDefined();
     expect(Object.hasOwn(rootModule, 'ProjectIntelligenceCapability')).toBe(false);
   });
 

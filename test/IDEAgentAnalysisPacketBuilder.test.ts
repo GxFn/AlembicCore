@@ -23,13 +23,6 @@ import {
   type ProjectContextRef,
   type ProjectContextResult,
 } from '../src/project-context.js';
-import { buildProjectSnapshot } from '../src/types/projectSnapshotBuilder.js';
-import {
-  buildHostAgentAnalysisPacket,
-  buildHostAgentAnalysisPacketFromSnapshot,
-  buildIDEAgentAnalysisPacket,
-} from '../src/workflows/surfaces/host-agent/briefing/HostAgentAnalysisPacketBuilder.js';
-import { buildIDEAgentAnalysisPacketFromSnapshot } from '../src/workflows/surfaces/host-agent/briefing/IDEAgentAnalysisPacketBuilder.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Find architectural boundaries' },
@@ -39,96 +32,6 @@ const dimensions: DimensionDef[] = [
     guide: 'Find call and data flow rules',
   },
 ];
-
-function makeSnapshot(overrides: Partial<Parameters<typeof buildProjectSnapshot>[0]> = {}) {
-  return buildProjectSnapshot({
-    projectRoot: '/fixture',
-    allFiles: [
-      {
-        name: 'UserService.ts',
-        path: '/fixture/src/UserService.ts',
-        relativePath: 'src/UserService.ts',
-        content: 'SECRET_SOURCE_BODY_SHOULD_NOT_LEAK',
-        targetName: 'core',
-        language: 'typescript',
-        priority: 'high',
-      },
-      {
-        name: 'UserRepository.ts',
-        path: '/fixture/src/UserRepository.ts',
-        relativePath: 'src/UserRepository.ts',
-        content: 'ANOTHER_SECRET_SOURCE_BODY_SHOULD_NOT_LEAK',
-        targetName: 'core',
-        language: 'typescript',
-      },
-    ],
-    allTargets: [{ name: 'core', type: 'library' }],
-    discoverer: { id: 'node', displayName: 'Node' },
-    langStats: { ts: 2 },
-    primaryLang: 'typescript',
-    astProjectSummary: {
-      classes: [
-        {
-          name: 'UserService',
-          kind: 'class',
-          relativePath: 'src/UserService.ts',
-          methodCount: 1,
-          methods: [
-            {
-              name: 'loadUser',
-              className: 'UserService',
-              file: 'src/UserService.ts',
-              line: 12,
-              complexity: 2,
-            },
-          ],
-        },
-      ],
-      protocols: [{ name: 'UserRepository', relativePath: 'src/UserRepository.ts' }],
-      projectMetrics: { totalMethods: 1 },
-    },
-    astContext: null,
-    codeEntityResult: { entitiesUpserted: 3, edgesCreated: 2 },
-    callGraphResult: { entitiesUpserted: 3, edgesCreated: 1 },
-    panoramaResult: {
-      layers: [{ level: 1, name: 'Domain', modules: ['core'] }],
-      couplingHotspots: [{ module: 'core', fanIn: 2, fanOut: 1 }],
-    },
-    depGraphData: {
-      nodes: [{ id: 'core', label: 'core', fileCount: 2 }],
-      edges: [{ from: 'src/UserService.ts', to: 'src/UserRepository.ts', type: 'imports' }],
-    },
-    depEdgesWritten: 1,
-    guardAudit: {
-      files: [
-        {
-          filePath: 'src/UserService.ts',
-          violations: [
-            {
-              ruleId: 'boundary',
-              severity: 'warning',
-              message: 'Service should not import UI',
-              line: 12,
-            },
-          ],
-        },
-      ],
-      summary: { totalWarnings: 1, warnings: 1, totalViolations: 1 },
-    },
-    activeDimensions: dimensions,
-    localPackageModules: [
-      {
-        name: 'core',
-        packageName: 'core',
-        fileCount: 2,
-        inferredRole: 'domain',
-        keyFiles: ['src/UserService.ts'],
-      },
-    ],
-    warnings: [],
-    ...overrides,
-  });
-}
 
 function makeProjectContextEnvelopes(): ProjectContextEnvelope<ProjectContextResult>[] {
   const project = {
@@ -388,17 +291,19 @@ function makeProjectContextTargetFileCountFixture(): ProjectContextPresenterInpu
 }
 
 describe('HostAgentAnalysisPacketBuilder', () => {
-  it('keeps snapshot packet builders internal while exposing new and legacy ProjectContext public entrypoints', async () => {
+  it('exposes only the ProjectContext packet entrypoints, under new and legacy names', async () => {
     const rootModule = (await import('../src/index.js')) as Record<string, unknown>;
     const hostAgentModule = (await import('../src/host-agent-workflows.js')) as Record<
       string,
       unknown
     >;
+    const builderModule = (await import(
+      '../src/workflows/surfaces/host-agent/briefing/HostAgentAnalysisPacketBuilder.js'
+    )) as Record<string, unknown>;
 
-    expect(buildHostAgentAnalysisPacket).toBeInstanceOf(Function);
-    expect(buildIDEAgentAnalysisPacket).toBe(buildHostAgentAnalysisPacket);
-    expect(buildHostAgentAnalysisPacketFromSnapshot).toBeInstanceOf(Function);
-    expect(buildIDEAgentAnalysisPacketFromSnapshot).toBe(buildHostAgentAnalysisPacketFromSnapshot);
+    // 基于项目快照的分析包入口已删除：连实现文件都不再有它们。
+    expect(Object.hasOwn(builderModule, 'buildHostAgentAnalysisPacket')).toBe(false);
+    expect(Object.hasOwn(builderModule, 'buildHostAgentAnalysisPacketFromSnapshot')).toBe(false);
     expect(buildHostAgentAnalysisPacketFromProjectContext).toBe(
       buildIDEAgentAnalysisPacketFromProjectContext
     );
@@ -414,80 +319,6 @@ describe('HostAgentAnalysisPacketBuilder', () => {
     expect(buildHostAgentPacketFromRoot).toBeInstanceOf(Function);
     expect(buildProjectContextPacketFromRoot).toBeInstanceOf(Function);
     expect(buildProjectContextMissionBriefingFromRoot).toBeInstanceOf(Function);
-  });
-
-  it('builds deterministic packet units without leaking source bodies', () => {
-    const snapshot = makeSnapshot();
-    const first = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
-      generatedAt: '2026-05-31T00:00:00.000Z',
-      maxUnits: 2,
-    });
-    const second = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
-      generatedAt: '2026-05-31T00:00:00.000Z',
-      maxUnits: 2,
-    });
-
-    expect(first).toStrictEqual(second);
-    expect(first.meta).toMatchObject({
-      compressionIndependent: true,
-      builder: 'HostAgentAnalysisPacketBuilder',
-      source: 'project-snapshot',
-    });
-    expect(first.units).toHaveLength(2);
-    expect(first.units[0]).toMatchObject({
-      dimensionId: 'architecture',
-      completionContract: {
-        mustReferenceAssignedSources: true,
-        allowNoRecipeWithReason: true,
-      },
-    });
-    expect(first.units[0]?.requiredReadSet).toContain('src/UserService.ts');
-    expect(first.sourceRefs.map((ref) => ref.path)).toContain('src/UserService.ts');
-    expect(first.structuralEvidenceRefs.map((ref) => ref.kind)).toEqual(
-      expect.arrayContaining(['ast', 'dependency'])
-    );
-    expect(JSON.stringify(first)).not.toContain('SECRET_SOURCE_BODY_SHOULD_NOT_LEAK');
-  });
-
-  it('also accepts ProjectIntelligence run result shape', () => {
-    const snapshot = makeSnapshot();
-    const result = {
-      projectRoot: snapshot.projectRoot,
-      allFiles: snapshot.allFiles,
-      langStats: snapshot.language.stats,
-      primaryLang: snapshot.language.primaryLang,
-      discoverer: snapshot.discoverer,
-      allTargets: snapshot.allTargets,
-      truncated: snapshot.truncated,
-      astProjectSummary: snapshot.ast,
-      astContext: snapshot.astContext,
-      codeEntityResult: snapshot.codeEntityGraph,
-      callGraphResult: snapshot.callGraph,
-      depGraphData: snapshot.dependencyGraph,
-      depEdgesWritten: snapshot.depEdgesWritten,
-      guardAudit: snapshot.guardAudit,
-      activeDimensions: snapshot.activeDimensions,
-      enhancementPackInfo: snapshot.enhancementPackInfo,
-      enhancementPatterns: snapshot.enhancementPatterns,
-      enhancementGuardRules: snapshot.enhancementGuardRules,
-      langProfile: snapshot.langProfile,
-      detectedFrameworks: snapshot.detectedFrameworks,
-      targetsSummary: snapshot.targetsSummary,
-      localPackageModules: snapshot.localPackageModules,
-      warnings: snapshot.warnings,
-      report: snapshot.phaseReport,
-      incrementalPlan: snapshot.incrementalPlan,
-      panoramaResult: snapshot.panorama,
-      isEmpty: snapshot.isEmpty,
-    };
-
-    const packet = buildHostAgentAnalysisPacket({
-      result,
-      options: { generatedAt: '2026-05-31T00:00:00.000Z', projectRoot: snapshot.projectRoot },
-    });
-
-    expect(packet.meta.source).toBe('project-intelligence-result');
-    expect(packet.requiredReadSet).toContain('src/UserService.ts');
   });
 
   it('builds ProjectContext-backed packet units without ProjectSnapshot or source body leakage', () => {
@@ -645,83 +476,33 @@ describe('HostAgentAnalysisPacketBuilder', () => {
       label: `Dimension ${index}`,
       guide: 'Large analysis guide '.repeat(30),
     }));
-    const snapshot = makeSnapshot({
-      activeDimensions: largeDimensions,
-      astProjectSummary: {
-        classes: Array.from({ length: 40 }, (_, index) => ({
-          name: `LargeClass${index}`,
-          kind: 'class',
-          file: `src/LargeClass${index}.ts`,
-          relativePath: `src/LargeClass${index}.ts`,
-          methodCount: 1,
-        })),
-      },
-    });
-    const packet = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
-      generatedAt: '2026-05-31T00:00:00.000Z',
-      maxUnits: 3,
+    const projectContext = buildProjectContextPresenterInput(makeProjectContextEnvelopes());
+    const packet = buildHostAgentAnalysisPacketFromProjectContext({
+      projectContext,
+      dimensions: largeDimensions,
+      options: { generatedAt: '2026-05-31T00:00:00.000Z', maxUnits: 3 },
     });
     const session = new GenerateSession({
-      projectRoot: snapshot.projectRoot,
+      projectRoot: '/fixture',
       dimensions: largeDimensions,
     });
-    const briefing = buildMissionBriefing({
-      projectMeta: {
-        name: 'fixture',
-        primaryLanguage: 'typescript',
-        fileCount: snapshot.allFiles.length,
-        projectType: 'node',
-      },
-      astData: snapshot.ast,
-      codeEntityResult: snapshot.codeEntityGraph,
-      callGraphResult: snapshot.callGraph,
-      depGraphData: snapshot.dependencyGraph,
-      guardAudit: snapshot.guardAudit,
-      targets: snapshot.targetsSummary,
+    const briefing = buildProjectContextMissionBriefing({
+      projectContext,
       activeDimensions: largeDimensions,
       session,
       responseBudget: { limitBytes: 600 },
     }) as {
-      ast: { classes: Array<{ file?: string }> };
       dimensions: Array<{ evidenceStarters?: unknown }>;
       meta?: { compressionLevel?: string };
     };
 
+    // 简报被压到最狠的一档，证据启发被去掉；分析包不走这套压缩，读集与证据引用都还在。
     expect(briefing.meta?.compressionLevel).toBe('aggressive');
-    expect(briefing.ast.classes[0]?.file).toBeUndefined();
     expect(briefing.dimensions[0]?.evidenceStarters).toBeUndefined();
+    expect(packet.units).toHaveLength(3);
     expect(packet.requiredReadSet.length).toBeGreaterThan(0);
-    expect(packet.sourceRefs.some((ref) => ref.path.startsWith('src/'))).toBe(true);
+    expect(packet.sourceRefs.some((ref) => ref.path.includes('src/'))).toBe(true);
     expect(packet.structuralEvidenceRefs.length).toBeGreaterThan(0);
-  });
-
-  it('handles legacy raw panorama shape with layers.levels, modules Map, and cycles', () => {
-    const packet = buildHostAgentAnalysisPacketFromSnapshot(
-      makeSnapshot({
-        panoramaResult: {
-          layers: {
-            levels: [{ level: 2, name: 'Services', modules: ['AuthService', 'UserRepository'] }],
-          },
-          modules: new Map([
-            ['AuthService', { name: 'AuthService', fanIn: 12, fanOut: 1 }],
-            ['UserRepository', { name: 'UserRepository', fanIn: 1, fanOut: 0 }],
-          ]),
-          cycles: [{ modules: ['AuthService', 'UserRepository'], severity: 'warning' }],
-        },
-      }),
-      {
-        generatedAt: '2026-05-31T00:00:00.000Z',
-      }
-    );
-    const panoramaHints = packet.units.flatMap((unit) => unit.structuralHints.panorama ?? []);
-
-    expect(panoramaHints).toEqual(
-      expect.arrayContaining([
-        'L2 Services: AuthService, UserRepository',
-        'AuthService fanIn=12 fanOut=1',
-        'warning: AuthService -> UserRepository',
-      ])
-    );
   });
 
   it('uses sourceRef/fqn/entity/line for stable keys and keeps short aliases display-only', () => {
@@ -745,54 +526,7 @@ describe('HostAgentAnalysisPacketBuilder', () => {
     expect(first.key).not.toBe(second.key);
   });
 
-  it('uses repo-qualified source refs for ProjectScope packets with duplicate short paths', () => {
-    const snapshot = makeSnapshot({
-      astProjectSummary: null,
-      allFiles: [
-        {
-          name: 'index.ts',
-          path: '/workspace/AlembicCore/lib/index.ts',
-          relativePath: 'lib/index.ts',
-          sourceIdentity: {
-            absolutePath: '/workspace/AlembicCore/lib/index.ts',
-            folderDisplayName: 'AlembicCore',
-            folderId: 'folder-core',
-            folderPath: '/workspace/AlembicCore',
-            folderRelativeRoot: 'AlembicCore',
-            projectScopeId: 'scope-a',
-            qualifiedPath: 'AlembicCore/lib/index.ts',
-            relativePath: 'lib/index.ts',
-          },
-          content: 'export const core = 1;',
-          targetName: 'AlembicCore:core',
-        },
-        {
-          name: 'index.ts',
-          path: '/workspace/AlembicPlugin/lib/index.ts',
-          relativePath: 'lib/index.ts',
-          sourceIdentity: {
-            absolutePath: '/workspace/AlembicPlugin/lib/index.ts',
-            folderDisplayName: 'AlembicPlugin',
-            folderId: 'folder-plugin',
-            folderPath: '/workspace/AlembicPlugin',
-            folderRelativeRoot: 'AlembicPlugin',
-            projectScopeId: 'scope-a',
-            qualifiedPath: 'AlembicPlugin/lib/index.ts',
-            relativePath: 'lib/index.ts',
-          },
-          content: 'export const plugin = 1;',
-          targetName: 'AlembicPlugin:plugin',
-        },
-      ],
-      localPackageModules: [],
-      depGraphData: null,
-      guardAudit: null,
-    });
-
-    const packet = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
-      generatedAt: '2026-06-01T00:00:00.000Z',
-      maxUnits: 1,
-    });
+  it('keeps unit keys distinct for the same short path in two ProjectScope folders', () => {
     const coreKey = createHostAgentAnalysisUnitKey({
       sourceRef: 'lib/index.ts',
       qualifiedPath: 'AlembicCore/lib/index.ts',
@@ -806,43 +540,14 @@ describe('HostAgentAnalysisPacketBuilder', () => {
       entityType: 'file',
     });
 
-    expect(packet.requiredReadSet).toEqual(
-      expect.arrayContaining(['AlembicCore/lib/index.ts', 'AlembicPlugin/lib/index.ts'])
-    );
-    expect(packet.sourceRefs.map((ref) => ref.qualifiedPath)).toEqual(
-      expect.arrayContaining(['AlembicCore/lib/index.ts', 'AlembicPlugin/lib/index.ts'])
-    );
     expect(coreKey.key).not.toBe(pluginKey.key);
   });
 
-  it('surfaces degraded AST, callgraph, and dependency graph warnings', () => {
-    const snapshot = makeSnapshot({
-      astProjectSummary: null,
-      callGraphResult: null,
-      depGraphData: null,
-      warnings: ['AST analysis partially failed', 'Call Graph failed on unsupported syntax'],
-    });
-
-    const packet = buildHostAgentAnalysisPacketFromSnapshot(snapshot, {
-      generatedAt: '2026-05-31T00:00:00.000Z',
-    });
-
-    expect(packet.projectSummary.degraded).toEqual(
-      expect.arrayContaining([
-        'ast-unavailable',
-        'ast-partial',
-        'callgraph-unavailable',
-        'depgraph-unavailable',
-      ])
-    );
-    expect(packet.projectSummary.warnings.join('\n')).toContain('AST analysis partially failed');
-    expect(packet.units[0]?.degraded).toEqual(expect.arrayContaining(['ast-unavailable']));
-    expect(packet.units[0]?.warnings.join('\n')).toContain('callgraph-unavailable');
-  });
-
   it('seeds unit progress with checkpoint linkage without choosing persistence', () => {
-    const packet = buildHostAgentAnalysisPacketFromSnapshot(makeSnapshot(), {
-      generatedAt: '2026-05-31T00:00:00.000Z',
+    const packet = buildHostAgentAnalysisPacketFromProjectContext({
+      projectContext: makeProjectContextEnvelopes(),
+      dimensions,
+      options: { generatedAt: '2026-05-31T00:00:00.000Z' },
     });
     const progress = createIDEAgentAnalysisProgressSeed({
       packetId: packet.packetId,

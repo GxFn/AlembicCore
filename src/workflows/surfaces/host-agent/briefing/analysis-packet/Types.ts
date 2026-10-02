@@ -4,13 +4,7 @@ import type {
   ProjectContextResult,
 } from '../../../../../domain/project-context/index.js';
 import type { StrictHostAgentAnalysisUnitProjectionV1 } from '../../../../../service/production/StrictAnalysisContracts.js';
-import type {
-  DimensionDef,
-  ProjectSnapshot,
-  ProjectSnapshotInput,
-} from '../../../../../types/ProjectSnapshot.js';
-
-export type ProjectAnalysisResult = Omit<ProjectSnapshotInput, 'projectRoot'>;
+import type { DimensionDef } from '../../../../../types/ProjectSnapshot.js';
 
 export type HostAgentAnalysisPacketProfile = 'cold-start' | 'rescan';
 
@@ -214,11 +208,6 @@ export interface HostAgentAnalysisPacketBuilderOptions {
   projectRoot?: string;
 }
 
-export interface HostAgentAnalysisPacketBuilderInput {
-  result: ProjectAnalysisResult | ProjectSnapshot;
-  options?: HostAgentAnalysisPacketBuilderOptions;
-}
-
 export interface HostAgentProjectContextPacketInput {
   projectContext:
     | ProjectContextPresenterInput
@@ -247,5 +236,4 @@ export type IDEAgentAnalysisUnitProgress = HostAgentAnalysisUnitProgress;
 export type IDEAgentAnalysisProgressSeed = HostAgentAnalysisProgressSeed;
 export type IDEAgentAnalysisPacket = HostAgentAnalysisPacket;
 export type IDEAgentAnalysisPacketBuilderOptions = HostAgentAnalysisPacketBuilderOptions;
-export type IDEAgentAnalysisPacketBuilderInput = HostAgentAnalysisPacketBuilderInput;
 export type IDEAgentProjectContextPacketInput = HostAgentProjectContextPacketInput;

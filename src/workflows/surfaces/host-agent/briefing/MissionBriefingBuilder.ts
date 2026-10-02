@@ -1,7 +1,7 @@
 /**
  * Mission Briefing 构建器 — 宿主 Agent 驱动 Bootstrap 的核心数据构建
  *
- * 将 Phase 1-4 的分析结果（AST / EntityGraph / DepGraph / Guard）
+ * 将 ProjectContext 给出的项目信息（目标、依赖图、层与热点、本地包）
  * + 维度定义 + 提交规范 + 执行计划 整合为一站式 Mission Briefing，
  * 让宿主 Agent (Cursor/Copilot) 拥有全部必要上下文来完成代码分析。
  *
@@ -26,16 +26,8 @@ import {
   type ProjectContextResult,
 } from '../../../../domain/project-context/index.js';
 import type {
-  AstCategoryInfo,
-  AstProtocolInfo,
-  AstSummary,
-  CallGraphResult,
-  CodeEntityGraphResult,
   DependencyGraph,
   DimensionDef,
-  GuardAudit,
-  GuardViolation,
-  IncrementalPlan,
   LocalPackageModule,
 } from '../../../../types/ProjectSnapshot.js';
 import { TierScheduler } from '../../planning/dimensions/TierScheduler.js';
@@ -80,8 +72,6 @@ interface TargetInfo {
   inferredRole?: string;
   fileCount?: number;
 }
-
-type PatternValue = number | string | boolean | Record<string, number | string | boolean>;
 
 /** 压缩后的协议 */
 interface CompressedProtocol {
@@ -191,16 +181,11 @@ interface MissionBriefing {
 /** buildMissionBriefing 参数 */
 interface MissionBriefingParams {
   projectMeta: Record<string, unknown>;
-  astData?: AstSummary | null;
-  codeEntityResult?: CodeEntityGraphResult | null;
-  callGraphResult?: CallGraphResult | null;
   depGraphData?: DependencyGraph | null;
-  guardAudit?: GuardAudit | null;
   targets?: (string | TargetInfo)[];
   activeDimensions: DimensionDef[];
   session: { toJSON(): Record<string, unknown> };
   languageExtension?: unknown;
-  incrementalPlan?: IncrementalPlan | null;
   languageStats?: Record<string, number> | null;
   panoramaResult?: Record<string, unknown> | null;
   localPackageModules?: LocalPackageModule[];
@@ -221,15 +206,6 @@ export interface ProjectContextMissionBriefingInput {
   rescan?: RescanBriefingInput;
   responseBudget?: Partial<ResponseBudget>;
 }
-
-// ── 常量 ────────────────────────────────────────────────────
-
-/** 分级压缩阈值 */
-const SIZE_THRESHOLDS = {
-  S: 100, // <100 files → 完整 AST
-  M: 500, // 100-500 files → top-50 classes
-  L: Infinity, // 500+ files → top-30 classes 摘要模式
-};
 
 // ── 维度指引构建 ────────────────────────────────────────────
 
@@ -338,276 +314,6 @@ function enrichDimensionTask(dim: DimensionDef, tier: number): DimensionTask {
 }
 
 export { buildEvidenceStarters } from './EvidenceStarterBuilder.js';
-
-// ── AST 压缩 ────────────────────────────────────────────────
-
-/**
- * 压缩 AST 数据以控制 Mission Briefing 体积
- *
- * @param astProjectSummary analyzeProject() 返回值
- * @param fileCount 项目文件数
- * @returns 压缩后的 AST 数据
- */
-function compressAstForBriefing(astProjectSummary: AstSummary | null, fileCount: number) {
-  if (!astProjectSummary) {
-    return { available: false, classes: [], protocols: [], categories: [], patterns: {} };
-  }
-
-  const classes = astProjectSummary.classes || [];
-  const protocols = astProjectSummary.protocols || [];
-  const categories = astProjectSummary.categories || [];
-
-  // 确定压缩级别
-  let topN: number;
-  let compressionLevel: string;
-  if (fileCount < SIZE_THRESHOLDS.S) {
-    topN = classes.length; // 完整返回
-    compressionLevel = 'none';
-  } else if (fileCount < SIZE_THRESHOLDS.M) {
-    topN = 50;
-    compressionLevel = 'medium';
-  } else {
-    topN = 30;
-    compressionLevel = 'high';
-  }
-
-  // ObjC 去重: @interface/@implementation/@extension 会产生同名 class 条目
-  // 合并策略: 保留 methodCount 最高的条目，合并 protocols 和 superclass
-  const classMap = new Map();
-  for (const c of classes) {
-    const existing = classMap.get(c.name);
-    if (!existing) {
-      classMap.set(c.name, { ...c });
-    } else {
-      // 保留更大的 methodCount
-      if ((c.methodCount || 0) > (existing.methodCount || 0)) {
-        existing.methodCount = c.methodCount;
-      }
-      // 合并 superclass（优先非空值）
-      if (!existing.superclass && c.superclass) {
-        existing.superclass = c.superclass;
-      }
-      // 合并 protocols
-      const existProtos = new Set(existing.protocols || existing.conformedProtocols || []);
-      for (const p of c.protocols || c.conformedProtocols || []) {
-        existProtos.add(p);
-      }
-      existing.protocols = [...existProtos];
-      // 合并 file（保留第一个）
-      if (!existing.file && (c.file || c.relativePath)) {
-        existing.file = c.file || c.relativePath;
-      }
-    }
-  }
-  const dedupedClasses = [...classMap.values()];
-
-  // 按 methodCount 降序排序，取 top-N
-  const sortedClasses = dedupedClasses
-    .sort((a, b) => (b.methodCount || 0) - (a.methodCount || 0))
-    .slice(0, topN);
-
-  const compressedClasses = sortedClasses.map((c) => ({
-    name: c.name,
-    kind: c.kind || 'class',
-    superclass: c.superclass || null,
-    file: c.file || c.relativePath || null,
-    methodCount: c.methodCount || c.methods?.length || 0,
-    protocols: c.protocols || c.conformedProtocols || [],
-  }));
-
-  const compressedProtocols = protocols.slice(0, topN).map((p: AstProtocolInfo) => ({
-    name: p.name,
-    file: p.file || p.relativePath || null,
-    methodCount: p.methodCount || p.methods?.length || 0,
-    conformers: p.conformers || [],
-  }));
-
-  const compressedCategories = categories.slice(0, topN).map((cat: AstCategoryInfo) => ({
-    baseClass: cat.baseClass || cat.extendedClass,
-    name: cat.name || '',
-    file: cat.file || cat.relativePath || null,
-    methods: (cat.methods || [])
-      .map((m: string | { name: string }) => (typeof m === 'string' ? m : m.name))
-      .slice(0, 10),
-  }));
-
-  // ── 结构化 summary: 含 kindDistribution + insight ──
-  const kindDist: Record<string, number> = {};
-  for (const c of dedupedClasses) {
-    const k = (c.kind as string) || 'class';
-    kindDist[k] = (kindDist[k] || 0) + 1;
-  }
-  const totalTypes = dedupedClasses.length;
-  const kindParts = Object.entries(kindDist)
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `${v} ${k}`);
-  const summaryText = `${totalTypes} types (${kindParts.join(', ')}), ${protocols.length} protocols, ${categories.length} ${categories.length > 0 && categories[0]?.baseClass ? 'categories' : 'extensions'}, ${astProjectSummary.projectMetrics?.totalMethods || 0} methods`;
-
-  // 生成 insight
-  const valueTypeCount = (kindDist.struct || 0) + (kindDist.enum || 0);
-  const refTypeCount = kindDist.class || 0;
-  const actorCount = kindDist.actor || 0;
-  let insight = '';
-  if (totalTypes > 0) {
-    const vtRatio = Math.round((valueTypeCount / totalTypes) * 100);
-    if (vtRatio >= 60) {
-      insight = `Value types (struct+enum) account for ${vtRatio}% — project favors value semantics`;
-    } else if (refTypeCount > valueTypeCount) {
-      insight = `Reference types (class) account for ${Math.round((refTypeCount / totalTypes) * 100)}% — OOP-heavy codebase`;
-    } else {
-      insight = `Balanced mix of value types (${vtRatio}%) and reference types (${Math.round((refTypeCount / totalTypes) * 100)}%)`;
-    }
-    if (actorCount > 0) {
-      insight += `; ${actorCount} actors indicate structured concurrency adoption`;
-    }
-  }
-
-  const summary = {
-    text: summaryText,
-    kindDistribution: kindDist,
-    insight,
-  };
-
-  // ── 压缩 patternStats: 保留计数 + 代表性类名 ──
-  const rawPatterns = astProjectSummary.patternStats || {};
-  const compressedPatterns: Record<string, PatternValue> = {};
-  for (const [key, val] of Object.entries(rawPatterns)) {
-    if (typeof val === 'number' || typeof val === 'string' || typeof val === 'boolean') {
-      compressedPatterns[key] = val;
-    } else if (Array.isArray(val)) {
-      compressedPatterns[key] = val.length; // 数组 → 计数
-    } else if (val && typeof val === 'object') {
-      const sub: Record<string, number | string | boolean> = {};
-      for (const [sk, sv] of Object.entries(val)) {
-        if (typeof sv === 'number' || typeof sv === 'string' || typeof sv === 'boolean') {
-          sub[sk] = sv;
-        } else if (Array.isArray(sv)) {
-          // instances 数组: 提取 top-3 类名作为 representatives
-          if (sk === 'instances' && sv.length > 0 && typeof sv[0] === 'object') {
-            sub[sk] = sv.length;
-            const classNames = sv
-              .map((inst: Record<string, unknown>) => inst.className || '')
-              .filter(Boolean) as string[];
-            const unique = [...new Set(classNames)].slice(0, 3);
-            if (unique.length > 0) {
-              sub.representatives = unique.join(', ');
-            }
-          } else {
-            sub[sk] = sv.length;
-          }
-        } else if (sv && typeof sv === 'object') {
-          sub[sk] = Object.keys(sv).length;
-        }
-      }
-      compressedPatterns[key] = sub;
-    }
-  }
-
-  return {
-    available: true,
-    compressionLevel,
-    summary,
-    classes: compressedClasses,
-    protocols: compressedProtocols,
-    categories: compressedCategories,
-    patterns: compressedPatterns,
-    metrics: astProjectSummary.projectMetrics
-      ? {
-          totalMethods: astProjectSummary.projectMetrics.totalMethods,
-          avgMethodsPerClass: astProjectSummary.projectMetrics.avgMethodsPerClass,
-          maxNestingDepth: astProjectSummary.projectMetrics.maxNestingDepth,
-          complexMethods: astProjectSummary.projectMetrics.complexMethods?.length || 0,
-          longMethods: astProjectSummary.projectMetrics.longMethods?.length || 0,
-        }
-      : null,
-  };
-}
-
-/** 压缩 Code Entity Graph */
-function summarizeEntityGraph(codeEntityResult: CodeEntityGraphResult | null) {
-  if (!codeEntityResult) {
-    return null;
-  }
-  return {
-    totalEntities: codeEntityResult.entitiesUpserted || 0,
-    totalEdges: codeEntityResult.edgesCreated || 0,
-  };
-}
-
-/**
- * 压缩 Call Graph 结果
- * @param callGraphResult CodeEntityGraph.populateCallGraph() 返回值
- */
-function summarizeCallGraph(callGraphResult: CallGraphResult | null) {
-  if (!callGraphResult) {
-    return null;
-  }
-  return {
-    methodEntities: callGraphResult.entitiesUpserted || 0,
-    callEdges: callGraphResult.edgesCreated || 0,
-    durationMs: callGraphResult.durationMs || 0,
-  };
-}
-
-/** 压缩 Guard 审计结果 */
-function summarizeGuardFindings(guardAudit: GuardAudit | null) {
-  if (!guardAudit) {
-    return null;
-  }
-
-  // 按 ruleId 聚合 violations
-  const ruleMap: Record<string, RuleMapEntry> = {};
-
-  // helper: 将单个 violation 累加到 ruleMap
-  const addViolation = (v: GuardViolation, examplePrefix: string) => {
-    const ruleId = v.ruleId || 'unknown';
-    if (!ruleMap[ruleId]) {
-      ruleMap[ruleId] = { ruleId, count: 0, example: null };
-    }
-    ruleMap[ruleId].count++;
-    if (!ruleMap[ruleId].example) {
-      ruleMap[ruleId].example = `${examplePrefix} — ${v.message}`;
-    }
-  };
-
-  // 1) Per-file violations
-  for (const fileResult of guardAudit.files || []) {
-    for (const v of fileResult.violations || []) {
-      addViolation(v, `${fileResult.filePath}:${v.line || '?'}`);
-    }
-  }
-
-  // 2) Cross-file violations（之前被遗漏）
-  for (const v of guardAudit.crossFileViolations || []) {
-    const loc = v.locations?.[0];
-    const prefix = loc ? `${loc.filePath}:${loc.line || '?'}` : '(cross-file)';
-    addViolation(v, prefix);
-  }
-
-  // 取 top-5 violations
-  const topViolations = Object.values(ruleMap)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
-  const totalErrors = guardAudit.summary?.totalErrors || 0;
-  const totalViolations = guardAudit.summary?.totalViolations || 0;
-
-  // §V2: 单独高亮跨文件违规 — 这类违规通常涉及架构层级或模块边界问题
-  const crossFileIssues = (guardAudit.crossFileViolations || []).map((v: GuardViolation) => ({
-    ruleId: v.ruleId,
-    message: v.message,
-    locations: v.locations?.slice(0, 3),
-    severity: (v as unknown as Record<string, unknown>).severity || 'warning',
-  }));
-
-  return {
-    totalViolations,
-    errors: totalErrors,
-    warnings: totalViolations - totalErrors,
-    topViolations,
-    ...(crossFileIssues.length > 0 ? { crossFileIssues } : {}),
-  };
-}
 
 // ── Architecture Overview 自动推断 ────────────────────────
 
@@ -843,115 +549,6 @@ function buildTechnologyStack(
   return stack.length > 0 ? stack : null;
 }
 
-/**
- * 提取项目关键抽象 — 从继承热点、协议遵从数、模块入口类中识别
- */
-function buildKeyAbstractions(
-  astData: AstSummary | null,
-  targets: MissionBriefing['targets']
-): MissionBriefing['keyAbstractions'] {
-  if (!astData) {
-    return null;
-  }
-
-  const classes = astData.classes || [];
-  const protocols = astData.protocols || [];
-  const abstractions: {
-    name: string;
-    kind: string;
-    module: string;
-    significance: string;
-    detail: string;
-  }[] = [];
-
-  // §1: 高继承热点 — 被多个子类继承的基类
-  const subclassCount: Record<string, number> = {};
-  for (const cls of classes) {
-    if (cls.superclass) {
-      subclassCount[cls.superclass] = (subclassCount[cls.superclass] || 0) + 1;
-    }
-  }
-  const topBases = Object.entries(subclassCount)
-    .filter(([, count]) => count >= 2)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5);
-
-  for (const [baseName, count] of topBases) {
-    const baseCls = classes.find((c) => c.name === baseName);
-    const module =
-      baseCls?.targetName || _inferModule(baseCls?.file || baseCls?.relativePath, targets);
-    abstractions.push({
-      name: baseName,
-      kind: (baseCls?.kind as string) || 'class',
-      module,
-      significance: `Base class with ${count} subclasses`,
-      detail: `Subclasses: ${classes
-        .filter((c) => c.superclass === baseName)
-        .map((c) => c.name)
-        .slice(0, 5)
-        .join(', ')}`,
-    });
-  }
-
-  // §2: 高方法数类 — 复杂度热点
-  const methodHeavy = classes
-    .filter((c) => (c.methodCount || 0) >= 15)
-    .sort((a, b) => (b.methodCount || 0) - (a.methodCount || 0))
-    .slice(0, 3);
-  for (const cls of methodHeavy) {
-    // 跳过已在继承热点中出现的
-    if (abstractions.some((a) => a.name === cls.name)) {
-      continue;
-    }
-    const module = cls.targetName || _inferModule(cls.file || cls.relativePath, targets);
-    abstractions.push({
-      name: cls.name,
-      kind: (cls.kind as string) || 'class',
-      module,
-      significance: `Complexity hotspot (${cls.methodCount} methods)`,
-      detail: cls.superclass ? `extends ${cls.superclass}` : 'root class',
-    });
-  }
-
-  // §3: 高遵从协议 — 核心抽象接口
-  const protoWithConformers = protocols
-    .filter((p) => (p.conformers?.length || 0) >= 2 || (p.methodCount || 0) >= 3)
-    .sort((a, b) => (b.conformers?.length || 0) - (a.conformers?.length || 0))
-    .slice(0, 5);
-  for (const proto of protoWithConformers) {
-    const module = proto.targetName || _inferModule(proto.file || proto.relativePath, targets);
-    const conformerCount = proto.conformers?.length || 0;
-    abstractions.push({
-      name: proto.name,
-      kind: 'protocol',
-      module,
-      significance:
-        conformerCount > 0
-          ? `Protocol with ${conformerCount} conformers`
-          : `Protocol with ${proto.methodCount || 0} method requirements`,
-      detail:
-        conformerCount > 0
-          ? `Conformers: ${(proto.conformers ?? []).slice(0, 5).join(', ')}`
-          : `${proto.methodCount || 0} required methods`,
-    });
-  }
-
-  return abstractions.length > 0 ? abstractions.slice(0, 10) : null;
-}
-
-/** 从文件路径推断模块名 */
-function _inferModule(filePath: string | undefined, targets: MissionBriefing['targets']): string {
-  if (!filePath) {
-    return 'unknown';
-  }
-  for (const t of targets) {
-    if (filePath.includes(t.name)) {
-      return t.name;
-    }
-  }
-  return filePath.split('/')[0] || 'unknown';
-}
-
 // ── Panorama 摘要构建 ──────────────────────────────────────
 
 /**
@@ -1062,12 +659,14 @@ function summarizePanorama(
 /**
  * 构建 Mission Briefing
  *
+ * 项目信息来自 ProjectContext（见 buildProjectContextMissionBriefing）。旧的项目快照输入
+ * （AST 汇总、实体图、调用图、Guard 审计、增量计划）已没有生产方，对应的入参与汇总逻辑已删除；
+ * 简报里的 `ast`、`keyAbstractions`、`codeEntityGraph`、`callGraph`、`guardFindings` 这几个键
+ * 仍然保留，取值固定为"没有这类数据"，宿主读到的形状不变。
+ *
  * @param opts.projectMeta 项目元数据
- * @param opts.astData analyzeProject() 原始结果
- * @param opts.codeEntityResult CodeEntityGraph.populateFromAst() 结果
- * @param opts.depGraphData discoverer.getDependencyGraph() 结果
- * @param opts.guardAudit GuardCheckEngine.auditFiles() 结果
- * @param opts.targets allTargets 列表
+ * @param opts.depGraphData 模块依赖图
+ * @param opts.targets 目标列表
  * @param opts.activeDimensions signal-aware dimension selection result
  * @param opts.skills 已加载的 bootstrap skills
  * @param opts.session GenerateSession 实例
@@ -1075,16 +674,11 @@ function summarizePanorama(
  */
 export function buildMissionBriefing({
   projectMeta,
-  astData,
-  codeEntityResult,
-  callGraphResult,
   depGraphData,
-  guardAudit,
   targets,
   activeDimensions,
   session,
   languageExtension, // §7.1: 语言扩展（反模式、Guard 规则、Agent 注意事项）
-  incrementalPlan, // §7.3: 增量 Bootstrap 评估结果
   languageStats, // §7.4: 完整语言分布统计
   panoramaResult, // §M1: Phase 1.8 全景数据
   localPackageModules, // 本地子包模块信息
@@ -1103,21 +697,9 @@ export function buildMissionBriefing({
       tierIndex >= 0 ? tierIndex + 1 : typeof dim.tierHint === 'number' ? dim.tierHint : 1;
     const task: DimensionTask = enrichDimensionTask(dim, tier);
 
-    // §7.3: 增量 Bootstrap — 标记维度状态
-    if (incrementalPlan) {
-      if (incrementalPlan.skippedDimensions.includes(dim.id)) {
-        task.status = 'skipped-incremental';
-      } else if (incrementalPlan.affectedDimensions.includes(dim.id)) {
-        task.status = 'pending';
-      }
-    }
-
-    // v2: 从 Phase 1-4 数据中提取维度相关的证据启发
+    // v2: 从依赖图与全景数据中提取维度相关的证据启发
     const evidenceStarters = buildEvidenceStarters(dim, {
-      astData,
-      guardAudit,
       depGraphData,
-      callGraphResult,
       panoramaResult,
     });
     if (evidenceStarters) {
@@ -1184,7 +766,8 @@ export function buildMissionBriefing({
   const briefing: MissionBriefing = {
     projectMeta,
 
-    ast: compressAstForBriefing(astData ?? null, (projectMeta.fileCount as number) || 0),
+    // 没有 AST 汇总的生产方；键与空形状保留给读这个字段的宿主。
+    ast: { available: false, classes: [], protocols: [], categories: [], patterns: {} },
 
     // 高层次架构概览 — Agent 一目了然项目结构
     architectureOverview: buildArchitectureOverview(
@@ -1197,11 +780,11 @@ export function buildMissionBriefing({
     technologyStack: buildTechnologyStack(depGraphData ?? null, builtTargets),
 
     // 关键抽象 — Agent 优先分析的核心类/协议
-    keyAbstractions: buildKeyAbstractions(astData ?? null, builtTargets),
+    keyAbstractions: null,
 
-    codeEntityGraph: summarizeEntityGraph(codeEntityResult ?? null),
+    codeEntityGraph: null,
 
-    callGraph: summarizeCallGraph(callGraphResult ?? null),
+    callGraph: null,
 
     dependencyGraph:
       dedupedDepNodes.length > 0
@@ -1211,7 +794,7 @@ export function buildMissionBriefing({
           }
         : null,
 
-    guardFindings: summarizeGuardFindings(guardAudit ?? null),
+    guardFindings: null,
 
     targets: builtTargets,
 

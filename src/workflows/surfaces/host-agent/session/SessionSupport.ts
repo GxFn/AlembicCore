@@ -1,19 +1,11 @@
 /**
- * SessionSupport — SessionManager 单例获取与项目分析 Session 缓存
+ * SessionSupport — SessionManager 单例获取
  *
- * 为冷启动和增量扫描提供 GenerateSessionManager 的单例解析，
- * 以及 Phase 1-4 分析结果的缓存，供后续维度执行复用。
+ * 为冷启动和增量扫描提供 GenerateSessionManager 的单例解析。
  */
 
-import path from 'node:path';
 import { resolveDataRoot } from '../../../../shared/resolveProjectRoot.js';
-import type { DimensionDef, ProjectSnapshot } from '../../../../types/ProjectSnapshot.js';
-import { toSessionCache } from '../../../../types/SnapshotViews.js';
 import { GenerateSessionManager } from './GenerateSession.js';
-
-// ═══════════════════════════════════════════════════════════
-// §1 — WorkflowSessionManagerProvider
-// ═══════════════════════════════════════════════════════════
 
 interface SessionManagerContainer {
   get(name: string): unknown;
@@ -62,52 +54,6 @@ function resolveSessionDataRoot(container: SessionManagerContainer): string | nu
   try {
     return resolveDataRoot(container as never);
   } catch {
-    return null;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════
-// §2 — WorkflowSessionCache
-// ═══════════════════════════════════════════════════════════
-
-export type WorkflowSessionContainer = Parameters<typeof getOrCreateSessionManager>[0];
-
-interface WorkflowSessionLogger {
-  warn(message: string): void;
-}
-
-export function cacheProjectAnalysisSession(opts: {
-  container: WorkflowSessionContainer;
-  projectRoot: string;
-  dimensions: DimensionDef[];
-  snapshot: ProjectSnapshot;
-  primaryLang: string | null;
-  fileCount: number;
-  moduleCount: number;
-  logger: WorkflowSessionLogger;
-  logPrefix: string;
-}): string | null {
-  try {
-    const sessionManager = getOrCreateSessionManager(opts.container);
-    const session = sessionManager.createSession({
-      projectRoot: opts.projectRoot,
-      dimensions: opts.dimensions.map((dimension) => ({
-        ...dimension,
-        skillMeta: dimension.skillMeta ?? undefined,
-      })),
-      projectContext: {
-        projectName: path.basename(opts.projectRoot),
-        primaryLang: opts.primaryLang,
-        fileCount: opts.fileCount,
-        modules: opts.moduleCount,
-      },
-    });
-    session.setSnapshotCache(toSessionCache(opts.snapshot));
-    return session.id;
-  } catch (err: unknown) {
-    opts.logger.warn(
-      `[${opts.logPrefix}] GenerateSessionManager setup failed (non-blocking): ${err instanceof Error ? err.message : String(err)}`
-    );
     return null;
   }
 }

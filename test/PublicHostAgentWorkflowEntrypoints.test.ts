@@ -6,9 +6,9 @@ import { describe, expect, it } from 'vitest';
 import {
   buildColdStartWorkflowPlan,
   buildGenerateFullPlan,
-  buildHostAgentMissionBriefing,
   buildKnowledgeRescanPlan,
   buildKnowledgeRescanWorkflowPlan,
+  buildProjectContextMissionBriefing,
   buildProjectIndexGapPlan,
   buildProjectIndexIncrementalPlan,
   clearDimensionCheckpoints,
@@ -128,15 +128,23 @@ describe('stable host-agent workflow entrypoint', () => {
       'recipe-1'
     );
 
-    const briefing = buildHostAgentMissionBriefing({
-      projectRoot: '/project',
-      primaryLang: 'typescript',
-      fileCount: 12,
-      projectType: 'node',
-      briefing: {
-        activeDimensions: dimensions,
-        session,
+    const briefing = buildProjectContextMissionBriefing({
+      projectContext: {
+        project: { projectRoot: '/project', displayName: 'project' },
+        envelopes: [],
+        refs: [],
+        files: [{ filePath: 'src/service.ts', language: 'typescript' }],
+        warnings: [],
+        unavailable: [],
+        modules: [],
+        moduleLayers: [],
+        fileFlows: [],
+        fileSymbols: [],
+        sourceSlices: [],
+        anchorRanges: [],
       },
+      activeDimensions: dimensions,
+      session,
     });
 
     expect(briefing.projectMeta).toMatchObject({
