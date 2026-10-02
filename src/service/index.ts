@@ -4,7 +4,6 @@ export * from './knowledge/index.js';
 export * from './knowledge/validation/candidate/index.js';
 export * from './knowledge/validation/quality/index.js';
 export * from './knowledge/validation/recipe/index.js';
-export * from './plan/status/index.js';
 export * from './search/index.js';
 export * from './sustain/index.js';
 export * from './vector/index.js';

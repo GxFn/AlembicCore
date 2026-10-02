@@ -56,7 +56,7 @@
 | McpSession(+字段 session?)/SseSessionRegistry 族/私有 GenerateSession 双胞胎 | McpConnection(+connection?)/SseConnectionRegistry(HTTP 载荷 sessionId 与 createStreamSession wire 术语保留)/GenerateTaskSession | W3 |
 | src/evolution.ts facade 本体 | src/sustain.ts(exports 新增 './sustain';'./evolution' wire 冻结留 shim 整体转发) | W3 |
 | Evolution{Proposal,Warning,LifecycleEvent,GitDiffCheckpoint,CoverageLedger}Repository 5 个 type 别名 | 删除,消费方改直名(coverage_ledger 是 Generate 概念,别名挂 Evolution 名实不符) | W3 |
-| RecipeSimilarity 的 RecipeLike | SimilarityRecipeLike(与 recipeStatus 侧 RecipeLike 消歧;补进 './sustain' 具名导出) | W3 |
+| RecipeSimilarity 的 RecipeLike | SimilarityRecipeLike(当时为与 recipeStatus 侧 RecipeLike 消歧;该侧已随 service/plan/status 于 2026-10 删除;补进 './sustain' 具名导出) | W3 |
 | exports `./workflows/capabilities` 族 6 条+src 目录 | `./workflows/surfaces` 族(0 外部消费实证,原子切换无 alias;closeout/retired 历史记录保留旧名) | W3 |
 | Agent src/tools/runtime/capabilities/ 目录 | tools/runtime/toolsets/(无独立 exports 子路径;类名 Capability/RuntimeCapability 待 W6 别名层删除后评估) | W3 |
 | Plugin lib/workflows/capabilities/ 目录 | lib/workflows/surfaces/(#workflows/* package-imports 中段同批;stage 验证过) | W3 |

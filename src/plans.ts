@@ -30,25 +30,6 @@ export {
   unique,
   validateCompletePlanIntent,
 } from './service/plan/intent/index.js';
-export type {
-  BuildPlanDraftInformationPackageInput,
-  PlanCodeRecipeMapping,
-  PlanCoverageBucket,
-  PlanCoverageGap,
-  PlanDraftInformationPackage,
-  PlanGenerationState,
-  PlanSignatureComparison,
-  PlanView,
-  ProjectContextSignatureInput,
-} from './service/plan/status/index.js';
-export {
-  buildCoverage,
-  buildPlanDraftInformationPackage,
-  compareProjectContextSignature,
-  computeProjectContextSignature,
-  projectPlanGenerationState,
-  projectPlanGenerationStateFromRecords,
-} from './service/plan/status/index.js';
 export {
   buildColdStartWorkflowPlan as buildGenerateFullPlan,
   buildKnowledgeRescanWorkflowPlan as buildProjectIndexIncrementalPlan,
