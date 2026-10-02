@@ -525,7 +525,6 @@ const requiredTypeDeclarations = {
     'CrossHarvestSemanticReviewFixtureResultV1',
     'DiscovererPreferenceData',
     'PrepareProjectAnalysisTestFixturesOptions',
-    'SnapshotData',
     'TwoScaleSharedHarvestSemanticReviewFixtureResultV1',
     'TwoScaleSharedHarvestSemanticReviewFixtureV1',
   ],

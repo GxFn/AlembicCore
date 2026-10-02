@@ -1,74 +1,15 @@
 /**
- * FileDiffPlanner — workflow 文件差异计划器
+ * FileDiffPlanner — workflow 完成后的文件快照保存
  *
- * 基于 FileDiffSnapshotStore 存储的文件指纹，检测项目变更范围，
- * 推断受影响维度，并控制内部维度执行链路仅执行受影响维度。
+ * 把一次 workflow 的文件指纹、各维度引用的文件、会话记忆摘要存成一份快照
+ * （FileDiffSnapshotStore）。增量计划本身由宿主给出：主体从 ProjectContext 文件快照算 diff，
+ * 把结果作为 plan 传进来，这里只负责把它一并记进快照。
  *
- * 流程:
- *   1. 加载上次成功快照
- *   2. 扫描当前文件 → 计算 diff (added/modified/deleted)
- *   3. 推断受影响维度 → { mode, dimensions, skippedDimensions }
- *   4. 从快照恢复未变更维度的 EpisodicMemory
- *   5. 只对受影响维度执行 dimension fill
- *   6. 完成后保存新快照
+ * 这个类原先还带一个 evaluate()——读上次快照、算 diff、推断受影响维度——从未有调用方，已删除。
  */
 
-import type {
-  GenerateFile,
-  LoggerLike,
-  RestoredEpisodicMemory,
-  SaveSnapshotParams,
-} from '../../../types/workflows.js';
+import type { LoggerLike, SaveSnapshotParams } from '../../../types/workflows.js';
 import { FileDiffSnapshotStore } from './FileDiffSnapshotStore.js';
-
-class SnapshotEpisodicMemory implements RestoredEpisodicMemory {
-  readonly #data: Record<string, unknown>;
-
-  constructor(data: Record<string, unknown>) {
-    this.#data = data;
-  }
-
-  static fromJSON(value: unknown): SnapshotEpisodicMemory {
-    return new SnapshotEpisodicMemory(
-      value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
-    );
-  }
-
-  getCompletedDimensions(): string[] {
-    const completed = this.#data.completedDimensions;
-    if (Array.isArray(completed)) {
-      return completed.filter((item): item is string => typeof item === 'string');
-    }
-
-    const reports = this.#data.dimensionReports ?? this.#data.reports;
-    if (reports && typeof reports === 'object') {
-      return Object.keys(reports);
-    }
-
-    return [];
-  }
-
-  getDimensionReport(dimId: string): { referencedFiles?: string[] } | null {
-    const reports = this.#data.dimensionReports ?? this.#data.reports;
-    if (!reports || typeof reports !== 'object') {
-      return null;
-    }
-    const report = (reports as Record<string, unknown>)[dimId];
-    if (!report || typeof report !== 'object') {
-      return null;
-    }
-    const referencedFiles = (report as { referencedFiles?: unknown }).referencedFiles;
-    return {
-      referencedFiles: Array.isArray(referencedFiles)
-        ? referencedFiles.filter((item): item is string => typeof item === 'string')
-        : [],
-    };
-  }
-
-  toJSON(): unknown {
-    return this.#data;
-  }
-}
 
 // ──────────────────────────────────────────────────────────────
 // FileDiffPlanner 类
@@ -77,119 +18,18 @@ class SnapshotEpisodicMemory implements RestoredEpisodicMemory {
 export class FileDiffPlanner {
   #snapshot;
 
-  #logger;
-
   #projectRoot;
 
   constructor(db: unknown, projectRoot: string, { logger }: { logger?: LoggerLike | null } = {}) {
     this.#snapshot = new FileDiffSnapshotStore(db, { logger });
-    this.#logger = logger || null;
     this.#projectRoot = projectRoot;
-  }
-
-  /**
-   * 评估增量可行性 — 在 bootstrap 流程最开始调用
-   *
-   * @param currentFiles 当前扫描到的文件
-   * @param allDimIds 所有可用维度 ID
-   */
-  evaluate(currentFiles: GenerateFile[], allDimIds: string[]) {
-    try {
-      // 1. 加载上次快照
-      const previousSnapshot = this.#snapshot.getLatest(this.#projectRoot);
-
-      if (!previousSnapshot) {
-        this.#log('No previous snapshot found — full bootstrap required');
-        return {
-          canIncremental: false,
-          mode: 'full',
-          affectedDimensions: allDimIds,
-          skippedDimensions: [],
-          previousSnapshot: null,
-          diff: null,
-          reason: '无历史快照，需要全量冷启动',
-          restoredEpisodic: null,
-        };
-      }
-
-      // 2. 计算 diff
-      const diff = this.#snapshot.computeDiff(previousSnapshot, currentFiles, this.#projectRoot);
-
-      this.#log(
-        `Diff: +${diff.added.length} added, ~${diff.modified.length} modified, ` +
-          `-${diff.deleted.length} deleted, =${diff.unchanged.length} unchanged ` +
-          `(ratio: ${(diff.changeRatio * 100).toFixed(1)}%)`
-      );
-
-      // 3. 推断受影响维度
-      const inference = this.#snapshot.inferAffectedDimensions(previousSnapshot, diff, allDimIds);
-
-      if (inference.mode === 'full') {
-        this.#log(`Full rebuild recommended: ${inference.reason}`);
-        return {
-          canIncremental: false,
-          mode: 'full',
-          affectedDimensions: allDimIds,
-          skippedDimensions: [],
-          previousSnapshot,
-          diff,
-          reason: inference.reason,
-          restoredEpisodic: null,
-        };
-      }
-
-      // 4. 增量可行 → 尝试恢复 SessionStore
-      let restoredEpisodic: RestoredEpisodicMemory | null = null;
-      if (previousSnapshot.episodicData) {
-        try {
-          restoredEpisodic = SnapshotEpisodicMemory.fromJSON(previousSnapshot.episodicData);
-          this.#log(
-            `Restored SessionStore: ${restoredEpisodic.getCompletedDimensions().length} dimensions`
-          );
-        } catch (err: unknown) {
-          this.#log(
-            `Failed to restore SessionStore: ${err instanceof Error ? err.message : String(err)}`,
-            'warn'
-          );
-        }
-      }
-
-      this.#log(
-        `Incremental plan: ${inference.dimensions.length} affected, ` +
-          `${inference.skippedDimensions.length} skipped — ${inference.reason}`
-      );
-
-      return {
-        canIncremental: true,
-        mode: 'incremental',
-        affectedDimensions: inference.dimensions,
-        skippedDimensions: inference.skippedDimensions,
-        previousSnapshot,
-        diff,
-        reason: inference.reason,
-        restoredEpisodic,
-      };
-    } catch (err: unknown) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.#log(`Incremental evaluation failed: ${errMsg} — fallback to full`, 'warn');
-      return {
-        canIncremental: false,
-        mode: 'full',
-        affectedDimensions: allDimIds,
-        skippedDimensions: [],
-        previousSnapshot: null,
-        diff: null,
-        reason: `增量评估失败 (${errMsg})，回退全量`,
-        restoredEpisodic: null,
-      };
-    }
   }
 
   /**
    * 保存快照 — 在 bootstrap 完成后调用
    *
    * @param [params.meta] { durationMs, candidateCount, primaryLang }
-   * @param [params.plan] evaluate() 返回的计划 (增量时)
+   * @param [params.plan] 宿主给出的增量计划 (增量时)
    * @returns 快照 ID
    */
   saveSnapshot(params: SaveSnapshotParams) {
@@ -223,20 +63,6 @@ export class FileDiffPlanner {
         : [],
       affectedDims: plan?.affectedDimensions || [],
     });
-  }
-
-  /** 获取快照管理器 (用于直接查询) */
-  getSnapshotManager() {
-    return this.#snapshot;
-  }
-
-  #log(msg: string, level = 'info') {
-    if (this.#logger) {
-      const fn = (this.#logger as Record<string, ((...args: unknown[]) => void) | undefined>)[
-        level
-      ];
-      fn?.(`[FileDiffPlanner] ${msg}`);
-    }
   }
 }
 

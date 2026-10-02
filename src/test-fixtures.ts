@@ -99,8 +99,6 @@ export type { DimensionDef } from './types/ProjectSnapshot.js';
 export {
   FileDiffSnapshotStore,
   normalizeSnapshotPath,
-  reconcileSnapshotHashes,
-  type SnapshotData,
 } from './workflows/surfaces/persistence/FileDiffSnapshotStore.js';
 
 export const AST_LANGUAGE_TEST_PLUGINS = Object.freeze({

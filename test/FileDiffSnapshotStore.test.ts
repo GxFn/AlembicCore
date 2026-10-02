@@ -4,12 +4,11 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
 import { pathGuard } from '../src/io.js';
+import { createAlembicRepositories } from '../src/repositories.js';
 import { computeContentHash } from '../src/shared/contentHash.js';
 import {
   FileDiffSnapshotStore,
   normalizeSnapshotPath,
-  reconcileSnapshotHashes,
-  type SnapshotData,
 } from '../src/workflows/surfaces/persistence/FileDiffSnapshotStore.js';
 
 describe('normalizeSnapshotPath', () => {
@@ -38,91 +37,6 @@ describe('normalizeSnapshotPath', () => {
   });
 });
 
-describe('reconcileSnapshotHashes', () => {
-  it('maps legacy short snapshot paths to unique current project-relative paths', () => {
-    const result = reconcileSnapshotHashes(
-      {
-        'Middleware/AuthMiddleware.swift': 'old-auth-hash',
-        'Sources/App.swift': 'app-hash',
-      },
-      ['Sources/Infrastructure/Networking/Middleware/AuthMiddleware.swift', 'Sources/App.swift']
-    );
-
-    expect(result.hashes).toEqual({
-      'Sources/Infrastructure/Networking/Middleware/AuthMiddleware.swift': 'old-auth-hash',
-      'Sources/App.swift': 'app-hash',
-    });
-    expect(result.remapped).toEqual({
-      'Middleware/AuthMiddleware.swift':
-        'Sources/Infrastructure/Networking/Middleware/AuthMiddleware.swift',
-    });
-    expect(result.ambiguous).toEqual([]);
-  });
-
-  it('keeps ambiguous legacy paths unchanged', () => {
-    const result = reconcileSnapshotHashes(
-      {
-        'Middleware/AuthMiddleware.swift': 'old-auth-hash',
-      },
-      [
-        'Sources/Infrastructure/Networking/Middleware/AuthMiddleware.swift',
-        'Sources/Feature/Networking/Middleware/AuthMiddleware.swift',
-      ]
-    );
-
-    expect(result.hashes).toEqual({
-      'Middleware/AuthMiddleware.swift': 'old-auth-hash',
-    });
-    expect(result.remapped).toEqual({});
-    expect(result.ambiguous).toEqual(['Middleware/AuthMiddleware.swift']);
-  });
-});
-
-describe('FileDiffSnapshotStore.computeDiff', () => {
-  it('reports a canonical modified file instead of legacy added/deleted noise', () => {
-    const store = new FileDiffSnapshotStore({ getDrizzle: () => ({}) });
-    const snapshot: SnapshotData = {
-      id: 'snap_legacy',
-      sessionId: null,
-      projectRoot: '/repo',
-      createdAt: new Date(0).toISOString(),
-      durationMs: 0,
-      fileCount: 1,
-      dimensionCount: 0,
-      candidateCount: 0,
-      primaryLang: null,
-      fileHashes: {
-        'Middleware/AuthMiddleware.swift': 'old-auth-hash',
-      },
-      dimensionMeta: {},
-      episodicData: null,
-      isIncremental: false,
-      parentId: null,
-      changedFiles: [],
-      affectedDims: [],
-      status: 'complete',
-    };
-
-    const diff = store.computeDiff(
-      snapshot,
-      [
-        {
-          path: '/repo/Sources/Infrastructure/Networking/Middleware/AuthMiddleware.swift',
-          relativePath: 'Middleware/AuthMiddleware.swift',
-          content: 'new auth middleware content',
-        },
-      ],
-      '/repo'
-    );
-
-    expect(diff.added).toEqual([]);
-    expect(diff.modified).toEqual([
-      'Sources/Infrastructure/Networking/Middleware/AuthMiddleware.swift',
-    ]);
-    expect(diff.deleted).toEqual([]);
-  });
-});
-
 describe('FileDiffSnapshotStore file content authority', () => {
   let projectRoot: string;
   let runtime: AlembicDatabaseRuntime;
@@ -140,39 +54,32 @@ describe('FileDiffSnapshotStore file content authority', () => {
     fs.rmSync(projectRoot, { recursive: true, force: true });
   });
 
-  it('uses disk bytes consistently when a scanned file omits content', () => {
+  // 存进去的快照由仓储读回核对：这个存储只有写入一侧。
+  const savedHashes = async (snapshotId: string) =>
+    (await createAlembicRepositories(runtime.connection).generateRepository.findById(snapshotId))
+      ?.fileHashes;
+
+  it('hashes the bytes on disk when a scanned file omits content', async () => {
     const filePath = path.join(projectRoot, 'source.ts');
     fs.writeFileSync(filePath, 'export const value = 1;\n');
-    const files = [{ path: filePath }];
-    const snapshotId = store.save({ projectRoot, allFiles: files });
-    const snapshot = store.getById(snapshotId);
+    const first = store.save({ projectRoot, allFiles: [{ path: filePath }] });
 
-    expect(snapshot).not.toBeNull();
-    expect(store.computeDiff(snapshot!, files, projectRoot)).toMatchObject({
-      unchanged: ['source.ts'],
-      modified: [],
-      changeRatio: 0,
+    expect(await savedHashes(first)).toEqual({
+      'source.ts': computeContentHash('export const value = 1;\n'),
     });
 
     fs.writeFileSync(filePath, 'export const value = 2;\n');
-    expect(store.computeDiff(snapshot!, files, projectRoot)).toMatchObject({
-      unchanged: [],
-      modified: ['source.ts'],
+    const second = store.save({ projectRoot, allFiles: [{ path: filePath }] });
+    expect(await savedHashes(second)).toEqual({
+      'source.ts': computeContentHash('export const value = 2;\n'),
     });
   });
 
-  it('preserves an explicitly empty scan instead of replacing it with disk content', () => {
+  it('preserves an explicitly empty scan instead of replacing it with disk content', async () => {
     const filePath = path.join(projectRoot, 'source.ts');
     fs.writeFileSync(filePath, 'export const value = 1;\n');
-    const files = [{ path: filePath, content: '' }];
-    const snapshotId = store.save({ projectRoot, allFiles: files });
-    const snapshot = store.getById(snapshotId);
+    const snapshotId = store.save({ projectRoot, allFiles: [{ path: filePath, content: '' }] });
 
-    expect(snapshot?.fileHashes['source.ts']).toBe(computeContentHash(''));
-    expect(store.computeDiff(snapshot!, files, projectRoot)).toMatchObject({
-      unchanged: ['source.ts'],
-      modified: [],
-      changeRatio: 0,
-    });
+    expect(await savedHashes(snapshotId)).toEqual({ 'source.ts': computeContentHash('') });
   });
 });
