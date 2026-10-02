@@ -71,6 +71,42 @@ export async function readProjectInputSnapshotView(
   return snapshotViews.get(projectSourceReaderIdentity(reader))?.();
 }
 
+const sourceCatalogs = new WeakMap<ProjectSourceReader, () => ReadonlySet<string> | undefined>();
+
+/**
+ * 这个文件是否在读取器声明的源码清单里。
+ *
+ * 只有认证捕获用的记录 / 重放读取器带清单：清单之外的源码文件不属于这次分析的输入，
+ * 分析不应该顺着 import 之类的线索去读它。没有清单的读取器（live、旧快照）返回 undefined，
+ * 表示不受清单限制。
+ */
+export function isDeclaredProjectSourceFile(
+  reader: ProjectSourceReader,
+  absolutePath: string
+): boolean | undefined {
+  const catalog = sourceCatalogs.get(projectSourceReaderIdentity(reader))?.();
+  return catalog?.has(path.resolve(absolutePath));
+}
+
+/** 清单里每个文件的规范绝对路径，连同运行时别名（如 macOS 的 /var）下的同一路径。 */
+function catalogPaths(
+  files: readonly ProjectInputPath[],
+  roots: readonly ProjectInputRootBinding[]
+): ReadonlySet<string> {
+  const paths = new Set<string>();
+  for (const file of files) {
+    const parts = file.relativePath.split('/');
+    const root = roots.find((entry) => entry.id === file.rootId);
+    if (!root) {
+      continue;
+    }
+    for (const base of [root.path, ...(root.aliases ?? [])]) {
+      paths.add(path.resolve(base, ...parts));
+    }
+  }
+  return paths;
+}
+
 export class ProjectSourceInputUncapturedError extends Error {
   readonly code = 'PROJECT_SOURCE_INPUT_UNCAPTURED';
   constructor(operation: string, target: string) {
@@ -106,6 +142,7 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
   readonly #blobs = new Map<`sha256:${string}`, Uint8Array>();
   readonly #failures = new Map<string, Error>();
   #sourceFiles?: ProjectInputPath[];
+  #sourcePaths?: ReadonlySet<string>;
 
   constructor(
     roots: readonly ProjectInputRootBinding[],
@@ -116,6 +153,7 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
       this.assertComplete();
       return { snapshot: await this.snapshot(), roots: structuredClone(this.#roots) };
     });
+    sourceCatalogs.set(this, () => this.#sourcePaths);
   }
 
   /** 清单来自已验证的Foundation inventory；实际字节仍必须经reader读取并核验。 */
@@ -127,6 +165,7 @@ export class RecordingProjectSourceReader implements ProjectSourceReader {
       throw error;
     }
     this.#sourceFiles = declared;
+    this.#sourcePaths = catalogPaths(declared, this.#roots);
   }
 
   async readFile(absolutePath: string, options?: ProjectSourceReadOptions): Promise<Uint8Array> {
@@ -470,7 +509,12 @@ export class ReplayProjectSourceReader implements ProjectSourceReader {
       this.#records.set(key, observation);
     }
     if (snapshot.sourceFiles !== undefined) {
-      validateSourceCatalog(snapshot.sourceFiles, this.#roots);
+      // 重放与记录给出同一个清单：分析在两遍里对"这个文件算不算输入"的判断必须一致。
+      const sourcePaths = catalogPaths(
+        validateSourceCatalog(snapshot.sourceFiles, this.#roots),
+        this.#roots
+      );
+      sourceCatalogs.set(this, () => sourcePaths);
     }
     const frozen = structuredClone(snapshot);
     snapshotViews.set(this, async () => {

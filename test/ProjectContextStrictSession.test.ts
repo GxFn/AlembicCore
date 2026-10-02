@@ -370,6 +370,84 @@ describe('strict analysis session', () => {
     });
   });
 
+  it('does not follow imports to source files outside the certified inventory', async () => {
+    // 清单（宿主的策略）不含名为 coverage 的目录，也不含 .cjs；这两个文件就在磁盘上，import 指向它们。
+    const inventory = {
+      'src/app.ts': [
+        "import { report } from './coverage/report.js';",
+        "import { tool } from './tool.cjs';",
+        "import { helper } from './helper.js';",
+        'export function run() {',
+        '  report();',
+        '  tool();',
+        '  helper();',
+        '}',
+      ].join('\n'),
+      'src/helper.ts': 'export function helper() { return 1; }',
+    };
+    const { projectRoot, dataRoot } = await fixture({
+      ...inventory,
+      'src/coverage/report.ts': 'export function report() { return 2; }',
+      'src/tool.cjs': 'exports.tool = function tool() { return 3; };',
+    });
+
+    await withCodeGraphProjectContextSession({ dataRoot }, async (context) => {
+      const request = flowRequest(projectRoot, 'src/app.ts');
+      const capture = await new NodeProjectContextFoundationHostPorts(context).createInputCapture({
+        repositories: [
+          { repoId: 'repo', scopeId: 'repo', relativeRoot: '.', sourceRoot: projectRoot },
+        ],
+        files: Object.entries(inventory).map(([relativePath, source]) => ({
+          repoId: 'repo',
+          relativePath,
+          content: Buffer.from(source),
+        })),
+      });
+      if (!capture) {
+        throw new Error('Expected native capture');
+      }
+      const sourceReads = new Set<string>();
+      const recorded = await context.execute(request, {
+        sourceReader: capture.reader,
+        onSourceFileVersion: ({ filePath }) => sourceReads.add(filePath),
+        onSourceFileRead: ({ filePath }) => sourceReads.add(filePath),
+      });
+      expect(recorded.errors ?? []).toEqual([]);
+      const targets = Object.fromEntries(
+        (recorded.data as FileFlowContext).callers.map((call) => [
+          call.to?.symbol ?? call.to?.label,
+          call.unresolved ? 'unresolved' : call.to?.filePath,
+        ])
+      );
+      // 清单内的目标照常解析；清单外的两个不跟过去，调用保持未解析。
+      expect(targets).toEqual({
+        report: 'unresolved',
+        tool: 'unresolved',
+        helper: 'src/helper.ts',
+      });
+      // 分析读到的源码只有清单里的文件——读到清单外的源码会让整次认证捕获作废。
+      expect([...sourceReads].sort()).toEqual(['src/app.ts', 'src/helper.ts']);
+
+      // 重放对"哪些文件算输入"的判断与记录时一致。
+      const snapshot = await capture.snapshot();
+      await capture.verify();
+      const replay = capture.createReplay(snapshot);
+      expect(await context.execute(request, { sourceReader: replay })).toEqual(recorded);
+      replay.assertComplete();
+
+      // 不带清单的实时查询不受清单限制，但同样不进被扫描策略排除的目录。
+      const live = await context.execute(request);
+      const liveTargets = Object.fromEntries(
+        (live.data as FileFlowContext).callers.map((call) => [
+          call.to?.symbol ?? call.to?.label,
+          call.unresolved ? 'unresolved' : call.to?.filePath,
+        ])
+      );
+      expect(liveTargets.report).toBe('unresolved');
+      expect(liveTargets.helper).toBe('src/helper.ts');
+    });
+  });
+
   it('links calls into another workspace package only when its entry is backed by configuration', async () => {
     const manifest = (value: object) => JSON.stringify(value);
     const files = {

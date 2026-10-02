@@ -3,7 +3,9 @@ import {
   type ModuleResolutionAccess,
   resolveModuleSpecifier,
 } from '../../../core/linking/moduleResolver.js';
+import { isDeclaredProjectSourceFile } from '../../../infrastructure/io/ProjectInputSnapshot.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
+import { isSourceScanExcludedPath } from '../../../shared/SourceScanExclusions.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { FileAnalysisSession } from '../analysis/FileAnalysisSession.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
@@ -54,6 +56,27 @@ export async function findModuleFile(input: ModuleFileInput): Promise<ModuleFile
     };
   }
   return { status: resolution.status === 'external' ? 'not-relative' : resolution.status };
+}
+
+/**
+ * 一个已经解析到的模块文件，其内容能不能被这次分析读取。不能时返回原因。
+ *
+ * 找到文件只需要看它存不存在；顺着它继续读内容（导出表、声明）则要求它是这次分析的源码：
+ * - 认证捕获的读取器带着源码清单，清单之外的文件不是这次分析的输入——读了它，
+ *   捕获会因为"读到清单外的源码"而整体作废。
+ * - 被共享扫描策略排除的目录（构建产物、依赖、coverage 等）里的文件，发现层与索引都不把它
+ *   当作项目源码；按内容得出的结论与它们保持同一个范围。
+ */
+export function moduleFileOutsideAnalysisScope(
+  input: Pick<ModuleFileInput, 'projectRoot' | 'reader'>,
+  filePath: string
+): 'not-in-source-catalog' | 'scan-excluded-directory' | undefined {
+  if (
+    isDeclaredProjectSourceFile(input.reader, path.resolve(input.projectRoot, filePath)) === false
+  ) {
+    return 'not-in-source-catalog';
+  }
+  return isSourceScanExcludedPath(filePath) ? 'scan-excluded-directory' : undefined;
 }
 
 /** 经输入读取器实现的解析通道。路径都是项目相对路径；逃出项目根的一律当作不存在。 */

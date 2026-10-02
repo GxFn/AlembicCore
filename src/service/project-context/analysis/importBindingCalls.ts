@@ -12,7 +12,7 @@ import {
 import { nodeProjectSourceReader } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
 import type { FileFlowExtractionResult } from '../fileFlow/contracts.js';
-import { findModuleFile } from '../fileFlow/moduleFile.js';
+import { findModuleFile, moduleFileOutsideAnalysisScope } from '../fileFlow/moduleFile.js';
 import { normalizeFileSymbols } from '../fileSymbols/normalize.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { throwIfProjectContextAborted } from '../interface/execution.js';
@@ -25,7 +25,8 @@ import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
  * tsconfig / jsconfig 的路径别名，或项目内另一个包的入口；项目外的包没有目标。
  *
  * 目标文件经同一个输入读取器按需读取：live 查询读当前文件，认证捕获读冻结字节并登记消费版本，
- * 重放时得到相同结果。只读真正被引用到的文件，不需要预先声明整个项目清单。
+ * 重放时得到相同结果。只读真正被引用到的文件；认证捕获里只读清单内的文件——清单之外的源码
+ * 不是这次分析的输入，指向它的调用保持未解析。
  * 非 JS 语言、没有 import 绑定证据的文件原样返回。
  */
 export async function linkImportBoundCalls(
@@ -95,7 +96,24 @@ export async function linkImportBoundCalls(
         signal: context?.signal,
         analysis: context?.analysis,
       });
-      return found.status === 'found' ? { filePath: found.filePath } : undefined;
+      if (found.status !== 'found') {
+        return undefined;
+      }
+      // 链接要读目标文件的导出表；不属于这次分析源码的文件不读，调用保持未解析。
+      const outside = moduleFileOutsideAnalysisScope(
+        { projectRoot: facts.projectRoot, reader },
+        found.filePath
+      );
+      if (outside) {
+        Logger.debug('ProjectContext call linking left a module outside the analysis scope', {
+          importerFile,
+          specifier,
+          target: found.filePath,
+          reason: outside,
+        });
+        return undefined;
+      }
+      return { filePath: found.filePath };
     },
   };
 
