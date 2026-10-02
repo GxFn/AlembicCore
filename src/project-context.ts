@@ -105,8 +105,10 @@ export {
 // 关系查询（跨文件、可反向）：回答来自源码索引，用的是协议自己的符号与引用。
 export {
   createProjectRelations,
+  openProjectRelationsStore,
   type ProjectRelations,
   type ProjectRelationsOptions,
+  type ProjectRelationsStore,
 } from './service/project-context/relations/index.js';
 // PC-F final-artifact 合约冻结 foundation 聚合面；文件引用 helper 属于 live ProjectContext 公共能力。
 export { createProjectContextFileRef } from './service/project-context/shared/sourceSlice-fileSymbols/contracts.js';

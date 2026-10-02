@@ -29,8 +29,9 @@ import type {
   SourceGraphSnapshot,
   SourceSymbolNode,
 } from '../../../domain/source-graph/index.js';
+import { openSourceIndexDatabase } from '../../../infrastructure/database/SourceIndexDatabase.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
-import type { SourceGraphRepositoryImpl } from '../../../repository/source-graph/SourceGraphRepository.js';
+import { SourceGraphRepositoryImpl } from '../../../repository/source-graph/SourceGraphRepository.js';
 import type { SourceGraphIndexOptions } from '../../source-graph/SourceGraphIndexOptions.js';
 import { SourceGraphLifecycleService } from '../../source-graph/SourceGraphLifecycle.js';
 import { SourceGraphQueryService } from '../../source-graph/SourceGraphQueryService.js';
@@ -109,6 +110,37 @@ type ResolvedTarget =
       counterparts?: SourceSymbolNode[];
     }
   | { ok: false; error: ProjectContextQueryError };
+
+export interface ProjectRelationsStore {
+  relations: ProjectRelations;
+  /** 库文件的绝对路径。 */
+  databasePath: string;
+  close(): void;
+}
+
+/**
+ * 在宿主给出的库文件上打开关系查询。
+ *
+ * 给没有主库句柄的宿主用：库只放源码索引，文件不存在就新建。索引的代际、新鲜度与查询语义
+ * 与建在主库里的完全相同；宿主负责选一个只属于自己的位置，并在不再使用时关闭。
+ */
+export function openProjectRelationsStore(
+  options: Omit<ProjectRelationsOptions, 'repository'> & { databasePath: string }
+): ProjectRelationsStore {
+  const { databasePath, ...rest } = options;
+  const database = openSourceIndexDatabase(databasePath);
+  Logger.debug('ProjectContext relations opened a standalone source index store', {
+    databasePath: database.path,
+  });
+  return {
+    relations: createProjectRelations({
+      ...rest,
+      repository: new SourceGraphRepositoryImpl(database.drizzle),
+    }),
+    databasePath: database.path,
+    close: () => database.close(),
+  };
+}
 
 export function createProjectRelations(options: ProjectRelationsOptions): ProjectRelations {
   const { repository } = options;

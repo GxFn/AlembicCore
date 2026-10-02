@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import Database from 'better-sqlite3';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { loadPlugins } from '../src/core/ast/index.js';
 import { type AlembicDatabaseRuntime, openAlembicDatabase } from '../src/database.js';
@@ -18,6 +19,7 @@ import {
   createProjectRelations,
   formatRelationGraphRef,
   isStructuredGraphRef,
+  openProjectRelationsStore,
   ProjectContext,
   parseRelationGraphRef,
 } from '../src/project-context.js';
@@ -284,6 +286,67 @@ describe('project relations', () => {
     const checked = await relations.ensureIndex({ projectRoot });
     expect(checked.generationId).not.toBe(caughtUp.generationId);
     expect(await callersOfClamp()).toEqual(expect.arrayContaining(['added', 'again']));
+  });
+
+  it('opens a standalone index store for hosts without a main database handle', async () => {
+    const projectRoot = await temporaryRoot('alembic-relations-store-');
+    const dataRoot = await temporaryRoot('alembic-relations-store-data-');
+    await materializeBenchmarkFixture(
+      { files: tsNodeNextFixture.files } as AnalysisBenchmarkFixture,
+      projectRoot
+    );
+    // 路径守卫没有配置：独立库不走主库的那一套，文件放哪由宿主决定。
+    const databasePath = path.join(dataRoot, 'private', 'nested', 'source-index.db');
+    const store = openProjectRelationsStore({ databasePath });
+    try {
+      expect(store.databasePath).toBe(databasePath);
+      expect(await store.relations.ensureIndex({ projectRoot })).toMatchObject({
+        available: true,
+        freshness: 'fresh',
+      });
+      const callers = await store.relations.query({
+        kind: 'callers',
+        scope: { projectRoot },
+        target: { symbol: 'clamp' },
+      });
+      expect(names((callers.data as ProjectRelationWalkContext).symbols)).toEqual(['total']);
+    } finally {
+      store.close();
+    }
+
+    // 库里只有源码索引的表；再次打开读到同一代，不重建。
+    const reopened = openProjectRelationsStore({ databasePath });
+    try {
+      const state = await reopened.relations.ensureIndex({ projectRoot });
+      expect(state).toMatchObject({ available: true, freshness: 'fresh' });
+      const again = await reopened.relations.query({
+        kind: 'callers',
+        scope: { projectRoot },
+        target: { symbol: 'clamp' },
+      });
+      expect(again.index.generationId).toBe(state.generationId);
+    } finally {
+      reopened.close();
+    }
+    const tables = new Database(databasePath, { readonly: true });
+    try {
+      expect(
+        tables
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+          )
+          .all()
+          .map((row) => (row as { name: string }).name)
+          .sort()
+      ).toEqual([
+        'source_graph_edges',
+        'source_graph_files',
+        'source_graph_generations',
+        'source_graph_symbols',
+      ]);
+    } finally {
+      tables.close();
+    }
   });
 
   it('reports a missing index, an unknown target and an ambiguous name as explicit errors', async () => {

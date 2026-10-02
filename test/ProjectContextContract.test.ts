@@ -56,6 +56,8 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       'getCodeGraphProjectContextIdentity',
       'isProjectRelationKind',
       'isStructuredGraphRef',
+      // 没有主库句柄的宿主（Plugin 的图工具）把索引放在自己的库文件里。
+      'openProjectRelationsStore',
       'parseProjectContextRef',
       'parseRelationGraphRef',
       'resolveAstParserLanguage',
