@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
 import {
+  buildProjectContextDependencyOwnershipV1,
   buildProjectContextRequestMatrixV2,
   buildProjectScopeManifestV1,
   CERTIFIED_PROJECT_FACTS_CONSUMERS,
@@ -17,7 +18,6 @@ import {
   ProjectFactsLeaseConflictError,
   captureCertifiedProjectFactsV2,
   createProjectContextConsumerLineageReceiptV2,
-  createProjectContextDependencyOwnershipV1,
   createProjectContextRequestAuditPlansV2,
   evaluateCertifiedProjectFactsReadinessV2,
   evaluateProjectContextRequestMatrixV2,
@@ -781,10 +781,15 @@ async function runChild(input) {
       await inventoryPorts.enumerateEligibleFiles({ repository, policy: inventoryPolicy })
     );
   }
-  const dependencyOwnership = await buildDependencyOwnership(
-    repositories,
-    descriptorsByRepo
-  );
+  // 目录由 Core 的生成器给出——与产品宿主捕获时用的是同一份实现，
+  // 所以这里审计通过的归属分类就是生产里的归属分类。
+  const { ownership: dependencyOwnership } = await buildProjectContextDependencyOwnershipV1({
+    repositories: repositories.map((repository) => ({
+      repository,
+      files: descriptorsByRepo.get(repository.repoId) ?? [],
+    })),
+    readFile: (request) => inventoryPorts.readFile(request),
+  });
   const ports = new NodeProjectContextFoundationHostPorts(undefined, {
     portableRoots,
     dependencyOwnership,
@@ -1369,139 +1374,6 @@ function repositoriesForMode(mode, workspaceRoot, bilidiliRoot) {
     moduleAliases:
       relativeRoot === '.' ? [] : [path.posix.basename(relativeRoot)],
   }));
-}
-
-async function buildDependencyOwnership(repositories, descriptorsByRepo) {
-  const entries = [];
-  for (const repository of repositories) {
-    const descriptors = descriptorsByRepo.get(repository.repoId) ?? [];
-    const packagePath = path.join(repository.sourceRoot, 'package.json');
-    const packageBytes = await readOptionalFile(packagePath);
-    if (packageBytes) {
-      const manifest = JSON.parse(packageBytes.toString('utf8'));
-      const packageName = typeof manifest.name === 'string' ? manifest.name.trim() : '';
-      if (packageName) {
-        const provenance = {
-          relativePath: 'package.json',
-          contentHash: hashBytes(packageBytes),
-        };
-        const ownerModuleId = selectPrimaryOwnerModuleId(descriptors, packageName);
-        entries.push({
-          repoId: repository.repoId,
-          ownerModuleId,
-          ownerPackageName: packageName,
-          source: 'package-name',
-          pattern: packageName,
-          provenance,
-        });
-        for (const exportKey of readPackageMapKeys(manifest.exports, '.')) {
-          if (exportKey === '.') continue;
-          entries.push({
-            repoId: repository.repoId,
-            ownerModuleId,
-            ownerPackageName: packageName,
-            source: 'package-export',
-            pattern: `${packageName}${exportKey.slice(1)}`,
-            provenance,
-          });
-        }
-        for (const importKey of readPackageMapKeys(manifest.imports, '#')) {
-          entries.push({
-            repoId: repository.repoId,
-            ownerModuleId,
-            ownerPackageName: packageName,
-            source: 'package-import',
-            pattern: importKey,
-            targetPatterns: readPackageTargetPatterns(manifest.imports[importKey], importKey),
-            provenance,
-          });
-        }
-      }
-    }
-    for (const moduleAlias of repository.moduleAliases ?? []) {
-      const provenanceBytes =
-        (await readOptionalFile(path.join(repository.sourceRoot, 'Package.swift'))) ??
-        Buffer.from(`explicit-module-alias:${moduleAlias}\n`);
-      entries.push({
-        repoId: repository.repoId,
-        ownerModuleId: selectPrimaryOwnerModuleId(descriptors, moduleAlias),
-        ownerPackageName: moduleAlias,
-        source: 'module-alias',
-        pattern: moduleAlias,
-        provenance: {
-          relativePath: (await fileExists(path.join(repository.sourceRoot, 'Package.swift')))
-            ? 'Package.swift'
-            : 'explicit-module-alias-v1',
-          contentHash: hashBytes(provenanceBytes),
-        },
-      });
-    }
-  }
-  return createProjectContextDependencyOwnershipV1(entries);
-}
-
-function selectPrimaryOwnerModuleId(descriptors, preferredName) {
-  const counts = new Map();
-  for (const descriptor of descriptors) {
-    for (const owner of descriptor.ownerModuleIds ?? []) {
-      if (!owner.startsWith('test:')) {
-        counts.set(owner, (counts.get(owner) ?? 0) + 1);
-      }
-    }
-  }
-  const preferred = [...counts.keys()].find(
-    (owner) => path.posix.basename(owner.slice(owner.indexOf(':') + 1)) === preferredName
-  );
-  const selected =
-    preferred ??
-    [...counts.entries()].sort(
-      ([leftOwner, leftCount], [rightOwner, rightCount]) =>
-        rightCount - leftCount || leftOwner.localeCompare(rightOwner)
-    )[0]?.[0];
-  if (!selected) {
-    throw new TypeError(`No certified module owner is available for ${preferredName}.`);
-  }
-  return selected;
-}
-
-function readPackageMapKeys(value, requiredPrefix) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return [];
-  }
-  return Object.keys(value)
-    .filter((key) => key.startsWith(requiredPrefix))
-    .sort();
-}
-
-function readPackageTargetPatterns(value, importKey) {
-  const targets = [];
-  visit(value);
-  if (targets.length === 0) {
-    throw new TypeError(`Package import ${importKey} has no canonical repository target.`);
-  }
-  return [...new Set(targets)].sort();
-
-  function visit(entry) {
-    if (typeof entry === 'string') {
-      if (!entry.startsWith('./')) {
-        throw new TypeError(`Package import ${importKey} targets outside its repository: ${entry}.`);
-      }
-      targets.push(entry.slice(2));
-      return;
-    }
-    if (entry === null) {
-      throw new TypeError(`Package import ${importKey} contains a null target.`);
-    }
-    if (Array.isArray(entry)) {
-      for (const child of entry) visit(child);
-      return;
-    }
-    if (entry && typeof entry === 'object') {
-      for (const child of Object.values(entry)) visit(child);
-      return;
-    }
-    throw new TypeError(`Package import ${importKey} contains an unsupported target.`);
-  }
 }
 
 async function readOptionalFile(filePath) {

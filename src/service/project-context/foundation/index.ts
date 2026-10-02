@@ -3,6 +3,7 @@ export * from './capture.js';
 export * from './consumerPort.js';
 export * from './consumerReceipts.js';
 export * from './contracts.js';
+export * from './dependencyOwnership.js';
 export * from './frozen.js';
 export * from './nodePorts.js';
 export * from './ownersV2.js';

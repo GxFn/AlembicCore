@@ -1757,7 +1757,7 @@ function validateDependencyResolutionEvidence(
     errors.push(`dependency-owner-module-outside-inventory:${prefix}`);
   }
   if (resolution.classification === 'internal-resolved') {
-    if (resolution.resolvedTargets?.length !== 1) {
+    if (!hasExpectedInternalTargetCount(resolution)) {
       errors.push(`dependency-internal-target-count:${prefix}`);
     }
     for (const target of resolution.resolvedTargets ?? []) {
@@ -1776,6 +1776,24 @@ function validateDependencyResolutionEvidence(
     }
   }
   return errors;
+}
+
+/**
+ * 一条"本仓库内部"的决议该带几个目标文件。
+ *
+ * - 私有别名（package-import）映射的是文件：必须恰好落到一个清单内、归该模块所有的文件，
+ *   落不到或落到多个都说明这次导入没有被真正解析。
+ * - 包名、包的导出子路径、模块别名指的是整个包或模块，没有"那一个文件"可绑；归属证据是
+ *   清单里的声明文件与归属模块本身。这类决议不带目标。
+ *
+ * 之前对所有来源都要求恰好一个目标，于是"本仓库的包名或模块名没被分析解析上"这种情况
+ * 在 host port 里被判成内部决议，到这里却因为没有目标而整次捕获抛错。
+ */
+function hasExpectedInternalTargetCount(
+  resolution: Pick<ProjectContextDependencyResolutionV1, 'ownershipSource' | 'resolvedTargets'>
+): boolean {
+  const count = resolution.resolvedTargets?.length ?? 0;
+  return resolution.ownershipSource === 'package-import' ? count === 1 : count === 0;
 }
 
 function validateDependencyOwnershipCatalog(
@@ -2243,7 +2261,10 @@ function normalizeDependencyResolutions(
       }
       return { relativePath, blobSha256: file.blobSha256 };
     });
-    if (resolution.classification === 'internal-resolved' && resolvedTargets.length !== 1) {
+    if (
+      resolution.classification === 'internal-resolved' &&
+      !hasExpectedInternalTargetCount({ ...resolution, resolvedTargets })
+    ) {
       throw new TypeError('Internal dependency resolution must bind one certified owned target.');
     }
     const normalized = {
