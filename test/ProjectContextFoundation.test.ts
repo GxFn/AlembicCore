@@ -2235,6 +2235,117 @@ describe('ProjectContext certified facts foundation', () => {
     expect(artifact.readiness.errors).toContain('dependency-warning-graph-alignment:core/map');
   });
 
+  it('conserves dependency observations by name when the host supplies no ownership catalog', async () => {
+    // 真实宿主都不给归属目录。只要项目有外部依赖，观测数与决议数就必须由 Core 自己配平，
+    // 否则每个真实项目的认证都过不了就绪。
+    const fixture = await createNodeCaptureFixture();
+    await fs.writeFile(
+      fixture.sourcePath,
+      'import { readFileSync } from "node:fs";\nexport const value = readFileSync;\n'
+    );
+    const artifact = await captureCertifiedProjectFactsV2(fixture.input, fixture.ports);
+    const observed = artifact.facts.requestOutcomes.filter(
+      (row) => (row.dependencyObservationCount ?? 0) > 0
+    );
+
+    expect(observed.map((row) => row.kind)).toContain('map');
+    for (const row of observed) {
+      expect(row.dependencyResolutions).toHaveLength(row.dependencyObservationCount!);
+      expect(row.dependencyResolutions).toEqual([
+        {
+          classification: 'expected-external',
+          dependencyName: 'node:fs',
+          importerRepoId: 'core',
+          requestKind: row.kind,
+          typedReason: 'core-host-port-diagnostic-has-no-canonical-ownership-binding',
+        },
+      ]);
+      expect(row.errors).toEqual([
+        expect.objectContaining({
+          classification: 'expected-external',
+          typedReason: 'dependency-is-outside-certified-repository-ownership',
+        }),
+      ]);
+    }
+    const map = observed.find((row) => row.kind === 'map')!;
+    // 对账数字来自图里真实的外部依赖热点，不是照着决议反填的。
+    expect(map.dependencyGraphReconciliation).toMatchObject({
+      originalExternalDependencyNames: ['node:fs'],
+      remainingExternalDependencyNames: ['node:fs'],
+      internalResolvedDependencyNames: [],
+      approvedSiblingDependencyNames: [],
+      originalExternalHotspotCount: 1,
+      remainingExternalHotspotCount: 1,
+    });
+    expect(artifact.readiness.errors).toEqual([]);
+    expect(artifact.readiness.verdict).toBe('passed');
+  });
+
+  it('keeps a declared internal module that stayed unresolved a confirmed defect without a catalog', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-no-catalog-defect-'));
+    temporaryRoots.push(root);
+    const dependencies = ['src', 'node:fs'];
+    const projectContext = {
+      execute: async () => ({
+        contractVersion: 1,
+        data: {
+          externalDependencyHotspots: dependencies.map((name) => ({ name, refs: [] })),
+          modules: [],
+        },
+        errors: dependencies.map((dependencyName) => ({
+          code: 'query-unavailable',
+          message: `map external dependency is not owned by module seeds: ${dependencyName}`,
+          retryable: false,
+          severity: 'warning',
+        })),
+        project: { projectRoot: root },
+        queryLevel: 'map',
+        refs: [],
+      }),
+    } as never;
+    const repository = {
+      relativeRoot: '.',
+      repoId: 'core',
+      scopeId: 'mr-alembic',
+      sourceRoot: root,
+    };
+    const plan = createProjectContextRequestAuditPlans({
+      repository,
+      eligibleFiles: [
+        {
+          language: 'typescript',
+          mode: '100644',
+          ownerModuleIds: ['module:src'],
+          relativePath: 'src/index.ts',
+        },
+      ],
+    }).find((candidate) => candidate.kind === 'map')!;
+    const result = await new NodeProjectContextFoundationHostPorts(projectContext).executeRequest({
+      repository,
+      plan,
+    });
+
+    // 按名字归类不放过"声明过的内部模块没解析上"：它仍是确认缺陷，决议与诊断一致。
+    expect(result.terminalStatus).toBe('failed');
+    expect(result.dependencyObservationCount).toBe(2);
+    expect(result.dependencyResolutions).toEqual([
+      {
+        classification: 'confirmed-defect',
+        dependencyName: 'src',
+        importerRepoId: 'core',
+        requestKind: 'map',
+        typedReason: 'declared-internal-module-remained-unresolved',
+      },
+      {
+        classification: 'expected-external',
+        dependencyName: 'node:fs',
+        importerRepoId: 'core',
+        requestKind: 'map',
+        typedReason: 'core-host-port-diagnostic-has-no-canonical-ownership-binding',
+      },
+    ]);
+  });
+
   it('fails closed for a missing current owner seed and ambiguous public ownership', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-ownership-defect-'));
     temporaryRoots.push(root);

@@ -92,6 +92,12 @@ const PORTABLE_PATH_KEYS = new Set([
   'sourceRoot',
 ]);
 const PARSER_REQUEST_KINDS = new Set(['anchor-range', 'file-flow', 'file-symbols']);
+/**
+ * 没有归属目录时依赖决议的原因码。沿用 Plugin 原先在端口外补造决议时用的同一个字符串，
+ * 已入库工件里的决议与之后 Core 自己给出的决议读起来是同一种东西。
+ */
+const DEPENDENCY_CLASSIFIED_WITHOUT_OWNERSHIP_CATALOG =
+  'core-host-port-diagnostic-has-no-canonical-ownership-binding';
 
 export interface NodeProjectContextFoundationPortableRoot {
   portableId: string;
@@ -1055,6 +1061,18 @@ function projectContextEnvelopeToAuditResult(
   const dependencyObservationCount = (envelope.errors ?? []).filter(
     isExternalDependencyDiagnostic
   ).length;
+  if (!dependencyOwnership && dependencyObservationCount > 0) {
+    // 降级路径：没有归属目录，依赖只按名字归类。记下数量，事后能看出这次认证的依赖分类没有归属证据。
+    Logger.debug('ProjectContext dependency evidence classified by name', {
+      reason: 'no-dependency-ownership-catalog',
+      repoId: repository.repoId,
+      requestKind: plan.kind,
+      observations: dependencyObservationCount,
+      confirmedDefects: dependencyResolutions.filter(
+        (resolution) => resolution.classification === 'confirmed-defect'
+      ).length,
+    });
+  }
   const dependencyGraphReconciliation = summarizeDependencyGraphReconciliation(
     envelope.data,
     dependencyResolutions
@@ -1226,24 +1244,45 @@ function classifyProjectContextDiagnostic(
         : error.severity === 'warning'
           ? 'advisory'
           : 'confirmed-defect';
+  const typedReason = unresolvedInternal
+    ? 'declared-internal-module-remained-unresolved'
+    : sibling
+      ? 'dependency-crosses-an-approved-sibling-repository-boundary'
+      : expectedExternal
+        ? 'dependency-is-outside-certified-repository-ownership'
+        : classification === 'advisory'
+          ? 'project-context-warning-retained-for-review'
+          : 'project-context-error-invalidates-certified-readiness';
+  const diagnostic: ProjectContextRequestDiagnosticV1 = {
+    classification,
+    code: error.code,
+    message: portableString(error.message, portableRoots),
+    retryable: error.retryable,
+    severity: error.severity,
+    typedReason,
+    ...(error.path ? { path: portableString(error.path, portableRoots, true) } : {}),
+    ...(sibling ? { relatedRepoId: sibling } : {}),
+  };
+  if (!dependencyName) {
+    return { diagnostic };
+  }
+  // 宿主没有给依赖归属目录：这条依赖观测只能按名字归类，拿不出归属证据。
+  // 这里仍为它出一条决议，使"观测数 = 决议数"在有目录与无目录两条路径上都由 Core 自己保持；
+  // 否则无目录的宿主只能在端口外面替 Core 补造决议（Plugin 曾经这样做，Main 没有做而过不了就绪）。
+  // internal-resolved / approved-sibling 两类要求目录里的归属证据，按名字认出的兄弟仓库依赖
+  // 在决议里只能记为 expected-external，诊断上仍保留 advisory 与 relatedRepoId。
   return {
-    diagnostic: {
-      classification,
-      code: error.code,
-      message: portableString(error.message, portableRoots),
-      retryable: error.retryable,
-      severity: error.severity,
-      typedReason: unresolvedInternal
-        ? 'declared-internal-module-remained-unresolved'
-        : sibling
-          ? 'dependency-crosses-an-approved-sibling-repository-boundary'
-          : expectedExternal
-            ? 'dependency-is-outside-certified-repository-ownership'
-            : classification === 'advisory'
-              ? 'project-context-warning-retained-for-review'
-              : 'project-context-error-invalidates-certified-readiness',
-      ...(error.path ? { path: portableString(error.path, portableRoots, true) } : {}),
-      ...(sibling ? { relatedRepoId: sibling } : {}),
+    diagnostic,
+    resolution: {
+      classification:
+        classification === 'confirmed-defect' ? 'confirmed-defect' : 'expected-external',
+      dependencyName,
+      importerRepoId: repository.repoId,
+      requestKind: plan.kind,
+      typedReason:
+        classification === 'confirmed-defect'
+          ? typedReason
+          : DEPENDENCY_CLASSIFIED_WITHOUT_OWNERSHIP_CATALOG,
     },
   };
 }
