@@ -1,7 +1,4 @@
-import type {
-  ProjectContextRef,
-  SourceRangeSummary,
-} from '../../../domain/project-context/index.js';
+import type { ProjectContextRef, SourceRangeSummary } from './ProjectContextRefs.js';
 
 /** 一条协议引用里能读出的定位信息。 */
 export interface ParsedProjectContextRef {
@@ -14,6 +11,9 @@ export interface ParsedProjectContextRef {
   /** file-symbol 的声明种类与（限定）名。 */
   symbolKind?: string;
   name?: string;
+  /** relation-site 的关系种类，以及关系指向的符号名或文件。 */
+  relationKind?: string;
+  target?: string;
 }
 
 const RANGE = /^L(\d+)-L(\d+)$/;
@@ -62,6 +62,12 @@ export function parseProjectContextRef(
                 : typeof metadata.name === 'string'
                   ? metadata.name
                   : input.label,
+          }
+        : {}),
+      ...(kind === 'relation-site'
+        ? {
+            ...(typeof metadata.kind === 'string' ? { relationKind: metadata.kind } : {}),
+            ...relationTarget(metadata),
           }
         : {}),
     };
@@ -117,5 +123,19 @@ export function parseProjectContextRef(
     ...(range ? { range } : {}),
     ...(hash ? { hash } : {}),
     ...(kind === 'file-symbol' ? { symbolKind: decode(parts[3]), name: decode(parts[4]) } : {}),
+    ...(kind === 'relation-site'
+      ? { relationKind: decode(parts[3]), target: decode(parts[4]) }
+      : {}),
   };
+}
+
+/** 关系指向谁：与生成引用 id 时取目标的顺序一致。 */
+function relationTarget(metadata: Record<string, unknown>): { target?: string } {
+  for (const key of ['targetFilePath', 'specifier', 'qualifiedName', 'symbolName']) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value) {
+      return { target: value };
+    }
+  }
+  return {};
 }

@@ -10,10 +10,14 @@ export type {
   AnchorRangeContext,
   AnchorRangeRadius,
   FileFlowContext,
+  FileSummary,
   FileSymbolContext,
   HotspotSummary,
   ModuleContext,
   ModuleLayerContext,
+  ModuleSummary,
+  ParsedProjectContextRef,
+  ParsedRelationGraphRef,
   ProjectContext as ProjectContextContract,
   ProjectContextAnchor,
   ProjectContextEnvelope,
@@ -56,8 +60,12 @@ export type {
 } from './domain/project-context/index.js';
 export {
   buildProjectContextPresenterInput,
+  formatRelationGraphRef,
   isProjectRelationKind,
+  isStructuredGraphRef,
   PROJECT_RELATION_KIND_VALUES,
+  parseProjectContextRef,
+  parseRelationGraphRef,
 } from './domain/project-context/index.js';
 export type {
   ArchitectureCodeEntitySnapshot,
@@ -97,10 +105,8 @@ export {
 // 关系查询（跨文件、可反向）：回答来自源码索引，用的是协议自己的符号与引用。
 export {
   createProjectRelations,
-  type ParsedProjectContextRef,
   type ProjectRelations,
   type ProjectRelationsOptions,
-  parseProjectContextRef,
 } from './service/project-context/relations/index.js';
 // PC-F final-artifact 合约冻结 foundation 聚合面；文件引用 helper 属于 live ProjectContext 公共能力。
 export { createProjectContextFileRef } from './service/project-context/shared/sourceSlice-fileSymbols/contracts.js';

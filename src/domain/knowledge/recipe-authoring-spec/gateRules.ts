@@ -16,6 +16,7 @@
  * P0 is purely additive: the live gates keep their inline originals until P1 re-points them
  * to import these back. Moving the function bodies (not retyping) is what guarantees byte-identity.
  */
+
 import type {
   RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
@@ -23,6 +24,7 @@ import type {
   RecipeSessionScope,
   RecipeSourceRefResolver,
 } from '../../../types/recipeAuthoringSpec.js';
+import { isStructuredGraphRef } from '../../project-context/ProjectRelationGraphRefs.js';
 
 /* ════════════════ Stage 1 — content-quality constants + predicates (verbatim) ════════════════ */
 
@@ -912,7 +914,13 @@ function validateStage2(
         nextAction:
           'Attach sourceGraph refs from a fresh graph query or remove the relationship claim.',
       });
-    } else if (refs.some((ref) => /\bstale\b|\bpartial\b|\bpending\b/i.test(ref))) {
+    } else if (
+      // 结构化引用（图引用、协议引用 id）用内容哈希表达新旧，里面的符号名与路径只是数据；
+      // 只有自由文本的引用才按字面上的 stale / partial / pending 判断。
+      refs.some(
+        (ref) => !isStructuredGraphRef(ref) && /\bstale\b|\bpartial\b|\bpending\b/i.test(ref)
+      )
+    ) {
       violations.push({
         code: 'STALE_GRAPH',
         itemIndex,

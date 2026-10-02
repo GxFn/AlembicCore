@@ -14,7 +14,13 @@ import type {
   ProjectSymbolListContext,
 } from '../src/domain/project-context/index.js';
 import { pathGuard } from '../src/io.js';
-import { createProjectRelations, ProjectContext } from '../src/project-context.js';
+import {
+  createProjectRelations,
+  formatRelationGraphRef,
+  isStructuredGraphRef,
+  ProjectContext,
+  parseRelationGraphRef,
+} from '../src/project-context.js';
 import { createAlembicRepositories } from '../src/repositories.js';
 import {
   type AnalysisBenchmarkFixture,
@@ -44,7 +50,7 @@ async function temporaryRoot(prefix: string): Promise<string> {
 /** 把一组文件写成项目、建好索引，返回关系查询入口。数据库放在项目之外。 */
 async function openProject(
   files: Record<string, string>,
-  options: { externalEngine?: boolean; index?: boolean } = {}
+  options: { externalEngine?: boolean; index?: boolean; now?: () => number } = {}
 ) {
   const projectRoot = await temporaryRoot('alembic-relations-');
   const dataRoot = await temporaryRoot('alembic-relations-data-');
@@ -54,6 +60,7 @@ async function openProject(
   databases.push(runtime);
   const relations = createProjectRelations({
     repository: createAlembicRepositories(runtime.connection).sourceGraphRepository,
+    ...(options.now ? { now: options.now } : {}),
   });
   const indexOptions = {
     projectRoot,
@@ -86,6 +93,8 @@ describe('project relations', () => {
     const { projectRoot, index, ask } = await openProject(tsNodeNextFixture.files);
     // 带 package.json 的项目照样就绪。
     expect(index).toMatchObject({ available: true, freshness: 'fresh', coverageGaps: 0 });
+    expect(index?.counts?.files).toBeGreaterThan(0);
+    expect(index?.counts?.relations).toBeGreaterThan(0);
 
     // 1. 文件里的声明：与按文件现算的 file-symbols 是同一组符号、同一批引用。
     const listed = await ask({ kind: 'symbols', target: { filePath: 'src/math.ts' } });
@@ -97,6 +106,19 @@ describe('project relations', () => {
     expect((listed.data as ProjectSymbolListContext).symbols).toEqual(
       (live.data as FileSymbolContext).symbols
     );
+
+    // 一个类型的成员；起点必须是类型。
+    const members = (await ask({ kind: 'members', target: { symbol: 'Calculator' } }))
+      .data as ProjectSymbolListContext;
+    expect(members.anchor?.symbol.qualifiedName).toBe('Calculator');
+    expect(names(members.symbols)).toEqual([
+      'Calculator.create',
+      'Calculator.run',
+      'Calculator.double',
+    ]);
+    expect((await ask({ kind: 'members', target: { filePath: 'src/math.ts' } })).errors).toEqual([
+      expect.objectContaining({ code: 'invalid-scope' }),
+    ]);
 
     // 3. 谁调用了 add：同文件的方法，以及另一个文件里经直接导入与经 barrel 改名导入的两处。
     const callers = await ask({
@@ -173,8 +195,21 @@ describe('project relations', () => {
     const relation = (callers.data as ProjectRelationWalkContext).relations[0];
     expect(relation.label).toBe('total calls clamp');
 
-    // 8. 引用对象与它的 id 字符串都能复核，并带回发生位置的源码。
-    for (const ref of [relation.ref, relation.ref?.id]) {
+    // 这条关系写成图引用：一行读得懂的文本，方括号里就是关系引用的 id。
+    const graphRef = formatRelationGraphRef(relation);
+    expect(graphRef).toBe(`graph:calls total -> clamp [${relation.ref?.id}]`);
+    const cited = parseRelationGraphRef(graphRef);
+    expect(cited).toMatchObject({
+      kind: 'calls',
+      from: 'total',
+      to: 'clamp',
+      tier: 'certain',
+      site: { filePath: 'src/app.ts', relationKind: 'calls', target: 'clamp' },
+    });
+    expect(isStructuredGraphRef(graphRef)).toBe(true);
+
+    // 8. 引用对象、它的 id 字符串、从图引用里取回的 id 都能复核，并带回发生位置的源码。
+    for (const ref of [relation.ref, relation.ref?.id, cited?.refId]) {
       const evidence = await ask({ kind: 'evidence', target: { ref }, includeText: true });
       expect(evidence.data).toMatchObject({
         kind: 'evidence',
@@ -203,6 +238,52 @@ describe('project relations', () => {
     expect(
       (await ask({ kind: 'evidence', target: { ref: refreshed.relations[0].ref } })).data
     ).toMatchObject({ current: true, indexed: true });
+  });
+
+  it('shares concurrent index catch-ups and reuses a recent one only when asked to', async () => {
+    let clock = 1_000_000;
+    const { projectRoot, relations, ask } = await openProject(tsNodeNextFixture.files, {
+      index: false,
+      now: () => clock,
+    });
+    const callersOfClamp = async () =>
+      names(
+        (
+          (await ask({ kind: 'callers', target: { symbol: 'clamp' } }))
+            .data as ProjectRelationWalkContext
+        ).symbols
+      );
+
+    // 并发的两次追赶是同一次：两个调用拿到同一个结果，库里只建了一代。
+    const [first, second] = await Promise.all([
+      relations.ensureIndex({ projectRoot }),
+      relations.ensureIndex({ projectRoot }),
+    ]);
+    expect(second).toBe(first);
+    expect(first).toMatchObject({ available: true, freshness: 'fresh' });
+    expect(await callersOfClamp()).toEqual(['total']);
+
+    // 源码变了。复用期内不再检查文件变化，回答仍来自上一次追到的那一代。
+    await fs.appendFile(
+      path.join(projectRoot, 'src/util.ts'),
+      '\nexport function added(): number {\n  return clamp(1, 0, 2);\n}\n'
+    );
+    clock += 10_000;
+    expect(await relations.ensureIndex({ projectRoot }, { maxAgeMs: 30_000 })).toBe(first);
+    expect(await callersOfClamp()).toEqual(['total']);
+
+    // 过了复用期就追上；不给 maxAgeMs 时每次都检查。
+    clock += 30_000;
+    const caughtUp = await relations.ensureIndex({ projectRoot }, { maxAgeMs: 30_000 });
+    expect(caughtUp.generationId).not.toBe(first.generationId);
+    expect(await callersOfClamp()).toEqual(expect.arrayContaining(['total', 'added']));
+    await fs.appendFile(
+      path.join(projectRoot, 'src/util.ts'),
+      '\nexport function again(): number {\n  return clamp(2, 0, 3);\n}\n'
+    );
+    const checked = await relations.ensureIndex({ projectRoot });
+    expect(checked.generationId).not.toBe(caughtUp.generationId);
+    expect(await callersOfClamp()).toEqual(expect.arrayContaining(['added', 'again']));
   });
 
   it('reports a missing index, an unknown target and an ambiguous name as explicit errors', async () => {
@@ -349,6 +430,23 @@ describe('project relations', () => {
     const conformers = (await ask({ kind: 'subtypes', target: { symbol: 'Greeter' } }))
       .data as ProjectRelationWalkContext;
     expect(names(conformers.symbols)).toEqual(['Service']);
+
+    // 类型的成员包含写在 extension 文件里的那些；把成员也算作起点时，它们的调用方一并算上。
+    const members = (await ask({ kind: 'members', target: { symbol: 'Service' } }))
+      .data as ProjectSymbolListContext;
+    expect(members.symbols.map((symbol) => `${symbol.filePath} ${symbol.qualifiedName}`)).toEqual(
+      expect.arrayContaining([
+        'Sources/App/Service.swift Service.greet',
+        'Sources/App/Service+Extended.swift Service.extended',
+        'Sources/App/Service+Extended.swift Service.helper',
+      ])
+    );
+    const repoUsers = (
+      await ask({ kind: 'callers', target: { symbol: 'Repo' }, includeMembers: true })
+    ).data as ProjectRelationWalkContext;
+    expect(names(repoUsers.symbols)).toEqual(
+      expect.arrayContaining(['bootstrap', 'Service.greet', 'Service.extended'])
+    );
     const created = (await ask({ kind: 'instantiations', target: { symbol: 'Repo' } }))
       .data as ProjectRelationWalkContext;
     expect(names(created.symbols)).toEqual(expect.arrayContaining(['bootstrap', 'Repo.make']));
@@ -378,6 +476,57 @@ describe('project relations', () => {
       .data as ProjectRelationWalkContext;
     expect(paths(importers.files)).toEqual(
       expect.arrayContaining(['Models/User.m', 'Services/UserService.m'])
+    );
+
+    // 类的成员：头文件里的属性，加实现文件里的方法定义；同一个方法的声明与定义只算一次。
+    const members = (await ask({ kind: 'members', target: { symbol: 'User' } }))
+      .data as ProjectSymbolListContext;
+    expect(members.anchor?.symbol).toMatchObject({ name: 'User', filePath: 'Models/User.h' });
+    expect(members.symbols.map((symbol) => `${symbol.filePath} ${symbol.qualifiedName}`)).toEqual([
+      'Models/User.h User.name',
+      'Models/User.h User.age',
+      'Models/User.m User.initWithName:age:',
+      'Models/User.m User.validate',
+      'Models/User.m User.isAdult',
+      'Models/User.m User.guestUser',
+    ]);
+
+    // 接口写在头文件、类扩展写在实现文件的类是同一个类：按名字问不算歧义，
+    // 类扩展里声明的协议遵循与实现文件里的成员都算它的。
+    const supertypes = await ask({ kind: 'supertypes', target: { symbol: 'UserService' } });
+    expect(supertypes.errors).toBeUndefined();
+    const supertypesData = supertypes.data as ProjectRelationWalkContext;
+    expect(supertypesData.anchor.symbol).toMatchObject({ filePath: 'Services/UserService.h' });
+    expect(names(supertypesData.symbols)).toEqual(['NetworkClientDelegate']);
+    // 用引用或文件把起点限定到其中一处时，别处的落点照样算上。
+    const viaRef = (
+      await ask({ kind: 'supertypes', target: { ref: supertypesData.anchor.symbol?.ref } })
+    ).data as ProjectRelationWalkContext;
+    expect(names(viaRef.symbols)).toEqual(['NetworkClientDelegate']);
+    const declared = (
+      await ask({ kind: 'callers', target: { filePath: 'Models/User.h', symbol: 'User.isAdult' } })
+    ).data as ProjectRelationWalkContext;
+    expect(names(declared.symbols)).toEqual(['UserService.trackLogin:']);
+
+    const serviceMembers = (await ask({ kind: 'members', target: { symbol: 'UserService' } }))
+      .data as ProjectSymbolListContext;
+    // 源码里写出的父类型，含项目之外的 NSObject；类扩展里写的协议也在其中。
+    expect(serviceMembers.anchor?.heritage).toEqual({
+      extends: ['NSObject'],
+      implements: ['NetworkClientDelegate'],
+    });
+    expect(names(serviceMembers.symbols)).toEqual(
+      expect.arrayContaining(['UserService.client', 'UserService.loginWithName:completion:'])
+    );
+    // 把成员算作起点：调用了 User 任何一个方法的地方。
+    const users = (await ask({ kind: 'callers', target: { symbol: 'User' }, includeMembers: true }))
+      .data as ProjectRelationWalkContext;
+    expect(names(users.symbols)).toEqual(
+      expect.arrayContaining([
+        'UserService.loginWithName:completion:',
+        'UserService.trackLogin:',
+        'UserService.logout',
+      ])
     );
   }, 60_000);
 });

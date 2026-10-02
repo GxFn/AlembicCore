@@ -18,6 +18,7 @@ import {
   type ProjectRelationWalkContext,
   type ProjectRelationWalkKind,
   type ProjectSymbolListContext,
+  parseProjectContextRef,
   type RelationSummary,
   type RepoContext,
   type SymbolSummary,
@@ -39,13 +40,14 @@ import { ownerOfPath } from '../shared/map-repo/index.js';
 import { dedupeProjectContextRefs } from '../shared/refs.js';
 import { loadSourceSliceFile } from '../sourceSlice/fileAccess.js';
 import { createRelationProjection, type RelationProjection } from './projection.js';
-import { parseProjectContextRef } from './refIds.js';
 
 export interface ProjectRelationsOptions {
   /** 宿主数据库上的源码索引仓库。 */
   repository: SourceGraphRepositoryImpl;
   /** 索引的仓库标识，与建索引时传的 repoId 一致；默认 'default'。 */
   indexRepoId?: string;
+  /** 取当前时间（毫秒）；只用于判断上一次追索引过去了多久。 */
+  now?: () => number;
 }
 
 /**
@@ -53,8 +55,17 @@ export interface ProjectRelationsOptions {
  * 这里不保存任何项目状态；索引的代际由宿主的数据库持有。
  */
 export interface ProjectRelations {
-  /** 把索引追到当前源码：没有就建，过期就增量，已是最新则不动。 */
-  ensureIndex(options: SourceGraphIndexOptions): Promise<ProjectIndexState>;
+  /**
+   * 把索引追到当前源码：没有就建，过期就增量，已是最新则不动。
+   *
+   * 同一个项目根上并发的调用共用同一次追赶——两次构建不会同时写同一个库。给了 `maxAgeMs` 时，
+   * 这个入口在这段时间内成功追过同一个项目根就不再追，直接返回那一次的状态：一轮分析里连续的
+   * 几次查询不必各查一遍文件变化。
+   */
+  ensureIndex(
+    options: SourceGraphIndexOptions,
+    reuse?: { maxAgeMs?: number }
+  ): Promise<ProjectIndexState>;
   query(
     request: ProjectRelationRequest,
     context?: { signal?: AbortSignal }
@@ -104,6 +115,10 @@ export function createProjectRelations(options: ProjectRelationsOptions): Projec
   const indexRepoId = options.indexRepoId?.trim() || 'default';
   const queries = new SourceGraphQueryService(repository);
   const views = new Map<string, GenerationView>();
+  const now = options.now ?? Date.now;
+  /** 每个项目根上一次成功追到的状态，与正在进行的那一次追赶。 */
+  const ensured = new Map<string, { at: number; state: ProjectIndexState }>();
+  const catchingUp = new Map<string, Promise<ProjectIndexState>>();
 
   /** 一代索引的文件表只读一次；代际重写（同一编号再次发布）时计数或时间会变，缓存随之失效。 */
   const viewOf = async (snapshot: SourceGraphSnapshot): Promise<GenerationView> => {
@@ -153,23 +168,36 @@ export function createProjectRelations(options: ProjectRelationsOptions): Projec
   };
 
   return {
-    async ensureIndex(indexOptions) {
-      const result = await new SourceGraphLifecycleService(repository).catchUpOnStartup(
-        indexOptions
-      );
-      views.clear();
-      const snapshot = result.generationId
-        ? await repository.getSnapshot(result.generationId)
-        : null;
-      Logger.debug('ProjectContext relations brought the source index up to date', {
-        projectRoot: result.projectRoot,
-        action: result.action,
-        generationId: result.generationId,
-        freshness: result.freshness.status,
-      });
-      return snapshot
-        ? indexState(await viewOf(snapshot))
-        : unavailableIndex(result.freshness.status, result.freshness.reason);
+    async ensureIndex(indexOptions, reuse) {
+      const root = path.resolve(indexOptions.projectRoot);
+      const last = ensured.get(root);
+      if (last && reuse?.maxAgeMs !== undefined && now() - last.at < reuse.maxAgeMs) {
+        Logger.debug('ProjectContext relations reused the last index catch-up', {
+          projectRoot: root,
+          ageMs: now() - last.at,
+          maxAgeMs: reuse.maxAgeMs,
+          generationId: last.state.generationId,
+        });
+        return last.state;
+      }
+      let pending = catchingUp.get(root);
+      if (!pending) {
+        pending = catchUp(indexOptions)
+          .then((state) => {
+            // 只记成功的那一次：追不上时下一次调用应当重试，而不是复用一个"不可用"。
+            if (state.available) {
+              ensured.set(root, { at: now(), state });
+            } else {
+              ensured.delete(root);
+            }
+            return state;
+          })
+          .finally(() => {
+            catchingUp.delete(root);
+          });
+        catchingUp.set(root, pending);
+      }
+      return pending;
     },
 
     async query(request, context) {
@@ -256,6 +284,40 @@ export function createProjectRelations(options: ProjectRelationsOptions): Projec
       throwIfProjectContextAborted(context);
       if (!target.ok) {
         return failure(kind, project, state, target.error);
+      }
+
+      if (kind === 'members') {
+        const type = target.symbol;
+        const typeFile = fileOfSymbol(view, type);
+        if (!type || !typeFile) {
+          return failure(kind, project, state, targetRequired(kind, 'a type'));
+        }
+        const found = await queries.members({
+          generationId: view.snapshot.generationId,
+          symbolId: type.symbolId,
+          alsoSymbolIds: target.counterparts?.map((symbol) => symbol.symbolId),
+        });
+        remember(view, found);
+        const limit = boundedLimit(request.limit, DEFAULT_LIMIT, MAX_LIMIT);
+        const members = summarizeSymbols(view, projection, definitionsFirst(found)).sort(
+          (left, right) =>
+            left.filePath.localeCompare(right.filePath) || compareByPosition(left, right)
+        );
+        const heritage = writtenHeritage([type, ...(target.counterparts ?? [])]);
+        const anchor = {
+          symbol: projection.symbolSummary(type, typeFile),
+          file: projection.fileSummary(typeFile),
+          ...(heritage ? { heritage } : {}),
+        };
+        const symbols = members.slice(0, limit);
+        const data: ProjectSymbolListContext = {
+          kind,
+          anchor,
+          symbols,
+          truncated: members.length > limit,
+          nextRefs: nextRefs([anchor.symbol.ref, ...symbols.map((symbol) => symbol.ref)]),
+        };
+        return envelope(kind, project, state, data);
       }
 
       if (kind === 'symbols') {
@@ -392,6 +454,21 @@ export function createProjectRelations(options: ProjectRelationsOptions): Projec
       return envelope(kind, project, state, data);
     },
   };
+
+  async function catchUp(indexOptions: SourceGraphIndexOptions): Promise<ProjectIndexState> {
+    const result = await new SourceGraphLifecycleService(repository).catchUpOnStartup(indexOptions);
+    views.clear();
+    const snapshot = result.generationId ? await repository.getSnapshot(result.generationId) : null;
+    Logger.debug('ProjectContext relations brought the source index up to date', {
+      projectRoot: result.projectRoot,
+      action: result.action,
+      generationId: result.generationId,
+      freshness: result.freshness.status,
+    });
+    return snapshot
+      ? indexState(await viewOf(snapshot))
+      : unavailableIndex(result.freshness.status, result.freshness.reason);
+  }
 
   /**
    * 模块之间谁依赖谁：模块划分来自协议自己的 repo 查询（发现层目标 → 模块），
@@ -657,9 +734,38 @@ export function createProjectRelations(options: ProjectRelationsOptions): Projec
         };
       }
     }
+    if (matches.length > 1 && matches.every((symbol) => isObjcClassDeclaration(view, symbol))) {
+      // ObjC 的一个类可以写在几处：头文件里的接口、实现文件里的类扩展。类名在整个程序里唯一，
+      // 同名的这几处是同一个类；起点取头文件里的那一处，其余作为它的别处落点一并算上。
+      const sites = [...matches].sort(
+        (left, right) =>
+          Number(isHeaderFile(right.filePath)) - Number(isHeaderFile(left.filePath)) ||
+          left.filePath.localeCompare(right.filePath)
+      );
+      remember(view, sites);
+      Logger.debug('ProjectContext relation target unified the declarations of one ObjC class', {
+        name,
+        sites: sites.map((symbol) => `${symbol.filePath}:${symbol.range.startLine}`),
+      });
+      return {
+        ok: true,
+        symbol: sites[0],
+        file: view.files.get(sites[0].filePath),
+        counterparts: sites.slice(1),
+      };
+    }
     if (matches.length === 1) {
       view.symbols.set(matches[0].symbolId, matches[0]);
-      return { ok: true, symbol: matches[0], file: view.files.get(matches[0].filePath) };
+      // 起点被文件或行号限定到了一处时，同一个声明在别处的落点仍要算上。
+      const elsewhere = isObjcDeclaration(view, matches[0])
+        ? await objcCounterparts(view, matches[0])
+        : [];
+      return {
+        ok: true,
+        symbol: matches[0],
+        file: view.files.get(matches[0].filePath),
+        ...(elsewhere.length > 0 ? { counterparts: elsewhere } : {}),
+      };
     }
     if (matches.length === 0) {
       return {
@@ -693,6 +799,38 @@ export function createProjectRelations(options: ProjectRelationsOptions): Projec
         severity: 'error',
       },
     };
+  }
+
+  /**
+   * ObjC 的同一个声明在别的文件里的落点：类名在整个程序里唯一，所以限定名与种类都相同的
+   * 就是同一个类（接口与类扩展）或同一个方法（头文件里的声明与实现文件里的定义）。
+   */
+  async function objcCounterparts(
+    view: GenerationView,
+    symbol: SourceSymbolNode
+  ): Promise<SourceSymbolNode[]> {
+    const name = symbol.qualifiedName ?? symbol.displayName;
+    const found = (
+      await repository.searchSymbols(view.snapshot.generationId, symbol.displayName, {
+        limit: MAX_LIMIT,
+      })
+    ).filter(
+      (candidate) =>
+        candidate.symbolId !== symbol.symbolId &&
+        candidate.kind === symbol.kind &&
+        (candidate.qualifiedName ?? candidate.displayName) === name &&
+        isObjcDeclaration(view, candidate)
+    );
+    remember(view, found);
+    if (found.length > 0) {
+      Logger.debug('ProjectContext relation target gained its ObjC counterparts', {
+        symbol: `${symbol.filePath}:${symbol.range.startLine} ${name}`,
+        counterparts: found.map(
+          (candidate) => `${candidate.filePath}:${candidate.range.startLine}`
+        ),
+      });
+    }
+    return found;
   }
 
   async function evidence(
@@ -794,6 +932,58 @@ function isBodilessDeclaration(symbol: SourceSymbolNode): boolean {
   return symbol.metadata.compatibilitySource === 'method-declaration';
 }
 
+function isObjcDeclaration(view: GenerationView, symbol: SourceSymbolNode): boolean {
+  return view.files.get(symbol.filePath)?.language === 'objectivec';
+}
+
+function isObjcClassDeclaration(view: GenerationView, symbol: SourceSymbolNode): boolean {
+  return symbol.kind === 'class' && isObjcDeclaration(view, symbol);
+}
+
+/** 源码里写出的父类型名字；一个类型有几处声明时合在一起。 */
+function writtenHeritage(
+  sites: readonly SourceSymbolNode[]
+): { extends: string[]; implements: string[] } | undefined {
+  const merged = { extends: new Set<string>(), implements: new Set<string>() };
+  for (const site of sites) {
+    const heritage = site.metadata.heritage;
+    if (!heritage || typeof heritage !== 'object') {
+      continue;
+    }
+    for (const key of ['extends', 'implements'] as const) {
+      const names = (heritage as Record<string, unknown>)[key];
+      for (const name of Array.isArray(names) ? names : []) {
+        if (typeof name === 'string' && name) {
+          merged[key].add(name);
+        }
+      }
+    }
+  }
+  return merged.extends.size > 0 || merged.implements.size > 0
+    ? { extends: [...merged.extends], implements: [...merged.implements] }
+    : undefined;
+}
+
+function isHeaderFile(filePath: string): boolean {
+  return /\.(h|hh|hpp)$/i.test(filePath);
+}
+
+/**
+ * 同一个方法的声明与定义只留定义：头文件里的那一行与实现文件里的方法体说的是同一个成员。
+ * 没有定义（协议、接口）或定义不止一个时原样保留。
+ */
+function definitionsFirst(symbols: readonly SourceSymbolNode[]): SourceSymbolNode[] {
+  const groups = new Map<string, SourceSymbolNode[]>();
+  for (const symbol of symbols) {
+    const key = `${symbol.kind}\u0000${symbol.qualifiedName ?? symbol.displayName}`;
+    groups.set(key, [...(groups.get(key) ?? []), symbol]);
+  }
+  return [...groups.values()].flatMap((group) => {
+    const definitions = group.filter((symbol) => !isBodilessDeclaration(symbol));
+    return definitions.length === 1 ? definitions : group;
+  });
+}
+
 function edgeTier(edge: SourceGraphEdge): string {
   const resolution = edge.metadata.resolution;
   const tier =
@@ -824,6 +1014,11 @@ function indexState(view: GenerationView): ProjectIndexState {
     freshness: snapshot.freshness.status,
     indexedAt: snapshot.indexedAt,
     coverageGaps: view.coverageGaps,
+    counts: {
+      files: snapshot.fileCount,
+      symbols: snapshot.symbolCount,
+      relations: snapshot.edgeCount,
+    },
     externalEngine: typeof status === 'string' ? status : 'absent',
     ...(snapshot.freshness.reason ? { reason: snapshot.freshness.reason } : {}),
     ...(snapshot.freshness.nextAction ? { nextAction: snapshot.freshness.nextAction } : {}),

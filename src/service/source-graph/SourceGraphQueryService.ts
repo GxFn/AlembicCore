@@ -102,6 +102,13 @@ export interface SourceGraphRelationsInput extends SourceGraphRankingOptions {
   depth?: number;
 }
 
+export interface SourceGraphMembersInput extends SourceGraphRankingOptions {
+  /** 类型的声明。 */
+  symbolId: string;
+  /** 同一个类型在别处的声明（接口之外的类扩展等）。 */
+  alsoSymbolIds?: readonly string[];
+}
+
 export interface SourceGraphImpactInput extends SourceGraphRankingOptions {
   changedFiles?: string[];
   symbolId?: string;
@@ -332,6 +339,15 @@ export class SourceGraphQueryService {
     });
   }
 
+  /** 一个类型的成员，含写在别的文件里的（扩展、分类、实现文件）。 */
+  async members(input: SourceGraphMembersInput): Promise<SourceSymbolNode[]> {
+    const context = await this.createContext(input, 'target');
+    const sites = [input.symbolId, ...(input.alsoSymbolIds ?? [])].flatMap(
+      (id) => context.symbolById.get(id) ?? []
+    );
+    return membersOfType(context, sites);
+  }
+
   /**
    * 一种关系的另一端：从起点出发，只沿这一种关系的边走，可走多跳。
    * 候选档的边不参与，除非查询明确要求。
@@ -342,7 +358,13 @@ export class SourceGraphQueryService {
     const symbolId = input.symbolId?.trim() || undefined;
     const filePath = context.options.filePath;
     const diagnostics: SourceGraphDiagnostic[] = [];
-    const anchor = this.resolveRelationAnchor(context, rule, symbolId, input.includeMembers);
+    const anchor = this.resolveRelationAnchor(
+      context,
+      rule,
+      symbolId,
+      input.includeMembers,
+      input.alsoSymbolIds
+    );
     if (rule.level === 'symbol' && symbolId && !anchor.missing) {
       anchor.symbolIds.push(
         ...(input.alsoSymbolIds ?? []).filter(
@@ -906,10 +928,12 @@ export class SourceGraphQueryService {
     context: SourceGraphQueryContext,
     rule: RelationRule,
     symbolId: string | undefined,
-    includeMembers: boolean | undefined
+    includeMembers: boolean | undefined,
+    alsoSymbolIds: readonly string[] = []
   ): { symbolIds: string[]; filePaths: string[]; missing?: string } {
     const filePath = context.options.filePath;
     const symbol = symbolId ? context.symbolById.get(symbolId) : undefined;
+    const also = alsoSymbolIds.flatMap((id) => context.symbolById.get(id) ?? []);
     if (symbolId && !symbol) {
       return {
         symbolIds: [],
@@ -931,9 +955,7 @@ export class SourceGraphQueryService {
     }
     if (symbol) {
       const members = includeMembers
-        ? context.symbols
-            .filter((candidate) => candidate.containerSymbolId === symbol.symbolId)
-            .map((candidate) => candidate.symbolId)
+        ? membersOfType(context, [symbol, ...also]).map((candidate) => candidate.symbolId)
         : [];
       return { symbolIds: [symbol.symbolId, ...members], filePaths: [] };
     }
@@ -1252,6 +1274,60 @@ const SYMBOL_DEPENDENCY_KINDS: ReadonlySet<string> = new Set([
 const MAX_RELATION_DEPTH = 8;
 /** 一次遍历最多读这么多条边；到了就停并如实标记，不让病态的图把查询拖垮。 */
 const MAX_TRAVERSAL_EDGES = 20_000;
+
+/**
+ * 一个类型的成员。sites 是这个类型的全部声明处（多数语言只有一处）。
+ *
+ * 写在类型体内的成员指向同文件里的那个声明。写在别处的成员——Swift 的 extension、
+ * ObjC 的实现文件与分类——所在文件里没有这个类型的声明，只记着所属类型的名字：名字相同、
+ * 且那个文件自己没有另外声明一个同名类型时，它们属于这个类型。
+ */
+function membersOfType(
+  context: SourceGraphQueryContext,
+  sites: readonly SourceSymbolNode[]
+): SourceSymbolNode[] {
+  if (sites.length === 0) {
+    return [];
+  }
+  const siteIds = new Set(sites.map((site) => site.symbolId));
+  const typeNames = new Set(sites.map((site) => site.qualifiedName ?? site.displayName));
+  // 另外声明了同名类型的文件：那里的成员归那个类型。
+  const otherDeclarationFiles = new Set<string>();
+  for (const candidate of context.symbols) {
+    if (
+      candidate.kind !== 'module' &&
+      !siteIds.has(candidate.symbolId) &&
+      outlineContainer(candidate) === undefined &&
+      typeNames.has(candidate.qualifiedName ?? candidate.displayName)
+    ) {
+      otherDeclarationFiles.add(candidate.filePath);
+    }
+  }
+  return context.symbols.filter((candidate) => {
+    if (candidate.kind === 'module' || siteIds.has(candidate.symbolId)) {
+      return false;
+    }
+    if (candidate.containerSymbolId) {
+      return siteIds.has(candidate.containerSymbolId);
+    }
+    const container = outlineContainer(candidate);
+    return (
+      container !== undefined &&
+      typeNames.has(container) &&
+      !otherDeclarationFiles.has(candidate.filePath)
+    );
+  });
+}
+
+/** 声明所属类型的名字（协议对外呈现的那个）；顶层声明没有。 */
+function outlineContainer(symbol: SourceSymbolNode): string | undefined {
+  const outline = symbol.metadata.outline;
+  const container =
+    outline && typeof outline === 'object' && 'container' in outline
+      ? outline.container
+      : undefined;
+  return typeof container === 'string' && container ? container : undefined;
+}
 
 /** 候选档的边不是事实：除非查询明确要求，否则任何结果都看不到它们。 */
 function factEdges(

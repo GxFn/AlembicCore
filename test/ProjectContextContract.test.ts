@@ -49,10 +49,15 @@ describe('ProjectContext PCQ-0 contract skeleton', () => {
       'createProjectContextCapabilities',
       'createProjectContextFileRef',
       'createProjectRelations',
+      // 图引用（2026-10-01）：一条关系事实的一行文本，生成与解析只有这一份，
+      // 宿主展示给模型、门禁识别的是同一种写法。
+      'formatRelationGraphRef',
       // 宿主启动前身份与真实SDK作用域；保持精确门面清单，不开放第三方内部类型。
       'getCodeGraphProjectContextIdentity',
       'isProjectRelationKind',
+      'isStructuredGraphRef',
       'parseProjectContextRef',
+      'parseRelationGraphRef',
       'resolveAstParserLanguage',
       'withCodeGraphProjectContextSession',
       'withProjectContextSession',

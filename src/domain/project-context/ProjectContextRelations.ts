@@ -17,6 +17,8 @@ import type {
 export const PROJECT_RELATION_KIND_VALUES = [
   /** 一个文件里的全部声明。 */
   'symbols',
+  /** 一个类型的成员，含写在别的文件里的（扩展、分类、实现文件）。 */
+  'members',
   /** 按名字或路径找声明。 */
   'search',
   'callers',
@@ -88,6 +90,8 @@ export interface ProjectIndexState {
   indexedAt?: number;
   /** 有解析缺口的文件数；关系可能因此不全。 */
   coverageGaps: number;
+  /** 这一代索引里的文件、声明与关系的数量。 */
+  counts?: { files: number; symbols: number; relations: number };
   /** 外部引擎这一代的状态：linked、unavailable、skipped，或没有启用（absent）。 */
   externalEngine: string;
   reason?: string;
@@ -95,8 +99,18 @@ export interface ProjectIndexState {
 }
 
 export interface ProjectSymbolListContext {
-  kind: 'symbols' | 'search';
+  kind: 'symbols' | 'search' | 'members';
   file?: FileSummary;
+  /** members 的起点：那个类型，以及它的声明所在的文件。 */
+  anchor?: {
+    symbol: SymbolSummary;
+    file: FileSummary;
+    /**
+     * 源码里写出的父类型名字，含项目之外的类型（NSObject、UIViewController）。
+     * 其中能解析到项目内声明的，另由 supertypes 给出带位置的关系。
+     */
+    heritage?: { extends: string[]; implements: string[] };
+  };
   symbols: SymbolSummary[];
   truncated: boolean;
   nextRefs: ProjectContextRef[];
