@@ -94,13 +94,16 @@ protocol's sessions run on own facts and never start a process.
 ## Known exception (D3) — host-agent session ↔ persistence straddle
 
 `workflows/surfaces/host-agent/session/GenerateSession.ts` ↔
-`workflows/surfaces/persistence/WorkflowSnapshotStore.ts` ↔
-`workflows/surfaces/host-agent/session/HostAgentDimensionCompletionWorkflow.ts`
-couple session state, snapshot persistence, and dimension-completion
-orchestration inside `workflows/surfaces/`. This is a KNOWN straddle, not a
-contract violation (same area); the W4 split groups the session side under
-`host-agent/session/` without changing the coupling. Owner: AlembicCore
-window; trigger: post-CKG1 restructuring of the cold-start/host-agent area.
+`workflows/surfaces/persistence/WorkflowSnapshotStore.ts` couple session state
+and snapshot persistence inside `workflows/surfaces/`. This is a KNOWN
+straddle, not a contract violation (same area); the W4 split groups the session
+side under `host-agent/session/` without changing the coupling. Owner:
+AlembicCore window; trigger: post-CKG1 restructuring of the
+cold-start/host-agent area. The third leg of the straddle, Core's
+`HostAgentDimensionCompletionWorkflow.ts`, was removed in 2026-10: it had no
+production caller — the host's dimension-completion flow lives in AlembicPlugin
+(`lib/recipe-pipeline/generate/dimension-completion.ts`) and uses Core's
+session, checkpoint and coverage helpers directly.
 
 ## Write-strategy boundary (B4): KnowledgeFileStore vs KnowledgeFileWriter
 

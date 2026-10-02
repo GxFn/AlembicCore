@@ -8,8 +8,6 @@ import {
 import { presentHostAgentKnowledgeRescanResponse } from '../../src/workflows/knowledge-rescan/KnowledgeRescanPresenters.js';
 import { buildMissionBriefing } from '../../src/workflows/surfaces/host-agent/briefing/MissionBriefingBuilder.js';
 import { buildInternalNextSteps } from '../../src/workflows/surfaces/host-agent/briefing/MissionBriefingSupport.js';
-import { GenerateSession } from '../../src/workflows/surfaces/host-agent/session/GenerateSession.js';
-import { runHostAgentDimensionCompletionWorkflow } from '../../src/workflows/surfaces/host-agent/session/HostAgentDimensionCompletionWorkflow.js';
 import {
   buildKnowledgeRescanPlan,
   type RelevanceAuditResult,
@@ -227,86 +225,6 @@ describe('host-agent mining workflow core', () => {
     expect(visibleText).not.toContain('enrichCandidates');
     expect(visibleText).not.toContain('alembic_skill');
     expect(visibleText).not.toContain('submit_batch');
-  });
-
-  test('completes a dimension by recovering submissions, binding recipes, and saving checkpoint', async () => {
-    const session = new GenerateSession({
-      projectRoot: '/repo',
-      dimensions: [dimensions[0]],
-      projectContext: { projectName: 'Demo' },
-    });
-    session.submissionTracker.recordSubmission(
-      'architecture',
-      {
-        title: 'Architecture Recipe',
-        knowledgeType: 'architecture',
-        kind: 'rule',
-        category: 'architecture',
-        trigger: '@arch-recipe',
-        coreCode: 'export const architecture = true;',
-        content: { markdown: '## Architecture\n\n```ts\nexport const architecture = true;\n```' },
-        reasoning: { sources: ['src/app.ts:12'], confidence: 0.9 },
-      },
-      'recipe-1'
-    );
-
-    const updates: unknown[] = [];
-    const edges: unknown[] = [];
-    const checkpoints: unknown[] = [];
-    const ctx = {
-      container: {
-        singletons: { _projectRoot: '/repo' },
-        get(name: string) {
-          if (name === 'knowledgeService') {
-            return {
-              get: async () => ({ tags: ['existing'] }),
-              update: async (...args: unknown[]) => {
-                updates.push(args);
-              },
-            };
-          }
-          if (name === 'knowledgeGraphService') {
-            return {
-              addEdge: async (...args: unknown[]) => {
-                edges.push(args);
-              },
-            };
-          }
-          return null;
-        },
-      },
-    };
-
-    const response = await runHostAgentDimensionCompletionWorkflow(
-      ctx,
-      {
-        dimensionId: 'architecture',
-        analysisText:
-          '## Architecture analysis\nThe project uses a clear architecture boundary with service modules.',
-        keyFindings: ['Service modules define the architecture boundary'],
-      },
-      {
-        getActiveSession: () => session,
-        saveCheckpoint: async (...args: unknown[]) => {
-          checkpoints.push(args);
-        },
-      }
-    );
-
-    expect(response.success).toBe(true);
-    expect(response.data).toMatchObject({
-      dimensionId: 'architecture',
-      recipesBound: 1,
-      progress: '1/1',
-      completedDimensions: ['architecture'],
-      isBootstrapComplete: true,
-    });
-    expect(updates).toHaveLength(1);
-    expect(checkpoints).toHaveLength(1);
-    expect(edges).toHaveLength(1);
-    expect(session.sessionStore.getDimensionReport('architecture')?.referencedFiles).toEqual([
-      'src/app.ts',
-    ]);
   });
 });
 

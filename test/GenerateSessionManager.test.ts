@@ -9,7 +9,6 @@ import {
   GenerateSessionLeaseError,
   GenerateSessionManager,
 } from '../src/workflows/surfaces/host-agent/session/GenerateSession.js';
-import { runHostAgentDimensionCompletionWorkflow } from '../src/workflows/surfaces/host-agent/session/HostAgentDimensionCompletionWorkflow.js';
 
 const dimensions: DimensionDef[] = [
   { id: 'architecture', label: 'Architecture', guide: 'Map architecture decisions' },
@@ -493,48 +492,35 @@ describe('GenerateSessionManager durable lease lifecycle', () => {
     }
   });
 
-  it('keeps dimension completion workflow compatible with the durable manager', async () => {
+  it('keeps a completed dimension across a manager restart', async () => {
+    // 维度完成由宿主的流程驱动（Plugin 的 dimension-completion）；Core 这一侧要保证的是：
+    // 会话记下完成之后落盘，重启后的管理器读回同一个结论与同一份报告。
     const dataRoot = await mkdtemp(join(tmpdir(), 'alembic-core-bootstrap-complete-'));
     try {
       const projectRoot = join(dataRoot, 'repo');
       const manager = new GenerateSessionManager({ dataRoot });
       const session = manager.createSession({ projectRoot, dimensions: [dimensions[0]] });
 
-      const response = await runHostAgentDimensionCompletionWorkflow(
-        {
-          dataRoot,
-          container: {
-            singletons: { _projectRoot: projectRoot },
-            get(name: string) {
-              if (name === 'generateSessionManager') {
-                return manager;
-              }
-              return null;
-            },
-          },
-        },
-        {
-          sessionId: session.id,
-          dimensionId: 'architecture',
-          analysisText:
-            '## Architecture analysis\nService modules define the durable workflow boundary.',
-          keyFindings: ['Service modules define the workflow boundary'],
-          referencedFiles: ['src/service.ts'],
-        }
-      );
+      const { updated } = session.markDimensionComplete('architecture', {
+        analysisText:
+          '## Architecture analysis\nService modules define the durable workflow boundary.',
+        keyFindings: ['Service modules define the workflow boundary'],
+        referencedFiles: ['src/service.ts'],
+      } as never);
 
-      expect(response.success).toBe(true);
-      expect(response.data).toMatchObject({
-        dimensionId: 'architecture',
-        progress: '1/1',
-        completedDimensions: ['architecture'],
-        isBootstrapComplete: true,
+      expect(updated).toBe(false);
+      expect(session.getProgress()).toMatchObject({
+        completed: 1,
+        total: 1,
+        completedDimIds: ['architecture'],
       });
+      expect(session.isComplete).toBe(true);
 
-      const restartedManager = new GenerateSessionManager({ dataRoot });
-      expect(restartedManager.getSession(session.id)?.isDimensionComplete('architecture')).toBe(
-        true
-      );
+      const restarted = new GenerateSessionManager({ dataRoot }).getSession(session.id);
+      expect(restarted?.isDimensionComplete('architecture')).toBe(true);
+      expect(restarted?.sessionStore.getDimensionReport('architecture')?.referencedFiles).toEqual([
+        'src/service.ts',
+      ]);
     } finally {
       await rm(dataRoot, { recursive: true, force: true });
     }

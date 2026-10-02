@@ -54,19 +54,10 @@ export * from './delivery/ProjectSkillDeliveryContracts.js';
 export * from './session/CompletenessCritic.js';
 export * from './session/GenerateSession.js';
 export {
-  type HostAgentDimensionCompleteArgs,
-  type HostAgentDimensionCompletedEvent,
-  type HostAgentDimensionCompletionContext,
-  type HostAgentDimensionCompletionDependencies,
-  type HostAgentDimensionCompletionResponse,
-  type HostAgentSessionContainer,
-  type HostAgentWorkflowSession,
-  runHostAgentDimensionCompletionWorkflow,
-} from './session/HostAgentDimensionCompletionWorkflow.js';
-export {
   getActiveHostAgentWorkflowSession,
-  type HostAgentSessionContainer as HostAgentMissionSessionContainer,
-  type HostAgentWorkflowSession as HostAgentMissionWorkflowSession,
+  type HostAgentMissionSessionContainer,
+  type HostAgentMissionWorkflowSession,
+  type HostAgentSessionContainer,
 } from './session/HostAgentMissionWorkflow.js';
 export * from './session/HostAgentSubmissionTracker.js';
 export * from './session/MiningSessionStore.js';

@@ -26,7 +26,6 @@ import {
   loadDimensionCheckpoints,
   MiningSessionStore,
   persistWorkflowResult,
-  runHostAgentDimensionCompletionWorkflow,
   saveDimensionCheckpoint,
 } from '../src/host-agent-workflows.js';
 import {
@@ -158,28 +157,6 @@ describe('stable host-agent workflow entrypoint', () => {
         'src/service.ts',
       ]).totalScore
     ).toBeGreaterThan(0);
-  });
-
-  it('validates dimension completion and degrades when no host-agent session exists', async () => {
-    const response = await runHostAgentDimensionCompletionWorkflow(
-      {
-        container: {
-          get: () => null,
-        },
-      },
-      {
-        dimensionId: 'architecture',
-        analysisText: '## Architecture\n\nEnough analysis text for validation.',
-      },
-      {
-        getActiveSession: () => null,
-      }
-    );
-
-    expect(response).toMatchObject({
-      success: false,
-      errorCode: 'SESSION_NOT_FOUND',
-    });
   });
 
   it('exposes checkpoint persistence for host-agent resume and cleanup', async () => {
