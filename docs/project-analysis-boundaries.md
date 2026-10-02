@@ -484,8 +484,13 @@ UTF-8 解码后的文本重新计算。包装 Node host port 的 adapter 必须�
 成员与类型、stat、realpath，以及解析后的 scope/preference。已知不存在与未曾捕获的
 操作有不同含义；重放遇到遗漏会锁存失败，即使业务层的旧 catch 吞掉异常也不能发布认证。
 
-捕获先预置 inventory 字节，然后执行请求矩阵；再使用新的纯内存 reader 重算同一矩阵，
-比较规范化输出，并检查实际输入未漂移。支持输入包含清单、空目录和不存在性，独立于
+捕获先预置 inventory 字节，然后把请求矩阵执行一遍，再检查实际输入未漂移。一次捕获只
+分析一遍：`facts.inputClosure.replayOutputHash` 记的是这一遍的输出哈希，也就是"只凭这份
+闭包重放应当得到的输出"。捕获内不再用纯内存 reader 把同一矩阵重算第二遍——那一遍要求的
+结果与第一遍相等，所以去掉后工件逐字节不变，一次捕获的分析耗时减半。只凭闭包能否得到
+同样的输出，改由会话层的测试用 `createReplay` 离线核对（`ProjectContextStrictSession`、
+`ProjectContextEndToEnd`、`ProjectInputSnapshot` 的测试）；新增读取路径或会话级缓存时，
+这些测试是发现"读集不完整""输出不确定"的地方。支持输入包含清单、空目录和不存在性，独立于
 源码扩展名/排除策略。mtime 不参与输入身份，业务配置中的普通字符串也不作为文件路径
 重绑定。产物仅保存 root 标识与相对路径；支持路径只读，不用于物化或写回文件。
 
@@ -499,6 +504,25 @@ port 的 adapter 必须转发 `createInputCapture`，并透传 `executeRequest` 
 `buildSourceRevisionVectorV1(entries, inputClosureHash)` 的第二个参数。它重新检查已认证
 读集，保留不存在的观察，传播异常和取消，并统一软链接 root；不能直接复制旧 hash。
 这只判断旧输入是否仍成立，不表示新的查询结果已经重新认证。无闭包的历史产物省略该参数。
+
+## 认证里的依赖证据
+
+`map`（以及带上它的 `repo`）每发现一个"不属于任何模块种子"的依赖，就给出一条依赖观测。
+认证要求每条观测都有一条决议与之对应（`dependencyObservationCount` 等于
+`dependencyResolutions` 的条数），并且决议的名字与依赖图里的外部热点一致。这两条由内置的
+Node host port 自己保持，宿主不需要、也不应该在端口外补造决议：
+
+- **宿主给了依赖归属目录**（`dependencyOwnership`，条目来自各仓库的 package 元数据）：每条
+  依赖按目录归为 `internal-resolved`、`approved-sibling`、`expected-external` 或
+  `confirmed-defect`，前两类带归属证据，依赖图随之对账。
+- **宿主没有给目录**（目前两个产品宿主都是这样）：依赖只能按名字归类——声明过的内部模块名
+  没解析上是 `confirmed-defect`，其余记为 `expected-external`，原因码
+  `core-host-port-diagnostic-has-no-canonical-ownership-binding`。按名字认出的兄弟仓库在
+  诊断上是 `advisory` 加 `relatedRepoId`，决议里仍是 `expected-external`：`approved-sibling`
+  要求目录里的归属证据。这条路径会打一条 debug 日志（`no-dependency-ownership-catalog`）。
+
+所以没有目录时认证照样能通过，但它的依赖分类没有归属证据：多仓库范围里，仓库之间的
+依赖会被记成外部依赖。要让它们被认出来，宿主需要提供归属目录。
 
 ## 部分结果
 
