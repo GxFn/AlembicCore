@@ -10,22 +10,17 @@
 import { basename, dirname, extname, join } from 'node:path';
 import { readSourceText, sourceExists } from '../../infrastructure/io/ProjectSourceReader.js';
 import { LanguageService } from '../../shared/LanguageService.js';
+import {
+  parseSwiftPackageManifest,
+  type SwiftPackageManifest,
+} from '../../shared/SwiftPackageManifest.js';
 import type { ProjectSourceStat } from '../../types/projectSourceReader.js';
 import { ProjectDiscoverer } from './ProjectDiscoverer.js';
 import { createSourceScanExcludeDirs } from './SourceScanExclusions.js';
 
-/** Package.swift 解析结果 */
-interface ParsedPackage {
+/** Package.swift 解析结果，带上清单文件自己的路径。 */
+interface ParsedPackage extends SwiftPackageManifest {
   path: string;
-  name: string;
-  version: string;
-  targets: { name: string; type: string; path: string | null; dependencies: string[] }[];
-  dependencies: (
-    | { url: string; version: string | null; type: string }
-    | { path: string; type: string }
-  )[];
-  products: { name: string; type: string }[];
-  platforms: { name: string; version: string }[];
 }
 
 const SKIP_DIRS = createSourceScanExcludeDirs(['.swiftpm', 'Build']);
@@ -307,172 +302,14 @@ export class SpmDiscoverer extends ProjectDiscoverer {
     return results;
   }
 
-  /** 简易解析 Package.swift（无 Swift 编译器，使用正则） */
+  /** 读取并解析 Package.swift；解析规则在 shared/SwiftPackageManifest。 */
   async #parsePackageSwift(packagePath: string): Promise<ParsedPackage> {
     if (!packagePath || !(await sourceExists(this.sourceReader, packagePath))) {
       throw new Error(`Package.swift not found: ${packagePath}`);
     }
 
     const content = await readSourceText(this.sourceReader, packagePath);
-    return {
-      path: packagePath,
-      name: this.#extractName(content),
-      version: this.#extractVersion(content),
-      targets: this.#extractTargets(content),
-      dependencies: this.#extractDependencies(content),
-      products: this.#extractProducts(content),
-      platforms: this.#extractPlatforms(content),
-    };
-  }
-
-  #extractName(content: string) {
-    const m = content.match(/name\s*:\s*"([^"]+)"/);
-    return m ? m[1] : 'unknown';
-  }
-
-  #extractVersion(content: string) {
-    const m = content.match(/version\s*:\s*"([^"]+)"/);
-    return m ? m[1] : '0.0.0';
-  }
-
-  #extractTargets(content: string) {
-    const targets: { name: string; type: string; path: string | null; dependencies: string[] }[] =
-      [];
-    const re = /\.(?:target|testTarget|executableTarget)\s*\(/g;
-    let match: RegExpExecArray | null;
-
-    while ((match = re.exec(content)) !== null) {
-      const type = match[0].includes('testTarget')
-        ? 'testTarget'
-        : match[0].includes('executableTarget')
-          ? 'executableTarget'
-          : 'target';
-
-      const startPos = match.index + match[0].length;
-      let depth = 1;
-      let endPos = startPos;
-
-      while (depth > 0 && endPos < content.length) {
-        if (content[endPos] === '(') {
-          depth++;
-        } else if (content[endPos] === ')') {
-          depth--;
-        }
-        endPos++;
-      }
-
-      if (depth === 0) {
-        const block = content.substring(startPos, endPos - 1);
-        const nameMatch = block.match(/name\s*:\s*"([^"]+)"/);
-        if (!nameMatch) {
-          continue;
-        }
-
-        const pathMatch = block.match(/path\s*:\s*"([^"]+)"/);
-        const depsMatch = block.match(/dependencies\s*:\s*\[([^\]]*)\]/s);
-        const dependencies: { name: string; index: number }[] = [];
-        if (depsMatch) {
-          const depRe = /\.(?:product|target)\s*\(\s*name\s*:\s*"([^"]+)"/g;
-          let dm: RegExpExecArray | null;
-          while ((dm = depRe.exec(depsMatch[1])) !== null) {
-            dependencies.push({ name: dm[1], index: dm.index });
-          }
-          const literalStarts = new Set<number>();
-          let nesting = 0;
-          let quoted = false;
-          let escaped = false;
-          for (let index = 0; index < depsMatch[1].length; index++) {
-            const character = depsMatch[1][index];
-            if (quoted) {
-              if (escaped) {
-                escaped = false;
-              } else if (character === '\\') {
-                escaped = true;
-              } else if (character === '"') {
-                quoted = false;
-              }
-            } else if (character === '"') {
-              quoted = true;
-              if (nesting === 0) {
-                literalStarts.add(index);
-              }
-            } else if (character === '(' || character === '[') {
-              nesting++;
-            } else if (character === ')' || character === ']') {
-              nesting--;
-            }
-          }
-          // SPM普通字符串依赖与.product/.target混排时仍保持清单顺序，
-          // 不把调用内部的package参数字符串误作另一个依赖。
-          const literalRe = /(?:^|,)\s*"([^"]+)"(?=\s*(?:,|$))/g;
-          while ((dm = literalRe.exec(depsMatch[1])) !== null) {
-            // computedDependency("a", "b", "c")中的参数也不是静态依赖声明。
-            if (literalStarts.has(dm.index + dm[0].indexOf('"'))) {
-              dependencies.push({ name: dm[1], index: dm.index });
-            }
-          }
-        }
-
-        targets.push({
-          name: nameMatch[1],
-          type,
-          path: pathMatch ? pathMatch[1] : null,
-          dependencies: dependencies.sort((a, b) => a.index - b.index).map((dep) => dep.name),
-        });
-      }
-    }
-
-    return targets;
-  }
-
-  #extractDependencies(content: string) {
-    const deps: (
-      | { url: string; version: string | null; type: string }
-      | { path: string; type: string }
-    )[] = [];
-
-    const urlRe = /\.package\s*\(\s*url\s*:\s*"([^"]+)"[^)]*\)/g;
-    let m: RegExpExecArray | null;
-    while ((m = urlRe.exec(content)) !== null) {
-      const block = m[0];
-      const fromMatch = block.match(/from\s*:\s*"([^"]+)"/);
-      const exactMatch = block.match(/exact\s*:\s*"([^"]+)"/);
-      deps.push({
-        url: m[1],
-        version: fromMatch ? fromMatch[1] : exactMatch ? exactMatch[1] : null,
-        type: 'package',
-      });
-    }
-
-    const pathRe = /\.package\s*\(\s*path\s*:\s*"([^"]+)"\s*\)/g;
-    while ((m = pathRe.exec(content)) !== null) {
-      deps.push({
-        path: m[1],
-        type: 'local',
-      });
-    }
-
-    return deps;
-  }
-
-  #extractProducts(content: string) {
-    const products: { name: string; type: string }[] = [];
-    const re = /\.(library|executable)\s*\(\s*name\s*:\s*"([^"]+)"/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
-      products.push({ name: m[2], type: m[1] });
-    }
-    return products;
-  }
-
-  #extractPlatforms(content: string) {
-    const platforms: { name: string; version: string }[] = [];
-    const re = /\.(iOS|macOS|tvOS|watchOS|visionOS)\s*\(\s*\.v(\d+(?:_\d+)?)\s*\)/g;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(content)) !== null) {
-      platforms.push({ name: m[1], version: m[2].replace(/_/g, '.') });
-    }
-    return platforms;
+    return { path: packagePath, ...parseSwiftPackageManifest(content) };
   }
 
   async #walkSourceFiles(dir: string) {
