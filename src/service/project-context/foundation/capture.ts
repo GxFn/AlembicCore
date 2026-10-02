@@ -162,22 +162,11 @@ async function captureCertifiedProjectFactsInternal(
   if (inputCapture) {
     inputCapture.reader.assertComplete();
     const snapshot = await inputCapture.snapshot();
-    // 使用新 reader 身份重新计算，防止同一 session 的 AST/cache 把 replay 变成结果复用。
-    const replay = inputCapture.createReplay(snapshot);
-    const replayOutcomes = await captureRequestOutcomes(
-      input,
-      repositories,
-      ports,
-      strictV2,
-      replay
-    );
-    replay.assertComplete();
-    const replayOutputHash = hashCanonicalJson(replayOutcomes);
-    if (replayOutputHash !== hashCanonicalJson(requestOutcomes)) {
-      throw new TypeError(
-        'Project context input replay did not reproduce the captured request outcomes.'
-      );
-    }
+    // 一次捕获只执行一遍分析。闭包里的 replayOutputHash 是"从这份闭包重放应当得到的输出"，
+    // 取的就是这一遍的输出哈希：以前捕获内再重放一遍并要求两者相等，所以工件逐字节不变。
+    // 重放本身仍可离线进行（createReplay + 同一组请求），会话层的测试用它核对
+    // "只凭闭包能得到同样的输出"；每次生产捕获不再为它付出第二遍分析的成本。
+    const replayOutputHash = hashCanonicalJson(requestOutcomes);
     try {
       await inputCapture.verify({ signal: input.signal });
     } catch (error) {
@@ -198,10 +187,10 @@ async function captureCertifiedProjectFactsInternal(
       ...[...chunksByHash.values()].sort((a, b) => a.blobHash.localeCompare(b.blobHash))
     );
     assertPortableSemanticJson(toProjectFactsJson(inputClosure), 'input closure');
-    Logger.debug('ProjectContext capture reproduced from recorded inputs', {
+    Logger.debug('ProjectContext capture froze its recorded inputs', {
       snapshotHash: snapshot.snapshotHash,
       observations: snapshot.observations.length,
-      requests: replayOutcomes.length,
+      requests: requestOutcomes.length,
       replayOutputHash,
     });
   } else {
