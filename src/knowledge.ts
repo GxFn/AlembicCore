@@ -72,6 +72,7 @@ export type {
   RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
   RecipeAuthoringViolation,
+  RecipeGraphRefVerifier,
   RecipeSessionScope,
   RecipeSourceRefEvidence,
   RecipeSourceRefResolver,
@@ -158,6 +159,7 @@ export type {
 } from './repository/sourceref/RecipeSourceRefRepository.js';
 // P5/C8: 可复用 fs-backed 源码引用解析器——两宿主注入 KnowledgeService 的 groundedSourcePaths port 时共用，
 // 保证深度接地判定 parity（Core 拥有共享 fs 能力，domain spec 仍 fs-free）。
+export { createFsGraphRefVerifier } from './service/knowledge/FsGraphRefVerifier.js';
 export { createFsSourceRefResolver } from './service/knowledge/FsSourceRefResolver.js';
 export {
   type ApplyReport,

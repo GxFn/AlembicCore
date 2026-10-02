@@ -1,4 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { validateAgainst } from '../src/domain/knowledge/recipe-authoring-spec/index.js';
 import {
   formatRelationGraphRef,
@@ -7,6 +10,8 @@ import {
   parseRelationGraphRef,
   type RelationSummary,
 } from '../src/domain/project-context/index.js';
+import { createFsGraphRefVerifier } from '../src/service/knowledge/FsGraphRefVerifier.js';
+import { computeContentHash } from '../src/shared/contentHash.js';
 
 const SITE_ID = 'relation-site:root:src/cache.ts:calls:Store.read:L14-L14:5-20:ab12cd34ef567890';
 
@@ -188,5 +193,92 @@ describe('结构化引用用哈希表达新旧，名字与路径只是数据', (
       'STALE_GRAPH',
     ]);
     expect(graphCodes([])).toEqual(['GRAPH_REF_INVALID']);
+  });
+});
+
+describe('宿主注入核验端口后，结构化引用对着当前源码复核', () => {
+  const roots: string[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  function project(): { root: string; file: string; ref: string } {
+    const root = mkdtempSync(path.join(tmpdir(), 'core-graph-ref-verify-'));
+    roots.push(root);
+    mkdirSync(path.join(root, 'src'), { recursive: true });
+    const file = path.join(root, 'src', 'cache.ts');
+    const text = 'export function load() {\n  return read();\n}\n';
+    writeFileSync(file, text);
+    const hash = computeContentHash(text);
+    return {
+      root,
+      file,
+      ref: `graph:calls load -> read [relation-site:root:src/cache.ts:calls:read:L2-L2:9-15:${hash}]`,
+    };
+  }
+
+  const verify = (projectRoot: string, graphRefs: string[], withVerifier = true) =>
+    validateAgainst(
+      [
+        {
+          title: 'Cache reads through the store',
+          kind: 'fact',
+          relationshipClaim: true,
+          reasoning: { graphRefs },
+        },
+      ],
+      {
+        stage: 2,
+        path: 'in-process',
+        profile: 'opportunistic',
+        projectRoot,
+        ...(withVerifier ? { graphRefVerifier: createFsGraphRefVerifier() } : {}),
+      }
+    ).filter(
+      (violation) => violation.code === 'GRAPH_REF_INVALID' || violation.code === 'STALE_GRAPH'
+    );
+
+  it('引用里的哈希仍是当前文件的哈希：放行', () => {
+    const { root, ref } = project();
+    expect(verify(root, [ref])).toEqual([]);
+    // 协议引用 id 本身也一样。
+    expect(verify(root, [ref.slice(ref.indexOf('[') + 1, -1)])).toEqual([]);
+  });
+
+  it('文件在引用产生之后改过：这条引用过期', () => {
+    const { root, file, ref } = project();
+    writeFileSync(file, 'export function load() {\n  return 1;\n}\n');
+    expect(verify(root, [ref])).toEqual([
+      expect.objectContaining({
+        code: 'STALE_GRAPH',
+        path: 'src/cache.ts',
+        sourceRef: ref,
+        message: expect.stringContaining('changed after'),
+      }),
+    ]);
+    // 没有注入核验端口的宿主行为不变：只要求有引用。
+    expect(verify(root, [ref], false)).toEqual([]);
+  });
+
+  it('引用所指的文件不在项目里：这条引用无效', () => {
+    const { root, file, ref } = project();
+    rmSync(file);
+    expect(verify(root, [ref])).toEqual([
+      expect.objectContaining({ code: 'GRAPH_REF_INVALID', path: 'src/cache.ts' }),
+    ]);
+    const escaping = `relation-site:root:../outside.ts:calls:read:L1-L1:${'a'.repeat(16)}`;
+    expect(verify(root, [escaping])).toEqual([
+      expect.objectContaining({ code: 'GRAPH_REF_INVALID' }),
+    ]);
+  });
+
+  it('自由文本引用与带仓库标识的引用不交给核验端口', () => {
+    const { root } = project();
+    expect(verify(root, ['graph:class Cache (src/cache.ts) — Methods(1): load'])).toEqual([]);
+    expect(
+      verify(root, [`relation-site:other-repo:src/missing.ts:calls:read:L1-L1:${'b'.repeat(16)}`])
+    ).toEqual([]);
   });
 });

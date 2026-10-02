@@ -89,3 +89,25 @@ export type RecipeSessionScope = (input: {
   itemIndex: number;
   title: string;
 }) => { violation: RecipeAuthoringViolation } | { ok: true };
+
+/**
+ * §C.11 port — checks a structured graph ref against the current source.
+ *
+ * The domain spec recognises a structured ref purely (a graph ref line, or a ProjectContext ref id
+ * that carries a content hash) and hands the cited file and hash to this host-injected verifier,
+ * which owns the file read and the hash comparison (STALE_GRAPH when the file changed after the ref
+ * was produced, GRAPH_REF_INVALID when the cited file is gone). Free-text refs are never passed to
+ * it. When no verifier is injected the spec only checks that a ref is present — the behaviour
+ * before this port existed.
+ */
+export type RecipeGraphRefVerifier = (input: {
+  projectRoot: string;
+  /** the ref exactly as the candidate carries it. */
+  graphRef: string;
+  /** repo-relative path of the file the ref cites. */
+  filePath: string;
+  /** content hash the ref recorded for that file. */
+  hash: string;
+  itemIndex: number;
+  title: string;
+}) => { ok: true } | { violation: RecipeAuthoringViolation };

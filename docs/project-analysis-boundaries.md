@@ -416,6 +416,12 @@ graph:calls Cache.load -> Store.read [relation-site:root:src/cache.ts:calls:Stor
 id）用哈希表达新旧，里面的符号名与路径只是数据——叫 `pending` 的方法不会被当成"引用待定"。只有
 自由文本的引用才按字面上的 stale / partial / pending 判断。
 
+门禁自己不读盘。宿主注入核验端口（`graphRefVerifier`，文件系统实现是
+`@alembic/core/knowledge` 的 `createFsGraphRefVerifier`）之后，候选里的结构化引用逐条对着当前源码
+复核：所指文件的内容哈希变了是 `STALE_GRAPH`，文件不在项目里是 `GRAPH_REF_INVALID`。它与
+`evidence` 用同一种哈希，所以查询时给出的引用在提交时复核得过。不注入时门禁只要求引用存在——
+这是默认行为，两个宿主目前都没有打开。带仓库标识的引用（多仓库范围）与自由文本引用不参与复核。
+
 **模块依赖。** 模块划分来自 `repo` 查询的 `modules`（见下），依赖来自索引里跨模块的边：
 文件导入与符号级的调用、继承、实现。每一对依赖按边的种类计数，标出其中只属于可信档的条数，并带
 几条可复核的关系。清单里声明的依赖（`RepoContext.dependencyGraph`）是另一回事，不在这里。

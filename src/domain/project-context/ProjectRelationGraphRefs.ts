@@ -66,16 +66,41 @@ export function parseRelationGraphRef(
   };
 }
 
+/** 一条结构化引用所指的文件，以及引用产生时那个文件的内容哈希。 */
+export interface StructuredGraphRefSite {
+  filePath: string;
+  hash: string;
+  /** 多仓库范围里文件所属的仓库；没有时文件相对项目根。 */
+  repoId?: string;
+}
+
 /**
- * 这段文本是不是一条可复核的结构化引用：图引用，或者协议引用 id 本身，并且带着内容哈希。
+ * 结构化引用所指的位置：图引用，或者协议引用 id 本身，并且带着内容哈希。
+ * 自由文本、不带哈希的引用（无从复核）返回 undefined。
+ */
+export function structuredGraphRefSite(
+  text: string | undefined
+): StructuredGraphRefSite | undefined {
+  if (typeof text !== 'string' || !text.trim()) {
+    return undefined;
+  }
+  const site = parseRelationGraphRef(text)?.site ?? parseProjectContextRef(text.trim());
+  if (!site?.hash) {
+    return undefined;
+  }
+  return {
+    filePath: site.filePath,
+    hash: site.hash,
+    ...(site.repoId ? { repoId: site.repoId } : {}),
+  };
+}
+
+/**
+ * 这段文本是不是一条可复核的结构化引用。
  *
  * 结构化引用靠内容哈希表达新旧，里面的符号名与路径只是数据——
  * 一个叫 `pending` 的方法不代表这条引用"待定"。不带哈希的引用无从复核，不算。
  */
 export function isStructuredGraphRef(text: string | undefined): boolean {
-  if (typeof text !== 'string' || !text.trim()) {
-    return false;
-  }
-  const site = parseRelationGraphRef(text)?.site ?? parseProjectContextRef(text.trim());
-  return site?.hash !== undefined;
+  return structuredGraphRefSite(text) !== undefined;
 }

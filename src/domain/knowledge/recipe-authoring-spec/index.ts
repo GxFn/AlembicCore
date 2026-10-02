@@ -19,6 +19,7 @@ export type {
   RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
   RecipeAuthoringViolation,
+  RecipeGraphRefVerifier,
   RecipeSessionScope,
   RecipeSourceRefEvidence,
   RecipeSourceRefResolver,

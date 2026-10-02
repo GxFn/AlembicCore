@@ -21,10 +21,14 @@ import type {
   RecipeAuthoringProfile,
   RecipeAuthoringSubmitPath,
   RecipeAuthoringViolation,
+  RecipeGraphRefVerifier,
   RecipeSessionScope,
   RecipeSourceRefResolver,
 } from '../../../types/recipeAuthoringSpec.js';
-import { isStructuredGraphRef } from '../../project-context/ProjectRelationGraphRefs.js';
+import {
+  isStructuredGraphRef,
+  structuredGraphRefSite,
+} from '../../project-context/ProjectRelationGraphRefs.js';
 
 /* ════════════════ Stage 1 — content-quality constants + predicates (verbatim) ════════════════ */
 
@@ -541,6 +545,12 @@ export interface ValidateAgainstOptions {
   sourceRefResolver?: RecipeSourceRefResolver;
   /** host-injected session port (stage 2 cold-start scope). */
   sessionScope?: RecipeSessionScope;
+  /**
+   * host-injected port (stage 2 graph evidence). When present together with projectRoot, every
+   * structured graph ref of a relationship claim is checked against the current source; absent, the
+   * gate only requires that a ref is present.
+   */
+  graphRefVerifier?: RecipeGraphRefVerifier;
   /** stage-2 cold-start project root for source-ref resolution. */
   projectRoot?: string;
   dimensionId?: string;
@@ -928,6 +938,26 @@ function validateStage2(
         message: 'Relationship evidence refers to stale or partial graph data.',
         nextAction: 'Refresh the source graph and cite fresh graph refs before submitting.',
       });
+    } else if (opts.graphRefVerifier && opts.projectRoot) {
+      // 宿主接了核验端口：结构化引用带着所指文件的内容哈希，逐条对着当前源码复核。
+      // 多仓库范围里带仓库标识的引用，文件不相对项目根，这里无从定位，不核验。
+      for (const graphRef of refs) {
+        const site = structuredGraphRefSite(graphRef);
+        if (!site || site.repoId) {
+          continue;
+        }
+        const verified = opts.graphRefVerifier({
+          projectRoot: opts.projectRoot,
+          graphRef,
+          filePath: site.filePath,
+          hash: site.hash,
+          itemIndex,
+          title,
+        });
+        if ('violation' in verified) {
+          violations.push(verified.violation);
+        }
+      }
     }
   }
 

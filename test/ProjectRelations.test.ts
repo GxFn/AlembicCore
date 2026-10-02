@@ -24,6 +24,7 @@ import {
   parseRelationGraphRef,
 } from '../src/project-context.js';
 import { createAlembicRepositories } from '../src/repositories.js';
+import { createFsGraphRefVerifier } from '../src/service/knowledge/FsGraphRefVerifier.js';
 import {
   type AnalysisBenchmarkFixture,
   materializeBenchmarkFixture,
@@ -222,6 +223,18 @@ describe('project relations', () => {
       });
     }
 
+    // 门禁的核验端口与 evidence 用的是同一种哈希：查询时给出的图引用，提交时复核得过。
+    const verifyGraphRef = () =>
+      createFsGraphRefVerifier()({
+        projectRoot,
+        graphRef: graphRef ?? '',
+        filePath: cited?.site.filePath ?? '',
+        hash: cited?.site.hash ?? '',
+        itemIndex: 0,
+        title: 'fixture',
+      });
+    expect(verifyGraphRef()).toEqual({ ok: true });
+
     // 文件改了：旧引用不再成立，也不给现在那一行的内容。
     const appFile = path.join(projectRoot, 'src/app.ts');
     await fs.writeFile(appFile, `// moved\n${await fs.readFile(appFile, 'utf8')}`);
@@ -231,6 +244,7 @@ describe('project relations', () => {
     expect(stale).toMatchObject({ current: false, indexed: false });
     expect(stale.reason).toContain('changed');
     expect(stale.text).toBeUndefined();
+    expect(verifyGraphRef()).toMatchObject({ violation: { code: 'STALE_GRAPH' } });
 
     // 索引追上之后，同一个问题给出新的引用，它是当前的。
     await reindex();
