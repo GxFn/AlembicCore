@@ -40,6 +40,7 @@ import {
   readSourceText,
   sourceExists,
 } from '../../../infrastructure/io/ProjectSourceReader.js';
+import Logger from '../../../infrastructure/logging/Logger.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import { resolveProjectScopeForFolder } from '../../../shared/ProjectScope.js';
 import type {
@@ -192,6 +193,8 @@ interface SourceFileFact {
   filePath: string;
   language: string;
   targetName?: string;
+  /** 文件所属构建目标的身份：名字在仓库里唯一时就是名字，否则是"名字@声明它的清单所在目录"。 */
+  targetKey?: string;
 }
 
 type PackageJsonRecord = Record<string, unknown>;
@@ -382,11 +385,31 @@ async function collectRepoSourceFacts(input: {
           sourceRoots,
         });
   errors.push(...fallbackFiles.errors);
+  if (discovery.files.length === 0) {
+    return { discovery, errors, sourceFiles: fallbackFiles.files, sourceRoots };
+  }
+
+  // 发现层只列"声明过的构建目标"目录下的文件。应用壳、清单文件、没有声明成目标的测试目录
+  // 同样是这个仓库的源码：把它们补进来（不带目标），交给模块划分归到所在的目录。
+  const untargeted = await collectUntargetedSourceFiles({
+    context: input.context,
+    known: discovery.files,
+    maxFiles: input.maxFiles ?? DEFAULT_MAX_FILES,
+    repo: input.repo,
+  });
+  errors.push(...untargeted.errors);
+  if (untargeted.files.length > 0) {
+    Logger.getInstance().debug('[RepoContext] source files outside declared targets were added', {
+      declaredTargetFiles: discovery.files.length,
+      discovererId: discovery.discovererId ?? null,
+      untargetedFiles: untargeted.files.length,
+    });
+  }
 
   return {
     discovery,
     errors,
-    sourceFiles: discovery.files.length > 0 ? discovery.files : fallbackFiles.files,
+    sourceFiles: [...discovery.files, ...untargeted.files],
     sourceRoots,
   };
 }
@@ -691,13 +714,14 @@ async function collectDiscoveryFacts(input: {
   const dependencyGraph = await readDiscovererDependencyGraph(selected, errors, input.context);
   const sourceFiles: SourceFileFact[] = [];
   let truncated = false;
+  const targetKeys = createTargetKeys(input.repo, targets);
   for (const target of targets) {
     throwIfProjectContextAborted(input.context);
     const files = await readTargetFiles(selected, target, errors, input.context);
     throwIfProjectContextAborted(input.context);
     for (const file of files) {
       throwIfProjectContextAborted(input.context);
-      const sourceFile = normalizeDiscoveredFile(input.repo, target, file);
+      const sourceFile = normalizeDiscoveredFile(input.repo, target, file, targetKeys.get(target));
       if (!sourceFile) {
         continue;
       }
@@ -879,10 +903,38 @@ async function readTargetFiles(
   }
 }
 
+/**
+ * 每个 target 的身份。名字在仓库里唯一时就是名字；两个清单各声明了一个同名 target 时，
+ * 加上清单所在的目录区分开，否则它们的文件会被并成一个模块。
+ */
+function createTargetKeys(
+  repo: RepoIdentity,
+  targets: readonly DiscoveredTarget[]
+): Map<DiscoveredTarget, string> {
+  const nameCounts = new Map<string, number>();
+  for (const target of targets) {
+    nameCounts.set(target.name, (nameCounts.get(target.name) ?? 0) + 1);
+  }
+  const keys = new Map<DiscoveredTarget, string>();
+  for (const target of targets) {
+    if ((nameCounts.get(target.name) ?? 0) <= 1) {
+      keys.set(target, target.name);
+      continue;
+    }
+    const manifestPath = readString(readRecord(target.metadata)?.packagePath);
+    const declaredIn = manifestPath
+      ? normalizeRelativePath(path.relative(repo.absoluteRoot, path.dirname(manifestPath))) || '.'
+      : (normalizeTargetPath(repo, target) ?? '.');
+    keys.set(target, `${target.name}@${declaredIn}`);
+  }
+  return keys;
+}
+
 function normalizeDiscoveredFile(
   repo: RepoIdentity,
   target: DiscoveredTarget,
-  file: DiscoveredFile
+  file: DiscoveredFile,
+  targetKey: string | undefined
 ): SourceFileFact | undefined {
   const absolutePath = path.resolve(file.path);
   const relativePath = path.relative(repo.absoluteRoot, absolutePath);
@@ -896,12 +948,14 @@ function normalizeDiscoveredFile(
       filePath: normalizeRelativePath(path.join(targetRoot, targetRelativePath)),
       language: normalizeLanguage(file.language, targetRelativePath),
       targetName: target.name,
+      ...(targetKey ? { targetKey } : {}),
     };
   }
   return {
     filePath: normalizeRelativePath(relativePath),
     language: normalizeLanguage(file.language, relativePath),
     targetName: target.name,
+    ...(targetKey ? { targetKey } : {}),
   };
 }
 
@@ -937,6 +991,64 @@ async function createSourceRootSummaries(input: {
       role: 'source-root',
     })
   );
+}
+
+/** 用源码语言写的构建清单。它们声明模块，自己不是哪个模块的源码；config 与本地包的引用里已经记着它们。 */
+const BUILD_MANIFEST_FILE_NAMES = new Set([
+  'Package.swift',
+  'build.gradle.kts',
+  'settings.gradle.kts',
+  'setup.py',
+]);
+
+function isBuildManifest(fileName: string): boolean {
+  return BUILD_MANIFEST_FILE_NAMES.has(fileName);
+}
+
+/**
+ * 仓库里不属于任何已声明目标的源码文件。总数（连同已知文件）不超过 maxFiles；到了上限就停，
+ * 并给出与目标文件收集相同的截断诊断。
+ */
+async function collectUntargetedSourceFiles(input: {
+  repo: RepoIdentity;
+  known: readonly SourceFileFact[];
+  maxFiles: number;
+  context?: Ctx;
+}): Promise<{ files: SourceFileFact[]; errors: ProjectContextQueryError[] }> {
+  const knownPaths = new Set(input.known.map((file) => file.filePath));
+  const remaining = input.maxFiles - knownPaths.size;
+  if (remaining <= 0) {
+    return { errors: [], files: [] };
+  }
+  const scanned: SourceFileFact[] = [];
+  await collectSourceFilesUnder({
+    absoluteRoot: input.repo.absoluteRoot,
+    context: input.context,
+    files: scanned,
+    // 扫描会先遇到已知文件；上限按"已知 + 新增"算，所以这里放宽到两者之和。
+    maxFiles: input.maxFiles + knownPaths.size,
+    repoRoot: input.repo.absoluteRoot,
+    sourceReader: input.repo.sourceReader,
+  });
+  const files = dedupeSourceFiles(scanned)
+    .filter(
+      (file) =>
+        !knownPaths.has(file.filePath) && !isBuildManifest(path.posix.basename(file.filePath))
+    )
+    .sort((left, right) => left.filePath.localeCompare(right.filePath));
+  if (files.length <= remaining) {
+    return { errors: [], files };
+  }
+  return {
+    errors: [
+      createQueryError({
+        code: 'query-unavailable',
+        message: `repo source file collection was truncated at ${input.maxFiles} files.`,
+        retryable: false,
+      }),
+    ],
+    files: files.slice(0, remaining),
+  };
 }
 
 async function collectFallbackSourceFiles(input: {
@@ -1101,12 +1213,17 @@ function createTargetSummaries(input: {
   repo: RepoIdentity;
   sourceFiles: readonly SourceFileFact[];
 }): TargetSummary[] {
+  const targetKeys = createTargetKeys(input.repo, input.discovery.targets);
   return input.discovery.targets
     .map((target) => {
       const targetPath = normalizeTargetPath(input.repo, target) ?? '.';
+      const targetKey = targetKeys.get(target) ?? target.name;
       const metadata = createMetadata({
         discovererId: input.discovery.discovererId ?? null,
-        fileCount: input.sourceFiles.filter((file) => file.targetName === target.name).length,
+        // 按 target 的身份数：两个同名 target 各数各的文件。
+        fileCount: input.sourceFiles.filter(
+          (file) => (file.targetKey ?? file.targetName) === targetKey
+        ).length,
         framework: readString(target.framework),
         language: readString(target.language),
         source: 'project-context-repo-target',

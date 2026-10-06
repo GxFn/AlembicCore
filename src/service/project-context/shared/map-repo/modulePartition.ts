@@ -26,16 +26,23 @@ export interface RepoModulePartition {
  * 输出按路径排序；同一个目录不会出现两次，所以"最长路径前缀"能把每个文件唯一地归到一个模块。
  */
 export function partitionRepoModules(input: {
-  files: readonly { filePath: string; targetName?: string }[];
+  /**
+   * targetKey 是文件所属构建目标的身份；不给时用 targetName。两个包各有一个同名 target 时，
+   * 名字相同而身份不同，各自成为一个模块。
+   */
+  files: readonly { filePath: string; targetName?: string; targetKey?: string }[];
   targets: readonly { name: string; kind?: string }[];
   /** 源码根目录（如 `src`、`Sources`、`packages/app/src`）。 */
   sourceRoots: readonly string[];
 }): RepoModulePartition[] {
-  const byTarget = new Map<string, string[]>();
+  const byTarget = new Map<string, { targetName: string; files: string[] }>();
   const untargeted: string[] = [];
   for (const file of input.files) {
     if (file.targetName) {
-      byTarget.set(file.targetName, [...(byTarget.get(file.targetName) ?? []), file.filePath]);
+      const key = file.targetKey ?? file.targetName;
+      const group = byTarget.get(key) ?? { targetName: file.targetName, files: [] };
+      group.files.push(file.filePath);
+      byTarget.set(key, group);
     } else {
       untargeted.push(file.filePath);
     }
@@ -53,7 +60,7 @@ export function partitionRepoModules(input: {
 
   if (byTarget.size > 1) {
     const kinds = new Map(input.targets.map((target) => [target.name, target.kind]));
-    for (const [targetName, files] of [...byTarget].sort(([left], [right]) =>
+    for (const [, { targetName, files }] of [...byTarget].sort(([left], [right]) =>
       left.localeCompare(right)
     )) {
       const targetKind = kinds.get(targetName);
@@ -77,9 +84,25 @@ export function partitionRepoModules(input: {
       add(module);
     }
   }
-  return [...modules.values()]
+  return disambiguateDirectoryModuleNames([...modules.values()])
     .map((module) => ({ ...module, files: [...new Set(module.files)].sort() }))
     .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+/**
+ * 目录模块（area / root）的名字取自目录名，可能与某个构建目标重名——包目录 `Packages/Kit`
+ * 下直接放着的文件会得到一个也叫 `Kit` 的模块。import 是按名字找模块的，重名会让
+ * `import Kit` 找到两个候选。构建目标的名字是声明出来的，保留；与它重名的目录模块改用目录路径当名字。
+ */
+function disambiguateDirectoryModuleNames(modules: RepoModulePartition[]): RepoModulePartition[] {
+  const targetNames = new Set(
+    modules.filter((module) => module.kind === 'target').map((module) => module.name)
+  );
+  return modules.map((module) =>
+    module.kind !== 'target' && targetNames.has(module.name) && module.path !== '.'
+      ? { ...module, name: module.path }
+      : module
+  );
 }
 
 /** 文件所属的模块：路径前缀最长的那个；没有任何模块的目录包住它时返回 undefined。 */

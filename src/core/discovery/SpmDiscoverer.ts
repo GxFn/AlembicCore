@@ -116,11 +116,20 @@ export class SpmDiscoverer extends ProjectDiscoverer {
     return targets;
   }
 
-  async getTargetFiles(target: string | { name: string }) {
+  async getTargetFiles(target: string | { name: string; metadata?: Record<string, unknown> }) {
     const targetName = typeof target === 'string' ? target : target.name;
+    // 主包和本地子包可以各声明一个同名 target（都叫 XTests）。listTargets 给出的 target 带着它所在的
+    // 清单路径，用它认准是哪个包里的那一个；只给名字时沿用"第一个声明了这个名字的包"。
+    const declaredIn =
+      typeof target === 'string' || typeof target.metadata?.packagePath !== 'string'
+        ? undefined
+        : target.metadata.packagePath;
 
     let sourcesDir: string | null = null;
     for (const { pkgPath, parsed } of this.#parsedPackages) {
+      if (declaredIn && pkgPath !== declaredIn) {
+        continue;
+      }
       const matchTarget = parsed.targets?.find((t: { name: string }) => t.name === targetName);
       if (matchTarget) {
         const pkgDir = dirname(pkgPath);

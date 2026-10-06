@@ -489,6 +489,32 @@ describe('ProjectContext PCQ-7 repo context', () => {
     });
   });
 
+  it('lists source files outside declared targets and keeps same-named targets apart', async () => {
+    await withFixture(createUntargetedSwiftPmFixture(), async (projectRoot) => {
+      const envelope = await ProjectContextCapabilities.execute({
+        kind: 'repo',
+        payload: { includeMapSummary: false },
+        scope: { projectRoot, repoId: 'app' },
+      });
+      const data = envelope.data as RepoContext;
+
+      // 应用壳 App/ 不属于任何 SPM 目标，以前根本不在源码清单里；两个 Package.swift 是清单不是模块源码。
+      expect(data.languages).toEqual([{ language: 'swift', fileCount: 5 }]);
+      expect(
+        (data.modules ?? []).map((module) => `${module.kind} ${module.name} @ ${module.path}`)
+      ).toEqual([
+        'area App @ App',
+        'target Kit @ Packages/Kit/Sources/Kit',
+        'target FeatureTests @ Packages/Kit/Tests/FeatureTests',
+        'target Feature @ Sources/Feature',
+        'target FeatureTests @ Tests/FeatureTests',
+      ]);
+      // 主包与子包各声明了一个 FeatureTests：各取各的文件，各数各的数。
+      const testTargets = data.targets.filter((target) => target.name === 'FeatureTests');
+      expect(testTargets.map((target) => target.refs[0]?.metadata?.fileCount)).toEqual([1, 1]);
+    });
+  });
+
   it('keeps repo output deterministic regardless of module seed order', async () => {
     await withFixture(createRepoFixture(), async (projectRoot) => {
       const left = await ProjectContext.execute({
@@ -734,6 +760,36 @@ function createBiliDiliSwiftPmFixture(): Record<string, string> {
     'Sources/Features/VideoPlay/VideoView.swift': 'struct VideoView {}\n',
     'Sources/Shared/Shared.swift': 'struct Shared {}\n',
     'Tests/BiliDiliTests/BiliDiliTests.swift': 'struct BiliDiliTests {}\n',
+  };
+}
+
+function createUntargetedSwiftPmFixture(): Record<string, string> {
+  return {
+    'Package.swift': [
+      '// swift-tools-version: 5.9',
+      'import PackageDescription',
+      'let package = Package(',
+      '  name: "App",',
+      '  dependencies: [.package(path: "Packages/Kit")],',
+      '  targets: [',
+      '    .target(name: "Feature"),',
+      '    .testTarget(name: "FeatureTests"),',
+      '  ]',
+      ')',
+    ].join('\n'),
+    'Packages/Kit/Package.swift': [
+      '// swift-tools-version: 5.9',
+      'import PackageDescription',
+      'let package = Package(',
+      '  name: "Kit",',
+      '  targets: [.target(name: "Kit"), .testTarget(name: "FeatureTests")]',
+      ')',
+    ].join('\n'),
+    'App/AppDelegate.swift': 'final class AppDelegate {}\n',
+    'Sources/Feature/Feature.swift': 'struct Feature {}\n',
+    'Tests/FeatureTests/FeatureTests.swift': 'struct FeatureTests {}\n',
+    'Packages/Kit/Sources/Kit/Kit.swift': 'public struct Kit {}\n',
+    'Packages/Kit/Tests/FeatureTests/KitFeatureTests.swift': 'struct KitFeatureTests {}\n',
   };
 }
 

@@ -54,6 +54,38 @@ describe('repository module partition', () => {
     expect(ownerOfPath(modules, 'README.md')?.name).toBe('root');
   });
 
+  it('keeps same-named targets of different packages apart and renames a directory module that collides with a target', () => {
+    const modules = partitionRepoModules({
+      targets: [
+        { name: 'Kit', kind: 'target' },
+        { name: 'KitTests', kind: 'testTarget' },
+      ],
+      sourceRoots: ['Sources', 'Tests', 'Packages/Kit'],
+      files: [
+        { filePath: 'Sources/Kit/A.swift', targetName: 'Kit', targetKey: 'Kit' },
+        // 主包与本地子包各声明了一个 KitTests：身份不同，各自成为一个模块。
+        { filePath: 'Tests/KitTests/T.swift', targetName: 'KitTests', targetKey: 'KitTests@.' },
+        {
+          filePath: 'Packages/Kit/Tests/KitTests/U.swift',
+          targetName: 'KitTests',
+          targetKey: 'KitTests@Packages/Kit',
+        },
+        // 包目录下直接放着的文件：目录模块本来也叫 Kit，与构建目标重名时改用路径当名字。
+        { filePath: 'Packages/Kit/Extra.swift' },
+      ],
+    });
+
+    expect(describeModules(modules)).toEqual([
+      'root Packages/Kit @ Packages/Kit (1)',
+      'target KitTests @ Packages/Kit/Tests/KitTests (1)',
+      'target Kit @ Sources/Kit (1)',
+      'target KitTests @ Tests/KitTests (1)',
+    ]);
+    expect(ownerOfPath(modules, 'Packages/Kit/Tests/KitTests/U.swift')?.path).toBe(
+      'Packages/Kit/Tests/KitTests'
+    );
+  });
+
   it('splits a single-target repository by the first directory under its source roots', () => {
     const modules = partitionRepoModules({
       targets: [{ name: 'app', kind: 'package' }],

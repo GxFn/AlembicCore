@@ -463,8 +463,12 @@ describe('project relations', () => {
       // 这个包的入口是按目录惯例找回的：依赖成立，但全部只是可信档。
       '@bench/app -> @bench/ui {"imports":1,"calls":1} trustedOnly=2',
     ]);
-    // 夹具里有一个文件不属于任何 workspace 成员，它没有归属，如实计数。
-    expect(data.unownedFiles).toBe(1);
+    // 夹具里 fixtures/sample 不是 workspace 成员：它不属于任何包，但仍是仓库里的源码，
+    // 按目录归到 fixtures 这个区域模块，所以没有"无归属"的文件。
+    expect(data.unownedFiles).toBe(0);
+    expect(data.modules.map((module) => `${module.kind} ${module.name}`)).toContain(
+      'area fixtures'
+    );
     // 每一对依赖带几条可以复核的关系。
     const toCore = data.dependencies.find(
       (dependency) => nameOf.get(dependency.to) === '@bench/core'
