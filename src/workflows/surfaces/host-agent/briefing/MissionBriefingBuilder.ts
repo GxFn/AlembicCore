@@ -42,6 +42,10 @@ import {
   type ResponseBudget,
   SUBMISSION_SCHEMA,
 } from './MissionBriefingSupport.js';
+import {
+  type BriefingExternalDependency,
+  buildProjectContextBriefingFacts,
+} from './ProjectContextBriefingFacts.js';
 
 // ── 本地类型定义 ────────────────────────────────────────────
 
@@ -189,6 +193,13 @@ interface MissionBriefingParams {
   languageStats?: Record<string, number> | null;
   panoramaResult?: Record<string, unknown> | null;
   localPackageModules?: LocalPackageModule[];
+  /**
+   * 项目外的依赖及用到它的模块。给了就以它为准；不给时沿用旧办法——
+   * 把依赖图里名字不是目标的节点当作外部依赖（只适合节点本来就混着外部包名的旧输入）。
+   */
+  externalDependencies?: BriefingExternalDependency[] | null;
+  /** 项目的源码文件总数；给了才用它算"本地包占比"，避免拿目标文件数之和当分母。 */
+  totalSourceFiles?: number;
   profile?: BriefingProfile;
   rescan?: RescanBriefingInput;
   responseBudget?: Partial<ResponseBudget>;
@@ -371,7 +382,9 @@ const KNOWN_DEPENDENCIES: Record<string, string> = {
 function buildArchitectureOverview(
   targets: MissionBriefing['targets'],
   depGraphData: DependencyGraph | null,
-  localPackageModules?: LocalPackageModule[]
+  localPackageModules?: LocalPackageModule[],
+  externalDependencies?: BriefingExternalDependency[] | null,
+  totalSourceFiles?: number
 ): MissionBriefing['architectureOverview'] {
   if (!targets || targets.length === 0) {
     return null;
@@ -445,7 +458,11 @@ function buildArchitectureOverview(
   // ── 外部依赖识别 ──
   const externalDeps: { name: string; role: string }[] = [];
   const localModuleNames = new Set(targets.map((t) => t.name));
-  if (depGraphData?.nodes) {
+  if (externalDependencies) {
+    for (const dependency of externalDependencies) {
+      externalDeps.push({ name: dependency.name, role: externalDependencyRole(dependency) });
+    }
+  } else if (depGraphData?.nodes) {
     for (const n of depGraphData.nodes) {
       const id = typeof n === 'string' ? n : n.id || '';
       const label = typeof n === 'string' ? n : n.label || id;
@@ -461,7 +478,7 @@ function buildArchitectureOverview(
 
   // ── 关键洞察 ──
   const insights: string[] = [];
-  const totalFiles = targets.reduce((s, t) => s + (t.fileCount || 0), 0);
+  const totalFiles = totalSourceFiles ?? targets.reduce((s, t) => s + (t.fileCount || 0), 0);
   const featureGroup = roleGroups.feature;
   const coreGroup = roleGroups.core;
   const networkGroup = roleGroups.networking;
@@ -514,12 +531,39 @@ function buildArchitectureOverview(
 }
 
 /**
+ * 外部依赖的角色。认得的名字给出它的用途；认不得的照实说它是哪一类：
+ * 清单里声明过的是第三方依赖；代码里 import 了、清单却没有声明的，是平台 SDK 自带的模块，
+ * 或者是别的依赖带进来的（两者从清单上分不出来，所以并在一起说）。
+ */
+function externalDependencyRole(dependency: BriefingExternalDependency): string {
+  const known = KNOWN_DEPENDENCIES[dependency.name.toLowerCase()];
+  if (known) {
+    return known;
+  }
+  if (dependency.name.startsWith('node:')) {
+    return 'Node.js built-in module';
+  }
+  return dependency.declared === false
+    ? 'not declared in the manifest (platform SDK or transitive dependency)'
+    : 'third-party dependency';
+}
+
+/**
  * 从外部依赖图中提取技术栈信息
  */
 function buildTechnologyStack(
   depGraphData: DependencyGraph | null,
-  targets: MissionBriefing['targets']
+  targets: MissionBriefing['targets'],
+  externalDependencies?: BriefingExternalDependency[] | null
 ): MissionBriefing['technologyStack'] {
+  if (externalDependencies) {
+    const stack = externalDependencies.map((dependency) => ({
+      name: dependency.name,
+      role: externalDependencyRole(dependency),
+      usedBy: dependency.usedBy.slice(0, 5),
+    }));
+    return stack.length > 0 ? stack : null;
+  }
   if (!depGraphData?.nodes || !depGraphData?.edges) {
     return null;
   }
@@ -682,6 +726,8 @@ export function buildMissionBriefing({
   languageStats, // §7.4: 完整语言分布统计
   panoramaResult, // §M1: Phase 1.8 全景数据
   localPackageModules, // 本地子包模块信息
+  externalDependencies,
+  totalSourceFiles,
   profile,
   rescan,
   responseBudget,
@@ -740,14 +786,21 @@ export function buildMissionBriefing({
         }
       }
     }
-    // 计算每个节点被多少模块依赖（fan-in）
+    // 计算每个节点被多少模块依赖（fan-in）。同一对模块之间可以有多条边（import、调用各一条），
+    // 按依赖方去重，否则"被多少模块依赖"会被边数撑大。
+    const dependentsByNode = new Map<string, Set<string>>();
     for (const e of depGraphData.edges || []) {
-      const edge = e as { to?: string };
+      const edge = e as { from?: string; to?: string };
       if (edge.to && nodeMap.has(edge.to)) {
-        const targetNode = nodeMap.get(edge.to);
-        if (targetNode) {
-          targetNode.dependentCount++;
-        }
+        const dependents = dependentsByNode.get(edge.to) ?? new Set<string>();
+        dependents.add(edge.from ?? '');
+        dependentsByNode.set(edge.to, dependents);
+      }
+    }
+    for (const [nodeId, dependents] of dependentsByNode) {
+      const targetNode = nodeMap.get(nodeId);
+      if (targetNode) {
+        targetNode.dependentCount = dependents.size;
       }
     }
     for (const node of nodeMap.values()) {
@@ -773,11 +826,13 @@ export function buildMissionBriefing({
     architectureOverview: buildArchitectureOverview(
       builtTargets,
       depGraphData ?? null,
-      localPackageModules
+      localPackageModules,
+      externalDependencies,
+      totalSourceFiles
     ),
 
     // 技术栈 — 外部依赖的角色识别
-    technologyStack: buildTechnologyStack(depGraphData ?? null, builtTargets),
+    technologyStack: buildTechnologyStack(depGraphData ?? null, builtTargets, externalDependencies),
 
     // 关键抽象 — Agent 优先分析的核心类/协议
     keyAbstractions: null,
@@ -846,20 +901,23 @@ export function buildProjectContextMissionBriefing({
   responseBudget,
 }: ProjectContextMissionBriefingInput): MissionBriefing {
   const presenterInput = normalizeProjectContextPresenterInput(projectContext);
+  const facts = buildProjectContextBriefingFacts(presenterInput);
   const briefing = buildMissionBriefing({
     projectMeta: {
-      ...buildProjectContextProjectMeta(presenterInput),
+      ...facts.projectMeta,
       ...projectMeta,
       projectInformationSource: 'project-context',
     },
-    targets: buildProjectContextTargets(presenterInput),
+    targets: facts.targets,
     activeDimensions,
     session,
     languageExtension: languageExtension ?? null,
-    languageStats: buildProjectContextLanguageStats(presenterInput),
-    depGraphData: buildProjectContextDependencyGraph(presenterInput),
-    localPackageModules: buildProjectContextLocalPackageModules(presenterInput),
-    panoramaResult: buildProjectContextPanoramaReplacement(presenterInput),
+    languageStats: facts.languageStats,
+    depGraphData: facts.depGraphData,
+    localPackageModules: facts.localPackageModules,
+    externalDependencies: facts.externalDependencies,
+    totalSourceFiles: facts.totalSourceFiles,
+    panoramaResult: facts.panoramaResult,
     profile,
     rescan,
     responseBudget,
@@ -898,175 +956,4 @@ function normalizeProjectContextPresenterInput(
   input: ProjectContextPresenterInput | readonly ProjectContextEnvelope<ProjectContextResult>[]
 ): ProjectContextPresenterInput {
   return 'project' in input ? input : buildProjectContextPresenterInput(input);
-}
-
-function buildProjectContextProjectMeta(
-  input: ProjectContextPresenterInput
-): Record<string, unknown> {
-  const repoName = input.repo?.repo.name;
-  const projectRoot = input.project.projectRoot;
-  return {
-    name: input.project.displayName ?? repoName ?? basename(projectRoot) ?? 'project-context',
-    primaryLanguage: inferProjectContextPrimaryLanguage(input),
-    fileCount: input.files.length,
-    projectType:
-      input.repo?.packageSystems[0]?.kind ?? input.repo?.buildSystems[0]?.kind ?? 'project-context',
-    projectRoot,
-  };
-}
-
-function buildProjectContextTargets(input: ProjectContextPresenterInput): TargetInfo[] {
-  const moduleFileCounts = new Map(
-    input.modules.map((moduleContext) => [
-      moduleContext.module.name,
-      moduleContext.ownedFiles.length,
-    ])
-  );
-  const repoTargets = input.repo?.targets.map((target) => ({
-    name: target.name,
-    type: target.kind ?? 'target',
-    fileCount:
-      (moduleFileCounts.has(target.name)
-        ? moduleFileCounts.get(target.name)
-        : target.refs.length) || undefined,
-  }));
-  if (repoTargets?.length) {
-    return repoTargets;
-  }
-  return input.modules.map((moduleContext) => ({
-    name: moduleContext.module.name,
-    type: moduleContext.module.kind ?? 'module',
-    inferredRole: moduleContext.module.role,
-    fileCount: moduleContext.ownedFiles.length,
-  }));
-}
-
-function buildProjectContextLanguageStats(
-  input: ProjectContextPresenterInput
-): Record<string, number> {
-  const stats = new Map<string, number>();
-  for (const file of input.files) {
-    if (file.language) {
-      stats.set(file.language, (stats.get(file.language) ?? 0) + 1);
-    }
-  }
-  // repo 给的是同一 scope 的总量；files 常为已读子集，只补缺少统计的语言。
-  for (const language of input.repo?.languages ?? []) {
-    stats.set(language.language, language.fileCount ?? stats.get(language.language) ?? 0);
-  }
-  return Object.fromEntries(
-    [...stats.entries()].sort(([left], [right]) => left.localeCompare(right))
-  );
-}
-
-function buildProjectContextDependencyGraph(
-  input: ProjectContextPresenterInput
-): DependencyGraph | null {
-  const nodes = [
-    ...(input.map?.modules.map((module) => ({
-      id: module.id,
-      label: module.name,
-      fileCount: module.ownedFileCount,
-    })) ?? []),
-    ...input.moduleLayers.flatMap((layerContext) =>
-      layerContext.layers.map((layer) => ({
-        id: layer.id,
-        label: layer.name,
-        fileCount: layer.fileGroups?.length,
-      }))
-    ),
-  ];
-  const edges = [
-    ...(input.map?.majorFlows.flatMap((flow) => {
-      const from = flow.refs[0]?.id ?? flow.refs[0]?.label;
-      const to = flow.refs[1]?.id ?? flow.refs[1]?.label;
-      return from && to ? [{ from, to, type: flow.summary }] : [];
-    }) ?? []),
-    ...input.fileFlows.flatMap((flow) =>
-      [...flow.imports, ...flow.callees, ...flow.outflow].flatMap((relation) => {
-        const from = relation.fromRef?.id ?? relation.from?.label ?? flow.file.filePath;
-        const to = relation.toRef?.id ?? relation.to?.label ?? relation.label;
-        return from && to ? [{ from, to, type: relation.kind }] : [];
-      })
-    ),
-  ];
-
-  if (!nodes.length && !edges.length) {
-    return null;
-  }
-  return { nodes, edges };
-}
-
-function buildProjectContextLocalPackageModules(
-  input: ProjectContextPresenterInput
-): LocalPackageModule[] {
-  const moduleContexts = input.modules.map((moduleContext) => ({
-    name: moduleContext.module.name,
-    packageName: moduleContext.module.name,
-    fileCount: moduleContext.ownedFiles.length,
-    inferredRole: moduleContext.module.role,
-    keyFiles: moduleContext.ownedFiles.slice(0, 6).map((file) => file.filePath),
-  }));
-  if (moduleContexts.length) {
-    return moduleContexts;
-  }
-  return (
-    input.map?.modules.map((module) => ({
-      name: module.name,
-      packageName: module.name,
-      fileCount: module.ownedFileCount ?? 0,
-      inferredRole: module.role,
-      keyFiles: [],
-    })) ?? []
-  );
-}
-
-function buildProjectContextPanoramaReplacement(
-  input: ProjectContextPresenterInput
-): Record<string, unknown> | null {
-  if (!input.map && !input.moduleLayers.length && !input.unavailable.length) {
-    return null;
-  }
-  return {
-    source: 'project-context',
-    layers:
-      input.map?.layers.map((layer) => ({
-        level: layer.order ?? 0,
-        name: layer.name,
-        modules:
-          input.map?.modules
-            .filter(
-              (module) => module.configLayer === layer.id || module.configLayer === layer.name
-            )
-            .map((module) => module.name) ?? [],
-      })) ?? [],
-    couplingHotspots:
-      input.map?.hotspots.map((hotspot) => ({
-        module: hotspot.ref.label ?? hotspot.ref.id,
-        fanIn: Math.round(hotspot.score),
-        fanOut: 0,
-      })) ?? [],
-    cyclicDependencies:
-      input.map?.cycles.map((cycle) => ({
-        cycle: cycle.refs.map((ref) => ref.label ?? ref.id),
-        severity: cycle.summary,
-      })) ?? [],
-    projectContextUnavailable: input.unavailable.map((item) => ({
-      queryLevel: item.queryLevel,
-      reason: item.reason,
-    })),
-  };
-}
-
-function inferProjectContextPrimaryLanguage(input: ProjectContextPresenterInput): string {
-  const repoLanguage = input.repo?.languages[0]?.language;
-  if (repoLanguage) {
-    return repoLanguage;
-  }
-  const stats = buildProjectContextLanguageStats(input);
-  return Object.entries(stats).sort((left, right) => right[1] - left[1])[0]?.[0] ?? 'unknown';
-}
-
-function basename(pathValue: string): string | undefined {
-  return pathValue.split('/').filter(Boolean).pop();
 }

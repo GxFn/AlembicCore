@@ -83,6 +83,33 @@ describe('ProjectContext PCQ-6 project map', () => {
           'shared -> feature via imports (1 relation)',
         ])
       );
+      // 同样的事实也以结构化字段给出，读的人不用去拆上面那行文字。
+      expect(data.majorFlows).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            from: expect.objectContaining({ name: 'feature' }),
+            to: expect.objectContaining({ name: 'shared' }),
+            relationKind: 'calls',
+            relationCount: 1,
+          }),
+          expect.objectContaining({
+            from: expect.objectContaining({ name: 'shared' }),
+            to: expect.objectContaining({ name: 'feature' }),
+            relationKind: 'imports',
+            relationCount: 1,
+          }),
+        ])
+      );
+      // feature 经 import 与调用两种关系依赖 shared：按模块计它只依赖一个模块，
+      // reason 里的 fan-out 按依赖汇总条数计仍是 2，综合分与排序沿用后者。
+      const featureHotspot = data.hotspots.find((hotspot) => hotspot.ref.label === 'feature');
+      expect(featureHotspot).toMatchObject({
+        externalFanOut: 0,
+        fanIn: 1,
+        fanOut: 1,
+        reason: 'fan-in:1 fan-out:2 relations:3 external:0',
+        relationCount: 3,
+      });
       expect(data.externalDependencyHotspots).toEqual([]);
       expect(data.nextRefs.some((ref) => ref.kind === 'module')).toBe(true);
       expect(data.nextRefs.some((ref) => ref.kind === 'module-layer')).toBe(true);
@@ -334,8 +361,14 @@ describe('ProjectContext PCQ-6 project map', () => {
       const data = envelope.data as ProjectMap;
 
       expect(data.externalDependencyHotspots).toEqual([
-        expect.objectContaining({ category: 'package', name: 'zod' }),
+        expect.objectContaining({
+          category: 'package',
+          name: 'zod',
+          relationCount: 1,
+          usedBy: expect.objectContaining({ name: 'api' }),
+        }),
       ]);
+      expect(data.hotspots[0]).toMatchObject({ externalFanOut: 1, fanIn: 0, fanOut: 0 });
       expect(envelope.errors).toContainEqual(
         expect.objectContaining({
           code: 'query-unavailable',

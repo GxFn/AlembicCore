@@ -91,3 +91,66 @@ describe('buildEvidenceStarters sourceGraphInventory(决策④ eval 开关注入
     expect(starters?.sourceGraphInventory).toBeUndefined();
   });
 });
+
+describe('buildEvidenceStarters 全景与依赖图', () => {
+  const dim: DimensionDef = { id: 'architecture', label: 'Architecture', guide: 'boundaries' };
+
+  it('reads coupling hotspots and cycles from the normalized ProjectContext panorama', () => {
+    const starters = buildEvidenceStarters(dim, {
+      panoramaResult: {
+        couplingHotspots: [
+          { module: 'Networking', fanIn: 11, fanOut: 3 },
+          { module: 'Leaf', fanIn: 1, fanOut: 0 },
+        ],
+        cyclicDependencies: [{ cycle: ['A', 'B'], severity: 'A <-> B' }],
+      },
+    });
+
+    // 进或出达到 5 的模块才算高耦合。
+    expect(starters?.couplingHotspots?.data).toEqual(['Networking (fanIn=11, fanOut=3)']);
+    expect(starters?.cyclicDependencies?.data).toEqual([{ cycle: 'A → B', severity: 'A <-> B' }]);
+  });
+
+  it('still reads the legacy panorama shape (module map and cycles)', () => {
+    const starters = buildEvidenceStarters(dim, {
+      panoramaResult: {
+        modules: new Map([['core', { name: 'core', fanIn: 7, fanOut: 0 }]]),
+        cycles: [{ cycle: ['core', 'ui'], severity: 'warning' }],
+      },
+    });
+
+    expect(starters?.couplingHotspots?.data).toEqual(['core (fanIn=7, fanOut=0)']);
+    expect(starters?.cyclicDependencies?.data).toEqual([
+      { cycle: 'core → ui', severity: 'warning' },
+    ]);
+  });
+
+  it('ranks the dependency overview by how many modules depend on each node', () => {
+    const starters = buildEvidenceStarters(dim, {
+      depGraphData: {
+        nodes: [{ id: 'app', label: 'App' }, { id: 'ui', label: 'UI' }, 'core'],
+        edges: [
+          { from: 'app', to: 'ui', type: 'imports' },
+          { from: 'app', to: 'core', type: 'imports' },
+          // 同一对模块的第二种关系不让 core 多一个依赖方。
+          { from: 'app', to: 'core', type: 'calls' },
+          { from: 'ui', to: 'core', type: 'imports' },
+        ],
+      },
+    });
+
+    expect(starters?.dependencyOverview?.data).toEqual({
+      totalModules: 3,
+      totalEdges: 4,
+      topModules: ['core', 'UI', 'App'],
+    });
+  });
+
+  it('keeps the declared node order when the graph has no edges', () => {
+    const starters = buildEvidenceStarters(dim, {
+      depGraphData: { nodes: ['b', 'a'], edges: [] },
+    });
+
+    expect(starters?.dependencyOverview?.data).toMatchObject({ topModules: ['b', 'a'] });
+  });
+});

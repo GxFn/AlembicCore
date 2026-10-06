@@ -195,21 +195,47 @@ export interface DependencyCycleSummary {
   summary: string;
 }
 
+/** 依赖聚合里的一端：一个模块。 */
+export interface ModuleEndpointSummary {
+  id: string;
+  name: string;
+}
+
 export interface HotspotSummary {
   ref: ProjectContextRef;
   score: number;
+  /**
+   * 给人看的一行，里面的 fan-in / fan-out 按依赖汇总条数计（同一对模块每种关系各算一条）。
+   * 要"有多少个模块"请读下面的结构化字段，不要去拆这行文字。
+   */
   reason: string;
+  /** 依赖它的模块数（按模块去重）。 */
+  fanIn?: number;
+  /** 它依赖的项目内模块数（按模块去重）。 */
+  fanOut?: number;
+  /** 它用到的项目外依赖数（按名字去重）。 */
+  externalFanOut?: number;
+  /** 经过它的关系条数（进与出合计）。 */
+  relationCount?: number;
 }
 
 export interface FlowSummary {
   refs: ProjectContextRef[];
+  /** 给人看的一行；模块到模块的边以 from / to 为准。 */
   summary: string;
+  from?: ModuleEndpointSummary;
+  to?: ModuleEndpointSummary;
+  relationKind?: string;
+  relationCount?: number;
 }
 
 export interface ExternalDependencySummary {
   name: string;
   category?: string;
   refs: ProjectContextRef[];
+  /** 用到这个外部依赖的模块。 */
+  usedBy?: ModuleEndpointSummary;
+  relationCount?: number;
 }
 
 export interface FileGroupSummary {

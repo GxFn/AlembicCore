@@ -37,6 +37,31 @@ export interface EvidenceStarterOpts {
 type EvidenceStarter = { hint: string; data: unknown };
 type WeightedEvidenceStarter = EvidenceStarter & { strength: number };
 
+/**
+ * 依赖图的节点按"被多少个模块依赖"从多到少排（同一对模块的多条边只算一次）；
+ * 一样多、或者图里没有边时，保持节点原来的顺序。
+ */
+function rankNodesByDependents(graph: DependencyGraph): string[] {
+  const dependents = new Map<string, Set<string>>();
+  for (const edge of graph.edges || []) {
+    if (edge.from === edge.to) {
+      continue;
+    }
+    const users = dependents.get(edge.to) ?? new Set<string>();
+    users.add(edge.from);
+    dependents.set(edge.to, users);
+  }
+  return (graph.nodes || [])
+    .map((node: string | DependencyNode, index) => {
+      const id = typeof node === 'string' ? node : (node.id ?? node.label ?? '');
+      const label = typeof node === 'string' ? node : node.label || node.id || '';
+      const count = dependents.get(id)?.size ?? dependents.get(label)?.size ?? 0;
+      return { count, index, label };
+    })
+    .sort((left, right) => right.count - left.count || left.index - right.index)
+    .map((entry) => entry.label);
+}
+
 export function buildEvidenceStarters(
   dim: DimensionDef,
   {
@@ -267,11 +292,7 @@ export function buildEvidenceStarters(
         data: {
           totalModules: nodeCount,
           totalEdges: edgeCount,
-          topModules: (depGraphData.nodes || [])
-            .slice(0, 5)
-            .map((node: string | DependencyNode) =>
-              typeof node === 'string' ? node : node.label || node.id
-            ),
+          topModules: rankNodesByDependents(depGraphData).slice(0, 5),
         },
       };
     }
@@ -380,14 +401,26 @@ export function buildEvidenceStarters(
   }
 
   if (panoramaResult) {
+    // 全景数据有两种形状：旧扫描结果是 modules(Map) + cycles；ProjectContext 给的是已经归一的
+    // couplingHotspots / cyclicDependencies 数组。两种都认，否则后一种进来时这里什么都不出。
     const panoramaModules = panoramaResult.modules as
       | Map<string, { name: string; fanIn: number; fanOut: number }>
       | undefined;
+    const normalizedHotspots = Array.isArray(panoramaResult.couplingHotspots)
+      ? (panoramaResult.couplingHotspots as Array<{
+          module: string;
+          fanIn: number;
+          fanOut: number;
+        }>)
+      : null;
     const panoramaCycles =
-      (panoramaResult.cycles as Array<{ cycle: string[]; severity: string }>) ?? [];
+      ((panoramaResult.cyclicDependencies ?? panoramaResult.cycles) as Array<{
+        cycle: string[];
+        severity: string;
+      }>) ?? [];
 
     if (
-      panoramaModules instanceof Map &&
+      (panoramaModules instanceof Map || normalizedHotspots) &&
       (dimId === 'architecture' ||
         dimId === 'project-profile' ||
         dimId === 'best-practice' ||
@@ -396,7 +429,18 @@ export function buildEvidenceStarters(
         dimKeywords.includes('耦合'))
     ) {
       const hotspots: { module: string; fanIn: number; fanOut: number }[] = [];
-      for (const [, mod] of panoramaModules) {
+      const candidates = normalizedHotspots
+        ? normalizedHotspots.map((entry) => ({
+            name: entry.module,
+            fanIn: entry.fanIn,
+            fanOut: entry.fanOut,
+          }))
+        : [
+            ...(
+              panoramaModules as Map<string, { name: string; fanIn: number; fanOut: number }>
+            ).values(),
+          ];
+      for (const mod of candidates) {
         if (mod.fanIn >= 5 || mod.fanOut >= 5) {
           hotspots.push({ module: mod.name, fanIn: mod.fanIn, fanOut: mod.fanOut });
         }

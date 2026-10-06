@@ -456,6 +456,42 @@ id）用哈希表达新旧，里面的符号名与路径只是数据——叫 `p
 `module-layers`、`map` 的种子——宿主不需要再从目标、源码根、顶层目录里自己推一遍。源码根自己的
 散落文件在引用里逐个列出，这样按目录扫描时不会把子目录的模块算进来。
 
+### 依赖汇总的结构化字段
+
+`map` 的三类汇总各有一行给人看的文字，同样的事实也以字段给出，读的一方不用去拆文字：
+
+| 汇总 | 字段 |
+|---|---|
+| `hotspots` | `fanIn`、`fanOut`、`externalFanOut`：依赖它的模块数、它依赖的项目内模块数、它用到的项目外依赖数，都按名字去重；`relationCount`：经过它的关系条数 |
+| `majorFlows` | `from`、`to`（模块的 id 与名字）、`relationKind`、`relationCount` |
+| `externalDependencyHotspots` | `usedBy`（用到它的模块）、`relationCount` |
+
+`hotspots` 的 `score` 与 `reason` 没有变：它们按依赖汇总的条数计，同一对模块之间每种关系
+（import、调用、导出）各算一条，所以 `reason` 里的 fan-out 可以大于 `fanOut`。排序仍按 `score`。
+
+## 简报读哪份事实
+
+宿主 Agent 拿到的 Mission Briefing 里，描述项目结构的各段各读一份 ProjectContext 事实；对应关系
+集中在 `workflows/surfaces/host-agent/briefing/ProjectContextBriefingFacts.ts`：
+
+| 简报段 | 事实 |
+|---|---|
+| `targets` | `repo.targets`。文件数：宿主给了同名模块的明细时是模块拥有的文件数，否则是发现层数出来的、属于该目标的源码文件数；两样都没有就不给 |
+| `dependencyGraph` | `repo.dependencyGraph`——清单里声明的依赖（去掉"包含"关系、自指与重复的边）。清单没有声明项目内部的依赖时（单包的 JS / TS 项目），用 `map` 观察到的模块与模块间 import |
+| `architectureOverview.externalDeps`、`technologyStack` | 清单声明的项目外依赖，加上代码里 import 了、清单没有声明的模块（平台 SDK 自带的，或别的依赖带进来的；角色一栏照实写"清单里没有声明"） |
+| `mustCoverModules`、"本地包占比" | `repo.localPackages`，路径是仓库根的那个（主项目自己）不算；文件数是 `repo.modules` 里落在包目录下的模块的文件数之和 |
+| `panorama` | `map` 的层、`hotspots` 的 `fanIn` / `fanOut`、环；与别的模块没有依赖的模块不列为耦合热点 |
+| `languageStats`、源码文件总数 | `repo.languages` |
+
+两条规则：
+
+- **属于本项目的名字不是外部依赖。** `map` 把"种子模块认不出来的 import"都记成外部依赖，宿主只给了
+  一部分模块当种子时，项目自己的模块会混在里面。仓库名、构建目标、本地包、`repo.modules` 与 `map`
+  里的模块名，以及项目自己的路径别名（`#x`、`@/x`、`~/x`），一律不进外部依赖；带子路径的 import
+  （`pkg/sub`）并到所属的包名下。
+- **一份事实缺席时对应的段就少内容**，不拿另一份事实改个形状顶替——例如没有声明的本地包时，简报
+  没有"必须覆盖的子包"一段，而不是把每个模块都列进去。
+
 ## 捕获期间的源码读取
 
 共用 source loader 的七类查询（source-slice、file-symbols、file-flow、anchor-range、

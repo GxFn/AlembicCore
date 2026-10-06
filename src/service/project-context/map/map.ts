@@ -632,20 +632,20 @@ function createHotspots(
 ): HotspotSummary[] {
   const stats = createDegreeStats(modules, rollups);
   return modules
-    .map((moduleRecord) => {
-      const stat = stats.get(moduleRecord.module.id) ?? {
-        externalFanOut: 0,
-        fanIn: 0,
-        fanOut: 0,
-        relationCount: 0,
-      };
+    .map((moduleRecord): HotspotSummary | undefined => {
+      const stat = stats.get(moduleRecord.module.id) ?? createEmptyDegreeStat();
       const score = stat.fanIn * 2 + stat.fanOut + stat.relationCount + stat.externalFanOut;
       if (score === 0 || !moduleRecord.module.ref) {
         return undefined;
       }
       return {
+        // 结构化的进出度按模块计；score 与 reason 沿用原先按依赖汇总条数的算法，排序不变。
+        externalFanOut: stat.externalNames.size,
+        fanIn: stat.dependents.size,
+        fanOut: stat.dependencies.size,
         reason: `fan-in:${stat.fanIn} fan-out:${stat.fanOut} relations:${stat.relationCount} external:${stat.externalFanOut}`,
         ref: moduleRecord.module.ref,
+        relationCount: stat.relationCount,
         score,
       };
     })
@@ -653,15 +653,36 @@ function createHotspots(
     .sort((left, right) => right.score - left.score || left.ref.id.localeCompare(right.ref.id));
 }
 
+interface ModuleDegreeStat {
+  /** 以下三个数按依赖汇总条数计：同一对模块之间每种关系（import / 调用 / 导出…）各算一条。 */
+  fanIn: number;
+  fanOut: number;
+  externalFanOut: number;
+  relationCount: number;
+  /** 依赖它的模块、它依赖的模块、它用到的项目外依赖——按名字去重，用来回答"有多少个"。 */
+  dependents: Set<string>;
+  dependencies: Set<string>;
+  externalNames: Set<string>;
+}
+
+function createEmptyDegreeStat(): ModuleDegreeStat {
+  return {
+    dependencies: new Set(),
+    dependents: new Set(),
+    externalFanOut: 0,
+    externalNames: new Set(),
+    fanIn: 0,
+    fanOut: 0,
+    relationCount: 0,
+  };
+}
+
 function createDegreeStats(
   modules: readonly ProjectContextModuleMapModule[],
   rollups: readonly ProjectContextModuleDependencyRollup[]
-): Map<string, { fanIn: number; fanOut: number; relationCount: number; externalFanOut: number }> {
+): Map<string, ModuleDegreeStat> {
   const stats = new Map(
-    modules.map((moduleRecord) => [
-      moduleRecord.module.id,
-      { externalFanOut: 0, fanIn: 0, fanOut: 0, relationCount: 0 },
-    ])
+    modules.map((moduleRecord) => [moduleRecord.module.id, createEmptyDegreeStat()])
   );
   for (const rollup of rollups) {
     const source = stats.get(rollup.from.id);
@@ -669,12 +690,20 @@ function createDegreeStats(
       source.fanOut += rollup.to ? 1 : 0;
       source.externalFanOut += rollup.to ? 0 : 1;
       source.relationCount += rollup.relationCount;
+      if (rollup.to && rollup.to.id !== rollup.from.id) {
+        source.dependencies.add(rollup.to.id);
+      } else if (!rollup.to && rollup.externalName) {
+        source.externalNames.add(rollup.externalName);
+      }
     }
     if (rollup.to) {
       const target = stats.get(rollup.to.id);
       if (target) {
         target.fanIn += 1;
         target.relationCount += rollup.relationCount;
+        if (rollup.to.id !== rollup.from.id) {
+          target.dependents.add(rollup.from.id);
+        }
       }
     }
   }
@@ -685,8 +714,12 @@ function createMajorFlows(rollups: readonly ProjectContextModuleDependencyRollup
   return rollups
     .filter((rollup) => rollup.to !== undefined)
     .map((rollup) => ({
+      from: { id: rollup.from.id, name: rollup.from.name },
       refs: rollup.refs,
+      relationCount: rollup.relationCount,
+      relationKind: rollup.relationKind,
       summary: `${rollup.from.name} -> ${rollup.to?.name} via ${rollup.relationKind} (${rollup.relationCount} relation${rollup.relationCount === 1 ? '' : 's'})`,
+      ...(rollup.to ? { to: { id: rollup.to.id, name: rollup.to.name } } : {}),
     }))
     .sort(
       (left, right) =>
@@ -703,6 +736,8 @@ function createExternalDependencyHotspots(
       category: rollup.reason === 'external-or-package' ? 'package' : 'unmatched',
       name: rollup.externalName ?? 'external',
       refs: rollup.refs,
+      relationCount: rollup.relationCount,
+      usedBy: { id: rollup.from.id, name: rollup.from.name },
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }

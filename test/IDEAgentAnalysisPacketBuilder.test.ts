@@ -242,9 +242,20 @@ function makeProjectContextTargetFileCountFixture(): ProjectContextPresenterInpu
       targets: [
         { name: 'AOXNetworkKit', kind: 'library', refs: [packageRef] },
         { name: 'AOXFoundationKit', kind: 'library', refs: [packageRef] },
+        // 发现层数出来的文件数记在目标的引用上；这个目标没有模块明细。
+        {
+          name: 'AOXNetworkKitTests',
+          kind: 'testTarget',
+          refs: [{ ...packageRef, metadata: { fileCount: 4 } }],
+        },
         { name: 'LegacyBridge', kind: 'library', refs: [legacyRef, legacyHeadersRef] },
       ],
-      localPackages: [],
+      // repo 查询给出的本地包：主项目自己（路径是仓库根）和两个子包。
+      localPackages: [
+        { name: 'BiliDili', path: '.' },
+        { name: 'AOXNetworkKit', path: 'Packages/AOXNetworkKit' },
+        { name: 'AOXFoundationKit', path: 'Packages/AOXFoundationKit' },
+      ],
       sourceRoots: [{ path: 'Packages' }],
       entrypoints: [],
       commands: [],
@@ -435,7 +446,7 @@ describe('HostAgentAnalysisPacketBuilder', () => {
     expect(build().languageStats).toEqual({ python: 2, typescript: 1 });
   });
 
-  it('builds ProjectContext target file counts from module owned files before anchor refs', () => {
+  it('takes target file counts from module owned files, then discovery, never from anchor refs', () => {
     const session = new GenerateSession({
       projectRoot: '/fixture/bilidili',
       dimensions,
@@ -447,27 +458,42 @@ describe('HostAgentAnalysisPacketBuilder', () => {
     }) as {
       targets: { name: string; fileCount?: number }[];
       architectureOverview: {
+        style: string;
         layers: { name: string; modules: string[]; fileCount: number }[];
         keyInsights: string[];
       } | null;
+      mustCoverModules: { totalLocalPackages: number; modules: { name: string }[] } | null;
     };
     const targetsByName = new Map(briefing.targets.map((target) => [target.name, target]));
 
+    // 宿主给了同名模块的明细：用模块拥有的文件数。
     expect(targetsByName.get('AOXNetworkKit')).toMatchObject({ fileCount: 3 });
     expect(targetsByName.get('AOXFoundationKit')).toMatchObject({ fileCount: 2 });
-    expect(targetsByName.get('LegacyBridge')).toMatchObject({ fileCount: 2 });
+    // 没有模块明细：用发现层数出来的该目标的文件数。
+    expect(targetsByName.get('AOXNetworkKitTests')).toMatchObject({ fileCount: 4 });
+    // 两样都没有就是不知道：两个引用不是两个文件。
+    expect(targetsByName.get('LegacyBridge')?.fileCount).toBeUndefined();
     expect(briefing.architectureOverview?.layers).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           name: 'Other',
-          modules: ['AOXNetworkKit', 'AOXFoundationKit', 'LegacyBridge'],
-          fileCount: 7,
+          modules: ['AOXNetworkKit', 'AOXFoundationKit', 'AOXNetworkKitTests', 'LegacyBridge'],
+          fileCount: 9,
         }),
       ])
     );
+    // 本地包是 repo 声明的那两个子包，主项目自己不算；占比的分母是项目的源码文件总数。
     expect(briefing.architectureOverview?.keyInsights).toContain(
-      '2 local packages provide 71% of the codebase (5/7 files)'
+      '2 local packages provide 100% of the codebase (5/5 files)'
     );
+    expect(briefing.architectureOverview?.style).toBe('Modular monolith (local packages)');
+    expect(briefing.mustCoverModules).toMatchObject({
+      totalLocalPackages: 2,
+      modules: [
+        { name: 'AOXNetworkKit', fileCount: 3, keyFiles: expect.any(Array) },
+        { name: 'AOXFoundationKit', fileCount: 2 },
+      ],
+    });
   });
 
   it('keeps packet evidence independent from Mission Briefing compression', () => {
