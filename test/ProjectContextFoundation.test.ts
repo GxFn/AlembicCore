@@ -439,19 +439,35 @@ describe('ProjectContext certified facts foundation', () => {
     );
   });
 
-  it('derives real Swift target ownership without promoting docs or config into modules', async () => {
+  it('derives Swift ownership from the repository module partition, with the app shell as a directory module', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-swift-owners-'));
     temporaryRoots.push(root);
-    for (const relativePath of [
-      'BiliDili/App.swift',
-      'Sources/Core/ServiceKit/Service.swift',
-      'Sources/Features/Home/Home.swift',
-      'Packages/AOXUIKit/Sources/AOXUIKit/UIKit.swift',
-      'Tests/HomeTests/HomeTests.swift',
-      'docs/example.swift',
-    ]) {
+    const files: Record<string, string> = {
+      'Package.swift': [
+        '// swift-tools-version: 5.9',
+        'import PackageDescription',
+        'let package = Package(',
+        '  name: "BiliDili",',
+        '  dependencies: [.package(path: "Packages/AOXUIKit")],',
+        '  targets: [',
+        '    .target(name: "Home", path: "Sources/Features/Home"),',
+        '    .target(name: "ServiceKit", path: "Sources/Core/ServiceKit"),',
+        '    .testTarget(name: "HomeTests", path: "Tests/HomeTests"),',
+        '  ]',
+        ')',
+      ].join('\n'),
+      'Packages/AOXUIKit/Package.swift':
+        'let package = Package(name: "AOXUIKit", targets: [.target(name: "AOXUIKit")])',
+      'Packages/AOXUIKit/Sources/AOXUIKit/UIKit.swift': 'struct UIKitValue {}\n',
+      // 应用壳不属于任何 SPM 目标：按目录成为一个模块，不再靠写死的仓库名。
+      'BiliDili/App.swift': 'final class App {}\n',
+      'Sources/Core/ServiceKit/Service.swift': 'struct Service {}\n',
+      'Sources/Features/Home/Home.swift': 'struct Home {}\n',
+      'Tests/HomeTests/HomeTests.swift': 'struct HomeTests {}\n',
+    };
+    for (const [relativePath, content] of Object.entries(files)) {
       await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
-      await fs.writeFile(path.join(root, relativePath), `// ${relativePath}\n`);
+      await fs.writeFile(path.join(root, relativePath), content);
     }
     const repository = {
       relativeRoot: '.',
@@ -459,9 +475,7 @@ describe('ProjectContext certified facts foundation', () => {
       scopeId: 'sp-bilidili',
       sourceRoot: root,
     };
-    const ports = new NodeProjectContextFoundationHostPorts({
-      execute: async () => undefined,
-    } as never);
+    const ports = new NodeProjectContextFoundationHostPorts();
     const eligibleFiles = await ports.enumerateEligibleFiles({
       repository,
       policy: {
@@ -470,13 +484,74 @@ describe('ProjectContext certified facts foundation', () => {
         version: 'swift-owner-test-v1',
       },
     });
+    const ownerOf = (relativePath: string) =>
+      eligibleFiles.find((file) => file.relativePath === relativePath);
+
+    expect(ownerOf('Sources/Core/ServiceKit/Service.swift')).toMatchObject({
+      ownerModuleIds: ['module:Sources/Core/ServiceKit'],
+      ownerModules: [
+        {
+          ownerModuleId: 'module:Sources/Core/ServiceKit',
+          moduleName: 'ServiceKit',
+          modulePath: 'Sources/Core/ServiceKit',
+        },
+      ],
+      ownersV2: [
+        expect.objectContaining({
+          origin: 'path-heuristic',
+          disposition: 'ambiguous',
+          typedReason: 'repo-module-partition-is-advisory-only',
+        }),
+      ],
+    });
+    expect(ownerOf('Tests/HomeTests/HomeTests.swift')?.ownerModuleIds).toEqual([
+      'test:Tests/HomeTests',
+    ]);
+    expect(ownerOf('BiliDili/App.swift')?.ownerModuleIds).toEqual(['module:BiliDili']);
+    // 清单文件声明模块，自己不是模块源码。
+    expect(ownerOf('Package.swift')?.ownerModuleIds).toEqual([]);
+    expect(ownerOf('Packages/AOXUIKit/Package.swift')?.ownerModuleIds).toEqual([]);
+
     const moduleNames = createProjectContextRequestAuditPlans({ repository, eligibleFiles })
       .filter((plan) => plan.kind === 'module')
       .map((plan) => (plan.selector as { moduleName?: string }).moduleName)
       .sort();
-
     expect(moduleNames).toEqual(['AOXUIKit', 'BiliDili', 'Home', 'HomeTests', 'ServiceKit']);
-    expect(moduleNames).not.toContain('docs');
+  });
+
+  it('falls back to path shape for inventory owners when the repository partition is unavailable', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-facts-owner-fallback-'));
+    temporaryRoots.push(root);
+    for (const relativePath of [
+      'BiliDili/App.swift',
+      'Sources/Core/ServiceKit/Service.swift',
+      'Tests/HomeTests/HomeTests.swift',
+    ]) {
+      await fs.mkdir(path.dirname(path.join(root, relativePath)), { recursive: true });
+      await fs.writeFile(path.join(root, relativePath), `// ${relativePath}\n`);
+    }
+    // 这个 ProjectContext 回答不了 repo 查询：退回按路径形状推断，不再有写死的仓库名规则。
+    const ports = new NodeProjectContextFoundationHostPorts({
+      execute: async () => {
+        throw new Error('repo facts unavailable');
+      },
+    } as never);
+    const eligibleFiles = await ports.enumerateEligibleFiles({
+      repository: { relativeRoot: '.', repoId: 'fallback', scopeId: 'fallback', sourceRoot: root },
+      policy: { excludeDirectories: ['.git'], includeExtensions: ['.swift'], version: 'v1' },
+    });
+
+    expect(
+      eligibleFiles.map((file) => `${file.relativePath} -> ${file.ownerModuleIds?.join('|')}`)
+    ).toEqual([
+      'BiliDili/App.swift -> ',
+      'Sources/Core/ServiceKit/Service.swift -> module:Sources/Core/ServiceKit',
+      'Tests/HomeTests/HomeTests.swift -> test:Tests/HomeTests',
+    ]);
+    expect(eligibleFiles[1]?.ownersV2?.[0]).toMatchObject({
+      typedReason: 'relative-path-shape-is-advisory-only',
+    });
+    expect(eligibleFiles[1]?.ownerModules).toBeUndefined();
   });
 
   it('requires every module audit seed to conserve its full inventory ownership', async () => {

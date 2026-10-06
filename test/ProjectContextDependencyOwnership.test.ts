@@ -436,8 +436,9 @@ describe('带归属目录的真实捕获', () => {
   }, 60_000);
 
   it('本仓库自己的模块名没被分析解析上时，记为内部依赖而不是让捕获失败', async () => {
-    // target 名是 Core，文件却按子目录归到 Sources/Core/Networking：模块种子里没有叫 Core 的模块，
-    // `import Core` 被 map 报成外部依赖。目录知道 Core 是本仓库声明的模块。
+    // target 名是 Core，源码却放在 Sources/CoreImpl（清单没写 path）：发现层找不到这个 target 的文件，
+    // 划分出来的模块叫 CoreImpl，`import Core` 被 map 报成外部依赖。目录知道 Core 是本仓库声明的模块，
+    // 并把它归到文件最多的那个模块。
     const controlRoot = await createTree({
       'Kit/Package.swift': [
         '// swift-tools-version:5.9',
@@ -448,9 +449,8 @@ describe('带归属目录的真实捕获', () => {
         ')',
         '',
       ].join('\n'),
-      'Kit/Sources/Core/Networking/Client.swift':
-        'public struct Client {\n    public init() {}\n}\n',
-      'Kit/Sources/Core/Networking/Request.swift': 'public struct Request {}\n',
+      'Kit/Sources/CoreImpl/Client.swift': 'public struct Client {\n    public init() {}\n}\n',
+      'Kit/Sources/CoreImpl/Request.swift': 'public struct Request {}\n',
       'Kit/Sources/App/Main.swift': 'import Core\n\nstruct Main {\n    let client = Client()\n}\n',
     });
     const { artifact, built } = await captureScope({
@@ -465,6 +465,7 @@ describe('带归属目录的真实捕获', () => {
     expect(core).toMatchObject({
       classification: 'internal-resolved',
       ownerRepoId: 'kit',
+      ownerModuleId: 'module:Sources/CoreImpl',
       ownershipSource: 'module-alias',
       ownershipProvenancePath: 'Package.swift',
     });

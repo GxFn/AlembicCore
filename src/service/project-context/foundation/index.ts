@@ -1,3 +1,5 @@
+// 构建清单的判定与 repo 的源码清单共用一份；读认证清单归属的宿主从这里取。
+export { isBuildManifestPath } from '../../../shared/BuildManifest.js';
 export * from './canonical.js';
 export * from './capture.js';
 export * from './consumerPort.js';

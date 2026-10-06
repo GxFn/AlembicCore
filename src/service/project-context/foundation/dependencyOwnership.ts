@@ -185,7 +185,10 @@ function addNodePackageEntries(context: ManifestContext, bytes: Uint8Array): voi
     });
     return;
   }
-  const ownerModuleId = selectPrimaryOwnerModuleId(context.files, packageName);
+  const ownerModuleId = selectPrimaryOwnerModuleId(context.files, packageName, {
+    kind: 'package-root',
+    manifestDirectory: path.posix.dirname(context.provenance.relativePath),
+  });
   if (!ownerModuleId) {
     context.gaps.push({
       repoId: context.repoId,
@@ -242,7 +245,9 @@ function addSwiftPackageEntries(context: ManifestContext, bytes: Uint8Array): vo
     ),
   ].sort();
   for (const moduleName of moduleNames) {
-    const ownerModuleId = selectPrimaryOwnerModuleId(context.files, moduleName);
+    const ownerModuleId = selectPrimaryOwnerModuleId(context.files, moduleName, {
+      kind: 'most-files',
+    });
     if (!ownerModuleId) {
       context.gaps.push({
         repoId: context.repoId,
@@ -264,12 +269,18 @@ function addSwiftPackageEntries(context: ManifestContext, bytes: Uint8Array): vo
 }
 
 /**
- * 一个包名落到清单里的哪个模块：优先取目录名与包名相同的模块，否则取文件最多的那个。
+ * 一个声明落到清单里的哪个模块。优先取目录名与声明的名字相同的模块（Swift 的 target、同名目录的包）。
+ * 没有同名的：
+ * - 包级声明（`package-root`）取清单所在目录下最浅的模块——一份 `package.json` 声明的是它目录下的整个包，
+ *   包的根模块代表它，更深的区域模块由 host port 按"清单目录包住模块目录"一并作证；
+ * - Swift 的 target 名（`most-files`）取文件最多的模块：target 的文件没按目标名放在目录里时，
+ *   声明的模块大概率就是那个最大的模块。
  * 测试模块不参与。清单里没有任何带归属的源码文件时返回 undefined。
  */
 function selectPrimaryOwnerModuleId(
   files: readonly ProjectContextFoundationFileDescriptor[],
-  preferredName: string
+  preferredName: string,
+  strategy: { kind: 'package-root'; manifestDirectory: string } | { kind: 'most-files' }
 ): string | undefined {
   const counts = new Map<string, number>();
   for (const file of files) {
@@ -279,11 +290,29 @@ function selectPrimaryOwnerModuleId(
       }
     }
   }
+  const ownerPath = (owner: string) => owner.slice(owner.indexOf(':') + 1);
   const preferred = [...counts.keys()]
     .sort()
-    .find((owner) => path.posix.basename(owner.slice(owner.indexOf(':') + 1)) === preferredName);
+    .find((owner) => path.posix.basename(ownerPath(owner)) === preferredName);
+  if (preferred) {
+    return preferred;
+  }
+  const insideManifestDirectory =
+    strategy.kind === 'package-root'
+      ? [...counts.keys()]
+          .filter(
+            (owner) =>
+              strategy.manifestDirectory === '.' ||
+              ownerPath(owner) === strategy.manifestDirectory ||
+              ownerPath(owner).startsWith(`${strategy.manifestDirectory}/`)
+          )
+          .sort(
+            (left, right) =>
+              ownerPath(left).length - ownerPath(right).length || left.localeCompare(right)
+          )
+      : [];
   return (
-    preferred ??
+    insideManifestDirectory[0] ??
     [...counts.entries()].sort(
       ([leftOwner, leftCount], [rightOwner, rightCount]) =>
         rightCount - leftCount || leftOwner.localeCompare(rightOwner)

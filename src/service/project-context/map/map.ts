@@ -742,15 +742,30 @@ function createExternalDependencyHotspots(
     .sort((left, right) => left.name.localeCompare(right.name));
 }
 
+/**
+ * 每个认不出归属的依赖名一条观测（认证要求每条观测恰有一条决议，决议按依赖名去重）。
+ * 观测带上 import 它的一个文件（路径最靠前的那个）：相对路径的依赖要靠它算出目标落在仓库的哪里。
+ */
 function createExternalDependencyWarnings(
   externalDependencies: readonly ExternalDependencySummary[]
 ): ProjectContextQueryError[] {
-  return externalDependencies.map((dependency) =>
+  const importerByName = new Map<string, string | undefined>();
+  for (const dependency of externalDependencies) {
+    const importer = dependency.refs
+      .filter((ref) => ref.kind === 'file' && ref.scope.filePath)
+      .map((ref) => ref.scope.filePath as string)
+      .sort()[0];
+    const known = importerByName.get(dependency.name);
+    importerByName.set(
+      dependency.name,
+      known === undefined || (importer !== undefined && importer < known) ? importer : known
+    );
+  }
+  return [...importerByName.entries()].map(([name, importer]) =>
     createQueryError({
       code: 'query-unavailable',
-      message: `map external dependency is not owned by module seeds: ${dependency.name}`,
-      // 带上 import 它的文件：相对路径的依赖要靠它算出目标落在仓库的哪里。
-      path: dependency.refs.find((ref) => ref.kind === 'file')?.scope.filePath,
+      message: `map external dependency is not owned by module seeds: ${name}`,
+      ...(importer ? { path: importer } : {}),
       retryable: false,
     })
   );

@@ -30,6 +30,7 @@ import { LanguageService } from '../../../shared/LanguageService.js';
 import type { ProjectSourceReader } from '../../../types/projectSourceReader.js';
 import type { ProjectContextHandlerExecutionContext } from '../interface/contracts.js';
 import { ProjectContext, supportsProjectContextSourceReader } from '../ProjectContextService.js';
+import { ownerOfPath } from '../shared/map-repo/index.js';
 import {
   readSourceControlRootScope,
   readSourceFolderScope,
@@ -49,6 +50,7 @@ import type {
   ProjectContextFoundationFileDescriptor,
   ProjectContextFoundationHostPorts,
   ProjectContextFoundationInputCapture,
+  ProjectContextFoundationOwnerModule,
   ProjectContextFoundationRepositoryInput,
   ProjectContextInputClosureV1,
   ProjectContextInventoryPolicyV1,
@@ -418,6 +420,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
     const includeExtensions = new Set(
       input.policy.includeExtensions.map((value) => value.toLowerCase())
     );
+    const partition = await this.#readModulePartition(root, input.repository.repoId, input.signal);
     const pending = [root];
     const descriptors: ProjectContextFoundationFileDescriptor[] = [];
     while (pending.length > 0) {
@@ -449,40 +452,62 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           continue;
         }
         const stat = await fs.stat(absolutePath);
-        const ownerModuleIds = inferOwnerModuleIds(relativePath);
+        const owners: ProjectContextFoundationOwnerModule[] = partition
+          ? partitionOwnerModules(partition, relativePath)
+          : inferOwnerModuleIds(relativePath).map((ownerModuleId) => {
+              const identity = seedIdentityFromOwnerId(input.repository.repoId, ownerModuleId);
+              return {
+                ownerModuleId,
+                moduleName: identity.moduleName,
+                modulePath:
+                  identity.modulePath ?? ownerModuleId.slice(ownerModuleId.indexOf(':') + 1),
+              };
+            });
+        const ownerModuleIds = owners.map((owner) => owner.ownerModuleId);
         descriptors.push({
           relativePath,
           language: LanguageService.inferLang(relativePath),
           mode: stat.mode & 0o111 ? '100755' : '100644',
           ownerModuleIds,
-          ownersV2: ownerModuleIds.map((ownerModuleId) => {
-            const ownershipEntries = (this.#dependencyOwnership?.entries ?? []).filter(
-              (entry) =>
-                entry.repoId === input.repository.repoId && entry.ownerModuleId === ownerModuleId
+          ownersV2: owners.map((owner) => {
+            const ownershipEntries = bindingOwnershipEntries(
+              this.#dependencyOwnership?.entries ?? [],
+              input.repository.repoId,
+              owner
             );
             return ownershipEntries.length > 0
               ? {
-                  ownerModuleId,
+                  ownerModuleId: owner.ownerModuleId,
                   origin: 'package-build-declaration' as const,
                   confidence: 'high' as const,
                   disposition:
                     ownerModuleIds.length > 1 ? ('shared' as const) : ('exclusive' as const),
                   typedReason: 'dependency-ownership-catalog-binds-package-build-evidence',
-                  evidence: ownershipEntries.map((entry) => ({
-                    kind: 'package-build-declaration' as const,
-                    relativePath: entry.provenance.relativePath,
-                    contentHash: entry.provenance.contentHash,
-                  })),
+                  // 证据是清单文件本身：同一份清单的几条声明（包名、导出子路径…）只记一次。
+                  evidence: uniqueBy(
+                    ownershipEntries.map((entry) => ({
+                      kind: 'package-build-declaration' as const,
+                      relativePath: entry.provenance.relativePath,
+                      contentHash: entry.provenance.contentHash,
+                    })),
+                    (evidence) => `${evidence.relativePath}\u0000${evidence.contentHash}`
+                  ),
                 }
               : {
-                  ownerModuleId,
+                  ownerModuleId: owner.ownerModuleId,
                   origin: 'path-heuristic' as const,
                   confidence: 'low' as const,
                   disposition: 'ambiguous' as const,
-                  typedReason: 'relative-path-shape-is-advisory-only',
+                  // 划分来自发现层的目标与目录规则，仍没有"这个文件属于这个模块"的构建声明为证：
+                  // 和纯路径形状一样只是建议，不能单独授权覆盖。
+                  typedReason: partition
+                    ? 'repo-module-partition-is-advisory-only'
+                    : 'relative-path-shape-is-advisory-only',
                   evidence: [{ kind: 'relative-path-shape' as const, relativePath }],
                 };
           }),
+          // 名字与目录只在有划分时给出；按路径形状推断的归属，种子照旧从 id 推名字。
+          ...(partition && owners.length > 0 ? { ownerModules: owners } : {}),
         });
       }
     }
@@ -491,7 +516,55 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
       ...entry,
       ownerModuleIds: [...(entry.ownerModuleIds ?? [])],
       ownersV2: entry.ownersV2 ? structuredClone(entry.ownersV2) : undefined,
+      ...(entry.ownerModules ? { ownerModules: structuredClone(entry.ownerModules) } : {}),
     }));
+  }
+
+  /**
+   * 仓库的模块划分——repo 查询给出的那一份，也是 map / module 查询的种子来源。清单里每个源码文件的
+   * 所属模块由它决定。取不到划分时（查询失败、仓库里没有可划分的源码）退回按路径形状推断，并记一条日志。
+   */
+  async #readModulePartition(
+    root: string,
+    repoId: string,
+    signal?: AbortSignal
+  ): Promise<InventoryModulePartition[] | undefined> {
+    try {
+      const envelope = await this.#projectContext.execute(
+        {
+          kind: 'repo',
+          project: { projectRoot: root, source: 'certified-project-facts-inventory' },
+          scope: { projectRoot: root, repoId },
+          payload: { includeMapSummary: false },
+        },
+        signal ? { signal } : undefined
+      );
+      const modules = (envelope?.data as { modules?: InventoryModulePartition[] } | undefined)
+        ?.modules;
+      if (Array.isArray(modules) && modules.length > 0) {
+        return modules.map((module) => ({
+          name: module.name,
+          path: module.path,
+          kind: module.kind,
+          ...(module.targetKind ? { targetKind: module.targetKind } : {}),
+        }));
+      }
+      Logger.getInstance().debug('ProjectContext inventory owners fall back to path shape', {
+        reason: 'repo-module-partition-empty',
+        repoId,
+      });
+      return undefined;
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      Logger.getInstance().debug('ProjectContext inventory owners fall back to path shape', {
+        reason: 'repo-module-partition-unavailable',
+        repoId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
   }
 
   async readFile(input: {
@@ -999,27 +1072,32 @@ function createCompleteModuleSeeds(
   dependencyOwnership?: ProjectContextDependencyOwnershipV1
 ): ProjectFactsJson[] {
   const byOwner = new Map<string, Set<string>>();
+  const identities = new Map<string, { moduleName: string; modulePath?: string }>();
   for (const file of files) {
+    // 严格 V2 的计划把"没有声明为证"的归属从 ownerModuleIds 里拿掉了，它们仍记在 ownersV2 里：
+    // 种子用清单行自己的归属，只有清单行完全不带归属信息时才按路径形状推断。
     const owners = file.ownerModuleIds?.length
       ? file.ownerModuleIds
-      : inferOwnerModuleIds(file.relativePath);
+      : file.ownersV2
+        ? file.ownersV2.map((owner) => owner.ownerModuleId)
+        : inferOwnerModuleIds(file.relativePath);
     for (const owner of owners) {
       const ownedFiles = byOwner.get(owner) ?? new Set<string>();
       ownedFiles.add(file.relativePath);
       byOwner.set(owner, ownedFiles);
     }
+    for (const ownerModule of file.ownerModules ?? []) {
+      identities.set(ownerModule.ownerModuleId, {
+        moduleName: ownerModule.moduleName,
+        modulePath: ownerModule.modulePath,
+      });
+    }
   }
   return [...byOwner.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([owner, ownedFiles]) => {
-      const ownerPath = owner.slice(owner.indexOf(':') + 1);
-      const modulePath = owner.startsWith('package:')
-        ? `Packages/${ownerPath}`
-        : ['module:', 'path:', 'test:'].some((prefix) => owner.startsWith(prefix))
-          ? ownerPath
-          : undefined;
-      const moduleName =
-        owner === 'root' ? repoId : path.posix.basename(modulePath ?? ownerPath) || repoId;
+      const { moduleName, modulePath } =
+        identities.get(owner) ?? seedIdentityFromOwnerId(repoId, owner);
       const ownershipBindings = dependencyOwnership?.entries
         .filter((entry) => entry.repoId === repoId && entry.ownerModuleId === owner)
         .map((entry) => ({
@@ -2120,6 +2198,122 @@ function findFirstStringByKey(value: ProjectFactsJson, key: string): string | un
   return result;
 }
 
+interface InventoryModulePartition {
+  name: string;
+  path: string;
+  kind: string;
+  targetKind?: string;
+}
+
+/** 划分规则只认这些源码扩展名；配置、文档、资源文件没有所属模块（与按路径形状推断时一致）。 */
+const OWNED_SOURCE_EXTENSIONS = new Set([
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.swift',
+  '.m',
+  '.mm',
+  '.h',
+  '.kt',
+  '.kts',
+  '.java',
+  '.py',
+  '.go',
+  '.rs',
+  '.dart',
+]);
+
+/** 源码文件归到路径前缀最长的那个模块：测试目标记 `test:<目录>`，其余记 `module:<目录>`。 */
+function partitionOwnerModules(
+  partition: readonly InventoryModulePartition[],
+  relativePath: string
+): ProjectContextFoundationOwnerModule[] {
+  if (!OWNED_SOURCE_EXTENSIONS.has(path.posix.extname(relativePath).toLowerCase())) {
+    return [];
+  }
+  const owner = ownerOfPath(partition, relativePath);
+  if (!owner) {
+    return [];
+  }
+  const prefix = owner.targetKind && /test/i.test(owner.targetKind) ? 'test' : 'module';
+  return [
+    { ownerModuleId: `${prefix}:${owner.path}`, moduleName: owner.name, modulePath: owner.path },
+  ];
+}
+
+/** 没有划分信息时，从归属 id 推种子的名字与目录：`module:src/core` → core @ src/core；仓库根用仓库名。 */
+function seedIdentityFromOwnerId(
+  repoId: string,
+  owner: string
+): { moduleName: string; modulePath?: string } {
+  const ownerPath = owner.slice(owner.indexOf(':') + 1);
+  const modulePath = owner.startsWith('package:')
+    ? `Packages/${ownerPath}`
+    : ['module:', 'path:', 'test:'].some((prefix) => owner.startsWith(prefix))
+      ? ownerPath
+      : undefined;
+  const moduleName =
+    owner === 'root' || modulePath === '.'
+      ? repoId
+      : path.posix.basename(modulePath ?? ownerPath) || repoId;
+  return { moduleName, ...(modulePath ? { modulePath } : {}) };
+}
+
+/**
+ * 目录里哪些条目为这个归属模块作证：条目直接写着这个模块的，以及包级声明（包名、导出子路径、
+ * 私有别名）所在清单目录包住这个模块目录的——一份 `package.json` 声明的是它目录下的整个包，
+ * 不只是生成目录时挑出来的那一个模块；嵌套的包以离模块最近的清单为准。Swift 的 target 名
+ * （module-alias）只为同名目标的模块作证。
+ */
+function bindingOwnershipEntries(
+  entries: readonly ProjectContextDependencyOwnershipEntryV1[],
+  repoId: string,
+  owner: ProjectContextFoundationOwnerModule
+): ProjectContextDependencyOwnershipEntryV1[] {
+  const repositoryEntries = entries.filter((entry) => entry.repoId === repoId);
+  const direct = repositoryEntries.filter((entry) => entry.ownerModuleId === owner.ownerModuleId);
+  const packageLevel = repositoryEntries.filter((entry) => entry.source !== 'module-alias');
+  const nearestManifestDirectory = packageLevel
+    .map((entry) => path.posix.dirname(entry.provenance.relativePath))
+    .filter(
+      (directory) =>
+        directory === '.' ||
+        owner.modulePath === directory ||
+        owner.modulePath.startsWith(`${directory}/`)
+    )
+    .sort((left, right) => right.length - left.length)[0];
+  const containing =
+    nearestManifestDirectory === undefined
+      ? []
+      : packageLevel.filter(
+          (entry) => path.posix.dirname(entry.provenance.relativePath) === nearestManifestDirectory
+        );
+  const seen = new Set<string>();
+  return [...direct, ...containing].filter((entry) => {
+    const key = `${entry.source}\u0000${entry.pattern}\u0000${entry.provenance.contentHash}`;
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function uniqueBy<T>(items: readonly T[], keyOf: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = keyOf(item);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
 function inferOwnerModuleIds(relativePath: string): string[] {
   const parts = relativePath.split('/');
   const extension = path.posix.extname(relativePath).toLowerCase();
@@ -2154,9 +2348,6 @@ function inferOwnerModuleIds(relativePath: string): string[] {
     const layered = ['Core', 'Infrastructure', 'Features'].includes(parts[1] ?? '');
     const moduleEnd = layered && parts[2] ? 3 : 2;
     return [`module:${parts.slice(0, moduleEnd).join('/')}`];
-  }
-  if (parts[0] === 'BiliDili') {
-    return ['module:BiliDili'];
   }
   if (parts[0] === 'Tests' && parts[1]) {
     return [`test:${parts.slice(0, 2).join('/')}`];

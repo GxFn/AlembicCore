@@ -41,6 +41,7 @@ import {
   sourceExists,
 } from '../../../infrastructure/io/ProjectSourceReader.js';
 import Logger from '../../../infrastructure/logging/Logger.js';
+import { isBuildManifestPath } from '../../../shared/BuildManifest.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 import { resolveProjectScopeForFolder } from '../../../shared/ProjectScope.js';
 import type {
@@ -993,18 +994,6 @@ async function createSourceRootSummaries(input: {
   );
 }
 
-/** 用源码语言写的构建清单。它们声明模块，自己不是哪个模块的源码；config 与本地包的引用里已经记着它们。 */
-const BUILD_MANIFEST_FILE_NAMES = new Set([
-  'Package.swift',
-  'build.gradle.kts',
-  'settings.gradle.kts',
-  'setup.py',
-]);
-
-function isBuildManifest(fileName: string): boolean {
-  return BUILD_MANIFEST_FILE_NAMES.has(fileName);
-}
-
 /**
  * 仓库里不属于任何已声明目标的源码文件。总数（连同已知文件）不超过 maxFiles；到了上限就停，
  * 并给出与目标文件收集相同的截断诊断。
@@ -1033,7 +1022,8 @@ async function collectUntargetedSourceFiles(input: {
   const files = dedupeSourceFiles(scanned)
     .filter(
       (file) =>
-        !knownPaths.has(file.filePath) && !isBuildManifest(path.posix.basename(file.filePath))
+        // 构建清单声明模块，自己不是模块源码；config 与本地包的引用里已经记着它们。
+        !knownPaths.has(file.filePath) && !isBuildManifestPath(file.filePath)
     )
     .sort((left, right) => left.filePath.localeCompare(right.filePath));
   if (files.length <= remaining) {

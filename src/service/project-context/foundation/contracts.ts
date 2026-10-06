@@ -163,6 +163,13 @@ export interface ProjectContextInventoryOwnerV2 {
   evidence: ProjectContextInventoryOwnerEvidenceV2[];
 }
 
+/** 清单行所属模块的名字与目录：模块种子按它取名，不再从归属 id 的路径末段猜。 */
+export interface ProjectContextFoundationOwnerModule {
+  ownerModuleId: string;
+  moduleName: string;
+  modulePath: string;
+}
+
 export interface ProjectContextFoundationFileDescriptor {
   relativePath: string;
   language: string;
@@ -170,6 +177,8 @@ export interface ProjectContextFoundationFileDescriptor {
   ownerModuleIds?: string[];
   /** Additive strict-v2 authority; ownerModuleIds remains the V1 compatibility projection. */
   ownersV2?: ProjectContextInventoryOwnerV2[];
+  /** 归属模块的名字与目录（有模块划分时由端口给出；旧端口不给，种子退回按 id 推名字）。 */
+  ownerModules?: ProjectContextFoundationOwnerModule[];
 }
 
 export type ProjectContextRepositoryRevisionObservation =
