@@ -1279,6 +1279,7 @@ async function captureRequestOutcomes(
       const result = await ports.executeRequest({
         repository: repository.input,
         plan,
+        inventoryPolicy: input.inventoryPolicy,
         signal: input.signal,
         ...(sourceReader ? { sourceReader } : {}),
       });

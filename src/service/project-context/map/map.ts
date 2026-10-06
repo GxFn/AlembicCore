@@ -749,6 +749,8 @@ function createExternalDependencyWarnings(
     createQueryError({
       code: 'query-unavailable',
       message: `map external dependency is not owned by module seeds: ${dependency.name}`,
+      // 带上 import 它的文件：相对路径的依赖要靠它算出目标落在仓库的哪里。
+      path: dependency.refs.find((ref) => ref.kind === 'file')?.scope.filePath,
       retryable: false,
     })
   );

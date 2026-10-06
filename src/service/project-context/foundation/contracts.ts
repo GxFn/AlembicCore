@@ -481,6 +481,11 @@ export interface ProjectContextFoundationHostPorts {
     plan: ProjectContextRequestAuditPlan;
     /** Runtime-only：普通执行、录制和重放必须读取调用方指定的同一组输入。 */
     sourceReader?: ProjectSourceReader;
+    /**
+     * 这次认证的清单策略。相对路径 import 的目标落在策略排除的目录里（dist、node_modules…）时，
+     * 端口据此把它记为策略之外的依赖而不是缺陷；不给时只能当作"仓库内找不到"。
+     */
+    inventoryPolicy?: ProjectContextInventoryPolicyV1;
     signal?: AbortSignal;
   }): Promise<ProjectContextRequestExecutionResult>;
 }

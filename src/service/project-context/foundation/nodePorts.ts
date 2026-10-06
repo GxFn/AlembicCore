@@ -684,6 +684,7 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
   async executeRequest(input: {
     repository: ProjectContextFoundationRepositoryInput;
     plan: ProjectContextRequestAuditPlan;
+    inventoryPolicy?: ProjectContextInventoryPolicyV1;
     signal?: AbortSignal;
     sourceReader?: ProjectSourceReader;
   }): Promise<ProjectContextRequestExecutionResult> {
@@ -734,7 +735,8 @@ export class NodeProjectContextFoundationHostPorts implements ProjectContextFoun
           input.repository,
           input.plan,
           await this.#resolvePortableRoots(input.repository, input.sourceReader),
-          this.#dependencyOwnership
+          this.#dependencyOwnership,
+          input.inventoryPolicy
         ),
         sourceFileReads: [...sourceFileReads.values()].sort(
           (left, right) =>
@@ -1049,10 +1051,18 @@ function projectContextEnvelopeToAuditResult(
   repository: ProjectContextFoundationRepositoryInput,
   plan: ProjectContextRequestAuditPlan,
   portableRoots: ResolvedPortableRoot[],
-  dependencyOwnership?: ProjectContextDependencyOwnershipV1
+  dependencyOwnership?: ProjectContextDependencyOwnershipV1,
+  inventoryPolicy?: ProjectContextInventoryPolicyV1
 ): ProjectContextRequestExecutionResult {
   const classifications = (envelope.errors ?? []).map((error) =>
-    classifyProjectContextDiagnostic(error, repository, plan, portableRoots, dependencyOwnership)
+    classifyProjectContextDiagnostic(
+      error,
+      repository,
+      plan,
+      portableRoots,
+      dependencyOwnership,
+      inventoryPolicy
+    )
   );
   const dependencyResolutions = classifications
     .map((classification) => classification.resolution)
@@ -1061,6 +1071,27 @@ function projectContextEnvelopeToAuditResult(
   const dependencyObservationCount = (envelope.errors ?? []).filter(
     isExternalDependencyDiagnostic
   ).length;
+  const relativeResolutions = dependencyResolutions.filter((resolution) =>
+    RELATIVE_DEPENDENCY_REASONS.has(resolution.typedReason)
+  );
+  if (relativeResolutions.length > 0) {
+    // 相对路径 import 没有解析到仓库里的文件：按目标落在哪里归类，不按"名字里含模块名"猜。
+    Logger.debug('ProjectContext relative imports classified by their target location', {
+      repoId: repository.repoId,
+      requestKind: plan.kind,
+      inventoryPolicy: inventoryPolicy?.version ?? null,
+      excludedByPolicy: relativeResolutions.filter(
+        (resolution) =>
+          resolution.typedReason === 'dependency-target-is-excluded-by-inventory-policy'
+      ).length,
+      outsideRepository: relativeResolutions.filter(
+        (resolution) => resolution.typedReason === 'dependency-target-is-outside-repository-root'
+      ).length,
+      missingInRepository: relativeResolutions.filter(
+        (resolution) => resolution.typedReason === 'relative-import-target-is-missing-in-repository'
+      ).length,
+    });
+  }
   if (!dependencyOwnership && dependencyObservationCount > 0) {
     // 降级路径：没有归属目录，依赖只按名字归类。记下数量，事后能看出这次认证的依赖分类没有归属证据。
     Logger.debug('ProjectContext dependency evidence classified by name', {
@@ -1105,12 +1136,80 @@ function projectContextEnvelopeToAuditResult(
   };
 }
 
+const RELATIVE_DEPENDENCY_REASONS = new Set([
+  'dependency-target-is-excluded-by-inventory-policy',
+  'dependency-target-is-outside-repository-root',
+  'relative-import-target-is-missing-in-repository',
+]);
+
+function isRelativeDependencyName(value: string): boolean {
+  return value === '.' || value === '..' || value.startsWith('./') || value.startsWith('../');
+}
+
+/**
+ * 相对路径的 import 不是包名，归属目录和"名字里含模块名"的推断都不适用；按它的目标落在哪里归类：
+ * 落在清单策略排除的目录里（dist、node_modules…）是策略之外的依赖，离开仓库根的也是；
+ * 仓库里本该有却没有的文件，只留一条待复核的警告。
+ */
+function classifyRelativeDependency(
+  error: ProjectContextQueryError,
+  dependencyName: string,
+  repository: ProjectContextFoundationRepositoryInput,
+  plan: ProjectContextRequestAuditPlan,
+  portableRoots: ResolvedPortableRoot[],
+  inventoryPolicy?: ProjectContextInventoryPolicyV1
+): {
+  diagnostic: ProjectContextRequestDiagnosticV1;
+  resolution: ProjectContextDependencyResolutionV1;
+} {
+  const importer = error.path
+    ? path.isAbsolute(error.path)
+      ? path.relative(repository.sourceRoot, error.path).split(path.sep).join('/')
+      : error.path
+    : undefined;
+  const target = importer
+    ? path.posix.normalize(path.posix.join(path.posix.dirname(importer), dependencyName))
+    : undefined;
+  const outsideRepository = target !== undefined && (target === '..' || target.startsWith('../'));
+  const excludedByPolicy =
+    target !== undefined &&
+    !outsideRepository &&
+    inventoryPolicy !== undefined &&
+    (target.split('/').some((segment) => inventoryPolicy.excludeDirectories.includes(segment)) ||
+      isExcluded(target, inventoryPolicy.excludeRelativePaths ?? []));
+  const typedReason = outsideRepository
+    ? 'dependency-target-is-outside-repository-root'
+    : excludedByPolicy
+      ? 'dependency-target-is-excluded-by-inventory-policy'
+      : 'relative-import-target-is-missing-in-repository';
+  const classification = outsideRepository || excludedByPolicy ? 'expected-external' : 'advisory';
+  return {
+    diagnostic: {
+      classification,
+      code: error.code,
+      message: portableString(error.message, portableRoots),
+      retryable: error.retryable,
+      severity: error.severity,
+      typedReason,
+      ...(error.path ? { path: portableString(error.path, portableRoots, true) } : {}),
+    },
+    resolution: {
+      classification: 'expected-external',
+      dependencyName,
+      importerRepoId: repository.repoId,
+      requestKind: plan.kind,
+      typedReason,
+    },
+  };
+}
+
 function classifyProjectContextDiagnostic(
   error: ProjectContextQueryError,
   repository: ProjectContextFoundationRepositoryInput,
   plan: ProjectContextRequestAuditPlan,
   portableRoots: ResolvedPortableRoot[],
-  dependencyOwnership?: ProjectContextDependencyOwnershipV1
+  dependencyOwnership?: ProjectContextDependencyOwnershipV1,
+  inventoryPolicy?: ProjectContextInventoryPolicyV1
 ): {
   diagnostic?: ProjectContextRequestDiagnosticV1;
   resolution?: ProjectContextDependencyResolutionV1;
@@ -1119,6 +1218,16 @@ function classifyProjectContextDiagnostic(
   const dependencyName = externalDependencyMessage
     ? error.message.slice(error.message.indexOf(':') + 1).trim()
     : undefined;
+  if (dependencyName && isRelativeDependencyName(dependencyName)) {
+    return classifyRelativeDependency(
+      error,
+      dependencyName,
+      repository,
+      plan,
+      portableRoots,
+      inventoryPolicy
+    );
+  }
   if (dependencyName && dependencyOwnership) {
     const ownership = resolveDependencyOwnership(
       dependencyName,

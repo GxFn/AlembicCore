@@ -572,6 +572,19 @@ Node host port 自己保持，宿主不需要、也不应该在端口外补造�
 所以没有目录时认证照样能通过，但它的依赖分类没有归属证据：多仓库范围里，仓库之间的
 依赖会被记成外部依赖。要让它们被认出来，宿主需要提供归属目录。
 
+相对路径的 import（`./x`、`../y`）不是包名，目录和"名字里含模块名"的推断都不适用；它没有解析到仓库里的
+文件时，按目标落在哪里归类（捕获把这次的清单策略传给端口，`executeRequest` 的 `inventoryPolicy`）：
+
+| 目标 | 归类 | 原因码 |
+|---|---|---|
+| 落在清单策略排除的目录里（`dist`、`node_modules`…） | `expected-external` | `dependency-target-is-excluded-by-inventory-policy` |
+| 离开仓库根 | `expected-external` | `dependency-target-is-outside-repository-root` |
+| 仓库里本该有却没有 | `advisory`（警告，待复核） | `relative-import-target-is-missing-in-repository` |
+
+map 为此在依赖观测的诊断上带着 import 它的文件路径。没有传策略的旧调用方只会得到后一种；三种都不是
+确认缺陷——脚本 import 构建产物（`scripts/*.mjs` 引 `../dist/…`）以前会因为路径里恰好含某个模块名而让捕获
+不通过，现在是策略之外的依赖。
+
 ### 归属目录从哪里来
 
 `buildProjectContextDependencyOwnershipV1`（`@alembic/core/project-context-foundation`）从各仓库
