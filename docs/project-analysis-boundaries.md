@@ -504,6 +504,34 @@ id）用哈希表达新旧，里面的符号名与路径只是数据——叫 `p
 - **一份事实缺席时对应的段就少内容**，不拿另一份事实改个形状顶替——例如没有声明的本地包时，简报
   没有"必须覆盖的子包"一段，而不是把每个模块都列进去。
 
+## 宿主怎么采集 ProjectContext
+
+非严格路径上（没有认证产物时），Plan、Main 的冷启动 / 重扫、Plugin 的冷启动 / 重扫都用同一份采集器
+`collectPlanProjectContext(projectRoot, hints, options)`（`@alembic/core/service/planFacts`）。
+2026-10-06 之前三处各有一份自己的请求循环与种子推导（F6 合一）。
+
+- **请求顺序固定**：`space` → `repo` → `map` → 前 N 个模块的 `module`、`module-layers` →
+  前 M 个明细文件的 `file-flow`、`file-symbols`、（要正文时）`source-slice`、`anchor-range`。整批请求共用一个
+  分析会话，每个源文件只解析一次。
+- **种子只有一个来源**：`repo` 查询的模块划分（见"模块划分"）。每个模块的引用原样作为 `map` / `module`
+  的种子，文件由 Core 按划分解析；宿主不再从本地包、源码根、顶层目录、入口与目标里自己推一遍，也不再按
+  路径前缀把源码清单挂到种子上。返回的 `moduleSeeds` 带 `kind`、`moduleId`、`fileCount`，`ownedFiles`
+  只是源码清单里归到该模块的代码文件，给宿主展示与覆盖台账用。
+- **上限是参数**（`options.limits`）：`maxFiles`、`maxModuleSeeds`（超出按文件数留大的，丢掉的名字在
+  `collection.droppedModuleSeeds`）、`maxModuleDetails`（同样按文件数从大到小取前 N 个模块的明细）、
+  `maxFileDetails`、`sourceSliceLines`。不给时等于 Plan 路径的旧行为：全部模块取明细、不取文件明细。
+- **范围是参数**（`options.scope`）：`sourceFolders`（对象或字符串）原样给 `space`；主仓库是 `repoRoot`
+  （默认角色为 primary-source 的文件夹，否则第一个），范围里的其他文件夹各一个整体种子；`moduleScope`
+  只保留落在这些目录里的模块（目录下面的模块，加上拥有这条目录的那个模块）。不给范围时按 `projectRoot`
+  查 ProjectScope 注册表，`hints.focusModules` 先选文件夹，没选中文件夹的项按目录过滤模块。
+- **明细文件只挑代码**：构建清单、文档、配置不当代表文件；语言统计与主语言同样只数代码文件。
+- **`maxFiles` 也约束划分**：它传给 `repo`，仓库的源码清单到上限就停，划分只覆盖收进来的文件；
+  种子从划分来，所以上限太小会少模块（旧推导从目标与源码根的引用取种子，不受这个上限影响）。
+  宿主传的是自己的扫描预算（冷启动 / 重扫的 `maxFiles`），回执里的 `sourceScanTruncated` 与
+  `repo` 自己的截断诊断会指出它起了作用。
+- **回执**：`analysis.collection` 记下范围从哪来、种子从哪来、上限、丢掉与过滤掉的模块、挑中的明细文件、
+  源码清单有没有到上限。没有划分却有代码文件时给出 `project-context-modules-unavailable` 缺口。
+
 ## 捕获期间的源码读取
 
 共用 source loader 的七类查询（source-slice、file-symbols、file-flow、anchor-range、

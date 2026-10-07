@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Parser } from 'web-tree-sitter';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
@@ -85,13 +85,16 @@ describe('planFacts ProjectContext error posture', () => {
   });
 
   it('does not classify an unsupported language as a fatal AST fact failure', async () => {
-    const fixtureRoot = createNodeFixture('src/notes.md', '# Notes\n');
+    // 种子来自仓库的模块划分，模块的文件由目录扫描给出：目录里的 JSON 会进模块分析，
+    // 它没有语法解析器，只能是一条"解析器不可用"的告警，不是 AST 失败。
+    const fixtureRoot = createNodeFixture('src/app/index.ts');
+    writeFileSync(join(fixtureRoot, 'src/app/config.json'), '{ "stable": true }\n');
 
     const analysis = await collectPlanProjectContext(fixtureRoot, undefined);
 
     expect(
       analysis.presenterInput.warnings.some((warning) =>
-        warning.message.includes('parser is unavailable for language markdown')
+        warning.message.includes('parser is unavailable for language json')
       )
     ).toBe(true);
     expect(analysis.contextStatus).toBe('complete');
@@ -107,7 +110,7 @@ function createNodeFixture(
 ): string {
   const fixtureRoot = mkdtempSync(join(tmpdir(), 'plan-facts-errors-'));
   fixtureRoots.push(fixtureRoot);
-  mkdirSync(join(fixtureRoot, 'src'), { recursive: true });
+  mkdirSync(join(fixtureRoot, dirname(relativeSourcePath)), { recursive: true });
   writeFileSync(
     join(fixtureRoot, 'package.json'),
     JSON.stringify({ name: 'plan-facts-errors', version: '1.0.0' })

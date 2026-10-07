@@ -1,6 +1,8 @@
 // planFacts：从 host 交付层(AlembicPlugin plan-tool.ts)下沉到 Core 的可复用
 // plan 事实收集 + 精简投影能力，双宿主(host-agent + 主体 in-process)共用。
 
+// F6：采集器的上限 / 范围 / 回执契约，三个宿主共用。
+export * from './collectContracts.js';
 export * from './collectProjectContext.js';
 // U1a.3：统一 plan 投影纯函数簇（buildProjectInfoTree 金字塔+预算+fullTreeRef /
 // buildProjectProfileFromAnalysis / collectModuleSnapshots + tree 类型 + PlanProjectContextAnalysis）。

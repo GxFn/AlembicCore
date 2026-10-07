@@ -18,6 +18,7 @@ import type {
 } from '../../../domain/project-context/index.js';
 import type { DimensionDef } from '../../../types/ProjectSnapshot.js';
 import type { PlanIntent } from '../intent/contracts.js';
+import type { PlanCollectionReport } from './collectContracts.js';
 import type { ProjectSourceFileFact } from './projectSourceFacts.js';
 import {
   removeTransientTransportIfPresent,
@@ -34,20 +35,36 @@ export const PLAN_FACTS_PROJECTION_BUDGET_BYTES = 12 * 1024;
 export interface PlanModuleSeed {
   moduleName: string;
   modulePath?: string;
+  /** 源码清单里归到该模块的代码文件（F6 起只作宿主展示与覆盖台账用；map / module 按引用自己解析文件）。 */
   ownedFiles?: string[];
   ref?: ProjectContextRef;
   role?: string;
+  /** F6 新增（可缺席）：划分给出的模块种类、模块 id 与划分的文件数；范围文件夹种子只有文件数。 */
+  kind?: string;
+  moduleId?: string;
+  fileCount?: number;
 }
 
 export interface PlanProjectContextAnalysis {
+  /** F6 新增（可缺席，旧产物与认证投影没有）：采集过程的回执。 */
+  collection?: PlanCollectionReport;
   contextStatus: 'complete' | 'partial';
   dimensions: DimensionDef[];
   envelopes: ProjectContextEnvelope<ProjectContextResult>[];
   factSource: 'project-context';
   fileCount: number;
   frameworks: string[];
+  /** F6 新增（可缺席）：没有任何源码文件与引用。 */
+  isEmpty?: boolean;
+  /** F6 新增（可缺席）：除主语言外还有别的代码语言。 */
+  isMultiLang?: boolean;
+  /** F6 新增（可缺席）：按语言计的代码文件数。 */
+  languageStats?: Record<string, number>;
   moduleCount: number;
+  /** 进了 map 的种子（经 moduleScope 过滤与 maxModuleSeeds 截断）。 */
   moduleSeeds: PlanModuleSeed[];
+  /** F6 新增（可缺席）：过滤与截断之前的全部模块（主仓库的划分 + 范围里的其他文件夹）。 */
+  modules?: PlanModuleSeed[];
   presenterInput: ProjectContextPresenterInput;
   primaryLanguage: string;
   projectType: string;

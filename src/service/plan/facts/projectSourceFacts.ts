@@ -2,6 +2,7 @@ import type { Dirent, Stats } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 // Core 内部代码不自引包入口(@alembic/core/*)，用内部相对路径引 shared 实现。
+import { isBuildManifestPath } from '../../../shared/BuildManifest.js';
 import { LanguageService } from '../../../shared/LanguageService.js';
 
 export interface ProjectSourceFileFact {
@@ -156,6 +157,25 @@ export function attachSourceFilesToProjectContextModuleSeeds<T extends ProjectMo
       })
       .filter((seed) => hasUsableSeedScope(seed) && (seed.ownedFiles?.length ?? 0) > 0)
   );
+}
+
+/** 不算代码的语言：不参与主语言判断、不作为模块的代码文件、不当明细文件。 */
+const NON_CODE_LANGUAGES: ReadonlySet<string> = new Set([
+  'json',
+  'markdown',
+  'plist',
+  'toml',
+  'unknown',
+  'xml',
+  'yaml',
+]);
+
+/**
+ * 源码清单里的一行算不算代码文件：文档与配置（json / markdown / yaml / toml / xml / plist）不算，
+ * 用源码语言写的构建清单（Package.swift 等）也不算。采集器与宿主用同一条规则。
+ */
+export function isProjectCodeFile(filePath: string, language: string): boolean {
+  return !NON_CODE_LANGUAGES.has(language) && !isBuildManifestPath(filePath);
 }
 
 export function normalizeProjectContextPath(value: string | undefined): string | undefined {
