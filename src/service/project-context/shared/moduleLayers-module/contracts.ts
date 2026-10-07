@@ -433,6 +433,8 @@ function isSupportedModuleFile(filePath: string): boolean {
   // Swift/ObjC/Kotlin 等项目的模块 ownedFiles 恒空,map/module 种子全部解析失败
   // (2026-07-10 BiliDili 实证:6 个种子全报 "module payload.ownedFiles or
   // payload.modulePath is required",实为本白名单把 .swift 挡掉后的误导性报错)。
+  // 2026-10-06：`.json` 不再算模块文件。它不是代码、没有语法解析器，认证清单也不把它算模块源码；
+  // 划分种子落到含 json 的目录（应用壳、配置目录）时，它只会带来"parser is unavailable"的告警。
   return [
     '.ts',
     '.tsx',
@@ -442,7 +444,6 @@ function isSupportedModuleFile(filePath: string): boolean {
     '.jsx',
     '.mjs',
     '.cjs',
-    '.json',
     '.swift',
     '.m',
     '.mm',

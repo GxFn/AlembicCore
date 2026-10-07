@@ -84,19 +84,25 @@ describe('planFacts ProjectContext error posture', () => {
     );
   });
 
-  it('does not classify an unsupported language as a fatal AST fact failure', async () => {
-    // 种子来自仓库的模块划分，模块的文件由目录扫描给出：目录里的 JSON 会进模块分析，
-    // 它没有语法解析器，只能是一条"解析器不可用"的告警，不是 AST 失败。
+  it('leaves non-code files in a module directory out of the module facts', async () => {
+    // 种子来自仓库的模块划分，模块的文件由目录扫描给出：目录里的 JSON 不是代码、没有语法解析器，
+    // 不进模块文件，也就不会有"解析器不可用"的告警，更不是 AST 失败。
     const fixtureRoot = createNodeFixture('src/app/index.ts');
     writeFileSync(join(fixtureRoot, 'src/app/config.json'), '{ "stable": true }\n');
 
     const analysis = await collectPlanProjectContext(fixtureRoot, undefined);
+    const moduleFiles = analysis.envelopes.flatMap((envelope) =>
+      envelope.queryLevel === 'module'
+        ? (envelope.data as ModuleContext).ownedFiles.map((file) => file.filePath)
+        : []
+    );
 
+    expect(moduleFiles).toEqual(['src/app/index.ts']);
     expect(
       analysis.presenterInput.warnings.some((warning) =>
         warning.message.includes('parser is unavailable for language json')
       )
-    ).toBe(true);
+    ).toBe(false);
     expect(analysis.contextStatus).toBe('complete');
     expect(
       analysis.understandingGaps.some((gap) => String(gap.code).startsWith('project-context-file-'))
