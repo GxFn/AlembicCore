@@ -268,7 +268,11 @@ function isAggregateCoverageLedgerModule(input: CoverageLedgerCanonicalModuleIdI
   const moduleId = normalizeCoverageLedgerString(input.moduleId);
   const moduleName = normalizeCoverageLedgerString(input.moduleName);
   const modulePath = input.modulePath ? normalizeCoverageSourcePath(input.modulePath) : null;
-  if (moduleId === 'root' || moduleId?.startsWith('module:root')) {
+  // 只有"整个仓库"才是聚合轴：id 恰好是 root / module:root，或名字 / 路径指向仓库根（下面两条）。
+  // 不能按 `module:root` 前缀判：模块引用 id 是 `module:<repoId>:<name>:<path>`，没有 ProjectScope 的
+  // 项目 repoId 就是 root，前缀判法会把它的每一个模块都当成聚合轴滤掉——主体在单仓项目上因此一直
+  // 拿不到 ProjectMap 模块（2026-10-07 修正）。
+  if (moduleId === 'root' || moduleId === 'module:root') {
     return true;
   }
   if (moduleName === 'root' || modulePath === 'root' || modulePath === '.') {

@@ -247,6 +247,27 @@ describe('buildCoverageLedger (U2a)', () => {
     ]);
   });
 
+  it('R-1 keeps real modules of a repository whose repo id is root', () => {
+    // 没有 ProjectScope 的项目 repoId 是 root，模块引用 id 以 module:root: 开头；它们是真实模块，
+    // 不是仓库根的聚合轴，必须得到 target 作用域的 id。
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'module:root:core:src/core',
+        moduleName: 'core',
+        modulePath: 'src/core',
+        projectRoot: '/project/AlembicCore',
+      })
+    ).toBe('target:core:src/core');
+    expect(
+      buildCanonicalCoverageLedgerModuleId({
+        moduleId: 'module:root:root:.',
+        moduleName: 'root',
+        modulePath: '.',
+        projectRoot: '/project/AlembicCore',
+      })
+    ).toBeUndefined();
+  });
+
   it('R-1 filters aggregate/root modules instead of polluting target coverage axes', () => {
     expect(
       buildCanonicalCoverageLedgerModuleId({
