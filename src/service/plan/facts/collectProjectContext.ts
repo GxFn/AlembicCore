@@ -3,8 +3,10 @@
 //
 // 历史：U1b.3 从 host 交付层 plan-tool.ts 下沉；F6（2026-10-06）把 Alembic 冷启动/重扫与 Plugin
 // 冷启动/重扫各自的采集循环并进来，上限、范围与来源标签做成 options。三处只剩这一份请求顺序：
-//   space → repo → map → 前 N 个模块的 module / module-layers → 前 M 个明细文件的
-//   file-flow / file-symbols / (source-slice) / anchor-range。
+//   space → repo → map（前 N 个模块的种子标 detail，明细与分层由 map 一次带回）
+//   → 前 M 个明细文件的 file-flow / file-symbols / (source-slice) / anchor-range。
+// 明细模块按"非测试模块优先、文件数从大到小"取：map 对每个种子本来就要装配一次模块，再单独发
+// module / module-layers 等于把同样的装配做第二遍（AlembicCore 上约占总耗时的四成）。
 // 种子只有一个来源：repo 查询给出的模块划分（RepoContext.modules）。宿主不再从 localPackages /
 // sourceRoots / topAreas / entrypoints / targets 自己推一遍，也不再按路径前缀把源码清单挂到种子上——
 // 划分的引用原样作为 map / module 的种子，文件由 Core 按同一份划分解析。
@@ -13,7 +15,6 @@ import path, { basename } from 'node:path';
 import { baseDimensions } from '../../../domain/dimension/BaseDimensions.js';
 import {
   buildProjectContextPresenterInput,
-  type ModuleContext,
   type ProjectContext as ProjectContextContract,
   type ProjectContextEnvelope,
   type ProjectContextPresenterInput,
@@ -201,31 +202,25 @@ async function collectPlanProjectContextInSession(
     Logger.debug('[PlanFacts] module seeds selected for the map query', seedLog);
   }
 
+  // 模块明细：非测试模块优先，再按文件数从大到小取前 N 个。按路径顺序取会把明细给仓库根、
+  // resources 这类只有一两个文件的模块；只按文件数取则测试目标会占掉名额。
+  const detailedSeeds = new Set(
+    limits.maxModuleDetails === undefined
+      ? moduleSeeds
+      : sortSeedsForDetails(moduleSeeds).slice(0, limits.maxModuleDetails)
+  );
   if (moduleSeeds.length > 0) {
     await push('map', {
-      moduleSeeds: moduleSeeds.map(createSeedPayload),
+      moduleSeeds: moduleSeeds.map((seed) => createSeedPayload(seed, detailedSeeds.has(seed))),
       ...(repo?.repo.name ? { repoName: repo.repo.name } : {}),
     });
   }
-  // 模块明细按文件数从大到小取前 N 个（与 maxModuleSeeds 的取舍同一条规则）：按路径顺序取会把
-  // 明细给仓库根、resources 这类只有一两个文件的模块，而大模块一个都轮不到。
-  const detailedSeeds =
-    limits.maxModuleDetails === undefined
-      ? moduleSeeds
-      : sortSeedsByFileCount(moduleSeeds).slice(0, limits.maxModuleDetails);
-  for (const seed of detailedSeeds) {
-    await push('module', {
-      ...createSeedPayload(seed),
-      includeDependencies: true,
-      includePublicSurfaces: true,
-    });
-    await push('module-layers', {
-      ...createSeedPayload(seed),
-      includeBoundaryCrossings: true,
-    });
-  }
 
-  const detailFiles = selectDetailFiles(envelopes, sourceFileFacts, limits.maxFileDetails);
+  const detailFiles = selectDetailFiles(
+    buildProjectContextPresenterInput(envelopes),
+    sourceFileFacts,
+    limits.maxFileDetails
+  );
   if (detailFiles.length > 0) {
     Logger.debug('[PlanFacts] detail files selected', {
       detailFiles,
@@ -587,6 +582,7 @@ function createPartitionSeed(
     ...(ownedFiles.length > 0 ? { ownedFiles } : {}),
     ref: module.ref,
     role: module.kind,
+    ...(module.targetKind ? { targetKind: module.targetKind } : {}),
   };
 }
 
@@ -646,6 +642,32 @@ function sortSeedsByFileCount(seeds: readonly PlanModuleSeed[]): PlanModuleSeed[
   );
 }
 
+/** 明细的取法：非测试模块在前，其余同 sortSeedsByFileCount（稳定排序，保持原有次序）。 */
+function sortSeedsForDetails(seeds: readonly PlanModuleSeed[]): PlanModuleSeed[] {
+  return sortSeedsByFileCount(seeds).sort(
+    (left, right) => Number(isTestModuleSeed(left)) - Number(isTestModuleSeed(right))
+  );
+}
+
+const TEST_PATH_SEGMENTS: ReadonlySet<string> = new Set([
+  '__tests__',
+  'spec',
+  'specs',
+  'test',
+  'tests',
+]);
+
+/** 测试模块：构建目标的种类带 test（SPM 的 testTarget 等），或目录 / 名字落在 test、tests、spec 这类段里。 */
+function isTestModuleSeed(seed: PlanModuleSeed): boolean {
+  if (seed.targetKind && /test/i.test(seed.targetKind)) {
+    return true;
+  }
+  const segments = (seed.modulePath ?? '').split('/').map((segment) => segment.toLowerCase());
+  return (
+    segments.some((segment) => TEST_PATH_SEGMENTS.has(segment)) || /tests?$/i.test(seed.moduleName)
+  );
+}
+
 function seedMatchesScope(
   seed: PlanModuleSeed,
   moduleScope: readonly string[],
@@ -667,13 +689,17 @@ function seedMatchesScope(
   });
 }
 
-/** map / module 的种子载荷：划分种子只带引用（文件由 Core 按划分解析），文件夹种子带文件清单。 */
-function createSeedPayload(seed: PlanModuleSeed): Record<string, unknown> {
+/**
+ * map 的种子载荷：划分种子只带引用（文件由 Core 按划分解析），文件夹种子带文件清单；
+ * 要明细的种子标 detail，map 会把它的模块明细与分层一并带回。
+ */
+function createSeedPayload(seed: PlanModuleSeed, detail: boolean): Record<string, unknown> {
   return {
     moduleName: seed.moduleName,
     ...(seed.modulePath ? { modulePath: seed.modulePath } : {}),
     ...(seed.role ? { role: seed.role } : {}),
     ...(seed.ref ? { ref: seed.ref } : { ownedFiles: seed.ownedFiles ?? [] }),
+    ...(detail ? { detail: true } : {}),
   };
 }
 
@@ -681,7 +707,7 @@ function createSeedPayload(seed: PlanModuleSeed): Record<string, unknown> {
 
 /** 明细文件从模块明细里的代码文件挑，再补引用里的代码文件；构建清单与文档不算。 */
 function selectDetailFiles(
-  envelopes: readonly ProjectContextEnvelope<ProjectContextResult>[],
+  presenterInput: ProjectContextPresenterInput,
   sourceFileFacts: readonly ProjectSourceFileFact[],
   limit: number
 ): string[] {
@@ -695,13 +721,11 @@ function selectDetailFiles(
       filePath,
       languageByFile.get(filePath) ?? LanguageService.inferLang(filePath)
     );
-  const fromModules = envelopes.flatMap((envelope) =>
-    envelope.queryLevel === 'module' && isModuleContext(envelope.data)
-      ? envelope.data.ownedFiles.map((file) => file.filePath)
-      : []
+  const fromModules = presenterInput.modules.flatMap((moduleContext) =>
+    moduleContext.ownedFiles.map((file) => file.filePath)
   );
-  const fromRefs = envelopes.flatMap((envelope) =>
-    envelope.refs.flatMap((ref) => (ref.scope.filePath ? [ref.scope.filePath] : []))
+  const fromRefs = presenterInput.refs.flatMap((ref) =>
+    ref.scope.filePath ? [ref.scope.filePath] : []
   );
   return [
     ...uniqueStrings(fromModules.filter(isDetailCandidate)),
@@ -899,16 +923,6 @@ function requiredAstFactKindFromFailure(message: string): RequiredAstFactKind | 
 
 function isRepoContext(value: ProjectContextResult): value is RepoContext {
   return !!value && typeof value === 'object' && 'repo' in value && 'sourceRoots' in value;
-}
-
-function isModuleContext(value: ProjectContextResult): value is ModuleContext {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    'module' in value &&
-    'ownedFiles' in value &&
-    Array.isArray((value as ModuleContext).ownedFiles)
-  );
 }
 
 /** file-flow 等文件级结果里的行数（FileSummary.lineCount）；没有或不是数字时返回 undefined。 */

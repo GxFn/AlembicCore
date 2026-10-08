@@ -43,6 +43,8 @@ export interface PlanModuleSeed {
   kind?: string;
   moduleId?: string;
   fileCount?: number;
+  /** kind 为 target 时构建目标的种类（如 SPM 的 testTarget），用来把测试模块排到明细之后。 */
+  targetKind?: string;
 }
 
 export interface PlanProjectContextAnalysis {

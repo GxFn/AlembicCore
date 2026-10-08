@@ -28,18 +28,17 @@ describe('planFacts ProjectContext error posture', () => {
     // Spy 只计数，实际源码读取、tree-sitter 解析、module/map 组合与投影全部照常执行。
     const parse = vi.spyOn(Parser.prototype, 'parse');
     const first = await collectPlanProjectContext(fixtureRoot, undefined);
-    const firstModule = first.envelopes.find((envelope) => envelope.queryLevel === 'module')
-      ?.data as ModuleContext;
+    // 模块明细由 map 一次带回，presenterInput.modules 里是带公开表面的模块。
+    const firstModule = first.presenterInput.modules[0] as ModuleContext;
 
-    expect(first.requestKinds).toEqual(['space', 'repo', 'map', 'module', 'module-layers']);
+    expect(first.requestKinds).toEqual(['space', 'repo', 'map']);
     expect(firstModule.publicSurfaces.map((symbol) => symbol.name)).toContain('BatchOriginal');
     expect(parse.mock.calls.filter(([input]) => input === source)).toHaveLength(1);
 
     parse.mockClear();
     writeFileSync(join(fixtureRoot, 'src/index.ts'), changedSource);
     const second = await collectPlanProjectContext(fixtureRoot, undefined);
-    const secondModule = second.envelopes.find((envelope) => envelope.queryLevel === 'module')
-      ?.data as ModuleContext;
+    const secondModule = second.presenterInput.modules[0] as ModuleContext;
 
     expect(secondModule.publicSurfaces.map((symbol) => symbol.name)).toContain('BatchChanged');
     expect(secondModule.publicSurfaces.map((symbol) => symbol.name)).not.toContain('BatchOriginal');
@@ -91,10 +90,8 @@ describe('planFacts ProjectContext error posture', () => {
     writeFileSync(join(fixtureRoot, 'src/app/config.json'), '{ "stable": true }\n');
 
     const analysis = await collectPlanProjectContext(fixtureRoot, undefined);
-    const moduleFiles = analysis.envelopes.flatMap((envelope) =>
-      envelope.queryLevel === 'module'
-        ? (envelope.data as ModuleContext).ownedFiles.map((file) => file.filePath)
-        : []
+    const moduleFiles = analysis.presenterInput.modules.flatMap((context) =>
+      context.ownedFiles.map((file) => file.filePath)
     );
 
     expect(moduleFiles).toEqual(['src/app/index.ts']);

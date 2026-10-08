@@ -341,6 +341,12 @@ export interface RepoContext {
 export interface ProjectMap {
   repo: RepoSummary;
   modules: ModuleSummary[];
+  /**
+   * 种子带 `detail: true` 时，map 顺手把这些模块的明细（含公开表面）与分层一并带回，
+   * 调用方不必再对同一批模块发 `module` / `module-layers`。没有这类种子时不带。
+   */
+  moduleContexts?: ModuleContext[];
+  moduleLayerContexts?: ModuleLayerContext[];
   layers: LayerSummary[];
   dependencySummary: DependencySummary;
   cycles: DependencyCycleSummary[];

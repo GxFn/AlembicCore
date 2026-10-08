@@ -105,6 +105,20 @@ export function buildProjectContextPresenterInput(
         if (isProjectMap(data)) {
           input.map = data;
           input.refs = dedupeRefs([...input.refs, ...collectMapRefs(data)]);
+          // map 带回的模块明细与分层等价于单独的 module / module-layers 结果。
+          for (const moduleContext of data.moduleContexts ?? []) {
+            input.modules.push(moduleContext);
+            input.files = dedupeFiles([...input.files, ...moduleContext.ownedFiles]);
+            input.refs = dedupeRefs([...input.refs, ...collectModuleRefs(moduleContext)]);
+          }
+          for (const layerContext of data.moduleLayerContexts ?? []) {
+            input.moduleLayers.push(layerContext);
+            input.files = dedupeFiles([
+              ...input.files,
+              ...layerContext.fileGroups.flatMap((group) => group.files),
+            ]);
+            input.refs = dedupeRefs([...input.refs, ...collectModuleLayerRefs(layerContext)]);
+          }
         }
         break;
       case 'module':

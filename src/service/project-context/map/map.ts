@@ -67,19 +67,31 @@ export const mapProjectContextHandler: ProjectContextHandler = async (
   return createProjectMapResult({ payload, request, resolution });
 };
 
+interface ProjectMapResolution {
+  errors: ProjectContextQueryError[];
+  modules: ProjectContextModuleMapModule[];
+  /** 带 `detail: true` 的种子的模块明细与分层（含公开表面），按种子顺序。 */
+  moduleContexts: ModuleContext[];
+  moduleLayerContexts: ModuleLayerContext[];
+}
+
 async function resolveProjectMapModules(
   request: CanonicalProjectContextRequest,
   moduleSeedPayloads: readonly Record<string, unknown>[],
   context?: ProjectContextExecutionContext
-): Promise<{ errors: ProjectContextQueryError[]; modules: ProjectContextModuleMapModule[] }> {
+): Promise<ProjectMapResolution> {
   const errors: ProjectContextQueryError[] = [];
   const modules: ProjectContextModuleMapModule[] = [];
-  for (const moduleSeedPayload of moduleSeedPayloads) {
+  const moduleContexts: ModuleContext[] = [];
+  const moduleLayerContexts: ModuleLayerContext[] = [];
+  for (const { detail: detailFlag, ...moduleSeedPayload } of moduleSeedPayloads) {
     throwIfProjectContextAborted(context);
+    // 种子标了 detail 的模块：公开表面也算出来，明细与分层直接带回，省掉调用方再发两次请求。
+    const detail = detailFlag === true;
     const moduleResult = await moduleProjectContextHandler(
       {
         kind: 'module',
-        payload: { ...moduleSeedPayload, includeDependencies: true, includePublicSurfaces: false },
+        payload: { ...moduleSeedPayload, includeDependencies: true, includePublicSurfaces: detail },
         project: request.project,
         scope: request.scope,
       },
@@ -104,22 +116,25 @@ async function resolveProjectMapModules(
     if (layerResult.errors) {
       errors.push(...layerResult.errors);
     }
-    modules.push(
-      createProjectContextModuleMapModule({
-        layerContext: isUnavailableData(layerResult.data)
-          ? undefined
-          : (layerResult.data as ModuleLayerContext),
-        moduleContext: moduleResult.data as ModuleContext,
-      })
-    );
+    const layerContext = isUnavailableData(layerResult.data)
+      ? undefined
+      : (layerResult.data as ModuleLayerContext);
+    const moduleContext = moduleResult.data as ModuleContext;
+    if (detail) {
+      moduleContexts.push(moduleContext);
+      if (layerContext) {
+        moduleLayerContexts.push(layerContext);
+      }
+    }
+    modules.push(createProjectContextModuleMapModule({ layerContext, moduleContext }));
   }
-  return { errors, modules: dedupeModules(modules) };
+  return { errors, modules: dedupeModules(modules), moduleContexts, moduleLayerContexts };
 }
 
 function createProjectMapResult(input: {
   payload: MapRequestPayload;
   request: CanonicalProjectContextRequest;
-  resolution: { errors: ProjectContextQueryError[]; modules: ProjectContextModuleMapModule[] };
+  resolution: ProjectMapResolution;
 }): ProjectContextHandlerResult {
   const { payload, request, resolution } = input;
   const resolvedModules = resolution.modules;
@@ -183,6 +198,12 @@ function createProjectMapResult(input: {
     layers,
     majorFlows,
     modules: resolvedModules.map((moduleRecord) => moduleRecord.module).sort(compareModules),
+    ...(resolution.moduleContexts.length > 0
+      ? {
+          moduleContexts: resolution.moduleContexts,
+          moduleLayerContexts: resolution.moduleLayerContexts,
+        }
+      : {}),
     nextRefs: createNextRefs({
       cycles,
       externalDependencyHotspots,

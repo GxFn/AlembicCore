@@ -467,6 +467,10 @@ id）用哈希表达新旧，里面的符号名与路径只是数据——叫 `p
   划分按 target 的身份（名字@清单目录）分组，目标的文件数也按身份数。
 - 目录模块的名字取自目录名；与某个构建目标重名时（包目录下直接放着的文件得到一个与 target 同名的模块），
   改用目录路径当名字——import 是按名字找模块的，重名会让它找到两个候选。
+- `repo` 的 `includeMapSummary`：明确为 `true` 而没给种子时，用自己的划分当 `map` 的种子；没给种子也没明确要时
+  安静跳过（以前每次都回一条"种子缺失"的告警）。
+- `module` 查询给了目录却扫不到代码文件（只有 json、文档或空目录）时，报错写明"目录里没有受支持的源码文件"，
+  不再与"载荷缺 ownedFiles / modulePath"混为一条。
 
 ### 依赖汇总的结构化字段
 
@@ -510,16 +514,19 @@ id）用哈希表达新旧，里面的符号名与路径只是数据——叫 `p
 `collectPlanProjectContext(projectRoot, hints, options)`（`@alembic/core/service/planFacts`）。
 2026-10-06 之前三处各有一份自己的请求循环与种子推导（F6 合一）。
 
-- **请求顺序固定**：`space` → `repo` → `map` → 前 N 个模块的 `module`、`module-layers` →
-  前 M 个明细文件的 `file-flow`、`file-symbols`、（要正文时）`source-slice`、`anchor-range`。整批请求共用一个
-  分析会话，每个源文件只解析一次。
+- **请求顺序固定**：`space` → `repo` → `map` → 前 M 个明细文件的 `file-flow`、`file-symbols`、（要正文时）
+  `source-slice`、`anchor-range`。整批请求共用一个分析会话，每个源文件只解析一次。前 N 个模块的明细不再单独发
+  `module` / `module-layers`：它们的种子带 `detail: true`，`map` 对每个种子本来就要装配一次模块，带上公开表面后把
+  明细与分层放在 `ProjectMap.moduleContexts` / `moduleLayerContexts` 一并带回，presenter 把它们当作 `module` /
+  `module-layers` 的结果收进 `modules` / `moduleLayers`（AlembicCore 上省掉约四成耗时）。
 - **种子只有一个来源**：`repo` 查询的模块划分（见"模块划分"）。每个模块的引用原样作为 `map` / `module`
   的种子，文件由 Core 按划分解析；宿主不再从本地包、源码根、顶层目录、入口与目标里自己推一遍，也不再按
   路径前缀把源码清单挂到种子上。返回的 `moduleSeeds` 带 `kind`、`moduleId`、`fileCount`，`ownedFiles`
   只是源码清单里归到该模块的代码文件，给宿主展示与覆盖台账用。
 - **上限是参数**（`options.limits`）：`maxFiles`、`maxModuleSeeds`（超出按文件数留大的，丢掉的名字在
-  `collection.droppedModuleSeeds`）、`maxModuleDetails`（同样按文件数从大到小取前 N 个模块的明细）、
-  `maxFileDetails`、`sourceSliceLines`。不给时等于 Plan 路径的旧行为：全部模块取明细、不取文件明细。
+  `collection.droppedModuleSeeds`）、`maxModuleDetails`（非测试模块优先，再按文件数从大到小取前 N 个；测试模块
+  按构建目标种类带 test 或目录 / 名字落在 test、tests、spec 这类段里判断）、`maxFileDetails`、`sourceSliceLines`。
+  不给时等于 Plan 路径的旧行为：全部模块取明细、不取文件明细。
 - **范围是参数**（`options.scope`）：`sourceFolders`（对象或字符串）原样给 `space`；主仓库是 `repoRoot`
   （默认角色为 primary-source 的文件夹，否则第一个），范围里的其他文件夹各一个整体种子；`moduleScope`
   只保留落在这些目录里的模块（目录下面的模块，加上拥有这条目录的那个模块）。不给范围时按 `projectRoot`

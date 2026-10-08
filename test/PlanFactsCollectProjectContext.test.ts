@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { reloadPlugins } from '../src/core/ast/ensureGrammars.js';
-import type { ModuleContext, SpaceContext } from '../src/domain/project-context/index.js';
+import type { SpaceContext } from '../src/domain/project-context/index.js';
 import { collectPlanProjectContext } from '../src/service/plan/facts/collectProjectContext.js';
 
 // F6：三个宿主共用的采集器。种子只来自 repo 的模块划分；上限、范围、来源标签都是参数。
@@ -59,10 +59,9 @@ describe('collectPlanProjectContext (F6 shared collector)', () => {
       sourceScanTruncated: false,
     });
     // Plan 路径的默认上限：全部模块取明细、不取文件明细。
-    expect(analysis.requestKinds).toEqual(['space', 'repo', 'map', 'module', 'module-layers']);
-    expect(analysis.envelopes.filter((envelope) => envelope.queryLevel === 'module')).toHaveLength(
-      5
-    );
+    expect(analysis.requestKinds).toEqual(['space', 'repo', 'map']);
+    // 明细由 map 一次带回：没有单独的 module 请求，presenterInput.modules 照样有全部模块。
+    expect(analysis.presenterInput.modules).toHaveLength(5);
     const mapModuleNames = analysis.presenterInput.map?.modules.map((module) => module.name).sort();
     expect(mapModuleNames).toEqual(['api', 'core', 'scripts', 'src', 'test']);
     expect(analysis.moduleCount).toBe(5);
@@ -86,16 +85,15 @@ describe('collectPlanProjectContext (F6 shared collector)', () => {
     expect(analysis.collection?.droppedModuleSeeds).toEqual(['scripts', 'src', 'test']);
     // 过滤与截断之前的全部模块仍在 modules 里。
     expect(analysis.modules).toHaveLength(5);
-    // 明细同样按文件数取：两个种子里 core 有两个文件，拿到唯一的一份明细。
-    const detailed = analysis.envelopes.filter((envelope) => envelope.queryLevel === 'module');
+    // 明细同样按文件数取：两个种子里 core 有两个文件，拿到唯一的一份明细（由 map 带回）。
+    const detailed = analysis.presenterInput.modules;
     expect(detailed).toHaveLength(1);
-    expect((detailed[0]?.data as ModuleContext).module.name).toBe('core');
+    expect(detailed[0]?.module.name).toBe('core');
+    expect(detailed[0]?.publicSurfaces.length).toBeGreaterThan(0);
     expect(analysis.requestKinds).toEqual([
       'space',
       'repo',
       'map',
-      'module',
-      'module-layers',
       'file-flow',
       'file-symbols',
       'source-slice',
@@ -129,8 +127,6 @@ describe('collectPlanProjectContext (F6 shared collector)', () => {
       'space',
       'repo',
       'map',
-      'module',
-      'module-layers',
       'file-flow',
       'file-symbols',
       'anchor-range',
@@ -211,12 +207,10 @@ describe('collectPlanProjectContext (F6 shared collector)', () => {
     expect(analysis.moduleSeeds.map((seed) => seed.moduleName)).toEqual(['core', 'test']);
     expect(analysis.collection?.filteredModuleSeeds).toEqual(['scripts', 'src', 'api']);
     expect(analysis.modules).toHaveLength(5);
-    const moduleEnvelopes = analysis.envelopes.filter(
-      (envelope) => envelope.queryLevel === 'module'
-    );
-    expect(
-      moduleEnvelopes.map((envelope) => (envelope.data as ModuleContext).module.name).sort()
-    ).toEqual(['core', 'test']);
+    expect(analysis.presenterInput.modules.map((context) => context.module.name).sort()).toEqual([
+      'core',
+      'test',
+    ]);
   });
 
   it('keeps the module partition whole when maxFiles only budgets the source inventory', async () => {
@@ -239,6 +233,20 @@ describe('collectPlanProjectContext (F6 shared collector)', () => {
       'test',
     ]);
     expect(analysis.presenterInput.map?.modules).toHaveLength(5);
+  });
+
+  it('gives module details to non-test modules before test modules', async () => {
+    const fixtureRoot = createNodeAreasFixture();
+
+    const analysis = await collectPlanProjectContext(fixtureRoot, undefined, {
+      limits: { maxModuleDetails: 2 },
+    });
+
+    // 五个模块里 test 是测试模块，排在最后；其余按文件数（core 两个）再按名字（api）取两个。
+    expect(analysis.presenterInput.modules.map((context) => context.module.name).sort()).toEqual([
+      'api',
+      'core',
+    ]);
   });
 
   it('reports a missing partition as a gap instead of inventing seeds', async () => {
