@@ -84,7 +84,7 @@ function makeMap(overrides: Partial<ProjectMap>): ProjectMap {
 }
 
 function makeInput(
-  facts: Pick<ProjectContextPresenterInput, 'repo' | 'map'>
+  facts: Partial<Pick<ProjectContextPresenterInput, 'repo' | 'map' | 'files'>>
 ): ProjectContextPresenterInput {
   return {
     project: PROJECT,
@@ -365,6 +365,33 @@ describe('ProjectContext facts behind the Mission Briefing', () => {
     expect(briefing.architectureOverview?.keyInsights).toContain(
       '1 local packages provide 50% of the codebase (10/20 files)'
     );
+  });
+
+  it("picks only code files as a local package's key files", () => {
+    const briefing = build(
+      makeInput({
+        files: [
+          { filePath: 'Packages/Kit/.github/workflows/ci.yml', language: 'yaml' },
+          { filePath: 'Packages/Kit/Package.swift', language: 'swift' },
+          { filePath: 'Packages/Kit/README.md', language: 'markdown' },
+          { filePath: 'Packages/Kit/Sources/Kit/Client.swift', language: 'swift' },
+          { filePath: 'Packages/Kit/Sources/Kit/Model.swift', language: 'swift' },
+        ],
+        repo: makeRepo({
+          localPackages: [
+            { name: 'App', path: '.' },
+            { name: 'Kit', path: 'Packages/Kit' },
+          ],
+        }),
+      })
+    );
+
+    expect(briefing.mustCoverModules?.modules).toEqual([
+      expect.objectContaining({
+        name: 'Kit',
+        keyFiles: ['Packages/Kit/Sources/Kit/Client.swift', 'Packages/Kit/Sources/Kit/Model.swift'],
+      }),
+    ]);
   });
 
   it('reports coupling as module counts and skips modules nothing depends on', () => {

@@ -22,6 +22,8 @@ import type {
   TargetSummary,
 } from '../../../../domain/project-context/index.js';
 import Logger from '../../../../infrastructure/logging/Logger.js';
+import { isProjectCodeFile } from '../../../../service/plan/facts/projectSourceFacts.js';
+import { LanguageService } from '../../../../shared/LanguageService.js';
 import type { DependencyGraph, LocalPackageModule } from '../../../../types/ProjectSnapshot.js';
 
 /** 项目外的一个依赖，以及用到它的模块名。 */
@@ -418,7 +420,10 @@ function buildLocalPackageModules(input: ProjectContextPresenterInput): LocalPac
       packageName: localPackage.name,
       fileCount,
       inferredRole: moduleContext?.module.role ?? mapModule?.role,
-      keyFiles: files.slice(0, 6),
+      // 代表文件只挑代码：Package.swift、README、CI 配置也在宿主读到过的文件里，但不能代表这个包。
+      keyFiles: files
+        .filter((filePath) => isProjectCodeFile(filePath, LanguageService.inferLang(filePath)))
+        .slice(0, 6),
     };
   });
 }
