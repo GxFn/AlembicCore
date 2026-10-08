@@ -1146,14 +1146,13 @@ describe('ProjectContext PCQ-9 end-to-end validation', () => {
         payload: { ref: appRepoRef },
         scope: { projectRoot },
       });
-      expect(repoWithoutMapFacts.errors).toContainEqual(
-        expect.objectContaining({
-          code: 'query-unavailable',
-          message:
-            'repo map facts are unavailable because payload.moduleSeeds or payload.modules is missing.',
-          severity: 'warning',
-        })
-      );
+      // 没给种子也没明确要 map 汇总：安静跳过，不再回"种子缺失"的告警。
+      expect(
+        (repoWithoutMapFacts.errors ?? []).some((error) =>
+          error.message.includes('repo map facts are unavailable')
+        )
+      ).toBe(false);
+      expect((repoWithoutMapFacts.data as RepoContext).mapRef).toBeUndefined();
 
       const anchor = await ProjectContext.execute({
         kind: 'anchor-range',

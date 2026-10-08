@@ -538,7 +538,7 @@ describe('ProjectContext PCQ-7 repo context', () => {
     });
   });
 
-  it('returns repo facts and an ordinary error when map facts are unavailable', async () => {
+  it('skips map facts quietly when no seeds are given and no map summary was requested', async () => {
     await withFixture(createRepoFixture(), async (projectRoot) => {
       const envelope = await ProjectContext.execute({
         kind: 'repo',
@@ -549,14 +549,31 @@ describe('ProjectContext PCQ-7 repo context', () => {
       expect(data.repo.id).toBe('fixture');
       expect(data.mapRef).toBeUndefined();
       expect(data.packageSystems.map((system) => system.kind)).toContain('node/package-json');
-      expect(envelope.errors).toContainEqual(
-        expect.objectContaining({
-          code: 'query-unavailable',
-          message:
-            'repo map facts are unavailable because payload.moduleSeeds or payload.modules is missing.',
-          severity: 'warning',
-        })
-      );
+      expect(
+        (envelope.errors ?? []).some((error) =>
+          error.message.includes('repo map facts are unavailable')
+        )
+      ).toBe(false);
+    });
+  });
+
+  it('seeds a requested map summary from its own module partition', async () => {
+    await withFixture(createRepoFixture(), async (projectRoot) => {
+      const envelope = await ProjectContext.execute({
+        kind: 'repo',
+        payload: { includeMapSummary: true },
+        scope: { projectRoot, repoId: 'fixture' },
+      });
+      const data = envelope.data as RepoContext;
+
+      expect(data.modules?.length ?? 0).toBeGreaterThan(0);
+      expect(data.mapRef).toBeDefined();
+      expect(data.mapSummary?.moduleCount).toBe(data.modules?.length);
+      expect(
+        (envelope.errors ?? []).some((error) =>
+          error.message.includes('repo map facts are unavailable')
+        )
+      ).toBe(false);
     });
   });
 

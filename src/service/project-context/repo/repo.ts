@@ -318,8 +318,15 @@ async function collectRepoContextFacts(input: {
           sourceRoots: sourceFacts.sourceRoots,
           targets,
         });
+  const moduleSummaries = createModuleSummaries({
+    repo: input.repo,
+    sourceFiles: sourceFacts.sourceFiles,
+    sourceRoots: sourceFacts.sourceRoots,
+    targets: sourceFacts.discovery.targets,
+  });
   const mapFacts = await createRepoMapFacts({
     context: input.context,
+    modules: moduleSummaries,
     payload: input.payload,
     project: input.project,
     repo: input.repo,
@@ -336,12 +343,7 @@ async function collectRepoContextFacts(input: {
     errors,
     localPackages,
     mapSummary: mapFacts.summary,
-    modules: createModuleSummaries({
-      repo: input.repo,
-      sourceFiles: sourceFacts.sourceFiles,
-      sourceRoots: sourceFacts.sourceRoots,
-      targets: sourceFacts.discovery.targets,
-    }),
+    modules: moduleSummaries,
     packageSystems,
     repo: input.repo,
     sourceFiles: sourceFacts.sourceFiles,
@@ -1526,6 +1528,7 @@ async function createTopAreaSummaries(input: {
 
 async function createRepoMapFacts(input: {
   context?: Ctx;
+  modules: readonly RepoModuleSummary[];
   payload: RepoRequestPayload;
   project: CanonicalProjectContextRequest['project'];
   repo: RepoIdentity;
@@ -1534,18 +1537,36 @@ async function createRepoMapFacts(input: {
   if (input.payload.includeMapSummary === false) {
     return { errors: [] };
   }
-  const moduleSeeds = [...(input.payload.moduleSeeds ?? []), ...(input.payload.modules ?? [])];
+  let moduleSeeds = [...(input.payload.moduleSeeds ?? []), ...(input.payload.modules ?? [])];
   if (moduleSeeds.length === 0) {
-    return {
-      errors: [
-        createQueryError({
-          code: 'query-unavailable',
-          message:
-            'repo map facts are unavailable because payload.moduleSeeds or payload.modules is missing.',
-          retryable: false,
-        }),
-      ],
-    };
+    // 没给种子：没有明确要 map 汇总就安静跳过（以前每次都回一条"种子缺失"的告警，调用方其实只要
+    // repo 事实）；明确要了就用仓库自己的模块划分当种子——划分里每个模块的引用本来就是 map 的种子。
+    if (input.payload.includeMapSummary !== true) {
+      Logger.debug(
+        '[RepoContext] map summary skipped: no module seeds and includeMapSummary not requested',
+        {
+          repoId: input.repo.repoId,
+        }
+      );
+      return { errors: [] };
+    }
+    if (input.modules.length === 0) {
+      return {
+        errors: [
+          createQueryError({
+            code: 'query-unavailable',
+            message:
+              'repo map facts are unavailable because the repository has no module partition.',
+            retryable: false,
+          }),
+        ],
+      };
+    }
+    moduleSeeds = input.modules.map((module) => module.ref);
+    Logger.info('[RepoContext] map summary seeded from the repository module partition', {
+      moduleCount: moduleSeeds.length,
+      repoId: input.repo.repoId,
+    });
   }
 
   const result = await mapProjectContextHandler(
