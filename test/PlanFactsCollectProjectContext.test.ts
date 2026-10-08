@@ -219,6 +219,28 @@ describe('collectPlanProjectContext (F6 shared collector)', () => {
     ).toEqual(['core', 'test']);
   });
 
+  it('keeps the module partition whole when maxFiles only budgets the source inventory', async () => {
+    const fixtureRoot = createNodeAreasFixture();
+
+    const analysis = await collectPlanProjectContext(fixtureRoot, undefined, {
+      limits: { maxFiles: 2, maxModuleDetails: 0 },
+    });
+
+    // 预算只截断源码清单（6 个代码文件只收 2 个）；划分照旧 5 个模块，种子一个不少。
+    expect(analysis.sourceFileFacts).toHaveLength(2);
+    expect(analysis.collection?.sourceScanTruncated).toBe(true);
+    expect(analysis.collection?.partitionTruncated).toBe(false);
+    expect(analysis.modules).toHaveLength(5);
+    expect(analysis.moduleSeeds.map((seed) => seed.moduleName)).toEqual([
+      'scripts',
+      'src',
+      'api',
+      'core',
+      'test',
+    ]);
+    expect(analysis.presenterInput.map?.modules).toHaveLength(5);
+  });
+
   it('reports a missing partition as a gap instead of inventing seeds', async () => {
     const fixtureRoot = mkdtempSync(join(tmpdir(), 'plan-facts-collect-empty-'));
     fixtureRoots.push(fixtureRoot);

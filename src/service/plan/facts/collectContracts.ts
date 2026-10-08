@@ -16,7 +16,10 @@ export interface PlanCollectSourceFolder {
  * 宿主（冷启动、重扫）按自己的预算传。
  */
 export interface PlanCollectLimits {
-  /** repo 扫描与源码清单的文件上限。 */
+  /**
+   * 源码清单（sourceFileFacts、Plan 树的文件事实）的文件上限。不约束模块划分：划分看的是 repo 查询
+   * 自己收集的源码文件清单，那份清单有它自己的上限与截断诊断（见回执的 partitionTruncated）。
+   */
   maxFiles?: number;
   /** 进 `map` 的模块数；超出时按文件数留大的，丢掉的名字写进回执。默认不设上限。 */
   maxModuleSeeds?: number;
@@ -69,6 +72,8 @@ export interface PlanCollectionReport {
   filteredModuleSeeds: string[];
   /** 源码清单是否到了 `maxFiles` 上限。 */
   sourceScanTruncated: boolean;
+  /** repo 自己的源码文件清单是否到了它的上限（划分因此不完整）。 */
+  partitionTruncated: boolean;
   /** 取了明细的文件。 */
   detailFiles: string[];
 }

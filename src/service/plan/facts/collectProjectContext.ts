@@ -142,16 +142,30 @@ async function collectPlanProjectContextInSession(
   });
   // includeMapSummary 关掉：map 由下面单独发，带的是划分出来的种子；repo 自己没有种子时只会回一条
   // "map facts unavailable" 的告警。
+  // 宿主的 maxFiles 不传给 repo：它是冷启动 / Plan 的扫描预算（默认 500），而模块划分要看仓库的全部
+  // 源码文件，预算一截断就会少模块（AlembicCore 在 500 下只剩 9 / 17 个）。repo 的文件清单用它自己的
+  // 上限，截断时它的诊断照常进信封，回执里也标出来。
   const repoEnvelope = await push(
     'repo',
     {
       includeMapSummary: false,
-      ...(limits.maxFiles !== undefined ? { maxFiles: limits.maxFiles } : {}),
       ...(scope.repoRoot ? { repoRoot: scope.repoRoot } : {}),
     },
     scope.repoDisplayName
   );
   const repo = isRepoContext(repoEnvelope.data) ? repoEnvelope.data : undefined;
+  const partitionTruncated = (repoEnvelope.errors ?? []).some((error) =>
+    error.message.includes('source file collection was truncated')
+  );
+  if (partitionTruncated) {
+    Logger.warn(
+      '[PlanFacts] repo source file collection hit its own limit; module partition is partial',
+      {
+        projectRoot: scope.projectRoot,
+        repoRoot: scope.repoRoot ?? '.',
+      }
+    );
+  }
   throwIfProjectContextAborted(executionContext);
   const sourceFileFacts = await collectProjectSourceFileFacts(scope.projectRoot, {
     ...(limits.maxFiles !== undefined ? { maxFiles: limits.maxFiles } : {}),
@@ -271,6 +285,7 @@ async function collectPlanProjectContextInSession(
       droppedModuleSeeds: selection.dropped,
       filteredModuleSeeds: selection.filtered,
       limits,
+      partitionTruncated,
       scopeSource: scope.source,
       seedSource,
       source,
