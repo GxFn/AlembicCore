@@ -100,12 +100,16 @@ export async function resolveProjectContextModuleSeed(input: {
   }
 
   if (ownedFilePaths.length === 0) {
+    // 给了目录却扫不到代码文件（只有 json / 文档 / 空目录）和根本没给范围是两件事，报错要分开说，
+    // 否则排查会往载荷缺字段的方向走。
     return {
       error:
         errors[0] ??
         createQueryError({
           code: 'invalid-scope',
-          message: 'module payload.ownedFiles or payload.modulePath is required.',
+          message: modulePath
+            ? `module directory contains no supported source files: ${modulePath}`
+            : 'module payload.ownedFiles or payload.modulePath is required.',
           retryable: false,
         }),
       errors: errors.slice(1),
