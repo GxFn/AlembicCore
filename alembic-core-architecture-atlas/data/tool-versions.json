@@ -1,0 +1,11 @@
+{
+  "mermaid": "11.17.2",
+  "cytoscape": "3.34.2",
+  "cytoscape-elk": "2.3.0",
+  "elkjs": "0.12.0",
+  "typescript": "5.9.3",
+  "vite": "8.2.2",
+  "marked": "18.0.11",
+  "dompurify": "3.4.14",
+  "yaml": "2.9.0"
+}

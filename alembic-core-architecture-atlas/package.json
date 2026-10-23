@@ -1,0 +1,51 @@
+{
+  "name": "@alembic/core-architecture-atlas",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.mjs",
+    "inventory:write": "node scripts/atlas.mjs inventory --write",
+    "inventory:check": "node scripts/atlas.mjs inventory",
+    "check:structure": "node scripts/atlas.mjs structure",
+    "check:current": "node scripts/atlas.mjs current",
+    "check:provenance": "node scripts/atlas.mjs provenance",
+    "render:verify": "node scripts/verify-server.mjs",
+    "check:render": "node scripts/atlas.mjs render",
+    "check:reader": "node scripts/atlas.mjs reader",
+    "check:isolation": "node scripts/atlas.mjs isolation",
+    "check": "npm run test && npm run format:check && npm run typecheck && npm run inventory:check && npm run check:structure && npm run check:current && npm run check:evidence && npm run check:render && npm run check:reader && npm run check:isolation && npm run build && npm run check:build",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "preview": "vite preview",
+    "check:build": "node scripts/check-build.mjs",
+    "evidence:run": "node scripts/run-evidence.mjs",
+    "check:evidence": "node scripts/atlas.mjs evidence",
+    "review:append": "node scripts/reviews.mjs append",
+    "maintenance:probe": "node scripts/maintenance-probe.mjs",
+    "check:portable": "node scripts/check-portable.mjs"
+  },
+  "dependencies": {
+    "cytoscape": "3.34.2",
+    "cytoscape-elk": "2.3.0",
+    "dompurify": "3.4.14",
+    "elkjs": "0.12.0",
+    "marked": "18.0.11",
+    "mermaid": "11.17.2",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.6",
+    "@types/cytoscape": "3.21.9",
+    "@types/node": "24.10.1",
+    "ajv": "8.17.1",
+    "typescript": "5.9.3",
+    "vite": "8.2.2"
+  }
+}

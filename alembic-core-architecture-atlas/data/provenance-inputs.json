@@ -1,0 +1,30 @@
+[
+  {
+    "path": "code-review-2026-10-22/file-review.json",
+    "sha256": "7350d28a7fccc662298c6cc5cd1f6a85be338d0981eb7af3547e09edd30e80c1"
+  },
+  {
+    "path": "code-review-2026-10-22/README.md",
+    "sha256": "aa07dbf8774540b09db6839e8125b7cb031b262cbed1944213b69e3dd99aea5e"
+  },
+  {
+    "path": "code-review-2026-10-22/findings.md",
+    "sha256": "78c9fb3b2be281cdcbabce92971e249c7adabc568a433a8674d9d26f4a34ff0d"
+  },
+  {
+    "path": "architecture-atlas/reviews/2026-10-22/semantic-review.md",
+    "sha256": "258a79159bf8195765b07b12fa393bfacf7c5b877aab7cd672ea02ada3c38d0c"
+  },
+  {
+    "path": "architecture-atlas/reviews/2026-10-22-r3/semantic-review.md",
+    "sha256": "fd6c4c3d5f407675dfe26fb7ac7ef892fb1cd310a62b4127a5a38b2504666a93"
+  },
+  {
+    "path": "architecture-atlas/reviews/2026-10-22-r3/self-review.md",
+    "sha256": "3f34a6b3e69409a64e2c0f2e535f96e1b2dd712d01115dce5645f35cdce42327"
+  },
+  {
+    "path": "architecture-atlas/implementation-2026-10-23/semantic-review.md",
+    "sha256": "bc26ee60ea133b2ec289f4cecc52316b868193a7553cf9946bc38d70024cf9e6"
+  }
+]

@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/observations.json",
+  "observationsSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "id": "V05",
+  "title": "严格语义评审离线回执：V4/V5序列化、新进程重验与篡改拒绝",
+  "status": "passed",
+  "observedAt": "2026-10-23T13:41:39.356Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+    }
+  ],
+  "cases": [
+    {
+      "title": "shared-harvest semantic evidence authority binds one physical evidence root across the complete canonical harvest-group set",
+      "status": "passed",
+      "duration": 2303.0209589999995
+    },
+    {
+      "title": "shared-harvest semantic evidence authority binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart",
+      "status": "passed",
+      "duration": 2088.709667
+    },
+    {
+      "title": "shared-harvest semantic evidence authority rejects incomplete, overlapping, mixed-harvest, rebound, and noncanonical binding sets",
+      "status": "passed",
+      "duration": 93.2432090000002
+    },
+    {
+      "title": "shared-harvest semantic evidence authority fails closed on cross-harvest group, root, request, load, and attestation tampering",
+      "status": "passed",
+      "duration": 80.27199999999993
+    }
+  ],
+  "probeObservations": [],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/report.json",
+  "rawSha256": "5af61b3df16c4843391d0d3bcb9a31a12dd7e100b6cb3aae8ef7b9886d24f3f1",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/console.txt",
+  "consoleSha256": "fe4070d78e0a620a73c23dfced7de5f9efd82393ffceb635354dcbdbc5d90561",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "test/SharedHarvestSemanticEvidenceAuthority.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "(shared-harvest semantic evidence authority binds one physical evidence root across the complete canonical harvest-group set|shared-harvest semantic evidence authority binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart|shared-harvest semantic evidence authority rejects incomplete, overlapping, mixed-harvest, rebound, and noncanonical binding sets|shared-harvest semantic evidence authority fails closed on cross-harvest group, root, request, load, and attestation tampering)$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/receipt.json",
+  "receiptSha256": "2d3e8fa1c4bfc253f3bffe4565edf57d0291f5dfc9a1c67eb6917220b0d35ec0"
+}

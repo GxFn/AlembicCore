@@ -1,0 +1,3592 @@
+{
+  "topics": [
+    {
+      "id": "01",
+      "slug": "overall-package-boundaries",
+      "title": "总体、公开包与宿主边界",
+      "question": "Core提供什么，哪些能力由外层拥有？",
+      "publicExports": [
+        ".",
+        "./knowledge",
+        "./production",
+        "./project-context"
+      ],
+      "applicableViews": "A0/A1 + exports矩阵",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "02",
+      "slug": "workspace-config-io",
+      "title": "工作区、配置与IO",
+      "question": "projectRoot/dataRoot、Ghost、多根与读写边界怎样配合？",
+      "publicExports": [
+        "./workspace",
+        "./config",
+        "./io",
+        "./capability"
+      ],
+      "applicableViews": "V0/F0/F1/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "03",
+      "slug": "database-and-repositories",
+      "title": "数据库与仓储",
+      "question": "事务、迁移、文件真相、运行数据分别由谁拥有？",
+      "publicExports": [
+        "./database",
+        "./repositories",
+        "./memory"
+      ],
+      "applicableViews": "A1/F0/F1/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "04",
+      "slug": "syntax-facts-linking",
+      "title": "语法、文件事实与链接",
+      "question": "解析、提取与跨文件绑定各能证明什么？",
+      "publicExports": [
+        "./core/analysis",
+        "./core/ast"
+      ],
+      "applicableViews": "V0/F0/F1",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "05",
+      "slug": "discovery-and-intelligence",
+      "title": "发现、框架与架构信号",
+      "question": "模块、依赖、框架与启发式信号从哪里来？",
+      "publicExports": [
+        "./enhancement",
+        "./project-context-capabilities"
+      ],
+      "applicableViews": "V0/F0/F1",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "06",
+      "slug": "project-context",
+      "title": "ProjectContext查询",
+      "question": "如何由space/repo收敛到源码片段，处理预算、取消与部分结果？",
+      "publicExports": [
+        "./project-context"
+      ],
+      "applicableViews": "V0/F0/F1/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "07",
+      "slug": "source-graph",
+      "title": "源码关系索引",
+      "question": "完整/增量代际、关系查询与freshness怎样保持一致？",
+      "publicExports": [
+        "./project-context",
+        "./repositories"
+      ],
+      "applicableViews": "V0/F0/F1/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "08",
+      "slug": "certified-project-facts",
+      "title": "认证项目事实",
+      "question": "输入冻结、回放、readiness、manifest及消费者回执怎样绑定？",
+      "publicExports": [
+        "./project-context-foundation"
+      ],
+      "applicableViews": "A1/V0/F1/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "09",
+      "slug": "planning-host-workflows",
+      "title": "规划与宿主工作流",
+      "question": "intent、briefing、unit、session、coverage和snapshot怎样衔接？",
+      "publicExports": [
+        "./plans",
+        "./host-agent-workflows"
+      ],
+      "applicableViews": "V0/F0/F1/S0/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "10",
+      "slug": "knowledge-authoring-persistence",
+      "title": "知识创作与持久化",
+      "question": "candidate/recipe、校验、file-first写入和sync如何闭环？",
+      "publicExports": [
+        "./knowledge",
+        "./dimensions"
+      ],
+      "applicableViews": "V0/F0/F1/S0/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "11",
+      "slug": "retrieval-recipe-context",
+      "title": "检索与RecipeContext",
+      "question": "候选召回如何经过live truth、过滤、排序与预算？",
+      "publicExports": [
+        "./search",
+        "./recipe-context-capabilities"
+      ],
+      "applicableViews": "V0/F0/F1",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "12",
+      "slug": "vector-generations",
+      "title": "向量与代际",
+      "question": "文件与Recipe region两条索引怎样写入、切换和恢复？",
+      "publicExports": [
+        "./vector"
+      ],
+      "applicableViews": "V0/F0/F1/S0/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "13",
+      "slug": "guard-feedback",
+      "title": "Guard与反馈",
+      "question": "规则筛选、分层检查、不确定结果与反馈怎样运行？",
+      "publicExports": [
+        "./guard"
+      ],
+      "applicableViews": "V0/F0/F1/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "14",
+      "slug": "sustain-proposals",
+      "title": "维护与提案",
+      "question": "drift、decay、consolidation与proposal怎样改变知识？",
+      "publicExports": [
+        "./sustain",
+        "./evolution"
+      ],
+      "applicableViews": "V0/F0/F1/S0/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "15",
+      "slug": "strict-production-authority",
+      "title": "严格生产与发布证据",
+      "question": "完整事实、独立评审、准入、私有revision与serving如何绑定？",
+      "publicExports": [
+        "./production",
+        "./host-agent-workflows",
+        "./knowledge",
+        "./workspace"
+      ],
+      "applicableViews": "A1/V0/F0/F1/S0/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "16",
+      "slug": "runtime-events-lifecycle",
+      "title": "运行时契约与观测",
+      "question": "job/resident、事件、信号、日志与资源释放各保证什么？",
+      "publicExports": [
+        "./daemon",
+        "./events",
+        "./logging",
+        "./report"
+      ],
+      "applicableViews": "V0/F0/F1/S0/R0",
+      "kind": "documentation-navigation-topic"
+    },
+    {
+      "id": "17",
+      "slug": "contracts-tooling-verification",
+      "title": "契约、工具与验证",
+      "question": "exports/wire/层规则、维护脚本和发布边界怎样验证？",
+      "publicExports": [
+        "./shared",
+        "./test-fixtures"
+      ],
+      "applicableViews": "A1/F0/F1/E0",
+      "kind": "documentation-navigation-topic"
+    }
+  ],
+  "assignments": [
+    {
+      "path": "resources/codegraph/native-worker.mjs",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/audit-project-context-foundation.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/check-output-budgets.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/check-public-api-boundary.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/check-release-readiness.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/check-space-edges.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/clean-dist.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/codemod-rename.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-consumer-core-imports-all.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-consumer-core-imports.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-doctrine.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-layer-contract.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-naming.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-retired-symbols.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-ring-direction.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/lint-scope-resolution.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/probe-private-revision-rehydrate.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/public-api-boundary-policy.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/report-public-api-closeout.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/smoke-public-api.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "scripts/strict-production-authority-probe.mjs",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/capability.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "02"
+      ]
+    },
+    {
+      "path": "src/config.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "02"
+      ]
+    },
+    {
+      "path": "src/core/AstAnalyzer.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/analysis/index.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/analyzeFile.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/astTypes.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/ensureGrammars.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/CallSiteExtractor.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/CallSiteNoisePolicy.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/ImportRecord.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/JsCallSiteExtractor.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/JsDeclarationCollector.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/ModuleSyntaxCollector.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/extract/SyntaxTolerance.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/guardQueries.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/index.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-dart.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-go.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-java.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-javascript.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-kotlin.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-objc.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-python.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-rust.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-swift.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/lang-typescript.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/languageRegistry.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/nodeRange.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/ast/parserInit.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/capability/CapabilityProbe.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/capability/index.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/CustomConfigDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/DartDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/DiscovererPreference.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/DiscovererRegistry.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/DiscovererSession.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/GenericDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/GoDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/JvmDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/NodeDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/ProjectDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/ProjectSpecLocator.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/PythonDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/RustDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/SourceScanExclusions.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/SpmDiscoverer.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/index.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/parsers/CMakeParser.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/parsers/GradleDslParser.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/parsers/JsonConfigParser.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/parsers/RubyDslParser.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/parsers/StarlarkParser.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/discovery/parsers/YamlConfigParser.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/AndroidEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/DjangoEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/EnhancementPack.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/EnhancementRegistry.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/FastAPIEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/GoGrpcEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/GoWebEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/LangChainEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/MLEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/NextjsEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/NodeServerEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/ReactEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/RustTokioEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/RustWebEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/SpringEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/SwiftIOSEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/VueEnhancement.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/detectFrameworks.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/enhancement/index.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/contracts.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/fileAst.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/fileFlow.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/fileSymbols.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/fileSyntaxEvidence.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/index.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/parserLanguage.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/facts/sourceLineRange.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/index.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/exportTable.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/heritageLinker.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/importBindingLinker.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/index.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/lexicalLinker.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/moduleAliases.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/moduleResolver.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/moduleTargets.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/core/linking/packageEntries.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/DaemonState.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/JobDisplaySnapshotContracts.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/JobProcessEventContracts.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/JobStore.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/ProjectRuntimeContracts.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/ResidentServiceContracts.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/RuntimeContracts.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/daemon/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/database.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "03"
+      ]
+    },
+    {
+      "path": "src/dimensions.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "10"
+      ]
+    },
+    {
+      "path": "src/domain/dimension/BaseDimensions.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/DimensionCatalogPayload.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/DimensionCopy.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/DimensionRegistry.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/DimensionSop.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/RecipeDimension.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/UnifiedDimension.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/dimension/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/evolution/EvolutionPolicy.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/index.ts",
+      "topicId": "01",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/FieldSpec.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/KnowledgeEntry.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/KnowledgeRepository.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/Lifecycle.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/RecipeRetrievalProfile.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/StyleGuide.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/UnifiedValidator.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/evidence-ledger/EvidenceLedgerContract.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/evidence-ledger/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/contentContract.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/depthContract.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/depthReview.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/dimensionCompletion.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/examples/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/failureModes.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/fields.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/gateRules.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/guidanceGenerator.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/pipelineEventPayloads.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/pipelineEvents.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/recipe-authoring-spec/styleWaiver.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/Constraints.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/Content.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/Quality.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/Reasoning.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/Relations.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/Stats.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/knowledge/values/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectContextContracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectContextMap.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectContextPresenterInput.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectContextRefIds.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectContextRefs.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectContextRelations.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/ProjectRelationGraphRefs.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/project-context/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/recipe-context/RecipeContextContracts.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/recipe-context/RecipeContextMap.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/recipe-context/RecipeContextRefs.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/recipe-context/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/similarity/RecipeSimilarity.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/snippet/Snippet.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/source-graph/SourceGraphContracts.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/domain/source-graph/index.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/enhancement.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "05"
+      ]
+    },
+    {
+      "path": "src/events.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "16"
+      ]
+    },
+    {
+      "path": "src/evolution.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "14"
+      ]
+    },
+    {
+      "path": "src/guard.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "13"
+      ]
+    },
+    {
+      "path": "src/host-agent-workflows.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "09"
+      ]
+    },
+    {
+      "path": "src/index.ts",
+      "topicId": "01",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/analysis/AnalysisEngineIdentity.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/analysis/CodeGraphNativeIndex.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/cache/CacheService.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/cache/UnifiedCacheAdapter.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/cache/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/config/ConfigLoader.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/config/Defaults.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/config/DiscovererPreferenceStore.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/config/Paths.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/config/TriggerSymbol.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/config/index.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/DatabaseConnection.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/PreparedStatementCache.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/SourceIndexDatabase.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/drizzle/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/drizzle/schema.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/001_initial_schema.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/004_evolution_proposals.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/005_recipe_source_refs.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/006_lifecycle_transition_events.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/007_evolution_type_simplification.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/008_recipe_warnings.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/009_knowledge_dimension_id.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/010_source_graph.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/011_guard_violations_attribution.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/013_git_diff_checkpoints.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/014_recipe_source_refs_content_fp.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/015_coverage_ledger.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/016_deep_mining_rounds_rescan_id.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/migrations/017_recipe_retrieval_profile.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/database/openAlembicDatabase.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/event/EventBus.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/event/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/index.ts",
+      "topicId": "01",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/CodeGraphGitInput.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/ProjectInputScope.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/ProjectInputSnapshot.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/ProjectInputView.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/ProjectSourceReader.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/WriteZone.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/io/index.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/logging/Logger.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/logging/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/report/ReportStore.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/report/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/signal/SignalAggregator.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/signal/SignalBridge.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/signal/SignalBus.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/signal/SignalTraceWriter.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/signal/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/ASTChunker.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/AsyncPersistence.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/BatchEmbedder.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/BinaryPersistence.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/Chunker.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/EmbeddingPort.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/HnswIndex.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/HnswVectorAdapter.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/IndexingPipeline.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/JsonVectorAdapter.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/OllamaEmbedProvider.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/ScalarQuantizer.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/TextChunkRanges.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/VectorMetadataFilter.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/VectorMigration.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/VectorStore.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/infrastructure/vector/index.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/io.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "02"
+      ]
+    },
+    {
+      "path": "src/knowledge.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "10"
+      ]
+    },
+    {
+      "path": "src/logging.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "16"
+      ]
+    },
+    {
+      "path": "src/memory.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "03"
+      ]
+    },
+    {
+      "path": "src/plans.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "09"
+      ]
+    },
+    {
+      "path": "src/production.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "15"
+      ]
+    },
+    {
+      "path": "src/project-context-capabilities.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "05"
+      ]
+    },
+    {
+      "path": "src/project-context.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "06"
+      ]
+    },
+    {
+      "path": "src/projectContextFoundation.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "08"
+      ]
+    },
+    {
+      "path": "src/recipe-context-capabilities.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "11"
+      ]
+    },
+    {
+      "path": "src/report.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "16"
+      ]
+    },
+    {
+      "path": "src/repositories.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "03"
+      ]
+    },
+    {
+      "path": "src/repository/base/RepositoryBase.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/base/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/bootstrap/BootstrapRepository.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/bootstrap/GenerateRepository.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/bootstrap/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/code/CodeEntityRepository.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/code/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/coverage/CoverageLedgerRepository.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/coverage/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/evolution/GitDiffCheckpointRepository.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/evolution/LifecycleEventRepository.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/evolution/ProposalRepository.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/evolution/WarningRepository.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/evolution/index.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/guard/GuardViolationRepository.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/guard/index.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/knowledge/KnowledgeEdgeRepository.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/knowledge/KnowledgeFileStore.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/knowledge/KnowledgeRepositoryImpl.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/knowledge/KnowledgeUnitOfWork.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/knowledge/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/memory/MemoryRepository.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/memory/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/search/KnowledgeSearchProjection.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/search/SearchRepoAdapter.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/search/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/session/SessionRepository.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/session/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/source-graph/SourceGraphRepository.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/source-graph/index.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/sourceref/RecipeSourceRefRepository.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/sourceref/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/sync/SyncRepoAdapter.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/sync/index.ts",
+      "topicId": "03",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/token/TokenUsageStore.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/repository/token/index.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/search.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "11"
+      ]
+    },
+    {
+      "path": "src/service/bootstrap/GenerateDedup.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/bootstrap/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/EnhancementGuardRules.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/ExclusionManager.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/GuardCheckEngine.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/GuardCodeChecks.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/GuardCrossFileChecks.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/GuardFeedbackLoop.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/GuardPatternUtils.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/GuardService.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/RuleLearner.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/UncertaintyCollector.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/ViolationsStore.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/guard/index.ts",
+      "topicId": "13",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/index.ts",
+      "topicId": "01",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/ConfidenceRouter.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/FsGraphRefVerifier.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/FsSourceRefResolver.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/KnowledgeFileWriter.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/KnowledgeGraphService.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/KnowledgeService.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/KnowledgeServiceDependencies.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/KnowledgeSyncService.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/KnowledgeUpdateSchema.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/RecipeExtractor.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/RecipeFreshnessService.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/RecipePathRewriter.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/RecipeProductionGateway.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/RecipeRetrieval.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/SourceRefReconciler.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/driftClassifier.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/persistKnowledgeUpdate.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/projectKnowledgeQualityFields.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/candidate/CandidateAggregator.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/candidate/CandidateValidationFacade.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/candidate/SimilarityService.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/candidate/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/quality/FeedbackCollector.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/quality/QualityScorer.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/quality/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/recipe/RecipeCandidateValidator.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/recipe/RecipeParser.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/knowledge/validation/recipe/index.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/facts/collectContracts.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/facts/collectProjectContext.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/facts/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/facts/projectInfoTree.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/facts/projectSourceFacts.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/facts/transientTransport.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/intent/coldStartProductionPlan.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/intent/contracts.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/intent/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/intent/planAuthoringSpec.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/plan/intent/planIntent.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/DurableSemanticDispositionReviewAuthority.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/PrivateCorpusRevisionResolver.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/ProductionActorIdentity.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/ProductionPersistenceContracts.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/SemanticDispositionReviewExecution.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/StrictAnalysisContracts.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/StrictFactExecution.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/StrictFactExecutionReceipt.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/production/StrictProductionAuthority.ts",
+      "topicId": "15",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/ProjectContextService.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/analysis/FileAnalysisSession.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/analysis/SymbolExtractor.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/analysis/codeGraphSession.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/analysis/importBindingCalls.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/analysis/strictAnalysisBackend.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/anchorRange/anchorRange.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/anchorRange/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/anchorRange/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/architectureIntelligence/architectureIntelligence.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/architectureIntelligence/contracts.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/architectureIntelligence/index.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/capabilities.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/dimensionPlanning/contracts.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/dimensionPlanning/dimensionPlanning.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/dimensionPlanning/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileFlow/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileFlow/fileFlow.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileFlow/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileFlow/moduleFile.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileFlow/normalize.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileSymbols/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileSymbols/fileSymbols.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileSymbols/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileSymbols/naming.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/fileSymbols/normalize.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/canonical.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/capture.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/consumerPort.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/consumerReceipts.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/contracts.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/dependencyOwnership.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/frozen.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/index.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/inputClosure.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/nodePorts.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/ownersV2.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/readiness.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/requestV2.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/scope.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/foundation/store.ts",
+      "topicId": "08",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/dispatch.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/execution.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/projectContext.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/projection.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/pruning.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/redaction.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/request.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/interface/response.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/map/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/map/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/map/map.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/module/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/module/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/module/module.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/moduleLayers/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/moduleLayers/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/moduleLayers/moduleLayers.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/relations/ProjectRelations.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/relations/index.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/relations/projection.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/repo/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/repo/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/repo/repo.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/fileFlow-moduleLayers/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/fileFlow-moduleLayers/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/fileSymbols-fileFlow/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/fileSymbols-fileFlow/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/map-repo/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/map-repo/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/map-repo/modulePartition.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/module-map/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/module-map/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/moduleLayers-module/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/moduleLayers-module/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/refs.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/repo-space/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/repo-space/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/sourceConfiguration.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/sourceSlice-fileSymbols/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/shared/sourceSlice-fileSymbols/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/sourceSlice/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/sourceSlice/fileAccess.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/sourceSlice/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/sourceSlice/range.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/sourceSlice/sourceSlice.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/space/contracts.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/space/index.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/project-context/space/space.ts",
+      "topicId": "06",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/RecipeContextService.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/adapters/fromCore.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/adapters/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/adapters/knowledgeReadPort.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/adapters/searchPort.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/adapters/sourceRefPort.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/adapters/vectorPort.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/detail.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/list.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/payload.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/prime.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/relations.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/search.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/shared.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/handlers/sourceRefs.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/contracts.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/diagnostics.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/dispatch.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/recipeContext.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/refs.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/request.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/interface/response.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/recipe-context/ports.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/CoarseRanker.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/FieldWeightedScorer.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/HybridRetriever.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/KnowledgeRetrieval.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/MultiSignalRanker.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/SearchDocumentProjection.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/SearchEngine.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/SearchTypes.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/contextBoost.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/index.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/search/tokenizer.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphExternalEdges.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphFileAnalyzer.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphIndexIdentity.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphIndexOptions.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphIndexer.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphInventory.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphLifecycle.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphLinker.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphModuleAccess.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphQueryService.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphService.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/SourceGraphSymbols.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/source-graph/index.ts",
+      "topicId": "07",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/ConsolidationAdvisor.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/ContentImpactAnalyzer.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/ContentPatcher.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/DecayDetector.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/EnhancementSuggester.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/GitDiffCheckpointService.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/LifecycleStateMachine.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/ProposalExecutor.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/ProposalGateway.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/RecipeImpactPlanner.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/RedundancyAnalyzer.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/StagingManager.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/sustain/index.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/EmbedProviderSelector.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/EmbeddingPort.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/EnrichmentTypes.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/RecipeRegionVectorIndex.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/RecipeVectorGeneration.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/SyncCoordinator.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/VectorAvailability.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/VectorIndexPorts.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/VectorService.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/service/vector/index.ts",
+      "topicId": "12",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/AlembicManagedBlock.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/BuildManifest.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/CoreContractSpine.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/DiagnosticCodes.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/FailureTaxonomy.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/FieldTaxonomy.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/LanguageProfiles.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/LanguageService.ts",
+      "topicId": "04",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/OutputBudget.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/PathGuard.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/ProjectMarkers.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/ProjectRegistry.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/ProjectScope.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/SourceScanExclusions.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/SwiftPackageManifest.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/TargetClassifier.ts",
+      "topicId": "05",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/TimerRegistry.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/WeightedRrfAccumulator.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/WorkspaceResolver.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/WorkspaceSettingsStore.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/canonicalJson.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/concurrency.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/constants.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/contentHash.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/developerIdentity.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/diffParser.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/errors/BaseError.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/errors/index.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/folderNames.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/gitBlob.ts",
+      "topicId": "14",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/index.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/isOwnDevRepo.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/lifecycle.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/markdownUtils.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/packageRoot.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/recipeTokens.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/resolveProjectRoot.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/schemas/common.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/schemas/config.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/schemas/index.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/shutdown.ts",
+      "topicId": "16",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/similarity.ts",
+      "topicId": "11",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/sourceContracts.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/sourceRefPath.ts",
+      "topicId": "10",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/testMode.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/tokenUtils.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/shared/utils/common.ts",
+      "topicId": "02",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/sustain.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "14"
+      ]
+    },
+    {
+      "path": "src/test-fixtures.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "17"
+      ]
+    },
+    {
+      "path": "src/types/KnowledgeWire.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/ProjectSnapshot.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/ReactiveEvolution.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/SnapshotViews.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/ast.d.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/evolution.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/graph-shared.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/index.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/planningViews.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/projectSourceReader.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/recipeAuthoringSpec.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/search-wire.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/types/workflows.ts",
+      "topicId": "17",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/vector.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "12"
+      ]
+    },
+    {
+      "path": "src/workflows/cold-start/ColdStartIntent.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/cold-start/ColdStartPlan.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/cold-start/ColdStartPresenters.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/cold-start/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/knowledge-rescan/KnowledgeRescanIntent.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/knowledge-rescan/KnowledgeRescanPresenters.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/knowledge-rescan/KnowledgeRescanWorkflowPlan.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/knowledge-rescan/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/ColdStartIntent.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/ColdStartPlan.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/ColdStartPresenters.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/KnowledgeRescanIntent.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/KnowledgeRescanPresenters.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/KnowledgeRescanWorkflowPlan.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/ProjectIndexPlan.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/project-index/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/shared/ProjectAnalysisPlanTypes.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/shared/WorkflowEnvelope.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/shared/WorkflowTypes.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/shared/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/RecipeSnapshotTypes.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/WorkflowCleanupPolicies.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/coverage/CoverageLedgerAdvisor.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/coverage/CoverageLedgerBuilder.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/coverage/CoverageLedgerWrite.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/coverage/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/coverage/shared/coveragePathMatching.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/EvidenceStarterBuilder.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/HostAgentAnalysisPacketBuilder.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/MissionBriefingBuilder.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/MissionBriefingSupport.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/ProjectContextBriefingFacts.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/analysis-packet/ProjectContextNormalize.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/analysis-packet/Scoring.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/analysis-packet/StableIdentity.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/analysis-packet/Types.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/analysis-packet/UnitProgress.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/briefing/analysis-packet/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/delivery/ProjectSkillDeliveryContracts.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/session/CompletenessCritic.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/session/GenerateSession.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/session/HostAgentMissionWorkflow.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/session/HostAgentSubmissionTracker.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/session/MiningSessionStore.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/host-agent/session/SessionSupport.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/DimensionCheckpoint.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/FileDiffPlanner.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/FileDiffSnapshotStore.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/WorkflowReportHistoryStore.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/WorkflowReportTypes.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/WorkflowReportWriter.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/WorkflowResultPersistence.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/WorkflowSnapshotStore.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/persistence/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/dimensions/BaseDimensions.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/dimensions/GenerateTerminalToolset.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/dimensions/TierScheduler.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/dimensions/generateDimensionConfigs.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/dimensions/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/knowledge/EvolutionPrescreen.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/knowledge/KnowledgeRescanPlanBuilder.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/knowledge/KnowledgeRescanPlanner.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/knowledge/RescanEvidenceProjectors.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/planning/knowledge/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/presentation/LanguageInference.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workflows/surfaces/presentation/index.ts",
+      "topicId": "09",
+      "referencedTopics": []
+    },
+    {
+      "path": "src/workspace.ts",
+      "topicId": "01",
+      "referencedTopics": [
+        "02"
+      ]
+    }
+  ]
+}

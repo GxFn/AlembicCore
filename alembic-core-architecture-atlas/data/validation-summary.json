@@ -1,0 +1,108 @@
+{
+  "inputObservationDigest": "70565a97b855fbe1d216ff7d0f8afee3dca64aee42ac02a69df5f12ef1055817",
+  "viewDigest": "d153d32616c3826a53e8f9d928fc2cd773c75d47c38318b57300e73ea9702256",
+  "baselineCommit": "35302912ac2efaa6a1bc65fdc112a16da75d845f",
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "scope": "静态来源快照；不代表产品测试重跑或实时工作树状态",
+  "sourceCount": 644,
+  "fileCount": 944,
+  "ownershipCount": 665,
+  "apiCount": 68,
+  "documentCount": 17,
+  "atlasVersion": "0.2.0",
+  "journeyCount": 4,
+  "objectCount": 8,
+  "runCount": 5,
+  "moduleCount": 119,
+  "failureCount": 116,
+  "diagramCount": 70,
+  "documents": [
+    {
+      "path": "maps/01-overall-package-boundaries/README.md",
+      "topicId": "01",
+      "status": "matched"
+    },
+    {
+      "path": "maps/02-workspace-config-io/README.md",
+      "topicId": "02",
+      "status": "matched"
+    },
+    {
+      "path": "maps/03-database-and-repositories/README.md",
+      "topicId": "03",
+      "status": "matched"
+    },
+    {
+      "path": "maps/04-syntax-facts-linking/README.md",
+      "topicId": "04",
+      "status": "matched"
+    },
+    {
+      "path": "maps/05-discovery-and-intelligence/README.md",
+      "topicId": "05",
+      "status": "matched"
+    },
+    {
+      "path": "maps/06-project-context/README.md",
+      "topicId": "06",
+      "status": "matched"
+    },
+    {
+      "path": "maps/07-source-graph/README.md",
+      "topicId": "07",
+      "status": "matched"
+    },
+    {
+      "path": "maps/08-certified-project-facts/README.md",
+      "topicId": "08",
+      "status": "matched"
+    },
+    {
+      "path": "maps/09-planning-host-workflows/README.md",
+      "topicId": "09",
+      "status": "matched"
+    },
+    {
+      "path": "maps/10-knowledge-authoring-persistence/README.md",
+      "topicId": "10",
+      "status": "matched"
+    },
+    {
+      "path": "maps/11-retrieval-recipe-context/README.md",
+      "topicId": "11",
+      "status": "matched"
+    },
+    {
+      "path": "maps/12-vector-generations/README.md",
+      "topicId": "12",
+      "status": "matched"
+    },
+    {
+      "path": "maps/13-guard-feedback/README.md",
+      "topicId": "13",
+      "status": "matched"
+    },
+    {
+      "path": "maps/14-sustain-proposals/README.md",
+      "topicId": "14",
+      "status": "matched"
+    },
+    {
+      "path": "maps/15-strict-production-authority/README.md",
+      "topicId": "15",
+      "status": "matched"
+    },
+    {
+      "path": "maps/16-runtime-events-lifecycle/README.md",
+      "topicId": "16",
+      "status": "matched"
+    },
+    {
+      "path": "maps/17-contracts-tooling-verification/README.md",
+      "topicId": "17",
+      "status": "matched"
+    }
+  ],
+  "originalAvailability": "matched",
+  "checkedAt": "2026-10-23T13:49:39.595Z"
+}

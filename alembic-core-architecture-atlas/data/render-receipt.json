@@ -1,0 +1,789 @@
+{
+  "renderer": "11.17.2",
+  "configDigest": "b403c5af96f6d11e5fc875c5adc4af2643f7396ca61313a374b18fd48c391695",
+  "harnessDigest": "1df539815a9182ba417c6b3b6f9583775b75b6b1ef48d938d57acb6aacdd73bb",
+  "diagrams": [
+    {
+      "id": "certified-capture-freeze",
+      "digest": "9897d2df2d36776a550e5c5062b05bf16559d9fa7a9f97c36e3566cd30942207"
+    },
+    {
+      "id": "certified-durable-consumption",
+      "digest": "1f530f1864c4f5d864869027141a670401566943dc7764f3e31ff1e82b82750c"
+    },
+    {
+      "id": "consumer-import-verification",
+      "digest": "715c6a25e7259bfd194bac8c2f329fd79cd0407c67decd5072a5a39cab386f10"
+    },
+    {
+      "id": "core-package-facades",
+      "digest": "93da2c16d3bf13a86b574332d4bf80bd0aa1d4a16fae3ea53dbeb011304c168d"
+    },
+    {
+      "id": "database-open-and-bind",
+      "digest": "6b1ec025cfd2c89f2cc1f6b1d6170c3a0ef45475375a238d90825b81af485f0a"
+    },
+    {
+      "id": "dependencies-01",
+      "digest": "7c5afe0a323486bcbea06f5d6bc3ea398090fe9949678f1c056b3fe289a51950"
+    },
+    {
+      "id": "dependencies-02",
+      "digest": "5e9f7e9beda7495712c1ec459b1a1f1498475016c65df02dcf3b6e87a7888036"
+    },
+    {
+      "id": "dependencies-03",
+      "digest": "5e4b30f03ffc4525ba7ecee7aa22844d6c6313f88725ed56f5f6198793b76bbe"
+    },
+    {
+      "id": "dependencies-04",
+      "digest": "060aa4bb6274acd96dab7b59b7f58435175d2d2418147ce598710bd62d73cd3b"
+    },
+    {
+      "id": "dependencies-05",
+      "digest": "3f494f0621fbd69e9d5ec7d332ed43893ced1fce80cfd5f68918fb2064111050"
+    },
+    {
+      "id": "dependencies-06",
+      "digest": "a117e20dfc7de9d2d962cbfee7b068f2dfda4e1ba70010bc97d9c3e47b16a906"
+    },
+    {
+      "id": "dependencies-07",
+      "digest": "5809cb1e00e7024c6d912cd76a747423491b1ef7fe72801cf430926528cf9787"
+    },
+    {
+      "id": "dependencies-08",
+      "digest": "87f249eb8af7eae9875c06874f48047ffce0bd515776b82f5b1ea93ef6a33ec8"
+    },
+    {
+      "id": "dependencies-09",
+      "digest": "fa153a2de98c872ea6bc08d1e4eca239a575d9b62fc69734b1ff46ff39b70ea7"
+    },
+    {
+      "id": "dependencies-10",
+      "digest": "45903cb1a73745457b183b0861cdf07a4d1c41de86b9f99c98852a25f1ab0b7d"
+    },
+    {
+      "id": "dependencies-11",
+      "digest": "e2867e69f5dd6dc7d80056e6cf13d4da0b8ecb6f107bd490cb6c1215571d82fe"
+    },
+    {
+      "id": "dependencies-12",
+      "digest": "1cc3e68d2ef0866749c0fbe7c3e9cc8c1ad1948c3cc2f0fb88b6200bf0c37583"
+    },
+    {
+      "id": "dependencies-13",
+      "digest": "10a87c239edb76faeba691ef1348b5f93290588cbbf893d482ce30bd46f6dd08"
+    },
+    {
+      "id": "dependencies-14",
+      "digest": "8c0cf8999332d8b1a93176eab73c2c89fef879bb23cdf1e88d76b7c7c67b188d"
+    },
+    {
+      "id": "dependencies-15",
+      "digest": "79d942ffd97af281ea65db6c9d4c7e1cab119ba899bfef7e81dd53de9925ee19"
+    },
+    {
+      "id": "dependencies-16",
+      "digest": "af71c762003dcba71c8ca225d9647c38e036c4ee05480e42698899e1031cf6f3"
+    },
+    {
+      "id": "dependencies-17",
+      "digest": "f588996bbce95126b0e778ea623bcf7dd5a02fb451781ea150a568cd8649d011"
+    },
+    {
+      "id": "discoverer-session-reader-and-cancel",
+      "digest": "cb74a8149753d4e4b0d44ee768333741f3b57fef6429186cb5eba6d38ea45b6a"
+    },
+    {
+      "id": "discovery-choice",
+      "digest": "97e47b78bed1974d0b7e461d0c83bb6e21e8236532b3e50b965e88e63165a567"
+    },
+    {
+      "id": "events-signals-waiting",
+      "digest": "d72b3a23cf4830eec86d2108e4754e809e4a21c2bc1d08f0a921e8a365ccb08c"
+    },
+    {
+      "id": "foundation-lease-state-and-replay",
+      "digest": "2844d622dd9c71ac3e4ad64fec0f374415baecc9ffdf628d688748ab9b381193"
+    },
+    {
+      "id": "framework-to-rules",
+      "digest": "be95e75567e39b4369a433c68f4037b457f58522369536af3f6010be2309e272"
+    },
+    {
+      "id": "guard-audit-feedback",
+      "digest": "c6890c0fcdd1ba94789f201e6d3cd2eb7f35bce53dd3ec49ee710db2557f4902"
+    },
+    {
+      "id": "hw-checkpoints",
+      "digest": "9f4515bcac789c0bc2bf482b3485777df9034e5288b56e2186aec075d1178bd5"
+    },
+    {
+      "id": "hw-packet",
+      "digest": "1c904fc1cb7820a8c8a632031a485675b67b5ec6573f412580bd82da57481c3d"
+    },
+    {
+      "id": "hw-plan-modes",
+      "digest": "38153986de40386566b8801e65378d781325db642e79be8d009736a3581d5ed0"
+    },
+    {
+      "id": "hw-session",
+      "digest": "f8647b9eab1af84fc0fcbf7412fd1c04f4bb918fb5bfe53d35d01c6c135139b9"
+    },
+    {
+      "id": "import-binding-resolution",
+      "digest": "342be1fc98323f0f36b43765fb702ac2cde2e3c14e3354ca1962b86de0961f02"
+    },
+    {
+      "id": "job-terminal-protection",
+      "digest": "4342418440bea0b0dc41470bf3b74e7a950aeafdc72fce7724a956d72f428aa7"
+    },
+    {
+      "id": "knowledge-create",
+      "digest": "41af02ef2b329b6bbacd05b41afe723558a898b81cdde762f36133d0c7376386"
+    },
+    {
+      "id": "knowledge-recovery",
+      "digest": "51c33a864ce22d62787c8f3b312a83d600d80c4f2c2a1781968c476e4f16c35c"
+    },
+    {
+      "id": "knowledge-uow-partial-compensation",
+      "digest": "a74f4464ff84d89f8d422513e915ab136a76a0bfc62a1a8ab9cb231743c9c8b8"
+    },
+    {
+      "id": "migration-replay-state",
+      "digest": "14d1259a7467aaa00c6c01d450b2c073dbe298d63d78759a8af62c54674bad35"
+    },
+    {
+      "id": "pc-handler-facts",
+      "digest": "1ed62632d4f92bbd35e899f72ddb25902027954293d0e41236018f58c25eb45c"
+    },
+    {
+      "id": "pc-request",
+      "digest": "4159e21c35c627bf2da1ee14b47bdc7c177a8335e4f4b8800ee387febbcf4cb5"
+    },
+    {
+      "id": "pc-session",
+      "digest": "2f70107f979a4951e4e51840eb9fd6d82fc1f53b42b881aaf5983288ccf19179"
+    },
+    {
+      "id": "proposal-update-and-failure",
+      "digest": "3409ca8d9be4ffbd5a7fe4068e07299ca1cc8e9e04f252eaf865b1a72b76fb22"
+    },
+    {
+      "id": "r3-authoring-and-sync-effects",
+      "digest": "8a8dc211e05089fbbdfcc33098de3c312be3e00896f37728e17ee512c473568b"
+    },
+    {
+      "id": "r3-core-recovery-owners",
+      "digest": "e1913f0857c729b027976f2c90424d38e4553f0e490cfd271965362115528a5e"
+    },
+    {
+      "id": "r3-file-index-and-wal",
+      "digest": "754581228a278598e7160dadd7ffb6208b2f68c38e92be1cbea85a04dc289bb3"
+    },
+    {
+      "id": "r3-guard-uncertainty",
+      "digest": "c99506ac8c01423d6459ea5a5b72dd9d04307e4f12c23db6ef673554d79f5fe8"
+    },
+    {
+      "id": "r3-release-readiness-gates",
+      "digest": "a20dc29d576df640a84a7992e564ed64149bdc92025a26d0abb3da1f0331c85b"
+    },
+    {
+      "id": "r3-retrieval-stop-and-degrade",
+      "digest": "99e167f20fa978892abdcb3ab4a86880704e9acbf24c0035ec9495beb14657de"
+    },
+    {
+      "id": "r3-shutdown-resource-ownership",
+      "digest": "931644bfc8a49dcd6a14960212d196b16309cab18fa57faadd481b7248a557b3"
+    },
+    {
+      "id": "r3-staging-two-phase-effects",
+      "digest": "c63b0778b61952ef5be7d9808542b4c82ceb82cb51a48f6f869c8b5054fc7be5"
+    },
+    {
+      "id": "retrieval-live-truth",
+      "digest": "221ca6298c37a50b60b411aa9fac18a8b4ecfa703baacaf9cdae5268b3b9c19c"
+    },
+    {
+      "id": "sg-build",
+      "digest": "e4e716de8729bc06fa4a76e5aa2ff5a8ab37efe3b07c19fac780ba276dd95f3a"
+    },
+    {
+      "id": "sg-evidence",
+      "digest": "40dbedc6514a14d6644544d8a558a6ff43a99fd3b16de544f0dcde24fc3d9698"
+    },
+    {
+      "id": "sg-partial-conservation",
+      "digest": "9f27cdcc0b31a194f67b2f9aac8dbd940f3133355168fe9cd6f60ce2d0db3c9a"
+    },
+    {
+      "id": "sg-refresh",
+      "digest": "8e5ce892509fab0a192b6931ef655a1736bd10d537b72352cebba975ae8062bc"
+    },
+    {
+      "id": "strict-admission-persistence",
+      "digest": "3094e5be209f5d38f2561c4ee9a02af1ea6d99e6917f6a395c64a8b245d28066"
+    },
+    {
+      "id": "strict-authority",
+      "digest": "cb8b6aa145bafe734a0212945fb4adf93ba40959807678798ce7b98da78198cd"
+    },
+    {
+      "id": "strict-durable-review",
+      "digest": "0bcf1a347fa29ee1fe4be21dd38579462e8b92629b1a571d0f4a63dc8673ca6e"
+    },
+    {
+      "id": "strict-facts",
+      "digest": "cf95d254fc8bd12e74203276e73514125c5d3a35a81e1ef5dccb37b199d918da"
+    },
+    {
+      "id": "strict-final-serving",
+      "digest": "1b348b54fecdb208d52582f47aa2bd53f3b4993745904158f27bc5160b2beaa4"
+    },
+    {
+      "id": "strict-induction-falsification-formation",
+      "digest": "f63cfdcbe0ac77ce70fdc559aeaa62522ccb647d49b9829ca0c7e41ce05eec3a"
+    },
+    {
+      "id": "strict-plan-compilation",
+      "digest": "b1e600570d6cf2dcc70a32f9e5dd438a64dcbdc6edb9db3014563c908f2bccf3"
+    },
+    {
+      "id": "strict-population-cluster-formation",
+      "digest": "144725ae1c4e3b69bcbb2834fd6ac4319c7bebd31a2440fa126c3498cfdd9500"
+    },
+    {
+      "id": "strict-recovery",
+      "digest": "2b8dd1c3350126dde6b33c12506fdbb733347436d9b61135b83ab98090c110e2"
+    },
+    {
+      "id": "syntax-evidence-and-tree",
+      "digest": "d0fb7d9834ac60eba9ad5e48390f213c80ffe8bb77ff52bbdcba8d811f223d79"
+    },
+    {
+      "id": "syntax-partial-propagation",
+      "digest": "7fe2e74d513d8ff49586ddaaa74213070d619faea97cd671a68148d8fa3c794c"
+    },
+    {
+      "id": "vector-generation-visibility",
+      "digest": "93d88fd9eac1ec7105733e88768b7e76bde880edc24c86f7d1b902221cebbd7d"
+    },
+    {
+      "id": "verification-authority-inputs",
+      "digest": "9876a4dd19754abb58a69f07cee01abd008742b82fe75444d54bfdaa1aec63c5"
+    },
+    {
+      "id": "workspace-write-coordinate",
+      "digest": "c073ba18f7a870287a0887ac3a0d628731bc391929e233ffaaa98298ed128331"
+    },
+    {
+      "id": "writezone-cross-device-move",
+      "digest": "6107fca6386d836cb5de58fc4c424e7769f394f3343c2b32ab8b74de20449449"
+    }
+  ],
+  "observations": [
+    {
+      "id": "core-package-facades",
+      "svgBytes": 17962,
+      "width": 690.03125,
+      "height": 187,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-core-recovery-owners",
+      "svgBytes": 19122,
+      "width": 828.87109375,
+      "height": 204.60000610351562,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-01",
+      "svgBytes": 18400,
+      "width": 553.2578125,
+      "height": 326.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "workspace-write-coordinate",
+      "svgBytes": 21155,
+      "width": 394,
+      "height": 553,
+      "missingLabels": []
+    },
+    {
+      "id": "writezone-cross-device-move",
+      "svgBytes": 19424,
+      "width": 460.765625,
+      "height": 431,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-02",
+      "svgBytes": 30438,
+      "width": 998.552734375,
+      "height": 710.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "database-open-and-bind",
+      "svgBytes": 22044,
+      "width": 515.26171875,
+      "height": 448.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "migration-replay-state",
+      "svgBytes": 17679,
+      "width": 270.3203125,
+      "height": 431,
+      "missingLabels": []
+    },
+    {
+      "id": "knowledge-uow-partial-compensation",
+      "svgBytes": 21448,
+      "width": 575.34375,
+      "height": 448.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-03",
+      "svgBytes": 34890,
+      "width": 1245.7890625,
+      "height": 483.79998779296875,
+      "missingLabels": []
+    },
+    {
+      "id": "syntax-evidence-and-tree",
+      "svgBytes": 18885,
+      "width": 248.8828125,
+      "height": 448.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "import-binding-resolution",
+      "svgBytes": 18447,
+      "width": 267.3515625,
+      "height": 466.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "syntax-partial-propagation",
+      "svgBytes": 22225,
+      "width": 559.2578125,
+      "height": 605.7999877929688,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-04",
+      "svgBytes": 32071,
+      "width": 831.57421875,
+      "height": 692.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "discovery-choice",
+      "svgBytes": 18338,
+      "width": 479.6953125,
+      "height": 309,
+      "missingLabels": []
+    },
+    {
+      "id": "framework-to-rules",
+      "svgBytes": 20551,
+      "width": 777.7109375,
+      "height": 344.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "discoverer-session-reader-and-cancel",
+      "svgBytes": 21744,
+      "width": 519.96484375,
+      "height": 588.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-05",
+      "svgBytes": 22937,
+      "width": 868.93359375,
+      "height": 361.8000183105469,
+      "missingLabels": []
+    },
+    {
+      "id": "pc-request",
+      "svgBytes": 20130,
+      "width": 238.1171875,
+      "height": 553,
+      "missingLabels": []
+    },
+    {
+      "id": "pc-session",
+      "svgBytes": 26000,
+      "width": 751.1640625,
+      "height": 623.3999633789062,
+      "missingLabels": []
+    },
+    {
+      "id": "pc-handler-facts",
+      "svgBytes": 22574,
+      "width": 846.056640625,
+      "height": 326.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-06",
+      "svgBytes": 33781,
+      "width": 945.18359375,
+      "height": 727.7999877929688,
+      "missingLabels": []
+    },
+    {
+      "id": "sg-build",
+      "svgBytes": 20598,
+      "width": 224.8671875,
+      "height": 675,
+      "missingLabels": []
+    },
+    {
+      "id": "sg-refresh",
+      "svgBytes": 20326,
+      "width": 598.6015625,
+      "height": 431,
+      "missingLabels": []
+    },
+    {
+      "id": "sg-evidence",
+      "svgBytes": 19532,
+      "width": 260.7578125,
+      "height": 553,
+      "missingLabels": []
+    },
+    {
+      "id": "sg-partial-conservation",
+      "svgBytes": 24363,
+      "width": 768.5234375,
+      "height": 588.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-07",
+      "svgBytes": 37703,
+      "width": 1220.0390625,
+      "height": 780.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "certified-capture-freeze",
+      "svgBytes": 22746,
+      "width": 722.6328125,
+      "height": 483.8000183105469,
+      "missingLabels": []
+    },
+    {
+      "id": "certified-durable-consumption",
+      "svgBytes": 23585,
+      "width": 783.875,
+      "height": 379.3999938964844,
+      "missingLabels": []
+    },
+    {
+      "id": "foundation-lease-state-and-replay",
+      "svgBytes": 22191,
+      "width": 778.3515625,
+      "height": 467.45001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-08",
+      "svgBytes": 30184,
+      "width": 684.826171875,
+      "height": 692.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "hw-packet",
+      "svgBytes": 19808,
+      "width": 240.15625,
+      "height": 570.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "hw-session",
+      "svgBytes": 19253,
+      "width": 263.078125,
+      "height": 553,
+      "missingLabels": []
+    },
+    {
+      "id": "hw-checkpoints",
+      "svgBytes": 19450,
+      "width": 522.6875,
+      "height": 431,
+      "missingLabels": []
+    },
+    {
+      "id": "hw-plan-modes",
+      "svgBytes": 25479,
+      "width": 796.09375,
+      "height": 501.3999938964844,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-plan-compilation",
+      "svgBytes": 27303,
+      "width": 894.47265625,
+      "height": 727.7999877929688,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-09",
+      "svgBytes": 18430,
+      "width": 580.23046875,
+      "height": 222.19998168945312,
+      "missingLabels": []
+    },
+    {
+      "id": "knowledge-create",
+      "svgBytes": 23615,
+      "width": 859.13671875,
+      "height": 397,
+      "missingLabels": []
+    },
+    {
+      "id": "knowledge-recovery",
+      "svgBytes": 24536,
+      "width": 438.65625,
+      "height": 780.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-authoring-and-sync-effects",
+      "svgBytes": 23029,
+      "width": 1380.40625,
+      "height": 187,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-10",
+      "svgBytes": 28961,
+      "width": 1436.255859375,
+      "height": 361.8000183105469,
+      "missingLabels": []
+    },
+    {
+      "id": "retrieval-live-truth",
+      "svgBytes": 23321,
+      "width": 1146.865234375,
+      "height": 361.8000183105469,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-retrieval-stop-and-degrade",
+      "svgBytes": 23072,
+      "width": 517.076171875,
+      "height": 570.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-11",
+      "svgBytes": 20790,
+      "width": 621.81640625,
+      "height": 344.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "vector-generation-visibility",
+      "svgBytes": 26398,
+      "width": 642.2109375,
+      "height": 727.7999877929688,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-file-index-and-wal",
+      "svgBytes": 24381,
+      "width": 685.837890625,
+      "height": 570.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-12",
+      "svgBytes": 39695,
+      "width": 1702.298828125,
+      "height": 605.7999877929688,
+      "missingLabels": []
+    },
+    {
+      "id": "guard-audit-feedback",
+      "svgBytes": 23396,
+      "width": 1074.818359375,
+      "height": 344.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-guard-uncertainty",
+      "svgBytes": 22404,
+      "width": 655.4140625,
+      "height": 466.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-13",
+      "svgBytes": 38111,
+      "width": 1578.74609375,
+      "height": 466.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "proposal-update-and-failure",
+      "svgBytes": 24093,
+      "width": 548.947265625,
+      "height": 641,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-staging-two-phase-effects",
+      "svgBytes": 24679,
+      "width": 699.48046875,
+      "height": 588.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-14",
+      "svgBytes": 37273,
+      "width": 1788.80859375,
+      "height": 483.8000183105469,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-facts",
+      "svgBytes": 21424,
+      "width": 463.7109375,
+      "height": 570.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-authority",
+      "svgBytes": 24202,
+      "width": 483.86328125,
+      "height": 710.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-recovery",
+      "svgBytes": 23870,
+      "width": 986.171875,
+      "height": 326.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-admission-persistence",
+      "svgBytes": 29491,
+      "width": 571.55078125,
+      "height": 1181.7999267578125,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-final-serving",
+      "svgBytes": 25245,
+      "width": 269.5546875,
+      "height": 955.3999633789062,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-durable-review",
+      "svgBytes": 26394,
+      "width": 703.103515625,
+      "height": 763,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-population-cluster-formation",
+      "svgBytes": 26585,
+      "width": 488.22265625,
+      "height": 920.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-induction-falsification-formation",
+      "svgBytes": 30798,
+      "width": 894.875,
+      "height": 798.199951171875,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-15",
+      "svgBytes": 40046,
+      "width": 1268.4921875,
+      "height": 798.199951171875,
+      "missingLabels": []
+    },
+    {
+      "id": "job-terminal-protection",
+      "svgBytes": 23298,
+      "width": 664.6640625,
+      "height": 571.8499755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "events-signals-waiting",
+      "svgBytes": 19944,
+      "width": 417.5546875,
+      "height": 466.20001220703125,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-shutdown-resource-ownership",
+      "svgBytes": 21184,
+      "width": 531.869140625,
+      "height": 431,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-16",
+      "svgBytes": 24408,
+      "width": 1144.68359375,
+      "height": 326.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "verification-authority-inputs",
+      "svgBytes": 22648,
+      "width": 713.6015625,
+      "height": 448.6000061035156,
+      "missingLabels": []
+    },
+    {
+      "id": "consumer-import-verification",
+      "svgBytes": 19305,
+      "width": 793.5,
+      "height": 309,
+      "missingLabels": []
+    },
+    {
+      "id": "r3-release-readiness-gates",
+      "svgBytes": 23462,
+      "width": 623.44921875,
+      "height": 588.2000122070312,
+      "missingLabels": []
+    },
+    {
+      "id": "dependencies-17",
+      "svgBytes": 15474,
+      "width": 274.0703125,
+      "height": 204.60000610351562,
+      "missingLabels": []
+    }
+  ],
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "theme": "light",
+  "observedAt": "2026-10-23T14:12:42.112Z",
+  "checks": {
+    "htmlSanitization": true
+  }
+}

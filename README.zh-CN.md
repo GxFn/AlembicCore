@@ -2,6 +2,8 @@
 
 [English](./README.md) | **简体中文**
 
+架构阅读入口：[AlembicCore 架构图谱](alembic-core-architecture-atlas/README.md)，提供独立本地阅读器、源码关系与逐边测试依据。
+
 `@alembic/core` 是 Alembic 运行时家族共享的、无头（headless）、确定性的知识内核。
 它承载所有 Alembic 宿主共同依赖的模型、持久化、分析、搜索与 workflow 契约——
 并且刻意不包含任何宿主形态的能力：没有 Agent 运行时、没有工具系统、没有

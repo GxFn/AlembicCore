@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v03-2026-10-23T13-41-26-238Z/observations.json",
+  "observationsSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "id": "V03",
+  "title": "认证工件与租约：中断后同身份重放",
+  "status": "passed",
+  "observedAt": "2026-10-23T13:41:30.905Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+    }
+  ],
+  "cases": [
+    {
+      "title": "ProjectContext certified facts foundation reopens durable content-addressed artifacts and refuses a second run consumer",
+      "status": "passed",
+      "duration": 532.168291
+    },
+    {
+      "title": "ProjectContext certified facts foundation replays an immutable publish interrupted after the atomic publish step",
+      "status": "passed",
+      "duration": 215.98387500000035
+    },
+    {
+      "title": "ProjectContext certified facts foundation ignores an orphan temp after file fsync and refuses a partial immutable final",
+      "status": "passed",
+      "duration": 218.49616600000036
+    },
+    {
+      "title": "ProjectContext certified facts foundation replays lease acquisition and completion crashes without exposing partial JSON",
+      "status": "passed",
+      "duration": 242.20558299999993
+    }
+  ],
+  "probeObservations": [],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v03-2026-10-23T13-41-26-238Z/report.json",
+  "rawSha256": "b21b523892b1836b24c2ef309be3b21dc9c9559fc698d2a97fbf1859c86e96f1",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v03-2026-10-23T13-41-26-238Z/console.txt",
+  "consoleSha256": "87ac4f68aa3d5c34a7dc572d772840ea1443c824f52075b7fd6bbff96b3bed38",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "test/ProjectContextFoundation.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "(ProjectContext certified facts foundation reopens durable content-addressed artifacts and refuses a second run consumer|ProjectContext certified facts foundation replays an immutable publish interrupted after the atomic publish step|ProjectContext certified facts foundation ignores an orphan temp after file fsync and refuses a partial immutable final|ProjectContext certified facts foundation replays lease acquisition and completion crashes without exposing partial JSON)$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v03-2026-10-23T13-41-26-238Z/receipt.json",
+  "receiptSha256": "0965ed73a5648768ba712d35bab550ef6d80396fbe1888d0929f7903c16669ce"
+}

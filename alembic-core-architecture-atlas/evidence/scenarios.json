@@ -1,0 +1,302 @@
+[
+  {
+    "id": "V01",
+    "title": "知识文件先行：DB分歧、阻断与显式同步",
+    "journeyRefs": [
+      "J01"
+    ],
+    "failureRefs": [
+      "F01-file-db-divergence"
+    ],
+    "testFiles": [
+      "test/KnowledgeServicePersistence.test.ts",
+      "alembic-core-architecture-atlas/probes/recovery.test.ts"
+    ],
+    "supportFiles": [
+      "test/support/knowledge-runtime.ts",
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "testNamePattern": "(?:KnowledgeService file-first commands (create|update|quality|deprecate) (commits durable truth that survives synchronization|aborts before DB mutation when the file store rejects the write|reports abort as divergence and sync can restore the durable file|reports missing-readback as divergence and sync can restore the durable file|reports ignored-write as divergence and sync can restore the durable file)$)|(?:Atlas Core recovery probe knowledge divergence preserves file hash and explicit sync is idempotent|Atlas Core recovery probe knowledge file rejection leaves no database row)$",
+    "expectedCaseTitles": [
+      "KnowledgeService file-first commands create commits durable truth that survives synchronization",
+      "KnowledgeService file-first commands create aborts before DB mutation when the file store rejects the write",
+      "KnowledgeService file-first commands create reports abort as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands create reports missing-readback as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands create reports ignored-write as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands update commits durable truth that survives synchronization",
+      "KnowledgeService file-first commands update aborts before DB mutation when the file store rejects the write",
+      "KnowledgeService file-first commands update reports abort as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands update reports missing-readback as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands update reports ignored-write as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands quality commits durable truth that survives synchronization",
+      "KnowledgeService file-first commands quality aborts before DB mutation when the file store rejects the write",
+      "KnowledgeService file-first commands quality reports abort as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands quality reports missing-readback as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands quality reports ignored-write as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands deprecate commits durable truth that survives synchronization",
+      "KnowledgeService file-first commands deprecate aborts before DB mutation when the file store rejects the write",
+      "KnowledgeService file-first commands deprecate reports abort as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands deprecate reports missing-readback as divergence and sync can restore the durable file",
+      "KnowledgeService file-first commands deprecate reports ignored-write as divergence and sync can restore the durable file",
+      "Atlas Core recovery probe knowledge divergence preserves file hash and explicit sync is idempotent",
+      "Atlas Core recovery probe knowledge file rejection leaves no database row"
+    ],
+    "expectedCaseCount": 22,
+    "sourcePaths": [
+      "src/service/knowledge/KnowledgeService.ts",
+      "src/service/knowledge/commitKnowledgeWrite.ts",
+      "src/service/knowledge/KnowledgeFileWriter.ts",
+      "src/service/knowledge/KnowledgeSyncService.ts",
+      "src/repository/knowledge/KnowledgeRepositoryImpl.ts",
+      "src/repository/knowledge/KnowledgeFileStore.ts",
+      "src/infrastructure/database/openAlembicDatabase.ts",
+      "src/domain/knowledge/KnowledgeEntry.ts"
+    ],
+    "fixtureDescription": "createKnowledgeRuntime() 每case在 os.tmpdir()/core-knowledge-* 建真实 Markdown + SQLite；pathGuard指向该root；正常持久层不mock。audit logger为空函数，qualityScorer为固定夹具，eventBus收集事件。afterEach关闭DB、reset pathGuard、删除临时根。DB注入使用真实SQLite BEFORE INSERT/UPDATE RAISE(ABORT)/RAISE(IGNORE)，或AFTER写入DELETE；file拒绝分支用vi.spyOn(writer.persist/moveOnLifecycleChange).mockReturnValue(null)。",
+    "caseExpansionRules": [
+      "describe.each(commands) 的 %s 展开 create/update/quality/deprecate 四组。",
+      "每组两个literal case与it.each fault的三个展开case；总计20。"
+    ],
+    "observations": [
+      "正例：run(command)后findById(id)符合各命令预期；显式env.sync()后仍符合。",
+      "file port拒绝：抛FileWriteError，DB before/after JSON严格相等，events为空。",
+      "DB故障：DivergenceError.details包含相同entryIds、fileOpsCompleted:1和reconcileVia:KnowledgeSyncService.sync；events为空。",
+      "DROP TRIGGER排故后显式env.sync()；findById同ID查回预期lifecycle/content/quality字段。",
+      "Atlas隔离probe核对文件hash保持、重复sync后同ID只有一行；file port拒绝后无DB行。"
+    ],
+    "limitations": [
+      "create/update/quality/deprecate共用一套真实文件/DB夹具；不覆盖delete语义。",
+      "sync helper实际调用KnowledgeSyncService.syncAll(runtime.sqlite)，异常中的reconcileVia字符串仍是KnowledgeSyncService.sync；图谱应区分提示与实际恢复命令。",
+      "不证明关系、审计、事件监听器、vector全链原子性，也不证明真实宿主接通。",
+      "本回执按完整Core产品库存绑定来源；主要实现路径用于阅读导航，不代表完整传递调用闭包。"
+    ],
+    "status": "not-run",
+    "expectedProbeCount": 1
+  },
+  {
+    "id": "V02",
+    "title": "源码索引：内容身份、代际取消与显式追赶",
+    "journeyRefs": [
+      "J02"
+    ],
+    "failureRefs": [
+      "sgf-cancel-publication",
+      "sgf-parsing-gap"
+    ],
+    "testFiles": [
+      "test/SourceGraphIndexer.test.ts",
+      "alembic-core-architecture-atlas/probes/recovery.test.ts"
+    ],
+    "supportFiles": [
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "expectedCaseTitles": [
+      "SourceGraphIndexer detects equal-size content changes with preserved mtime and still noops for metadata-only touches",
+      "SourceGraphIndexer uses one source text for SDK symbols and hashes even when the live file changes after the read",
+      "SourceGraphIndexer does not publish a generation when the build is cancelled before publication",
+      "SourceGraphIndexer detects stale filesystem changes and builds an incremental generation with deletion cleanup",
+      "SourceGraphIndexer records partial and degraded accounting for large, unsupported, timeout, and parse-failed files",
+      "Atlas Core recovery probe cancelled source generation can recover with a new signal and exact content hash"
+    ],
+    "expectedCaseCount": 6,
+    "sourcePaths": [
+      "src/service/source-graph/SourceGraphIndexer.ts",
+      "src/service/source-graph/SourceGraphLifecycle.ts",
+      "src/service/source-graph/SourceGraphFileAnalyzer.ts",
+      "src/service/source-graph/SourceGraphInventory.ts",
+      "src/service/source-graph/SourceGraphIndexIdentity.ts",
+      "src/service/source-graph/SourceGraphIndexOptions.ts",
+      "src/service/source-graph/SourceGraphService.ts",
+      "src/service/source-graph/SourceGraphLinker.ts",
+      "src/repository/source-graph/SourceGraphRepository.ts",
+      "src/infrastructure/io/ProjectSourceReader.ts"
+    ],
+    "fixtureDescription": "每case在 os.tmpdir()/alembic-source-graph-indexer-*创建真实TS/Swift/Ruby fixture与SQLite；pathGuard指向临时root。内容漂移case保持原mtime/字节长度；单读取case在readFile真实返回后改写现场文件；取消case在真实readFile返回后AbortController.abort，注入点在发布前。afterEach还原spy/quiet，关闭DB并删除root。",
+    "observations": [
+      "等长且同mtime的alpha→bravo改写仍得到stale，catchUpOnStartup返回built-incremental且新代符号含bravo；仅touch mtime得到fresh-noop。",
+      "读取后现场改写：reads===1，索引contentHash等于第一次读到的原内容SHA-256，符号含boundVersion且不含laterVersion。",
+      "发布前取消：buildFull拒绝，cancelled快照不存在，prior快照仍存在。",
+      "另一个独立case显式buildIncremental处理新增、修改、删除；删文件及其edges清理，changed文件hash变动，ready=true。",
+      "超文件/解析预算、Ruby unsupported、真实语法错误形成partial snapshot和ready=false；诊断类别以及每文件parseStatus有断言。",
+      "Atlas probe在同一fixture中取消后使用新signal显式增量重建，核对新内容hash与旧代保留。"
+    ],
+    "limitations": [
+      "这些case不证明外部CodeGraph补边完整，也未修复R06的callSitesComplete传播问题。",
+      "partial case中parser-timeout由maxParseBytes预算产生，不是实际CPU挂起或系统超时实验。",
+      "SourceGraph scope/数据库均是临时fixture，没有真实项目索引变化。",
+      "本回执按完整Core产品库存绑定来源；主要实现路径用于阅读导航，不代表完整传递调用闭包。"
+    ],
+    "testNamePattern": "(?:(SourceGraphIndexer detects equal-size content changes with preserved mtime and still noops for metadata-only touches|SourceGraphIndexer uses one source text for SDK symbols and hashes even when the live file changes after the read|SourceGraphIndexer does not publish a generation when the build is cancelled before publication|SourceGraphIndexer detects stale filesystem changes and builds an incremental generation with deletion cleanup|SourceGraphIndexer records partial and degraded accounting for large, unsupported, timeout, and parse-failed files)$)|Atlas Core recovery probe cancelled source generation can recover with a new signal and exact content hash$",
+    "status": "not-run",
+    "expectedProbeCount": 1
+  },
+  {
+    "id": "V03",
+    "title": "认证工件与租约：中断后同身份重放",
+    "journeyRefs": [
+      "J02",
+      "J03"
+    ],
+    "failureRefs": [
+      "F08-immutable-publish-crash",
+      "F08-immutable-collision",
+      "F08-run-conflict",
+      "F08-lease-completion-crash"
+    ],
+    "testFiles": [
+      "test/ProjectContextFoundation.test.ts"
+    ],
+    "supportFiles": [
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "expectedCaseTitles": [
+      "ProjectContext certified facts foundation reopens durable content-addressed artifacts and refuses a second run consumer",
+      "ProjectContext certified facts foundation replays an immutable publish interrupted after the atomic publish step",
+      "ProjectContext certified facts foundation ignores an orphan temp after file fsync and refuses a partial immutable final",
+      "ProjectContext certified facts foundation replays lease acquisition and completion crashes without exposing partial JSON"
+    ],
+    "expectedCaseCount": 4,
+    "sourcePaths": [
+      "src/service/project-context/foundation/store.ts",
+      "src/service/project-context/foundation/capture.ts",
+      "src/service/project-context/foundation/canonical.ts",
+      "src/service/project-context/foundation/readiness.ts",
+      "src/service/project-context/foundation/consumerPort.ts",
+      "src/service/project-context/foundation/contracts.ts"
+    ],
+    "fixtureDescription": "每case在os.tmpdir()/project-facts-*建真实文件存储。artifact由createCaptureInput/createHostPorts受控数据经实际capture生成；host port是测试夹具，不是现场源码项目。故障通过store durability.onStep在immutable-after-publish、immutable-after-temp-fsync、lease-after-publish、replace-after-rename抛Error；恢复用新FileCertifiedProjectFactsStore实例显式put/acquire/complete。",
+    "observations": [
+      "put后open与原artifact深相等；同run lease取得acquired再resumed，新实例consumerPort也resumed；不同run或bindingHash拒绝ProjectFactsLeaseConflictError。",
+      "immutable publish后注入错误；新store put同artifact成功且open深相等。",
+      "temp-fsync后错误留下.tmp文件；重放put成功；伪造partial final导致collision且原partial字节未被覆盖。",
+      "lease-after-publish中断后同run显式acquire返回resumed，不同run被拒；replace-after-rename中断后同身份complete返回completed。"
+    ],
+    "limitations": [
+      "通过步骤hook模拟中断，不是杀进程、断电或磁盘硬件故障实验。",
+      "实测同进程新store实例，不是独立操作系统进程恢复；不得用fresh process描述V03。",
+      "没有并发读者逐瞬间读取JSON的探针；标题without exposing partial JSON只对应原子步骤设计和可读重放结果，不能扩展成全时序证明。",
+      "不自动接管其他run，不自动重新执行consumer adapter。",
+      "本回执按完整Core产品库存绑定来源；主要实现路径用于阅读导航，不代表完整传递调用闭包。"
+    ],
+    "testNamePattern": "(ProjectContext certified facts foundation reopens durable content-addressed artifacts and refuses a second run consumer|ProjectContext certified facts foundation replays an immutable publish interrupted after the atomic publish step|ProjectContext certified facts foundation ignores an orphan temp after file fsync and refuses a partial immutable final|ProjectContext certified facts foundation replays lease acquisition and completion crashes without exposing partial JSON)$",
+    "status": "not-run",
+    "expectedProbeCount": 0
+  },
+  {
+    "id": "V04",
+    "title": "向量WAL：快照写失败后显式flush与重开",
+    "journeyRefs": [
+      "J01"
+    ],
+    "failureRefs": [
+      "V3-SNAPSHOT"
+    ],
+    "testFiles": [
+      "test/VectorPersistence.test.ts"
+    ],
+    "supportFiles": [
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "expectedCaseTitles": [
+      "HnswVectorAdapter WAL integration rejects flush and retains WAL when the HNSW snapshot cannot be written",
+      "HnswVectorAdapter WAL integration retains recovered WAL when the first startup snapshot fails",
+      "HnswVectorAdapter WAL integration replays WAL entries newer than the persisted snapshot"
+    ],
+    "expectedCaseCount": 3,
+    "sourcePaths": [
+      "src/infrastructure/vector/HnswVectorAdapter.ts",
+      "src/infrastructure/vector/AsyncPersistence.ts",
+      "src/infrastructure/vector/BinaryPersistence.ts",
+      "src/infrastructure/vector/HnswIndex.ts",
+      "src/infrastructure/vector/VectorMigration.ts",
+      "src/infrastructure/io/WriteZone.ts",
+      "src/shared/WorkspaceResolver.ts"
+    ],
+    "fixtureDescription": "os.tmpdir()/hnsw-wal-*真实目录、真实HNSW/二进制/WAL路径；设置长flush间隔避免自动计时器抢先。通过mkdir占据vector_index.asvec路径制造真实EISDIR。排故rmdir后调用同store.flush，再新建adapter initSync/getById。旧快照+新WAL case保留真实upsert生成WAL，并在destroy后恢复旧快照构造输入。",
+    "observations": [
+      "EISDIR导致公开flush拒绝，WAL文本与故障前journal完全相同。",
+      "排除目录故障后显式flush成功，WAL不存在；新adapter读回accepted的content和vector与预期相同。",
+      "启动回放后第一快照失败时init拒绝且WAL原文本保留；修路径flush后新adapter可读recovered。",
+      "既有snapshot不含c，新WAL包含c；新实例init后ids精确a/b/c，vector search返回3项且c最接近。"
+    ],
+    "limitations": [
+      "destroy会同步保存；第三case明确恢复旧快照构造输入，不能称destroy等价进程崩溃。",
+      "前两case不是独立进程重启；是新adapter实例重开。",
+      "不证明断电fsync整体保证，也不证明坏CRC对应丢失数据可修复。",
+      "不调用embedding provider，也不覆盖知识live-truth/filter/publication全链。",
+      "本回执按完整Core产品库存绑定来源；主要实现路径用于阅读导航，不代表完整传递调用闭包。"
+    ],
+    "testNamePattern": "(HnswVectorAdapter WAL integration rejects flush and retains WAL when the HNSW snapshot cannot be written|HnswVectorAdapter WAL integration retains recovered WAL when the first startup snapshot fails|HnswVectorAdapter WAL integration replays WAL entries newer than the persisted snapshot)$",
+    "status": "not-run",
+    "expectedProbeCount": 0
+  },
+  {
+    "id": "V05",
+    "title": "严格语义评审离线回执：V4/V5序列化、新进程重验与篡改拒绝",
+    "journeyRefs": [
+      "J03",
+      "J04"
+    ],
+    "failureRefs": [
+      "stf-host-execution-reused",
+      "stf-durable-tamper"
+    ],
+    "testFiles": [
+      "test/SharedHarvestSemanticEvidenceAuthority.test.ts",
+      "test/DurableSemanticDispositionFreshProcess.test.ts"
+    ],
+    "cliTestFiles": [
+      "test/SharedHarvestSemanticEvidenceAuthority.test.ts"
+    ],
+    "supportFiles": [
+      "test/DurableSemanticDispositionFreshProcess.test.ts",
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "expectedCaseTitles": [
+      "shared-harvest semantic evidence authority binds one physical evidence root across the complete canonical harvest-group set",
+      "shared-harvest semantic evidence authority binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart",
+      "shared-harvest semantic evidence authority rejects incomplete, overlapping, mixed-harvest, rebound, and noncanonical binding sets",
+      "shared-harvest semantic evidence authority fails closed on cross-harvest group, root, request, load, and attestation tampering"
+    ],
+    "expectedCaseCount": 4,
+    "expectedNestedCaseTitle": "durable semantic disposition-review fresh-process verifier rehydrates and verifies a serialized Agent attestation without producer module state",
+    "expectedNestedCaseCount": 2,
+    "sourcePaths": [
+      "src/service/production/DurableSemanticDispositionReviewAuthority.ts",
+      "src/service/production/SemanticDispositionReviewExecution.ts",
+      "src/service/production/StrictAnalysisContracts.ts",
+      "src/service/production/StrictProductionAuthority.ts",
+      "src/service/production/StrictFactExecution.ts",
+      "src/service/production/StrictFactExecutionReceipt.ts",
+      "src/service/project-context/foundation/frozen.ts",
+      "src/service/project-context/foundation/capture.ts",
+      "src/service/project-context/foundation/requestV2.ts",
+      "src/service/project-context/foundation/canonical.ts",
+      "src/test-fixtures.ts"
+    ],
+    "fixtureDescription": "Core内受控frozen源码和strict schedule产生fact receipts；真实Ed25519密钥及签名验证；reviewerHost.invoke返回固定JSON判定，evidenceStore.load返回fixture证据，没有外部模型/API。临时root存序列化attestation、expectedRequest、trustPolicy；正例execFileSync启动独立Node+Vitest并通过ALEMBIC_DURABLE_ATTESTATION_FIXTURE传路径，原始fixture与临时key只在隔离环境生命周期内使用。afterEach删除roots。",
+    "observations": [
+      "V5一个physical evidence root绑定两个harvest groups与三个execution receipts，evidenceLoadCount===1；再次execute拒绝HOST_EXECUTION_REUSED。",
+      "V4一个authenticated root绑定file/repository两种scale；JSON roundtrip后assert与consume验证成功，StrictProductionAuthority保留execution/attestation hashes。",
+      "两个正例各自启动fresh-process verifier；子进程必须1 passed，V5 receipt hash数组与expectedSemanticRequest严格相等，V4长度为2。",
+      "V4/V5负例拒绝缺组、错序、重复/跨组receipt、重绑blob/witness/source、内容或load篡改、非法signature等；每个tamper clone由assert抛错。"
+    ],
+    "limitations": [
+      "CLI只能运行SharedHarvestSemanticEvidenceAuthority主文件；DurableSemanticDispositionFreshProcess是嵌套support，单独无env运行会skip，不能算独立通过。",
+      "外层Vitest JSON expected4 cases，不应把两个子进程case误计为外层6；父case的stdout断言提供nested通过依据。",
+      "Gateway名称包含Agent但本样本全在Core；没有修改或启动AlembicAgent。",
+      "断言是签名、receipt binding、request结构与验证合同；reviewer内容由fixture给定，不证明真实模型评审质量。",
+      "未覆盖Main持久化/实际发布，未修复R01，也未针对当前消费端expectedSemanticRequest换请求做独立负例；不要关联stf-current-request-mismatch为已实测。",
+      "本回执按完整Core产品库存绑定来源；主要实现路径用于阅读导航，不代表完整传递调用闭包。",
+      "子进程通过由外层case断言其输出含1 passed证明；本回执只保存外层原始报告，不声称保存了子进程独立stdout。"
+    ],
+    "testNamePattern": "(shared-harvest semantic evidence authority binds one physical evidence root across the complete canonical harvest-group set|shared-harvest semantic evidence authority binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart|shared-harvest semantic evidence authority rejects incomplete, overlapping, mixed-harvest, rebound, and noncanonical binding sets|shared-harvest semantic evidence authority fails closed on cross-harvest group, root, request, load, and attestation tampering)$",
+    "status": "not-run",
+    "expectedProbeCount": 0
+  }
+]

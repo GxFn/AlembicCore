@@ -2,6 +2,8 @@
 
 **English** | [简体中文](./README.zh-CN.md)
 
+Architecture walkthrough: [AlembicCore Architecture Atlas](alembic-core-architecture-atlas/README.md) — a separate local documentation reader with source and test evidence.
+
 `@alembic/core` is the shared, headless, deterministic knowledge kernel of the
 Alembic runtime family. It owns the models, persistence, analysis, search, and
 workflow contracts that every Alembic host builds on — and deliberately nothing

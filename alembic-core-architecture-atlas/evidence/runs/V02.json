@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/observations.json",
+  "observationsSha256": "59c87e1a4f3afb0ecd70c0ef0ad7bf12b58023d275805a25c404ce7e166b95aa",
+  "id": "V02",
+  "title": "源码索引：内容身份、代际取消与显式追赶",
+  "status": "passed",
+  "observedAt": "2026-10-23T13:41:26.237Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+    }
+  ],
+  "cases": [
+    {
+      "title": "SourceGraphIndexer detects equal-size content changes with preserved mtime and still noops for metadata-only touches",
+      "status": "passed",
+      "duration": 1028.3292090000002
+    },
+    {
+      "title": "SourceGraphIndexer uses one source text for SDK symbols and hashes even when the live file changes after the read",
+      "status": "passed",
+      "duration": 371.31333300000006
+    },
+    {
+      "title": "SourceGraphIndexer does not publish a generation when the build is cancelled before publication",
+      "status": "passed",
+      "duration": 16.58658400000013
+    },
+    {
+      "title": "SourceGraphIndexer detects stale filesystem changes and builds an incremental generation with deletion cleanup",
+      "status": "passed",
+      "duration": 42.300874999999905
+    },
+    {
+      "title": "SourceGraphIndexer records partial and degraded accounting for large, unsupported, timeout, and parse-failed files",
+      "status": "passed",
+      "duration": 34.7052920000001
+    },
+    {
+      "title": "Atlas Core recovery probe cancelled source generation can recover with a new signal and exact content hash",
+      "status": "passed",
+      "duration": 51.44212500000003
+    }
+  ],
+  "probeObservations": [
+    {
+      "scenario": "V02",
+      "cancelledPublished": false,
+      "priorPreserved": true,
+      "recoveredGeneration": "atlas-recovered",
+      "sourceHash": "92719980c42e1c5f002a7f264aac625dad9b310ba007d3d8c06462f79ded6065",
+      "indexedHash": "92719980c42e1c5f002a7f264aac625dad9b310ba007d3d8c06462f79ded6065"
+    }
+  ],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/report.json",
+  "rawSha256": "138d64924b0a1aeda59670c3cb52187169bfff7a22e8cd4bd1f5e25a05b17477",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/console.txt",
+  "consoleSha256": "a603a9c895b2849492b7b8c934565db002f93ede70fbf9411804f2be03026739",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "test/SourceGraphIndexer.test.ts",
+      "alembic-core-architecture-atlas/probes/recovery.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "(?:(SourceGraphIndexer detects equal-size content changes with preserved mtime and still noops for metadata-only touches|SourceGraphIndexer uses one source text for SDK symbols and hashes even when the live file changes after the read|SourceGraphIndexer does not publish a generation when the build is cancelled before publication|SourceGraphIndexer detects stale filesystem changes and builds an incremental generation with deletion cleanup|SourceGraphIndexer records partial and degraded accounting for large, unsupported, timeout, and parse-failed files)$)|Atlas Core recovery probe cancelled source generation can recover with a new signal and exact content hash$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/receipt.json",
+  "receiptSha256": "213c25a8b278987444e2c67c00bda3a230d24061cfb4a5ff743b3e16446ceaa7"
+}

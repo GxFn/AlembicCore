@@ -1,0 +1,200 @@
+{
+  "uiDigest": "a9c9daed2bd4db6bcd666ab14e2e52ec6d32d90eed683a1ccbdc2f7dab457131",
+  "inputObservationDigest": "70565a97b855fbe1d216ff7d0f8afee3dca64aee42ac02a69df5f12ef1055817",
+  "contentDigest": "ac3329a4f49174bd3bcadc42fe27566a760ee2e71bc963c7be9290788c3c8724",
+  "observedAt": "2026-10-23T14:49:20.842Z",
+  "browser": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36",
+  "method": "真实IAB/CUA操作静态preview产物；人工读取DOM、SVG位置、界面反馈并查看截图。发现book资源白名单和手机长词溢出后修复、重建并复查；以下记录仅对应实际完成的交互。",
+  "samples": [
+    {
+      "page": "overview; journeys; objects; 09; 10; files; api; failures; runs; impact; history",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "theme": "light/dark",
+      "screenshot": "implementation-2026-10-23/validation/journeys-1440-delivery.png",
+      "checks": [
+        {
+          "id": "navigation",
+          "passed": true,
+          "observation": "总览显示17专题、119功能、116失败情形、70图；旅程页显示J01–J04各8步；新增对象、失败、运行入口可读取实际内容。"
+        },
+        {
+          "id": "search-chinese",
+          "passed": true,
+          "observation": "搜索孤儿出现F08-immutable-publish-crash、J01及步骤05/08、K3-SYNC-SKIP、M10-04与相关专题。"
+        },
+        {
+          "id": "search-path",
+          "passed": true,
+          "observation": "完整commitKnowledgeWrite.ts路径返回唯一文件定位、M01-05、J01-03、O01、V01及相关失败和专题。"
+        },
+        {
+          "id": "search-symbol",
+          "passed": true,
+          "observation": "ConfigDefaults返回精确root/config公共入口以及config.ts、index.ts、Defaults.ts的公开导出名命中。"
+        },
+        {
+          "id": "exact-ids",
+          "passed": true,
+          "observation": "搜索M10-02和K3-CREATE分别直达稳定模块/失败锚点，顶部约88px；旧中文标题别名仍唯一且可定位。"
+        },
+        {
+          "id": "api-route",
+          "passed": true,
+          "observation": "@alembic/core结果进入#api~.，仅展开根规则；自由输入ConfigDefaults仍返回root和config两项。"
+        },
+        {
+          "id": "evidence",
+          "passed": true,
+          "observation": "spc-1源码与断言依据展开后显示compileColdStartPlan的catalog重验源码与enumeration-order测试断言，并有返回J03-01的链接。"
+        },
+        {
+          "id": "copy-locator",
+          "passed": true,
+          "observation": "点击spc-1复制定位，页面实际反馈已复制源码定位；没有读取系统剪贴板。"
+        },
+        {
+          "id": "journey-backlinks",
+          "passed": true,
+          "observation": "J01-03进入KW-02图边，再返回J01-03；进入O01后从对象的精确步骤链接返回J01-03，顶部约88px。"
+        },
+        {
+          "id": "deep-link",
+          "passed": true,
+          "observation": "J01-03到KW-02，正文完成时顶部89.90px；4张SVG完成后仍为89.90px且依据已展开。旧别名#10~普通candidate批次生产顶部87.98px。"
+        },
+        {
+          "id": "diagram-read-fit",
+          "passed": true,
+          "observation": "09新增严格计划图实际9节点8边，阅读/全图可切换，节点文字与图边按钮可用。"
+        },
+        {
+          "id": "fullscreen",
+          "passed": true,
+          "observation": "严格计划图全屏后卡片边界1440×900，再次点击恢复正文；截图另存strict-plan-fullscreen-1440.png。"
+        },
+        {
+          "id": "cytoscape-counts",
+          "passed": true,
+          "observation": "09的F0切换交互图，实际data-node-count=4、data-edge-count=2，与显示模型相符。"
+        },
+        {
+          "id": "none-status",
+          "passed": true,
+          "observation": "失败页筛选K3-SYNC-VECTOR只剩一项，标none与明确缺口；说明DB已改变、无跨层回滚，没有变成运行通过。"
+        },
+        {
+          "id": "run-scope",
+          "passed": true,
+          "observation": "运行页5卡显示所列样本通过；V01实际观察包含相同恢复前后文件hash、DB行数0→1及secondSyncSameHash=true；命令、环境、原始材料均可展开。"
+        },
+        {
+          "id": "review-consumption",
+          "passed": true,
+          "observation": "历史追加OutputBudget完整复核记录；点击到文件索引唯一记录，显示新reviewed状态、whole-file方法和当前SHA，原继承记录仍可见。"
+        },
+        {
+          "id": "impact",
+          "passed": true,
+          "observation": "coldStartProductionPlan.ts显示M09-09、2失败、O05、J03、09/15专题、8直接导入方及5个保守绑定全库存的运行记录。"
+        },
+        {
+          "id": "theme",
+          "passed": true,
+          "observation": "键盘Enter触发主题按钮切到dark并返回light，文件复核信息保留；暗色截图另存。"
+        },
+        {
+          "id": "keyboard",
+          "passed": true,
+          "observation": "主题按钮可通过键盘Enter操作；本轮仅声明该代表键盘交互，不宣称完整无障碍审计。"
+        },
+        {
+          "id": "history",
+          "passed": true,
+          "observation": "历史明确2605 pass/1 skip属于原产品全量基线，选定场景另列；保留R01–R11与当前浏览器不能重新核验ledger说明。"
+        },
+        {
+          "id": "stale-status",
+          "passed": true,
+          "observation": "历史页在状态示例下显示源码已漂移、上下文已漂移、历史快照，并明确不是当前核验结果；没有修改真实产品源制造过期。"
+        },
+        {
+          "id": "back-forward",
+          "passed": true,
+          "observation": "从历史进入OutputBudget文件后，浏览器后退恢复history，前进恢复files筛选。"
+        },
+        {
+          "id": "responsive",
+          "passed": true,
+          "observation": "最终1440×900旅程入口四卡完整；整页scrollWidth没有超过viewport，最终console error为空。"
+        }
+      ]
+    },
+    {
+      "page": "journeys~J03-02 in detached build",
+      "viewport": {
+        "width": 1024,
+        "height": 768
+      },
+      "theme": "light",
+      "screenshot": "implementation-2026-10-23/validation/portable-j03-1024.png",
+      "checks": [
+        {
+          "id": "portable",
+          "passed": true,
+          "observation": "独立临时副本没有Core源码、ledger或消费者；实际构建后通过4275静态服务进入J03-02，显示不能重新核验原始材料的范围说明。"
+        },
+        {
+          "id": "deep-link",
+          "passed": true,
+          "observation": "独立副本J03-02顶部88.21px，步骤内容与显式边界可读。"
+        },
+        {
+          "id": "responsive",
+          "passed": true,
+          "observation": "1024×768无整页横向溢出，scrollWidth减viewport为-15，最终console error为空。"
+        }
+      ]
+    },
+    {
+      "page": "runs; journeys; 15~f-stf-population-unknown",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "theme": "light",
+      "screenshot": "implementation-2026-10-23/validation/strict-failure-390-final.png",
+      "checks": [
+        {
+          "id": "responsive",
+          "passed": true,
+          "observation": "初测运行卡长函数名造成123px溢出；修复换行后运行卡与严格失败卡均无整页横向溢出，最终差值-15；截图实际可读。"
+        },
+        {
+          "id": "mobile-menu",
+          "passed": true,
+          "observation": "手机目录打开aria-expanded=true，点击业务旅程后关闭为false并进入该页。"
+        },
+        {
+          "id": "deep-link",
+          "passed": true,
+          "observation": "冷进入15的population-unknown失败卡，正文完成顶部87.875px；9张SVG完成后仍为87.875px。"
+        },
+        {
+          "id": "run-environment",
+          "passed": true,
+          "observation": "手机运行卡展开实际命令/环境，显示Node v24.19.0和Vitest4.1.6；最终console error为空。"
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "复制只验证浏览器成功反馈，没有读取系统剪贴板。",
+    "过期UI只观察明确标注的状态示例；实际源/测试/consumer漂移由独立临时文件系统维护演练验证。",
+    "独立副本复用已安装依赖，不代表另一台机器首次安装或离线安装。",
+    "浏览器只展示生成时的证据快照；原始材料校验由本地check:provenance和check:evidence完成。",
+    "本轮执行39个选定外层case与24个Core边界case；未重跑全量产品测试。V05的两个子进程检查由父case断言证明，没有另存子进程完整日志。"
+  ]
+}

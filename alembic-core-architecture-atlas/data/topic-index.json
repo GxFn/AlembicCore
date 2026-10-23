@@ -1,0 +1,245 @@
+[
+  {
+    "id": "01",
+    "slug": "overall-package-boundaries",
+    "title": "总体、公开包与宿主边界",
+    "question": "Core提供什么，哪些能力由外层拥有？",
+    "publicExports": [
+      ".",
+      "./knowledge",
+      "./production",
+      "./project-context"
+    ],
+    "applicableViews": "A0/A1 + exports矩阵",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 30,
+    "path": "maps/01-overall-package-boundaries/README.md"
+  },
+  {
+    "id": "02",
+    "slug": "workspace-config-io",
+    "title": "工作区、配置与IO",
+    "question": "projectRoot/dataRoot、Ghost、多根与读写边界怎样配合？",
+    "publicExports": [
+      "./workspace",
+      "./config",
+      "./io",
+      "./capability"
+    ],
+    "applicableViews": "V0/F0/F1/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 38,
+    "path": "maps/02-workspace-config-io/README.md"
+  },
+  {
+    "id": "03",
+    "slug": "database-and-repositories",
+    "title": "数据库与仓储",
+    "question": "事务、迁移、文件真相、运行数据分别由谁拥有？",
+    "publicExports": [
+      "./database",
+      "./repositories",
+      "./memory"
+    ],
+    "applicableViews": "A1/F0/F1/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 34,
+    "path": "maps/03-database-and-repositories/README.md"
+  },
+  {
+    "id": "04",
+    "slug": "syntax-facts-linking",
+    "title": "语法、文件事实与链接",
+    "question": "解析、提取与跨文件绑定各能证明什么？",
+    "publicExports": [
+      "./core/analysis",
+      "./core/ast"
+    ],
+    "applicableViews": "V0/F0/F1",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 47,
+    "path": "maps/04-syntax-facts-linking/README.md"
+  },
+  {
+    "id": "05",
+    "slug": "discovery-and-intelligence",
+    "title": "发现、框架与架构信号",
+    "question": "模块、依赖、框架与启发式信号从哪里来？",
+    "publicExports": [
+      "./enhancement",
+      "./project-context-capabilities"
+    ],
+    "applicableViews": "V0/F0/F1",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 47,
+    "path": "maps/05-discovery-and-intelligence/README.md"
+  },
+  {
+    "id": "06",
+    "slug": "project-context",
+    "title": "ProjectContext查询",
+    "question": "如何由space/repo收敛到源码片段，处理预算、取消与部分结果？",
+    "publicExports": [
+      "./project-context"
+    ],
+    "applicableViews": "V0/F0/F1/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 77,
+    "path": "maps/06-project-context/README.md"
+  },
+  {
+    "id": "07",
+    "slug": "source-graph",
+    "title": "源码关系索引",
+    "question": "完整/增量代际、关系查询与freshness怎样保持一致？",
+    "publicExports": [
+      "./project-context",
+      "./repositories"
+    ],
+    "applicableViews": "V0/F0/F1/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 24,
+    "path": "maps/07-source-graph/README.md"
+  },
+  {
+    "id": "08",
+    "slug": "certified-project-facts",
+    "title": "认证项目事实",
+    "question": "输入冻结、回放、readiness、manifest及消费者回执怎样绑定？",
+    "publicExports": [
+      "./project-context-foundation"
+    ],
+    "applicableViews": "A1/V0/F1/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 15,
+    "path": "maps/08-certified-project-facts/README.md"
+  },
+  {
+    "id": "09",
+    "slug": "planning-host-workflows",
+    "title": "规划与宿主工作流",
+    "question": "intent、briefing、unit、session、coverage和snapshot怎样衔接？",
+    "publicExports": [
+      "./plans",
+      "./host-agent-workflows"
+    ],
+    "applicableViews": "V0/F0/F1/S0/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 92,
+    "path": "maps/09-planning-host-workflows/README.md"
+  },
+  {
+    "id": "10",
+    "slug": "knowledge-authoring-persistence",
+    "title": "知识创作与持久化",
+    "question": "candidate/recipe、校验、file-first写入和sync如何闭环？",
+    "publicExports": [
+      "./knowledge",
+      "./dimensions"
+    ],
+    "applicableViews": "V0/F0/F1/S0/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 72,
+    "path": "maps/10-knowledge-authoring-persistence/README.md"
+  },
+  {
+    "id": "11",
+    "slug": "retrieval-recipe-context",
+    "title": "检索与RecipeContext",
+    "question": "候选召回如何经过live truth、过滤、排序与预算？",
+    "publicExports": [
+      "./search",
+      "./recipe-context-capabilities"
+    ],
+    "applicableViews": "V0/F0/F1",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 48,
+    "path": "maps/11-retrieval-recipe-context/README.md"
+  },
+  {
+    "id": "12",
+    "slug": "vector-generations",
+    "title": "向量与代际",
+    "question": "文件与Recipe region两条索引怎样写入、切换和恢复？",
+    "publicExports": [
+      "./vector"
+    ],
+    "applicableViews": "V0/F0/F1/S0/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 27,
+    "path": "maps/12-vector-generations/README.md"
+  },
+  {
+    "id": "13",
+    "slug": "guard-feedback",
+    "title": "Guard与反馈",
+    "question": "规则筛选、分层检查、不确定结果与反馈怎样运行？",
+    "publicExports": [
+      "./guard"
+    ],
+    "applicableViews": "V0/F0/F1/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 14,
+    "path": "maps/13-guard-feedback/README.md"
+  },
+  {
+    "id": "14",
+    "slug": "sustain-proposals",
+    "title": "维护与提案",
+    "question": "drift、decay、consolidation与proposal怎样改变知识？",
+    "publicExports": [
+      "./sustain",
+      "./evolution"
+    ],
+    "applicableViews": "V0/F0/F1/S0/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 21,
+    "path": "maps/14-sustain-proposals/README.md"
+  },
+  {
+    "id": "15",
+    "slug": "strict-production-authority",
+    "title": "严格生产与发布证据",
+    "question": "完整事实、独立评审、准入、私有revision与serving如何绑定？",
+    "publicExports": [
+      "./production",
+      "./host-agent-workflows",
+      "./knowledge",
+      "./workspace"
+    ],
+    "applicableViews": "A1/V0/F0/F1/S0/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 9,
+    "path": "maps/15-strict-production-authority/README.md"
+  },
+  {
+    "id": "16",
+    "slug": "runtime-events-lifecycle",
+    "title": "运行时契约与观测",
+    "question": "job/resident、事件、信号、日志与资源释放各保证什么？",
+    "publicExports": [
+      "./daemon",
+      "./events",
+      "./logging",
+      "./report"
+    ],
+    "applicableViews": "V0/F0/F1/S0/R0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 29,
+    "path": "maps/16-runtime-events-lifecycle/README.md"
+  },
+  {
+    "id": "17",
+    "slug": "contracts-tooling-verification",
+    "title": "契约、工具与验证",
+    "question": "exports/wire/层规则、维护脚本和发布边界怎样验证？",
+    "publicExports": [
+      "./shared",
+      "./test-fixtures"
+    ],
+    "applicableViews": "A1/F0/F1/E0",
+    "kind": "documentation-navigation-topic",
+    "ownedFileCount": 41,
+    "path": "maps/17-contracts-tooling-verification/README.md"
+  }
+]

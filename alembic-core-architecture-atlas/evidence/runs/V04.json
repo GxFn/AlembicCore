@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/observations.json",
+  "observationsSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "id": "V04",
+  "title": "向量WAL：快照写失败后显式flush与重开",
+  "status": "passed",
+  "observedAt": "2026-10-23T13:41:31.829Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+    }
+  ],
+  "cases": [
+    {
+      "title": "HnswVectorAdapter WAL integration rejects flush and retains WAL when the HNSW snapshot cannot be written",
+      "status": "passed",
+      "duration": 13.227332999999987
+    },
+    {
+      "title": "HnswVectorAdapter WAL integration retains recovered WAL when the first startup snapshot fails",
+      "status": "passed",
+      "duration": 4.4802910000000224
+    },
+    {
+      "title": "HnswVectorAdapter WAL integration replays WAL entries newer than the persisted snapshot",
+      "status": "passed",
+      "duration": 7.288374999999974
+    }
+  ],
+  "probeObservations": [],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/report.json",
+  "rawSha256": "c880de8f07a92a128417c19cbce63636637191d7da1e3c31e3125e9e90d82a42",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/console.txt",
+  "consoleSha256": "71f4c98ad61ffe9e3d0eeb2e44ccf3c9eda57ce76a6d2773b2660b2198d4fc7e",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "test/VectorPersistence.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "(HnswVectorAdapter WAL integration rejects flush and retains WAL when the HNSW snapshot cannot be written|HnswVectorAdapter WAL integration retains recovered WAL when the first startup snapshot fails|HnswVectorAdapter WAL integration replays WAL entries newer than the persisted snapshot)$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/receipt.json",
+  "receiptSha256": "0d462deeda9c62430930d516839c6568a7fd33325520c435910e89132c18a8ff"
+}

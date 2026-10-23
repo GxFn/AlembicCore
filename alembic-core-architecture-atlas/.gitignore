@@ -1,0 +1,5 @@
+node_modules/
+.build/
+*.tsbuildinfo
+/reviews/.append.lock
+/reviews/records.json.tmp

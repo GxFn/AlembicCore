@@ -1,0 +1,126 @@
+{
+  "origin": "code-review-2026-10-22/file-review.json",
+  "originSha256": "7350d28a7fccc662298c6cc5cd1f6a85be338d0981eb7af3547e09edd30e80c1",
+  "recordHistory": [
+    {
+      "id": "file-review-20261023-output-budget",
+      "path": "architecture-atlas/reviews/2026-10-23/files/file-review-20261023-output-budget.json",
+      "sha256": "a4d9f0930e02c3e1d0f9f29a432e6b5472de43dae9e2cf470e600005c674cd25"
+    }
+  ],
+  "appendedReviews": [
+    {
+      "id": "file-review-20261023-output-budget",
+      "path": "src/shared/OutputBudget.ts",
+      "sourceSha256": "2b5996ef7d7d0d5a5c328206e59ed75e224d997963fdfb4de5d67770f863a6a4",
+      "scope": "whole-file",
+      "readLevel": "full",
+      "reviewedAt": "2026-10-23T13:19:39.592Z",
+      "method": "2026-10-23完整读取文件；对照根门面和既有OutputBudget断言核对输入、UTF-8边界及归档声明范围",
+      "rawLedgerRef": "architecture-atlas/reviews/2026-10-23/files/file-review-20261023-output-budget.json"
+    }
+  ],
+  "originalAvailability": "matched",
+  "method": "继承逐文件阅读；本轮逐边复核另见各页。full/partial保持原义，不代表本轮产品测试执行。",
+  "reviewedAt": "2026-10-22",
+  "counts": {
+    "inherited": 941,
+    "source-changed": 2,
+    "reviewed": 1
+  },
+  "productTests": {
+    "status": "inherited-not-rerun",
+    "origin": "code-review-2026-10-22/README.md",
+    "summary": "原全量基线：2605 pass、1 skip；未重跑全量。选定场景的独立执行见运行证据页。"
+  },
+  "knownRisks": [
+    {
+      "id": "R01",
+      "title": "严格事实 value 与权威摘要绑定不足",
+      "topicId": "15",
+      "detail": "事实序列化值可变且authorityHash不变；不据此声称完整外层利用。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R02",
+      "title": "路径检查可被软链接绕过",
+      "topicId": "02",
+      "detail": "PathGuard / FsSourceRefResolver 的词法边界不等于真实路径边界。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R03",
+      "title": "Guard聚合丢失分层与跳过统计",
+      "topicId": "13",
+      "detail": "不确定结果仍可能出现100% coverage。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R04",
+      "title": "全局正则的lastIndex影响连续匹配",
+      "topicId": "13",
+      "detail": "注入 /g RegExp 重复检查会漏掉连续行。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R05",
+      "title": "私有同名声明遮挡合法export *",
+      "topicId": "04",
+      "detail": "exportTable本地回退未充分区分公开导出。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R06",
+      "title": "调用点不完整被描述为解析成功",
+      "topicId": "07",
+      "detail": "callSitesComplete=false未向上层传播partial。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R07",
+      "title": "带范围的sourceRef被精确匹配过滤",
+      "topicId": "11",
+      "detail": "路径范围语义在RecipeContext边界丢失。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R08",
+      "title": "read port丢失moduleName和额外tag",
+      "topicId": "11",
+      "detail": "输入条件未完整传给查询层。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R09",
+      "title": "补丁文件写失败后仍回退普通更新",
+      "topicId": "14",
+      "detail": "ProposalExecutor捕获FileWriteError后返回null继续更新。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R10",
+      "title": "增强注册器并发初始化重复注册",
+      "topicId": "05",
+      "detail": "async项目Guard helper自行去重，注册器及同步helper仍受影响。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    },
+    {
+      "id": "R11",
+      "title": "两个GenerateSessionManager覆盖会话进度",
+      "topicId": "09",
+      "detail": "单写者无此问题；共享会话的并发更新缺少合并。",
+      "status": "observed-unfixed",
+      "origin": "code-review-2026-10-22/findings.md"
+    }
+  ]
+}

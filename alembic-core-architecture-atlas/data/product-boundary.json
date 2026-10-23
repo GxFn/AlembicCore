@@ -1,0 +1,374 @@
+{
+  "package": {
+    "name": "@alembic/core",
+    "version": "0.3.0",
+    "description": "Shared headless core contracts for Alembic runtimes.",
+    "type": "module",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./capability": {
+        "types": "./dist/capability.d.ts",
+        "import": "./dist/capability.js"
+      },
+      "./enhancement": {
+        "types": "./dist/enhancement.d.ts",
+        "import": "./dist/enhancement.js"
+      },
+      "./logging": {
+        "types": "./dist/logging.d.ts",
+        "import": "./dist/logging.js"
+      },
+      "./dimensions": {
+        "types": "./dist/dimensions.d.ts",
+        "import": "./dist/dimensions.js"
+      },
+      "./knowledge": {
+        "types": "./dist/knowledge.d.ts",
+        "import": "./dist/knowledge.js"
+      },
+      "./evolution": {
+        "types": "./dist/evolution.d.ts",
+        "import": "./dist/evolution.js"
+      },
+      "./sustain": {
+        "types": "./dist/sustain.d.ts",
+        "import": "./dist/sustain.js"
+      },
+      "./memory": {
+        "types": "./dist/memory.d.ts",
+        "import": "./dist/memory.js"
+      },
+      "./plans": {
+        "types": "./dist/plans.d.ts",
+        "import": "./dist/plans.js"
+      },
+      "./search": {
+        "types": "./dist/search.d.ts",
+        "import": "./dist/search.js"
+      },
+      "./vector": {
+        "types": "./dist/vector.d.ts",
+        "import": "./dist/vector.js"
+      },
+      "./guard": {
+        "types": "./dist/guard.d.ts",
+        "import": "./dist/guard.js"
+      },
+      "./project-context": {
+        "types": "./dist/project-context.d.ts",
+        "import": "./dist/project-context.js"
+      },
+      "./project-context-foundation": {
+        "types": "./dist/projectContextFoundation.d.ts",
+        "import": "./dist/projectContextFoundation.js"
+      },
+      "./project-context-capabilities": {
+        "types": "./dist/project-context-capabilities.d.ts",
+        "import": "./dist/project-context-capabilities.js"
+      },
+      "./recipe-context-capabilities": {
+        "types": "./dist/recipe-context-capabilities.d.ts",
+        "import": "./dist/recipe-context-capabilities.js"
+      },
+      "./report": {
+        "types": "./dist/report.d.ts",
+        "import": "./dist/report.js"
+      },
+      "./host-agent-workflows": {
+        "types": "./dist/host-agent-workflows.d.ts",
+        "import": "./dist/host-agent-workflows.js"
+      },
+      "./production": {
+        "types": "./dist/production.d.ts",
+        "import": "./dist/production.js"
+      },
+      "./database": {
+        "types": "./dist/database.d.ts",
+        "import": "./dist/database.js"
+      },
+      "./repositories": {
+        "types": "./dist/repositories.d.ts",
+        "import": "./dist/repositories.js"
+      },
+      "./workspace": {
+        "types": "./dist/workspace.d.ts",
+        "import": "./dist/workspace.js"
+      },
+      "./config": {
+        "types": "./dist/config.d.ts",
+        "import": "./dist/config.js"
+      },
+      "./io": {
+        "types": "./dist/io.d.ts",
+        "import": "./dist/io.js"
+      },
+      "./events": {
+        "types": "./dist/events.d.ts",
+        "import": "./dist/events.js"
+      },
+      "./shared": {
+        "types": "./dist/shared/index.d.ts",
+        "import": "./dist/shared/index.js"
+      },
+      "./domain/knowledge": {
+        "types": "./dist/domain/knowledge/index.d.ts",
+        "import": "./dist/domain/knowledge/index.js"
+      },
+      "./daemon": {
+        "types": "./dist/daemon/index.d.ts",
+        "import": "./dist/daemon/index.js"
+      },
+      "./core": {
+        "types": "./dist/core/index.d.ts",
+        "import": "./dist/core/index.js"
+      },
+      "./core/analysis": {
+        "types": "./dist/core/analysis/index.d.ts",
+        "import": "./dist/core/analysis/index.js"
+      },
+      "./core/ast": {
+        "types": "./dist/core/ast/index.d.ts",
+        "import": "./dist/core/ast/index.js"
+      },
+      "./core/ast/*": {
+        "types": "./dist/core/ast/*.d.ts",
+        "import": "./dist/core/ast/*.js"
+      },
+      "./core/discovery": {
+        "types": "./dist/core/discovery/index.d.ts",
+        "import": "./dist/core/discovery/index.js"
+      },
+      "./infrastructure/database": {
+        "types": "./dist/infrastructure/database/index.d.ts",
+        "import": "./dist/infrastructure/database/index.js"
+      },
+      "./infrastructure/database/drizzle": {
+        "types": "./dist/infrastructure/database/drizzle/index.d.ts",
+        "import": "./dist/infrastructure/database/drizzle/index.js"
+      },
+      "./infrastructure/database/drizzle/*": {
+        "types": "./dist/infrastructure/database/drizzle/*.d.ts",
+        "import": "./dist/infrastructure/database/drizzle/*.js"
+      },
+      "./infrastructure/database/migrations/*": {
+        "types": "./dist/infrastructure/database/migrations/*.d.ts",
+        "import": "./dist/infrastructure/database/migrations/*.js"
+      },
+      "./infrastructure/report": {
+        "types": "./dist/infrastructure/report/index.d.ts",
+        "import": "./dist/infrastructure/report/index.js"
+      },
+      "./repository": {
+        "types": "./dist/repository/index.d.ts",
+        "import": "./dist/repository/index.js"
+      },
+      "./repository/base": {
+        "types": "./dist/repository/base/index.d.ts",
+        "import": "./dist/repository/base/index.js"
+      },
+      "./repository/base/*": {
+        "types": "./dist/repository/base/*.d.ts",
+        "import": "./dist/repository/base/*.js"
+      },
+      "./repository/bootstrap": {
+        "types": "./dist/repository/bootstrap/index.d.ts",
+        "import": "./dist/repository/bootstrap/index.js"
+      },
+      "./repository/bootstrap/*": {
+        "types": "./dist/repository/bootstrap/*.d.ts",
+        "import": "./dist/repository/bootstrap/*.js"
+      },
+      "./repository/code": {
+        "types": "./dist/repository/code/index.d.ts",
+        "import": "./dist/repository/code/index.js"
+      },
+      "./repository/code/*": {
+        "types": "./dist/repository/code/*.d.ts",
+        "import": "./dist/repository/code/*.js"
+      },
+      "./repository/sync": {
+        "types": "./dist/repository/sync/index.d.ts",
+        "import": "./dist/repository/sync/index.js"
+      },
+      "./repository/sync/*": {
+        "types": "./dist/repository/sync/*.d.ts",
+        "import": "./dist/repository/sync/*.js"
+      },
+      "./service/bootstrap": {
+        "types": "./dist/service/bootstrap/index.d.ts",
+        "import": "./dist/service/bootstrap/index.js"
+      },
+      "./service/candidate": {
+        "types": "./dist/service/knowledge/validation/candidate/index.d.ts",
+        "import": "./dist/service/knowledge/validation/candidate/index.js"
+      },
+      "./service/planFacts": {
+        "types": "./dist/service/plan/facts/index.d.ts",
+        "import": "./dist/service/plan/facts/index.js"
+      },
+      "./service/quality": {
+        "types": "./dist/service/knowledge/validation/quality/index.d.ts",
+        "import": "./dist/service/knowledge/validation/quality/index.js"
+      },
+      "./service/recipe": {
+        "types": "./dist/service/knowledge/validation/recipe/index.d.ts",
+        "import": "./dist/service/knowledge/validation/recipe/index.js"
+      },
+      "./types": {
+        "types": "./dist/types/index.d.ts",
+        "import": "./dist/types/index.js"
+      },
+      "./test-fixtures": {
+        "types": "./dist/test-fixtures.d.ts",
+        "import": "./dist/test-fixtures.js"
+      },
+      "./workflows": {
+        "types": "./dist/workflows/index.d.ts",
+        "import": "./dist/workflows/index.js"
+      },
+      "./workflows/shared": {
+        "types": "./dist/workflows/shared/index.d.ts",
+        "import": "./dist/workflows/shared/index.js"
+      },
+      "./workflows/cold-start": {
+        "types": "./dist/workflows/cold-start/index.d.ts",
+        "import": "./dist/workflows/cold-start/index.js"
+      },
+      "./workflows/knowledge-rescan": {
+        "types": "./dist/workflows/knowledge-rescan/index.d.ts",
+        "import": "./dist/workflows/knowledge-rescan/index.js"
+      },
+      "./workflows/surfaces": {
+        "types": "./dist/workflows/surfaces/index.d.ts",
+        "import": "./dist/workflows/surfaces/index.js"
+      },
+      "./workflows/surfaces/host-agent": {
+        "types": "./dist/workflows/surfaces/host-agent/index.d.ts",
+        "import": "./dist/workflows/surfaces/host-agent/index.js"
+      },
+      "./workflows/surfaces/persistence": {
+        "types": "./dist/workflows/surfaces/persistence/index.d.ts",
+        "import": "./dist/workflows/surfaces/persistence/index.js"
+      },
+      "./workflows/surfaces/planning/dimensions": {
+        "types": "./dist/workflows/surfaces/planning/dimensions/index.d.ts",
+        "import": "./dist/workflows/surfaces/planning/dimensions/index.js"
+      },
+      "./workflows/surfaces/planning/knowledge": {
+        "types": "./dist/workflows/surfaces/planning/knowledge/index.d.ts",
+        "import": "./dist/workflows/surfaces/planning/knowledge/index.js"
+      },
+      "./workflows/surfaces/presentation": {
+        "types": "./dist/workflows/surfaces/presentation/index.d.ts",
+        "import": "./dist/workflows/surfaces/presentation/index.js"
+      },
+      "./infrastructure/cache": {
+        "types": "./dist/infrastructure/cache/index.d.ts",
+        "import": "./dist/infrastructure/cache/index.js"
+      },
+      "./types/graph-shared": {
+        "types": "./dist/types/graph-shared.d.ts",
+        "import": "./dist/types/graph-shared.js"
+      },
+      "./types/search-wire": {
+        "types": "./dist/types/search-wire.d.ts",
+        "import": "./dist/types/search-wire.js"
+      }
+    },
+    "files": [
+      "config/public-api-boundary.json",
+      "dist",
+      "resources",
+      "RELEASE-PLAYBOOK.md",
+      "scripts/check-public-api-boundary.mjs",
+      "scripts/check-release-readiness.mjs",
+      "scripts/clean-dist.mjs",
+      "scripts/lint-consumer-core-imports.mjs",
+      "scripts/public-api-boundary-policy.mjs",
+      "scripts/report-public-api-closeout.mjs",
+      "README.md"
+    ],
+    "scripts": {
+      "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.json",
+      "build:check": "tsc -p tsconfig.json --noEmit",
+      "clean:dist": "node scripts/clean-dist.mjs",
+      "typecheck": "tsc -p tsconfig.json --noEmit",
+      "test": "vitest run",
+      "test:watch": "vitest",
+      "test:coverage": "vitest run --coverage",
+      "smoke:public-api": "node scripts/smoke-public-api.mjs",
+      "probe:strict-production": "npm run build && node scripts/strict-production-authority-probe.mjs",
+      "check:output-budgets": "node scripts/check-output-budgets.mjs",
+      "check:space-edges": "node scripts/check-space-edges.mjs",
+      "lint:doctrine": "node scripts/lint-doctrine.mjs",
+      "lint:naming": "node scripts/lint-naming.mjs",
+      "lint:public-api-boundary": "node scripts/check-public-api-boundary.mjs",
+      "lint:layer-contract": "node scripts/lint-layer-contract.mjs",
+      "lint:consumer-core-imports": "node scripts/lint-consumer-core-imports-all.mjs",
+      "lint:scope-resolution": "node scripts/lint-scope-resolution.mjs",
+      "report:public-api-closeout": "node scripts/report-public-api-closeout.mjs",
+      "release:check": "node scripts/check-release-readiness.mjs",
+      "lint": "biome check src/ test/ scripts/ resources/codegraph/ *.ts",
+      "lint:fix": "biome check --fix src/ test/ scripts/ resources/codegraph/ *.ts",
+      "format": "biome format --write src/ test/ scripts/ resources/codegraph/ *.ts",
+      "check": "npm run build && npm run lint:public-api-boundary && npm run lint:layer-contract && npm run lint:consumer-core-imports && npm run lint:scope-resolution && npm run smoke:public-api && npm run check:output-budgets && npm run check:space-edges && npm run lint:doctrine && npm run lint:naming && npm run test && npm run lint && npm run lint:retired-symbols",
+      "lint:retired-symbols": "node scripts/lint-retired-symbols.mjs . --dirs=src,test"
+    },
+    "engines": {
+      "node": ">=22.0.0"
+    },
+    "license": "MIT",
+    "dependencies": {
+      "@colbymchenry/codegraph": "1.6.0",
+      "better-sqlite3": "^12.6.2",
+      "drizzle-orm": "^0.45.1",
+      "js-yaml": "^4.1.1",
+      "p-limit": "^7.3.0",
+      "uuid": "^13.0.0",
+      "web-tree-sitter": "^0.26.8",
+      "winston": "^3.19.0",
+      "zod": "^4.3.6"
+    },
+    "devDependencies": {
+      "@biomejs/biome": "2.4.6",
+      "@types/better-sqlite3": "^7.6.13",
+      "@types/js-yaml": "^4.0.9",
+      "@types/node": "^22.19.18",
+      "@vitest/coverage-v8": "^4.1.6",
+      "typescript": "^5.9.3",
+      "vitest": "^4.0.18"
+    }
+  },
+  "tsconfig": {
+    "compilerOptions": {
+      "target": "ES2022",
+      "lib": [
+        "ES2024"
+      ],
+      "module": "NodeNext",
+      "moduleResolution": "NodeNext",
+      "outDir": "dist",
+      "rootDir": "src",
+      "declaration": true,
+      "strict": true,
+      "noImplicitReturns": true,
+      "noFallthroughCasesInSwitch": true,
+      "esModuleInterop": true,
+      "skipLibCheck": true,
+      "isolatedModules": true,
+      "forceConsistentCasingInFileNames": true
+    },
+    "include": [
+      "src/**/*.ts"
+    ],
+    "exclude": [
+      "dist",
+      "node_modules"
+    ]
+  }
+}
