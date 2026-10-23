@@ -169,7 +169,7 @@
           },
           {
             "id": "divergence",
-            "label": "DivergenceError：显式sync指引",
+            "label": "create/update分歧：显式sync指引",
             "role": "failure"
           },
           {
@@ -269,8 +269,8 @@
     "truthKind": "current-code",
     "baselineCommit": "35302912ac2efaa6a1bc65fdc112a16da75d845f",
     "reviewDepth": "L3",
-    "reviewedAt": "2026-10-22",
-    "reviewOrigin": "architecture-atlas/reviews/2026-10-22-r3/semantic-review.md",
+    "reviewedAt": "2026-10-23T16:05:54.700Z",
+    "reviewOrigin": "architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md",
     "dependencySelection": [
       "src/index.ts",
       "src/knowledge.ts",
@@ -528,7 +528,7 @@
               "meaning": "本指南只恢复文件→DB 投影，不会补保证所有后置效果。"
             }
           ],
-          "action": "先排除原 DB 连接/锁/迁移故障，再由宿主显式调用 KnowledgeSyncService.sync 或 syncAll。先检查 dryRun 报告，再在既有授权下执行写同步；syncAll 另外观察后置向量结果。",
+          "action": "仅对create/update等persist路径且原文件真相仍在：排除DB故障后显式KnowledgeSyncService.sync/syncAll。若operation为knowledge.delete，按reconcileVia分流到删除清单，不能以sync代替同IDdelete。先dryRun，正式写后仍须读回。",
           "identity": "复用原 entryId 与原文件，不重新 create 生成新 id，也不因重试更新已保存文件的来源身份。",
           "verify": "按同 entryId 重读 DB 与 Markdown，核对正文和文件 hash；确认没有同一条目重复行，并记录 sync 的 updated/created/skipped/orphaned/violations。向量和关系另验。",
           "stop": "文件不在预期根、id 冲突、仍有审计 PersistenceError 或来源无法确认时停止；不能以删除文件/清空 DB 代替恢复。"
@@ -662,7 +662,7 @@
       }
     ],
     "path": "maps/01-overall-package-boundaries/README.md",
-    "body": "AlembicCore 是可运行的 Headless 内核库。它拥有配置与路径解析、数据库和仓储、源码分析、知识写入与检索、Guard、工作流及严格生产的确定性规则；宿主负责选择项目、装配依赖、执行模型和工具、CLI/MCP/UI 交互及发布运输。理解入口时先查 package.json 的 exports，再查对应门面的实际导出，不能把磁盘上存在的类视为可供外层直接引用的公共 API。\n\n根入口保留常用共享能力和明确收敛的兼容符号，完整业务能力通过子路径进入。公开 ProjectContext 在 ./project-context，认证持久工件在 ./project-context-foundation；后者实际映射到 projectContextFoundation 门面。./core/analysis 是冻结兼容入口，当前把调用点和导入记录类型转发到语法叶子。没有 ./source-graph 或 ./recipe-context 公共键，关系查询由 ProjectContext 门面提供，RecipeContext 的能力门面是 ./recipe-context-capabilities。\n\n图中的边界关系表示公开门面暴露了某个能力，不表示导入包就执行相应流程。运行调用必须回到专题纵切里的确切方法；例如 Main 的 KnowledgeModule 用公开 ./knowledge 的 KnowledgeService，并注入 repository、fileWriter、eventBus 等真实依赖。Core 支持可选端口和历史兼容路径，宿主装配不同会改变副作用，不能把一个构造器或类型声明当作全部能力已启用。\n\n依赖方向由 config/layer-contract.json 约束，公共面的稳定性和收缩预算由 config/public-api-boundary.json 约束。core 目录是分析叶子，不是凌驾所有层的控制器。type-only 桥与运行依赖必须区分；AstAnalyzer、repository 和 workflow 的存在是完整复用能力的一部分，不能为了看起来分层整齐而删成接口。\n\n边界测试对公开存在与退役符号作断言，但这只证明相应 API 可见性，不证明业务执行成功。维护者新增公共能力时还需要真实消费者、输入输出、持久化与兼容说明。下钻时按用户问题选择知识持久化、项目事实、严格生产等专题，再从生成的文件与 API 索引确认定位。\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n阅读Core调用链时先标记四种责任：门面决定可见性，宿主决定依赖装配，领域服务执行用例，持久化owner决定何时可以确认耐久。根入口不是一个自动执行的应用启动器；createAlembicRepositories也只绑定已连接句柄，不替宿主连接、迁移或选择数据根。\n\n失败恢复同样分属各owner。知识创建/更新可能留下文件真相，索引取消应保留旧代，工作流结果部分保存应保留检查点，严格输入闭包失败则不能发布局部结果。下面将这些独立路径并排展示，供宿主选择正确入口；图中没有一个隐藏的Core总恢复调度器。输出预算又是另一层：overflow只描述交付合同，既不保存原内容，也不能证明宿主已经履行归档。",
+    "body": "AlembicCore 是可运行的 Headless 内核库。它拥有配置与路径解析、数据库和仓储、源码分析、知识写入与检索、Guard、工作流及严格生产的确定性规则；宿主负责选择项目、装配依赖、执行模型和工具、CLI/MCP/UI 交互及发布运输。理解入口时先查 package.json 的 exports，再查对应门面的实际导出，不能把磁盘上存在的类视为可供外层直接引用的公共 API。\n\n根入口保留常用共享能力和明确收敛的兼容符号，完整业务能力通过子路径进入。公开 ProjectContext 在 ./project-context，认证持久工件在 ./project-context-foundation；后者实际映射到 projectContextFoundation 门面。./core/analysis 是冻结兼容入口，当前把调用点和导入记录类型转发到语法叶子。没有 ./source-graph 或 ./recipe-context 公共键，关系查询由 ProjectContext 门面提供，RecipeContext 的能力门面是 ./recipe-context-capabilities。\n\n图中的边界关系表示公开门面暴露了某个能力，不表示导入包就执行相应流程。运行调用必须回到专题纵切里的确切方法；例如 Main 的 KnowledgeModule 用公开 ./knowledge 的 KnowledgeService，并注入 repository、fileWriter、eventBus 等真实依赖。Core 支持可选端口和历史兼容路径，宿主装配不同会改变副作用，不能把一个构造器或类型声明当作全部能力已启用。\n\n依赖方向由 config/layer-contract.json 约束，公共面的稳定性和收缩预算由 config/public-api-boundary.json 约束。core 目录是分析叶子，不是凌驾所有层的控制器。type-only 桥与运行依赖必须区分；AstAnalyzer、repository 和 workflow 的存在是完整复用能力的一部分，不能为了看起来分层整齐而删成接口。\n\n边界测试对公开存在与退役符号作断言，但这只证明相应 API 可见性，不证明业务执行成功。维护者新增公共能力时还需要真实消费者、输入输出、持久化与兼容说明。下钻时按用户问题选择知识持久化、项目事实、严格生产等专题，再从生成的文件与 API 索引确认定位。\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n阅读Core调用链时先标记四种责任：门面决定可见性，宿主决定依赖装配，领域服务执行用例，持久化owner决定何时可以确认耐久。根入口不是一个自动执行的应用启动器；createAlembicRepositories也只绑定已连接句柄，不替宿主连接、迁移或选择数据根。\n\n失败恢复同样分属各owner。知识创建/更新可能留下文件真相，索引取消应保留旧代，工作流结果部分保存应保留检查点，严格输入闭包失败则不能发布局部结果。下面将这些独立路径并排展示，供宿主选择正确入口；图中没有一个隐藏的Core总恢复调度器。输出预算又是另一层：overflow只描述交付合同，既不保存原内容，也不能证明宿主已经履行归档。\n\n## 删除不能套用创建恢复\n\nfile-first协调器也服务remove，但恢复入口因操作而不同。创建/更新分歧见F01-file-db-divergence；删除的文件/DB/后置事件分流见[知识删除](../10-knowledge-authoring-persistence/README.md#m-M10-06)。",
     "freshness": "matched"
   },
   {
@@ -8517,7 +8517,8 @@
       "src/service/knowledge/validation/recipe/RecipeParser.ts",
       "src/service/knowledge/validation/recipe/index.ts",
       "src/shared/sourceRefPath.ts",
-      "test/support/knowledge-runtime.ts"
+      "test/support/knowledge-runtime.ts",
+      "src/infrastructure/vector/HnswVectorAdapter.ts"
     ],
     "testPaths": [
       "test/FailureSemanticsCO3.test.ts",
@@ -8525,7 +8526,8 @@
       "test/KnowledgeProductizationLifecycle.test.ts",
       "test/KnowledgeServicePersistence.test.ts",
       "test/support/knowledge-runtime.ts",
-      "test/unit/RecipeProductionGateway.test.ts"
+      "test/unit/RecipeProductionGateway.test.ts",
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
     ],
     "consumerRefs": [
       {
@@ -8538,7 +8540,8 @@
     "risks": [
       "R02：FsSourceRefResolver的lexical containment不能阻止symlink读到根外；本页不据此推断全部来源均安全。",
       "读回wrong-id虽会触发DivergenceError，但既有参数化恢复case没有逐项覆盖该分支。",
-      "关系、审计、事件、向量与主写入具有先后/异步边界，不是全链原子事务。"
+      "关系、审计、事件、向量与主写入具有先后/异步边界，不是全链原子事务。",
+      "V07-S3受控短暂读取失败可使仍存在的文件进入orphan并暂时deprecated；风险观察未修改产品。"
     ],
     "diagrams": [
       {
@@ -9058,6 +9061,562 @@
             }
           }
         ]
+      },
+      {
+        "id": "knowledge-delete-recovery",
+        "title": "删除失败后先确定哪一段已完成",
+        "viewType": "R0",
+        "description": "只画fileStore已注入路径；文件、referrer、目标/FK事务、审计、事件并非一个事务。恢复箭头由调用者显式执行。",
+        "nodes": [
+          {
+            "id": "d1",
+            "label": "现存id / delete",
+            "role": "operation"
+          },
+          {
+            "id": "d2",
+            "label": "同步owner检查与remove",
+            "role": "operation"
+          },
+          {
+            "id": "d3",
+            "label": "await逐个referrer更新",
+            "role": "operation"
+          },
+          {
+            "id": "d4",
+            "label": "await目标/FK事务",
+            "role": "operation"
+          },
+          {
+            "id": "d5",
+            "label": "兼容清理 / non-blocking audit",
+            "role": "operation"
+          },
+          {
+            "id": "d6",
+            "label": "同步emit / 返回",
+            "role": "operation"
+          },
+          {
+            "id": "df",
+            "label": "FileWriteError",
+            "role": "operation"
+          },
+          {
+            "id": "dd",
+            "label": "DivergenceError",
+            "role": "operation"
+          },
+          {
+            "id": "dp",
+            "label": "后置错误 / 已删除",
+            "role": "operation"
+          },
+          {
+            "id": "dr",
+            "label": "调用者读回并选择动作",
+            "role": "boundary"
+          }
+        ],
+        "edges": [
+          {
+            "id": "kd-1",
+            "from": "d1",
+            "to": "d2",
+            "label": "file-first协调器选择remove",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "fileOperation: 'remove',"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/KnowledgeServicePersistence.test.ts",
+              "caseTitle": "preserves DB truth on %s failure",
+              "anchorSymbol": "service",
+              "assertedBehavior": "unlink拒绝后文件和主行仍在，未发删除事件。",
+              "assertionExcerpt": "expect(fs.existsSync(file)).toBe(true);",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "kd-2",
+            "from": "d2",
+            "to": "d3",
+            "label": "文件完成后await反向引用更新",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "await this.#removeReverseRelationsDurably(id);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/KnowledgeServicePersistence.test.ts",
+              "caseTitle": "keeps reverse-reference cleanup durable after deleting its target",
+              "anchorSymbol": "service",
+              "assertedBehavior": "删除目标后反向引用清理在显式sync之后仍保持。",
+              "assertionExcerpt": "expect(await related()).toEqual([]);",
+              "scenarioKind": "normal"
+            }
+          },
+          {
+            "id": "kd-3",
+            "from": "d3",
+            "to": "d4",
+            "label": "referrer后提交目标事务",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "const deleted = await this.repository.delete(id);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/KnowledgeServicePersistence.test.ts",
+              "caseTitle": "deletes dependent proposal, warning and lifecycle rows in the repository transaction",
+              "anchorSymbol": "service",
+              "assertedBehavior": "目标/FK事务拒绝时保留从表；排故后service.delete清理主行与所列从表。",
+              "assertionExcerpt": "expect(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "kd-4",
+            "from": "d4",
+            "to": "d5",
+            "label": "目标事务后兼容清理与audit",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "await this._audit('delete_knowledge', id, context.userId, {"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "deletion listener failure does not restore committed truth",
+              "anchorSymbol": "service",
+              "assertedBehavior": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+              "assertionExcerpt": "expect({ auditAttempts, listenerAttempts }).toEqual(",
+              "scenarioKind": "observed-boundary"
+            }
+          },
+          {
+            "id": "kd-5",
+            "from": "d5",
+            "to": "d6",
+            "label": "同步emit不等于消费者已耐久",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "deletion listener failure does not restore committed truth",
+              "anchorSymbol": "service",
+              "assertedBehavior": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+              "assertionExcerpt": "expect({ auditAttempts, listenerAttempts }).toEqual(",
+              "scenarioKind": "observed-boundary"
+            }
+          },
+          {
+            "id": "kd-6",
+            "from": "d2",
+            "to": "df",
+            "label": "文件拒绝阻断DB",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+              "symbol": "commitKnowledgeWrite",
+              "excerpt": "throw new FileWriteError(fileFailureMessage, { cause: error });"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/KnowledgeServicePersistence.test.ts",
+              "caseTitle": "preserves DB truth on %s failure",
+              "anchorSymbol": "service",
+              "assertedBehavior": "unlink拒绝后文件和主行仍在，未发删除事件。",
+              "assertionExcerpt": "expect(fs.existsSync(file)).toBe(true);",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "kd-7",
+            "from": "d4",
+            "to": "dd",
+            "label": "文件/DB分歧外抛",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+              "symbol": "commitKnowledgeWrite",
+              "excerpt": "throw new DivergenceError(dbFailureMessage, details, { cause: error });"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/KnowledgeServicePersistence.test.ts",
+              "caseTitle": "reports a DB %s after file removal and supports retry",
+              "anchorSymbol": "service",
+              "assertedBehavior": "ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。",
+              "assertionExcerpt": "expect(await env.repo.findById(id)).toBeNull();",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "kd-8",
+            "from": "d6",
+            "to": "dp",
+            "label": "listener拒绝不补回真相",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "this.logger.error('Error deleting knowledge entry', {"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "deletion listener failure does not restore committed truth",
+              "anchorSymbol": "service",
+              "assertedBehavior": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+              "assertionExcerpt": "expect({ auditAttempts, listenerAttempts }).toEqual(",
+              "scenarioKind": "observed-boundary"
+            }
+          },
+          {
+            "id": "kd-9",
+            "from": "dd",
+            "to": "dr",
+            "label": "调用方按reconcileVia检查",
+            "kind": "recovery",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "reconcileVia: 'KnowledgeService.delete',"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "deletion DB failure leaves a retryable identity",
+              "anchorSymbol": "service",
+              "assertedBehavior": "同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。",
+              "assertionExcerpt": "expect(recovered).toEqual(",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "kd-10",
+            "from": "dr",
+            "to": "d1",
+            "label": "仍有主行才显式同ID重试",
+            "kind": "recovery",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "const entry = await this._findOrThrow(id);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "deletion DB failure leaves a retryable identity",
+              "anchorSymbol": "service",
+              "assertedBehavior": "同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。",
+              "assertionExcerpt": "expect(recovered).toEqual(",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "kd-11",
+            "from": "dp",
+            "to": "dr",
+            "label": "主行已无则检查消费方",
+            "kind": "boundary",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeService.ts",
+              "symbol": "KnowledgeService",
+              "excerpt": "throw new NotFoundError('Knowledge entry not found', 'knowledge', id);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "deletion listener failure does not restore committed truth",
+              "anchorSymbol": "service",
+              "assertedBehavior": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+              "assertionExcerpt": "expect({ auditAttempts, listenerAttempts }).toEqual(",
+              "scenarioKind": "observed-boundary"
+            }
+          }
+        ]
+      },
+      {
+        "id": "knowledge-sync-post-maintenance",
+        "title": "syncAll先改变DB，再等待独立维护",
+        "viewType": "R0",
+        "description": "completed仅表示维护调用返回。reject与resolve-failed是不同分支；真实store恢复由单独标注的fixture接线验证。",
+        "nodes": [
+          {
+            "id": "s1",
+            "label": "显式syncAll",
+            "role": "operation"
+          },
+          {
+            "id": "s2",
+            "label": "sync逐文件 / 登记id / upsert",
+            "role": "operation"
+          },
+          {
+            "id": "s3",
+            "label": "orphan检查 / 可deprecate",
+            "role": "operation"
+          },
+          {
+            "id": "s4",
+            "label": "await注入维护端口",
+            "role": "operation"
+          },
+          {
+            "id": "s5",
+            "label": "completed + unknown report",
+            "role": "operation"
+          },
+          {
+            "id": "s6",
+            "label": "reject / DB效果仍在",
+            "role": "operation"
+          },
+          {
+            "id": "s7",
+            "label": "调用方读回DB与store",
+            "role": "boundary"
+          },
+          {
+            "id": "s8",
+            "label": "非PersistenceError skip",
+            "role": "operation"
+          },
+          {
+            "id": "s9",
+            "label": "dryRun或未配置跳过维护",
+            "role": "operation"
+          }
+        ],
+        "edges": [
+          {
+            "id": "ks-1",
+            "from": "s1",
+            "to": "s2",
+            "label": "同步先执行",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "const syncReport = this.sync(db, opts);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync maintenance rejection preserves DB changes and recovers the real vector store",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+              "assertionExcerpt": "expect(recovered.reopenedIds).toEqual([]);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "ks-2",
+            "from": "s2",
+            "to": "s3",
+            "label": "循环结束后检查未登记id",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "report.orphaned = this._detectOrphans(repo, syncedIds, dryRun);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync read failure and real file absence produce distinguishable orphan observations",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+              "assertionExcerpt": "expect(recovered).toMatchObject(",
+              "scenarioKind": "risk-observed"
+            }
+          },
+          {
+            "id": "ks-3",
+            "from": "s2",
+            "to": "s8",
+            "label": "普通异常记录并skip",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "report.skipped++;"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync read failure and real file absence produce distinguishable orphan observations",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+              "assertionExcerpt": "expect(recovered).toMatchObject(",
+              "scenarioKind": "risk-observed"
+            }
+          },
+          {
+            "id": "ks-4",
+            "from": "s8",
+            "to": "s3",
+            "label": "未登记id仍可能被选中",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "report.orphaned = this._detectOrphans(repo, syncedIds, dryRun);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync read failure and real file absence produce distinguishable orphan observations",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+              "assertionExcerpt": "expect(recovered).toMatchObject(",
+              "scenarioKind": "risk-observed"
+            }
+          },
+          {
+            "id": "ks-5",
+            "from": "s3",
+            "to": "s4",
+            "label": "直接DB变化后才await维护",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/KnowledgeProductizationLifecycle.test.ts",
+              "caseTitle": "deprecates an orphan for an empty corpus and awaits authoritative vector maintenance",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "空文件语料仍做孤儿检查；syncAll等待维护Promise后返回。",
+              "assertionExcerpt": "expect(settled).toBe(false);",
+              "scenarioKind": "normal"
+            }
+          },
+          {
+            "id": "ks-6",
+            "from": "s4",
+            "to": "s5",
+            "label": "resolve只标调用完成",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "report.vectorMaintenanceStatus = 'completed';"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync completed can carry a failed maintenance business report",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "completed只说明端口resolve；嵌套业务报告仍可failed。",
+              "assertionExcerpt": "expect(report.vectorMaintenanceStatus).toBe('completed');",
+              "scenarioKind": "observed-boundary"
+            }
+          },
+          {
+            "id": "ks-7",
+            "from": "s4",
+            "to": "s6",
+            "label": "reject传播 / 不撤销sync",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync maintenance rejection preserves DB changes and recovers the real vector store",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+              "assertionExcerpt": "expect(recovered.reopenedIds).toEqual([]);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "ks-8",
+            "from": "s6",
+            "to": "s7",
+            "label": "调用方保留残留与诊断",
+            "kind": "boundary",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "const syncReport = this.sync(db, opts);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync maintenance rejection preserves DB changes and recovers the real vector store",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+              "assertionExcerpt": "expect(recovered.reopenedIds).toEqual([]);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "ks-9",
+            "from": "s7",
+            "to": "s1",
+            "label": "排故后显式重调",
+            "kind": "recovery",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "const syncReport = this.sync(db, opts);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync maintenance rejection preserves DB changes and recovers the real vector store",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+              "assertionExcerpt": "expect(recovered.reopenedIds).toEqual([]);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "ks-10",
+            "from": "s1",
+            "to": "s9",
+            "label": "dryRun / 未配置有独立状态",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/KnowledgeSyncService.ts",
+              "symbol": "KnowledgeSyncService",
+              "excerpt": "vectorMaintenanceStatus: opts.dryRun ? 'skipped-dry-run' : 'not-configured',"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "sync read failure and real file absence produce distinguishable orphan observations",
+              "anchorSymbol": "sync",
+              "assertedBehavior": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+              "assertionExcerpt": "expect(recovered).toMatchObject(",
+              "scenarioKind": "risk-observed"
+            }
+          }
+        ]
       }
     ],
     "configPaths": [
@@ -9069,8 +9628,8 @@
     "truthKind": "current-code",
     "baselineCommit": "35302912ac2efaa6a1bc65fdc112a16da75d845f",
     "reviewDepth": "L3",
-    "reviewedAt": "2026-10-22",
-    "reviewOrigin": "architecture-atlas/reviews/2026-10-22-r3/semantic-review.md",
+    "reviewedAt": "2026-10-23T16:05:54.737Z",
+    "reviewOrigin": "architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md",
     "dependencySelection": [
       "src/service/knowledge/KnowledgeService.ts",
       "src/service/knowledge/commitKnowledgeWrite.ts",
@@ -9083,8 +9642,8 @@
       "src/domain/knowledge/FieldSpec.ts",
       "src/domain/knowledge/index.ts"
     ],
-    "sourceFingerprint": "56ca283e06bff39c898dff0fb8ec81f622c19e8884a8bad3cbe30fe9b9769ed5",
-    "contextFingerprint": "b076c784791e5b9fe356741ff1a1a01c51d4cf33d206227573d362aee598e911",
+    "sourceFingerprint": "c6e590df483ed1223bac18b728314f32802cf5642db37f3cb4f203b3528bf4a5",
+    "contextFingerprint": "d7550fd3607ddf88e611a6c1d25f939379b10d1adeb276fd9a0195c6fa37d0d4",
     "moduleDetails": [
       {
         "name": "结构、内容、唯一性分层校验",
@@ -9175,10 +9734,10 @@
           "excerpt": "const syncReport = this.sync(db, opts);"
         },
         "input": "DB句柄、dryRun/force/skipViolations、可选vectorMaintenance",
-        "output": "sync计数、violations/orphaned/skipped、向量维护状态",
-        "calls": "_collectMdFiles；parseKnowledgeMarkdown；RawDbSyncAdapter；_detectOrphans；reconcileAuthoritativeCorpus",
+        "output": "sync返回synced/created/updated/skipped/orphaned/violations；syncAll维护reject时不返回报告；resolve时原样携带unknown report，completed只表示端口完成调用。",
+        "calls": "syncAll先同步sync→收集Markdown→读取/解析→登记id→审计/构造行/upsert→孤儿检查，之后才await注入的reconcileAuthoritativeCorpus。sync本身不经KnowledgeService事件，向量维护须显式端口。",
         "sideEffects": "逐文件upsert；手改审计；孤儿deprecated；最后显式await向量维护",
-        "limits": "同步不经KnowledgeService事件；DB完成后向量失败不会反向回滚DB；dryRun不做这些写入。",
+        "limits": "没有跨文件/DB/向量事务。非PersistenceError异常可skip，id登记前后决定是否进入孤儿集合；orphaned不独立证明磁盘文件已删除。completed不保证nested report成功或向量健康，未配置为not-configured，dryRun不调用维护。",
         "id": "M10-04",
         "aliases": [
           "markdown同步及后置向量维护"
@@ -9186,12 +9745,14 @@
         "graphRefs": [
           "knowledge-recovery",
           "r3-authoring-and-sync-effects",
-          "vector-generation-visibility"
+          "vector-generation-visibility",
+          "knowledge-sync-post-maintenance"
         ],
         "failureRefs": [
           "K3-SYNC-AUDIT",
           "K3-SYNC-SKIP",
-          "K3-SYNC-VECTOR"
+          "K3-SYNC-VECTOR",
+          "K3-SYNC-RESULT"
         ],
         "apiRefs": [
           ".",
@@ -9220,6 +9781,32 @@
         "failureRefs": [],
         "apiRefs": [
           ".",
+          "./knowledge"
+        ]
+      },
+      {
+        "id": "M10-06",
+        "name": "知识删除：文件、目标事务与后置效果分段",
+        "entry": {
+          "path": "src/service/knowledge/KnowledgeService.ts",
+          "symbol": "KnowledgeService",
+          "excerpt": "reconcileVia: 'KnowledgeService.delete',"
+        },
+        "input": "现存知识id、ServiceContext、明确注入的fileStore/仓储及可选审计与事件端口。",
+        "output": "主链完成返回{success:true,id}；FileWriteError、DivergenceError或后置listener错误分别对应不同已发生状态。起初主行不存在时NotFound。",
+        "calls": "delete先登记activeDeletes并移除该id待处理关系任务→_findOrThrow→commitKnowledgeWrite(remove)→逐个referrer持久更新→目标/FK仓储事务→兼容清理→_audit→同步emit。",
+        "sideEffects": "目标Markdown先移除；referrer逐个file-first更新不属于目标删除事务。目标/FK事务后仍有兼容清理、non-blocking审计及同步事件；finally只解除activeDeletes计数。",
+        "limits": "fileStore缺失为DB-only兼容路径。remove=false可继续索引清理；成功返回不证明异步边清理、审计或向量已耐久。同ID重试只针对仍有主行的分歧，主行已无不能靠再次delete重放listener。",
+        "aliases": [],
+        "graphRefs": [
+          "knowledge-delete-recovery"
+        ],
+        "failureRefs": [
+          "K3-DELETE-FILE",
+          "K3-DELETE-DB",
+          "K3-DELETE-POST"
+        ],
+        "apiRefs": [
           "./knowledge"
         ]
       }
@@ -9405,8 +9992,8 @@
       },
       {
         "id": "K3-SYNC-SKIP",
-        "trigger": "逐文件读取/解析等非PersistenceError",
-        "remainingState": "可留原DB状态；没有成功登记ID的项可能随后参与孤儿判断",
+        "trigger": "逐文件读取、解析或未分类处理异常，且不是PersistenceError",
+        "remainingState": "本轮已有DB写入保留；失败发生在登记id之前时，仍存在的文件可能进入orphan并被deprecated；登记后失败不由本轮缺id分支再判孤儿。",
         "automaticAction": "记录error、skipped++，继续其他文件与孤儿检测",
         "explicitRecovery": "宿主检查失败路径是否仍存在/可读，再重试sync并核对lifecycle；不能把skipped看作无副作用",
         "stopCondition": "仅该文件步骤跳过；孤儿检测没有按同一文件再次确认存在的保证",
@@ -9416,8 +10003,13 @@
           "excerpt": "report.skipped++;"
         },
         "test": {
-          "relation": "none",
-          "reason": "本次未定位“现存文件临时不可读→孤儿分类”的同一集成断言；保留源码限制而非新复现缺陷。"
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "sync read failure and real file absence produce distinguishable orphan observations",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+          "assertionExcerpt": "expect(recovered).toMatchObject(",
+          "scenarioKind": "risk-observed"
         },
         "aliases": [
           "k3-sync-skip--逐文件读取解析等非persistenceerror"
@@ -9427,35 +10019,69 @@
         ],
         "graphRefs": [
           "knowledge-recovery",
-          "r3-authoring-and-sync-effects"
+          "r3-authoring-and-sync-effects",
+          "knowledge-sync-post-maintenance"
         ],
         "apiRefs": [
           ".",
           "./knowledge"
         ],
         "runbook": {
-          "preconditions": "sync 中发生逐文件读取/解析的非 PersistenceError，report.skipped 增加。此指南是源码导出的检查建议，现有 Atlas 未声明对应端到端恢复测试已覆盖。",
+          "preconditions": "保留同一root/DB/id、原文件字节和本轮skipped/orphaned报告；先确认失败发生于读取/登记id之前还是之后。",
           "checks": [
             {
-              "observe": "定位日志中的失败文件，确认文件仍存在且可读/可解析",
-              "meaning": "skip 可能来自暂时读取失败，不代表文件被删除。"
+              "observe": "读实际sourceFile是否仍在、id与hash是否一致，核对skipped及orphaned。",
+              "meaning": "受控一次读取失败能产生orphan，即便文件仍在；报告名称不独立证明磁盘删除。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeSyncService.ts",
+                "symbol": "KnowledgeSyncService",
+                "excerpt": "report.orphaned = this._detectOrphans(repo, syncedIds, dryRun);"
+              },
+              "fields": [
+                "sourceFile",
+                "id",
+                "skipped",
+                "orphaned"
+              ]
             },
             {
-              "observe": "按该文件原 id 检查 DB lifecycle 与 orphaned 结果",
-              "meaning": "本次失败项可能未登记到有效 ID 集，后续孤儿检测仍继续，不能假设完全无副作用。"
+              "observe": "重读DB lifecycle并比较文件中lifecycle。",
+              "meaning": "正式扫描可能已deprecated，dryRun只报告；内容与向量需另核。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeSyncService.ts",
+                "symbol": "KnowledgeSyncService",
+                "excerpt": "syncedIds.add(parsed.id as string);"
+              },
+              "fields": [
+                "lifecycle",
+                "syncedIds"
+              ]
+            },
+            {
+              "observe": "检查PersistenceError还是普通skip日志。",
+              "meaning": "前者直接终止；后者记录错误后继续，不自动重试读取。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeSyncService.ts",
+                "symbol": "KnowledgeSyncService",
+                "excerpt": "if (err instanceof PersistenceError) {"
+              },
+              "fields": [
+                "error",
+                "skipped"
+              ]
             }
           ],
-          "action": "修复文件权限/内容或解析输入，先 dryRun 审阅同根同步将做的变化，再显式重新 sync；若已被判孤儿则单独核对文件和 lifecycle 纠正路径，不能无条件批量 reactivate。",
-          "identity": "使用文件原 id 与实际来源路径；不要复制出另一个新 id 来绕开孤儿诊断。",
-          "verify": "确认失败文件不再 skipped、DB 与文件内容一致，检查 lifecycle 与 orphaned 报告的最终值；单独记录仍无集成运行证明的限制。",
-          "stop": "文件归属、id 或 lifecycle 改动原因不明时停止；审计 PersistenceError 不是可忽略 skip。"
+          "action": "排除读取故障并确认文件真相后显式重扫；有维护端口时分别检查其报告与store。先dryRun不能替代正式写后的读回。",
+          "identity": "复用原id与原文件；不能用重新create掩盖暂时读失败。",
+          "verify": "读取恢复后skipped=0，文件仍同hash，DB按文件恢复；真实缺文件control与读取失败分开。当前样本不证明向量修复。",
+          "stop": "文件归属/hash不明、PersistenceError或真实写入仍失败时停止；不因orphaned直接删除仍在的文件。"
         }
       },
       {
         "id": "K3-SYNC-VECTOR",
         "trigger": "syncAll中权威向量维护reject",
         "remainingState": "Markdown与DB同步已完成；向量可能部分变化",
-        "automaticAction": "await的错误向调用方传播，不生成completed维护状态",
+        "automaticAction": "await维护端口reject直接传播，syncAll没有专用错误重试/DB回滚；此前同步效果保留。",
         "explicitRecovery": "排除provider/store问题后显式reconcile或syncAll；读者保留DB/向量不一致诊断",
         "stopCondition": "无自动重试、无DB回滚，不能当作整个syncAll未执行",
         "source": {
@@ -9464,8 +10090,13 @@
           "excerpt": "report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();"
         },
         "test": {
-          "relation": "none",
-          "reason": "本轮未定位该reject穿过syncAll并核对DB保留的具体case；不借其他vector测试冒充。"
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "sync maintenance rejection preserves DB changes and recovers the real vector store",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+          "assertionExcerpt": "expect(recovered.reopenedIds).toEqual([]);",
+          "scenarioKind": "recovered"
         },
         "aliases": [
           "k3-sync-vector--syncall中权威向量维护reject"
@@ -9476,33 +10107,379 @@
         "graphRefs": [
           "knowledge-recovery",
           "r3-authoring-and-sync-effects",
-          "vector-generation-visibility"
+          "vector-generation-visibility",
+          "knowledge-sync-post-maintenance"
         ],
         "apiRefs": [
           ".",
           "./knowledge"
         ],
         "runbook": {
-          "preconditions": "syncAll 已执行 sync(db, opts) 后在 reconcileAuthoritativeCorpus await 处拒绝；能访问同一 DB 与注入的 vectorMaintenance 端口。",
+          "preconditions": "确认syncAll已完成同步后，注入维护端口确实reject；保存原id、root、DB与端口错误。不要把resolve的failed报告误归为此分支。",
           "checks": [
             {
-              "observe": "分别检查 Markdown→DB 同步结果与 DB 当前行",
-              "meaning": "DB 部分已完成，reject 不能当作整次未执行。"
+              "observe": "重读DB lifecycle/正文及源Markdown，确认直接同步的效果。",
+              "meaning": "调用拒绝不代表DB没改；本样本文件已无且DB已deprecated。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeSyncService.ts",
+                "symbol": "KnowledgeSyncService",
+                "excerpt": "const syncReport = this.sync(db, opts);"
+              },
+              "fields": [
+                "id",
+                "lifecycle",
+                "sourceFile"
+              ]
             },
             {
-              "observe": "检查 provider/store 原始错误及活跃向量代际/维护诊断",
-              "meaning": "向量可能未完成或部分变化，不能用 DB 更新计数代替 dense 可见性。"
+              "observe": "保存端口错误及实际对账errors/inspection，读真实store残留ID。",
+              "meaning": "Core此层没有专用向量失败诊断；fixture将reconcileIndex.errors转reject，非宿主默认策略。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeSyncService.ts",
+                "symbol": "KnowledgeSyncService",
+                "excerpt": "report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();"
+              },
+              "fields": [
+                "errors",
+                "initialInspection",
+                "finalInspection",
+                "vectorIds"
+              ]
+            },
+            {
+              "observe": "明确store.flush与新adapter读回是否都完成。",
+              "meaning": "内存删除不等于快照耐久；本样本以真实HNSW新adapter确认两类向量均已无。",
+              "source": {
+                "path": "src/infrastructure/vector/HnswVectorAdapter.ts",
+                "symbol": "HnswVectorAdapter",
+                "excerpt": "async flush() {"
+              },
+              "fields": [
+                "listIds",
+                "getById",
+                "flush"
+              ]
             }
           ],
-          "action": "修复明确的 provider/store 故障后，由宿主显式重试权威 corpus reconcile，或按原同步选项重试 syncAll；恢复过程中保留 DB/向量分歧说明。",
-          "identity": "保持相同知识实体 ID 和权威 corpus 来源；新向量 generation 的身份遵从 manager/router，不能手工把 failed 改 ready。",
-          "verify": "重读 DB 仍保留已同步条目；确认维护返回实际完成状态和期望代际/检查结果，再用受限业务 query 检查相应候选是否通过 live truth。",
-          "stop": "向量端口缺失、权威 corpus 未确认或 inspection 未通过时不能宣称向量恢复；不得回滚已同步 DB 来掩盖后置失败。"
+          "action": "修复实际store故障，再由调用方同root/DB/options显式syncAll或其明确维护协议；检查nested report后显式flush并读回。",
+          "identity": "复用原知识id与权威语料；二次sync的orphaned可为空，因为DB前次已变更。",
+          "verify": "DB保持目标状态、维护errors为空、真实store不再暴露目标；本probe另用同进程新HNSW adapter重开确认。",
+          "stop": "errors/degraded/inspection仍不符合目标、来源冲突或flush失败时停止；不能把completed本身作为健康证明。"
+        }
+      },
+      {
+        "id": "K3-DELETE-FILE",
+        "trigger": "目标remove遇到unlink、读取或owner歧义拒绝",
+        "remainingState": "协调器尚未开始DB回调；目标文件是否存在仍需读回。",
+        "automaticAction": "记录entryId/operation/fileOperation并抛FileWriteError，不继续DB提交。",
+        "explicitRecovery": "先核对owner/路径，再排除明确I/O故障，主行仍在时同ID delete。",
+        "stopCondition": "归属不清时停止，不能直接unlink或清DB。",
+        "source": {
+          "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+          "symbol": "commitKnowledgeWrite",
+          "excerpt": "throw new FileWriteError(fileFailureMessage, { cause: error });"
+        },
+        "test": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "preserves DB truth on %s failure",
+          "anchorSymbol": "service",
+          "assertedBehavior": "unlink拒绝后文件和主行仍在，未发删除事件。",
+          "assertionExcerpt": "expect(fs.existsSync(file)).toBe(true);",
+          "scenarioKind": "rejected"
+        },
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "graphRefs": [
+          "knowledge-delete-recovery"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。",
+          "checks": [
+            {
+              "observe": "先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。",
+              "meaning": "FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。",
+              "source": {
+                "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+                "symbol": "commitKnowledgeWrite",
+                "excerpt": "logger.error('Knowledge mutation aborted before DB commit: file persistence failed', {"
+              },
+              "fields": [
+                "error.name",
+                "error.cause",
+                "entryId",
+                "operation",
+                "fileOperation"
+              ]
+            },
+            {
+              "observe": "读回目标主行、目标FK从表和相关referrer的关系/Markdown。",
+              "meaning": "referrer可先变化；它们不与目标删除组成一个跨文件事务。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeService.ts",
+                "symbol": "KnowledgeService",
+                "excerpt": "await this.#removeReverseRelationsDurably(id);"
+              },
+              "fields": [
+                "id",
+                "sourceFile",
+                "relations.related"
+              ]
+            },
+            {
+              "observe": "主行已无时检查audit warning与同步listener错误，另外核对消费方。",
+              "meaning": "审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeService.ts",
+                "symbol": "KnowledgeService",
+                "excerpt": "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+              },
+              "fields": [
+                "knowledge:deleted",
+                "entryId",
+                "Audit log failed (non-blocking)"
+              ]
+            }
+          ],
+          "action": "修复可核验的文件I/O原因后显式重试同ID delete。",
+          "identity": "复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。",
+          "verify": "目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。",
+          "stop": "owner/路径无法确认、错误原因仍在时停止。"
+        }
+      },
+      {
+        "id": "K3-DELETE-DB",
+        "trigger": "目标文件移除后，referrer更新或目标/FK提交失败",
+        "remainingState": "文件已无；目标主行可能仍在；部分referrer可能已经改写。目标事务内失败的从表回滚不扩展到其他资源。",
+        "automaticAction": "抛带knowledge.delete与reconcileVia=KnowledgeService.delete的DivergenceError，无自动sync或文件恢复。",
+        "explicitRecovery": "排除DB根因并读回确认目标仍在，再同ID显式delete。",
+        "stopCondition": "目标已无或身份冲突时停止统一重试，转入后置效果检查。",
+        "source": {
+          "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+          "symbol": "commitKnowledgeWrite",
+          "excerpt": "throw new DivergenceError(dbFailureMessage, details, { cause: error });"
+        },
+        "test": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "reports a DB %s after file removal and supports retry",
+          "anchorSymbol": "service",
+          "assertedBehavior": "ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。",
+          "assertionExcerpt": "expect(await env.repo.findById(id)).toBeNull();",
+          "scenarioKind": "recovered"
+        },
+        "moduleRefs": [
+          "M10-06",
+          "M01-05"
+        ],
+        "graphRefs": [
+          "knowledge-delete-recovery"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。",
+          "checks": [
+            {
+              "observe": "先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。",
+              "meaning": "FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。",
+              "source": {
+                "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+                "symbol": "commitKnowledgeWrite",
+                "excerpt": "logger.error('Knowledge mutation aborted before DB commit: file persistence failed', {"
+              },
+              "fields": [
+                "error.name",
+                "error.cause",
+                "entryId",
+                "operation",
+                "fileOperation"
+              ]
+            },
+            {
+              "observe": "读回目标主行、目标FK从表和相关referrer的关系/Markdown。",
+              "meaning": "referrer可先变化；它们不与目标删除组成一个跨文件事务。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeService.ts",
+                "symbol": "KnowledgeService",
+                "excerpt": "await this.#removeReverseRelationsDurably(id);"
+              },
+              "fields": [
+                "id",
+                "sourceFile",
+                "relations.related"
+              ]
+            },
+            {
+              "observe": "主行已无时检查audit warning与同步listener错误，另外核对消费方。",
+              "meaning": "审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeService.ts",
+                "symbol": "KnowledgeService",
+                "excerpt": "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+              },
+              "fields": [
+                "knowledge:deleted",
+                "entryId",
+                "Audit log failed (non-blocking)"
+              ]
+            }
+          ],
+          "action": "目标主行仍在时，排除锁/受控触发器/连接故障后显式KnowledgeService.delete(id, context)。",
+          "identity": "复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。",
+          "verify": "目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。",
+          "stop": "不以重新create、删除DB或sync替代删除；referrer失败原因未核实不能声称全体一致。"
+        }
+      },
+      {
+        "id": "K3-DELETE-POST",
+        "trigger": "目标删除完成后同步knowledge:deleted listener抛错",
+        "remainingState": "文件和主行已删除，审计可能仅尝试；失败listener的效果未证明完成。",
+        "automaticAction": "delete外层记录错误并重抛；finally释放删除标记，不补回已删实体。",
+        "explicitRecovery": "读回已提交状态，定位具体listener/消费方的恢复协议；本入口没有统一重放消费者能力。",
+        "stopCondition": "再次delete通常NotFound，不能以新create或盲目重试恢复后置效果。",
+        "source": {
+          "path": "src/service/knowledge/KnowledgeService.ts",
+          "symbol": "KnowledgeService",
+          "excerpt": "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+        },
+        "test": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "deletion listener failure does not restore committed truth",
+          "anchorSymbol": "service",
+          "assertedBehavior": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+          "assertionExcerpt": "expect({ auditAttempts, listenerAttempts }).toEqual(",
+          "scenarioKind": "observed-boundary"
+        },
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "graphRefs": [
+          "knowledge-delete-recovery"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。",
+          "checks": [
+            {
+              "observe": "先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。",
+              "meaning": "FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。",
+              "source": {
+                "path": "src/service/knowledge/commitKnowledgeWrite.ts",
+                "symbol": "commitKnowledgeWrite",
+                "excerpt": "logger.error('Knowledge mutation aborted before DB commit: file persistence failed', {"
+              },
+              "fields": [
+                "error.name",
+                "error.cause",
+                "entryId",
+                "operation",
+                "fileOperation"
+              ]
+            },
+            {
+              "observe": "读回目标主行、目标FK从表和相关referrer的关系/Markdown。",
+              "meaning": "referrer可先变化；它们不与目标删除组成一个跨文件事务。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeService.ts",
+                "symbol": "KnowledgeService",
+                "excerpt": "await this.#removeReverseRelationsDurably(id);"
+              },
+              "fields": [
+                "id",
+                "sourceFile",
+                "relations.related"
+              ]
+            },
+            {
+              "observe": "主行已无时检查audit warning与同步listener错误，另外核对消费方。",
+              "meaning": "审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeService.ts",
+                "symbol": "KnowledgeService",
+                "excerpt": "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+              },
+              "fields": [
+                "knowledge:deleted",
+                "entryId",
+                "Audit log failed (non-blocking)"
+              ]
+            }
+          ],
+          "action": "先确认持久删除已经完成，再按实际消费方合同处置；当前样本只观察listener失败，不签消费者恢复。",
+          "identity": "复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。",
+          "verify": "目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。",
+          "stop": "主行已无时停止重复delete；未找到明确消费恢复入口则保留失败材料，交调用方判断。"
+        }
+      },
+      {
+        "id": "K3-SYNC-RESULT",
+        "trigger": "维护端口resolve，但其unknown业务报告为failed/degraded",
+        "remainingState": "syncAll已设置vectorMaintenanceStatus=completed；nested report未被Core解释。",
+        "automaticAction": "原样返回维护report，不转译其业务status/errors为异常。",
+        "explicitRecovery": "调用者读取真实报告并按端口协议处理；另外核对store。",
+        "stopCondition": "不能把completed当向量健康、检索完整或公开可见。",
+        "source": {
+          "path": "src/service/knowledge/KnowledgeSyncService.ts",
+          "symbol": "KnowledgeSyncService",
+          "excerpt": "report.vectorMaintenanceStatus = 'completed';"
+        },
+        "test": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "sync completed can carry a failed maintenance business report",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "completed只说明端口resolve；嵌套业务报告仍可failed。",
+          "assertionExcerpt": "expect(report.vectorMaintenanceStatus).toBe('completed');",
+          "scenarioKind": "observed-boundary"
+        },
+        "moduleRefs": [
+          "M10-04"
+        ],
+        "graphRefs": [
+          "knowledge-sync-post-maintenance"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "端口正常resolve，且报告内容可读。",
+          "checks": [
+            {
+              "observe": "同时读取vectorMaintenanceStatus和vectorMaintenanceReport。",
+              "meaning": "completed与nested failed可以同时出现；本case只证明返回合同。",
+              "source": {
+                "path": "src/service/knowledge/KnowledgeSyncService.ts",
+                "symbol": "KnowledgeSyncService",
+                "excerpt": "report.vectorMaintenanceStatus = 'completed';"
+              },
+              "fields": [
+                "vectorMaintenanceStatus",
+                "vectorMaintenanceReport"
+              ]
+            }
+          ],
+          "action": "按注入端口的实际report合同判断下一步；没有可核验store结果时保留未知。",
+          "identity": "保留本次报告与源/DB身份，不将它改写为新的恢复回执。",
+          "verify": "业务成功需独立report与store断言，本合同case没有该证明。",
+          "stop": "报告failed/degraded或含未知诊断时停止宣称维护健康。"
         }
       }
     ],
     "path": "maps/10-knowledge-authoring-persistence/README.md",
-    "body": "## 入口、输入与责任\n\n公开入口是 `@alembic/core/knowledge`。`RecipeProductionGateway.create` 接收来源、items及策略选项，先做统一结构/唯一性校验，再做去重、相似度与融合；普通 `KnowledgeService.create` 也可直接被消费，不能画成所有创建必经Gateway。服务接收wire实体及userId，检查标题冲突、构造pending实体、运行提交Hook，再由ConfidenceRouter选择staging/pending/deprecated。严格生产的prepared写入与普通创建有不同准入凭据，详见专题15。\n\n## 主持久化与衍生效果\n\n`commitKnowledgeWrite`拥有提交顺序。注入fileStore时先调用同步文件端口，之后才执行异步repository闭包并检查读回id。`KnowledgeFileWriter`核对目标所有权，设置sourceFile，序列化完整Markdown，采用临时文件、文件fsync、rename、目录fsync；新路径耐久后才清理旧路径。Markdown是此模式的知识内容真相；SQLite仍有独立业务数据，不能把整库叫作缓存。外层KnowledgeModule真实注入repository、writer、Hook和eventBus。\n\n服务在持久化之后投射relations、提交审计、触发创建Hook和knowledge:changed。自动关系发现与创建Hook含best-effort异步分支；它们不属于文件加数据库的跨资源原子事务。文件写入失败转成FileWriteError，DB闭包不执行。文件已成功而DB抛错或读回身份不符会保留文件并抛DivergenceError。没有fileStore时是显式legacy DB-only分支，保留旧null与后续错误/审计顺序。\n\n## 分歧恢复与限制\n\nDivergenceError中的reconcileVia只是恢复提示，不会自动调用sync。宿主/操作者排除DB故障后显式调用KnowledgeSyncService.sync或syncAll：扫描candidates/recipes，解析wire与hash，经RawDbSyncAdapter upsert索引，报告手改与孤儿。syncAll另行await可选的权威向量维护；它不能依赖此处没有发出的服务事件。部分读取/解析错误可跳过并报告，审计持久化错误继续上抛。\n\n既有真实SQLite/Markdown测试覆盖文件拒绝和三种DB故障恢复；读回错误id分支尚未见对应具体case，不冒充完整覆盖。来源解析的symlink边界问题R02仍在专题02记录。此页是源码与既有断言复核，未重新执行产品测试，也未修复产品缺陷。\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n候选验证、服务创建和同步是三个用例边界。统一校验器同时返回结构诊断与含唯一性的最终结果；Gateway按候选收集拒绝/创建，不提供整批事务。普通融合建议故障会退回直接提交，质量评分故障可保留created，因此返回集合需要逐项理解。服务提交前的Hook block与提交后的关系/审计/事件不是同一阶段。同步是对Markdown内容的索引重建，逐文件前进；审计失败上抛，其余文件错误可跳过，后续孤儿扫描仍运行。syncAll在这些DB变更之后才等待向量维护。恢复必须先区分“未进入写入”“文件/DB分歧”“主数据已变而衍生失败”，而不是收到异常就重建全部或再次create。此处沿用既有测试源码，mock gateway测试仅证明策略分支；没有新执行产品测试。\n\n[FigJam：知识写入与显式恢复](https://www.figma.com/board/NFOhWgtow19Hss7laEFzpC)是本页创建/更新路径的辅助总览，覆盖文件优先、DB分歧与调用者显式sync；不将其扩展到删除、批次补偿或后置衍生效果的事务保证。仓库图与源码锚点是维护依据。",
+    "body": "## 入口、输入与责任\n\n公开入口是 `@alembic/core/knowledge`。`RecipeProductionGateway.create` 接收来源、items及策略选项，先做统一结构/唯一性校验，再做去重、相似度与融合；普通 `KnowledgeService.create` 也可直接被消费，不能画成所有创建必经Gateway。服务接收wire实体及userId，检查标题冲突、构造pending实体、运行提交Hook，再由ConfidenceRouter选择staging/pending/deprecated。严格生产的prepared写入与普通创建有不同准入凭据，详见专题15。\n\n## 主持久化与衍生效果\n\n`commitKnowledgeWrite`拥有提交顺序。注入fileStore时先调用同步文件端口，之后才执行异步repository闭包并检查读回id。`KnowledgeFileWriter`核对目标所有权，设置sourceFile，序列化完整Markdown，采用临时文件、文件fsync、rename、目录fsync；新路径耐久后才清理旧路径。Markdown是此模式的知识内容真相；SQLite仍有独立业务数据，不能把整库叫作缓存。外层KnowledgeModule真实注入repository、writer、Hook和eventBus。\n\n服务在持久化之后投射relations、提交审计、触发创建Hook和knowledge:changed。自动关系发现与创建Hook含best-effort异步分支；它们不属于文件加数据库的跨资源原子事务。文件写入失败转成FileWriteError，DB闭包不执行。文件已成功而DB抛错或读回身份不符会保留文件并抛DivergenceError。没有fileStore时是显式legacy DB-only分支，保留旧null与后续错误/审计顺序。\n\n## 分歧恢复与限制\n\nDivergenceError中的operation/reconcileVia决定恢复分流。仅当create/update等persist路径保留原文件真相时，调用者排除DB故障后显式sync/syncAll；knowledge.delete分歧需确认主行仍在再同IDdelete，详见删除操作卡。sync/syncAll的扫描路径为：扫描candidates/recipes，解析wire与hash，经RawDbSyncAdapter upsert索引，报告手改与孤儿。syncAll另行await可选的权威向量维护；它不能依赖此处没有发出的服务事件。部分读取/解析错误可跳过并报告，审计持久化错误继续上抛。\n\n既有真实SQLite/Markdown测试覆盖文件拒绝和三种DB故障恢复；读回错误id分支尚未见对应具体case，不冒充完整覆盖。来源解析的symlink边界问题R02仍在专题02记录。上述覆盖描述属于2026-10-22源码复核；0.3新增V06/V07的实际范围见独立证据记录，产品缺陷未修复。\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n候选验证、服务创建和同步是三个用例边界。统一校验器同时返回结构诊断与含唯一性的最终结果；Gateway按候选收集拒绝/创建，不提供整批事务。普通融合建议故障会退回直接提交，质量评分故障可保留created，因此返回集合需要逐项理解。服务提交前的Hook block与提交后的关系/审计/事件不是同一阶段。同步是对Markdown内容的索引重建，逐文件前进；审计失败上抛，其余文件错误可跳过，后续孤儿扫描仍运行。syncAll在这些DB变更之后才等待向量维护。恢复必须先区分“未进入写入”“文件/DB分歧”“主数据已变而衍生失败”，而不是收到异常就重建全部或再次create。该段形成于2026-10-22源码复核；mock gateway测试仅证明策略分支，后续V06/V07按各自运行范围单列。\n\n[FigJam：知识写入与显式恢复](https://www.figma.com/board/NFOhWgtow19Hss7laEFzpC)是本页创建/更新路径的辅助总览，覆盖文件优先、DB分歧与调用者显式sync；不将其扩展到删除、批次补偿或后置衍生效果的事务保证。仓库图与源码锚点是维护依据。\n\n## 0.3 删除与同步恢复操作\n\n删除是独立操作，见[删除阅读路径](../../journeys/j05.md)。不能把create分歧的sync建议套用到已删除文件的DB cleanup。审计失败只warn，事件listener抛错则可能发生在主行已无之后；先读回当前真相。\n\nsyncAll先改DB，再等待注入维护。completed只表示端口resolve，未知业务report可能失败；reject则没有SyncAllReport而DB效果保留。V07分别给真实HNSW恢复、resolve-failed合同、短暂读取失败与真实缺文件对照。fixture把reconcileIndex.errors转reject的策略有单独说明，不声称当前宿主必然抛错。",
     "freshness": "matched"
   },
   {
@@ -10707,8 +11684,8 @@
     "truthKind": "current-code",
     "baselineCommit": "35302912ac2efaa6a1bc65fdc112a16da75d845f",
     "reviewDepth": "L3",
-    "reviewedAt": "2026-10-22",
-    "reviewOrigin": "architecture-atlas/reviews/2026-10-22-r3/semantic-review.md",
+    "reviewedAt": "2026-10-23T16:05:54.775Z",
+    "reviewOrigin": "architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md",
     "dependencySelection": [
       "src/service/vector/RecipeVectorGeneration.ts",
       "src/service/vector/RecipeRegionVectorIndex.ts",
@@ -11064,7 +12041,7 @@
       }
     ],
     "path": "maps/12-vector-generations/README.md",
-    "body": "## 两条索引与公开端口\n\n`@alembic/core/vector`提供文件分块索引、Recipe region投影、向量存储与代际管理。文件通路由IndexingPipeline扫描、Chunker按AST/section/fixed分块、sourceHash判断增量、BatchEmbedder批处理后写入store。Recipe通路以canonical retrieval document set为身份来源，RecipeRegionVectorIndex产生region chunks和检索元数据。query与document embedding端口区分用途；provider适配层报告对称或非对称能力，Core不负责宿主模型安装或API密钥管理。\n\n## 影子构建与可见性\n\n`RecipeVectorGenerationManager.buildAndActivate`先读当前route，再按provider、model、dimension、projection/schema和corpusFingerprint生成manifest。相同manifest也要重新inspection且存在ready清单，才能返回already-active。其他情况创建shadow并先写building清单，以完整authoritative corpus调用region同步；仅当同步completed、实际IDs/metadata/hash/dimension检查healthy后写ready，再调用router.activate(next, expectedPreviousGenerationId)。这个compare-and-swap是可见性切换点，创建shadow不是发布成功。\n\n失败会记录errors、尝试写failed清单并清理shadow，本次失败不主动切换active；错误结果重新读取当前route，没有并发外部切换时仍是旧代际。回滚也是显式调用，不能靠失败结果假定宿主已回滚。Main的KnowledgeRetrievalModule实际把同一storage注入factory/router，另用GenerationRoutingVectorStore负责外层读取路由；这些是宿主接线，与Core的确定性状态检查分工。\n\n## 增量维护、删除与恢复边界\n\nregion子集刷新不能删除未列入子集的Recipe；删除全量孤儿需要显式authoritative Recipe IDs。活知识的旧chunk要等replacement写后读回成功再删除。VectorLifecycleCoordinator按事件排队，终态删除不依赖embedding在线，flush/destroy等待清理。普通检索只用reader，不在读取路径隐式重建region。\n\nHNSW存原始向量与图，SQ8用于粗排，最终候选仍用原向量余弦重排；ASVEC快照与CRC32 WAL提供持久恢复。显式flush失败应传播并保留dirty/WAL，兼容destroy和旧JSON后端的best-effort路径承诺较弱。IndexingPipeline只在完整扫描和确证消失时删旧块；dryRun限制store写入，但前序分块/enrichment/embedding仍可能执行。此页对manager边引用内存router测试，不把它冒充磁盘崩溃或宿主路由端到端测试；本轮未重跑产品测试或外部embedding服务。\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n文件索引与Recipe代际是两条不同写链。文件链的删除权限来自producer marker、扫描完整性和ENOENT确认，不来自“本次列表里没有”。AST fallback、enrichment失败与embedding失败可能继续产生可用文本，但这些结果不能冒充完整语义向量。HNSW适配器当前先修改内存再append WAL；AsyncPersistence的文件头设计描述不能替代调用顺序。recover逐行CRC检查，仅把有效日志投射回内存并加入pending，真正确认点是onPersist成功之后清理该批WAL；快照进行时新增的操作保留供下一批。后台持久化失败会按间隔重试，显式flush则拒绝并要求调用方处理。坏CRC、无可重放append及进程终止前未确认的内存状态并非自动可恢复。现有EISDIR测试是真实文件系统失败与重开验证，onReplay/onPersist收集fixture则仅证明WAL协议，不混称真实断电/磁盘崩溃证据。",
+    "body": "## 两条索引与公开端口\n\n`@alembic/core/vector`提供文件分块索引、Recipe region投影、向量存储与代际管理。文件通路由IndexingPipeline扫描、Chunker按AST/section/fixed分块、sourceHash判断增量、BatchEmbedder批处理后写入store。Recipe通路以canonical retrieval document set为身份来源，RecipeRegionVectorIndex产生region chunks和检索元数据。query与document embedding端口区分用途；provider适配层报告对称或非对称能力，Core不负责宿主模型安装或API密钥管理。\n\n## 影子构建与可见性\n\n`RecipeVectorGenerationManager.buildAndActivate`先读当前route，再按provider、model、dimension、projection/schema和corpusFingerprint生成manifest。相同manifest也要重新inspection且存在ready清单，才能返回already-active。其他情况创建shadow并先写building清单，以完整authoritative corpus调用region同步；仅当同步completed、实际IDs/metadata/hash/dimension检查healthy后写ready，再调用router.activate(next, expectedPreviousGenerationId)。这个compare-and-swap是可见性切换点，创建shadow不是发布成功。\n\n失败会记录errors、尝试写failed清单并清理shadow，本次失败不主动切换active；错误结果重新读取当前route，没有并发外部切换时仍是旧代际。回滚也是显式调用，不能靠失败结果假定宿主已回滚。Main的KnowledgeRetrievalModule实际把同一storage注入factory/router，另用GenerationRoutingVectorStore负责外层读取路由；这些是宿主接线，与Core的确定性状态检查分工。\n\n## 增量维护、删除与恢复边界\n\nregion子集刷新不能删除未列入子集的Recipe；删除全量孤儿需要显式authoritative Recipe IDs。活知识的旧chunk要等replacement写后读回成功再删除。VectorLifecycleCoordinator按事件排队，终态删除不依赖embedding在线，flush/destroy等待清理。普通检索只用reader，不在读取路径隐式重建region。\n\nHNSW存原始向量与图，SQ8用于粗排，最终候选仍用原向量余弦重排；ASVEC快照与CRC32 WAL提供持久恢复。显式flush失败应传播并保留dirty/WAL，兼容destroy和旧JSON后端的best-effort路径承诺较弱。IndexingPipeline只在完整扫描和确证消失时删旧块；dryRun限制store写入，但前序分块/enrichment/embedding仍可能执行。此页对manager边引用内存router测试，不把它冒充磁盘崩溃或宿主路由端到端测试；2026-10-22内容复核未重跑产品测试；0.2的V04与0.3的V07独立运行范围见[证据记录](../../evidence/README.md)。这些样本没有调用外部embedding服务。\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n文件索引与Recipe代际是两条不同写链。文件链的删除权限来自producer marker、扫描完整性和ENOENT确认，不来自“本次列表里没有”。AST fallback、enrichment失败与embedding失败可能继续产生可用文本，但这些结果不能冒充完整语义向量。HNSW适配器当前先修改内存再append WAL；AsyncPersistence的文件头设计描述不能替代调用顺序。recover逐行CRC检查，仅把有效日志投射回内存并加入pending，真正确认点是onPersist成功之后清理该批WAL；快照进行时新增的操作保留供下一批。后台持久化失败会按间隔重试，显式flush则拒绝并要求调用方处理。坏CRC、无可重放append及进程终止前未确认的内存状态并非自动可恢复。现有EISDIR测试是真实文件系统失败与重开验证，onReplay/onPersist收集fixture则仅证明WAL协议，不混称真实断电/磁盘崩溃证据。",
     "freshness": "matched"
   },
   {
@@ -12503,7 +13480,8 @@
       "test/StrictAnalysisProductionContracts.test.ts",
       "test/StrictFactExecution.test.ts",
       "test/StrictPreparedRecipeGateway.test.ts",
-      "test/StrictSemanticEvidenceAuthority.test.ts"
+      "test/StrictSemanticEvidenceAuthority.test.ts",
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
     ],
     "consumerRefs": [
       {
@@ -12528,7 +13506,7 @@
         "repository": "Alembic",
         "path": "lib/recipe-pipeline/generate/strict/StrictPrivateCorpusRuntime.ts",
         "excerpt": "knowledgeService: options.knowledgeService,",
-        "meaning": "Main把真实KnowledgeService注入Core Gateway，inspection另从repository与Markdown文件核对；测试gateway fixture不能代替此接线。"
+        "meaning": "Main注入真实KnowledgeService；inspection查询repository、检查部分字段/Markdown及文件存在，返回预期dbHash/fileHash而非此处完整重算。此接线不升级V08内存合同为真实落盘证明。"
       },
       {
         "repository": "Alembic",
@@ -14277,6 +15255,583 @@
             }
           }
         ]
+      },
+      {
+        "id": "strict-prepared-replay",
+        "title": "Prepared重放：先重验授权，再精确inspect",
+        "viewType": "R0",
+        "description": "authorize/inspect/create均为注入端口；Core不写journal consumed、不重算端口hash，也不自动重试。V08明确使用内存合同。",
+        "nodes": [
+          {
+            "id": "p1",
+            "label": "同item / prepared / context",
+            "role": "operation"
+          },
+          {
+            "id": "p2",
+            "label": "同步payload与authority重验",
+            "role": "operation"
+          },
+          {
+            "id": "p3",
+            "label": "await authorize端口",
+            "role": "operation"
+          },
+          {
+            "id": "p4",
+            "label": "await inspect端口",
+            "role": "operation"
+          },
+          {
+            "id": "p5",
+            "label": "精确existing / recovered",
+            "role": "operation"
+          },
+          {
+            "id": "p6",
+            "label": "missing / await create",
+            "role": "operation"
+          },
+          {
+            "id": "p7",
+            "label": "ID核对 / await再inspect",
+            "role": "operation"
+          },
+          {
+            "id": "p8",
+            "label": "精确匹配 / created",
+            "role": "operation"
+          },
+          {
+            "id": "pe",
+            "label": "拒绝或端口异常",
+            "role": "operation"
+          },
+          {
+            "id": "pr",
+            "label": "调用方保留身份并排故",
+            "role": "boundary"
+          }
+        ],
+        "edges": [
+          {
+            "id": "pr-1",
+            "from": "p1",
+            "to": "p2",
+            "label": "任何写前同步核对",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "assertStrictPersistenceAuthorityV1({"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "G1→Admission→G2身份错配在端口访问之前拒绝。",
+              "assertionExcerpt": "expect(authorizePreparedRecipe).not.toHaveBeenCalled();",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "pr-2",
+            "from": "p2",
+            "to": "p3",
+            "label": "重验后await授权",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "!(await this.#authorizePreparedRecipe("
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。",
+              "assertionExcerpt": "expect(result.status).toBe('created');",
+              "scenarioKind": "normal"
+            }
+          },
+          {
+            "id": "pr-3",
+            "from": "p3",
+            "to": "p4",
+            "label": "授权允许才inspect",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "recovers an exact persist-before-consumed row without creating a duplicate",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "精确已有inspection返回recovered，本次不调用create。",
+              "assertionExcerpt": "expect(create).not.toHaveBeenCalled();",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "pr-4",
+            "from": "p4",
+            "to": "p5",
+            "label": "existing须10字段匹配",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "assertPreparedRecipeInspection(existing, prepared, context);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "recovers an exact persist-before-consumed row without creating a duplicate",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "精确已有inspection返回recovered，本次不调用create。",
+              "assertionExcerpt": "expect(create).not.toHaveBeenCalled();",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "pr-5",
+            "from": "p4",
+            "to": "p6",
+            "label": "missing才create固定ID",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const saved = await this.#knowledgeService.create(data, { userId: context.userId });"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。",
+              "assertionExcerpt": "expect(result.status).toBe('created');",
+              "scenarioKind": "normal"
+            }
+          },
+          {
+            "id": "pr-6",
+            "from": "p6",
+            "to": "p7",
+            "label": "create返回后再次读回",
+            "kind": "call",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const inspected = await this.#inspectPreparedRecipe(prepared);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。",
+              "assertionExcerpt": "expect(result.status).toBe('created');",
+              "scenarioKind": "normal"
+            }
+          },
+          {
+            "id": "pr-7",
+            "from": "p7",
+            "to": "p8",
+            "label": "精确inspection才能created",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "assertPreparedRecipeInspection(inspected, prepared, context);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。",
+              "assertionExcerpt": "expect(result.status).toBe('created');",
+              "scenarioKind": "normal"
+            }
+          },
+          {
+            "id": "pr-8",
+            "from": "p2",
+            "to": "pe",
+            "label": "payload/authority错配写前拒绝",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const strictPayload = assertPreparedRecipeAuthoringProjection("
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "rejects an item changed after G1 review before journal authorization or write",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "评审后的payload变化在授权/inspection/create之前拒绝。",
+              "assertionExcerpt": "expect(inspectPreparedRecipe).not.toHaveBeenCalled();",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "pr-9",
+            "from": "p3",
+            "to": "pe",
+            "label": "授权拒绝",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "throw new Error('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "fails closed for unauthorized or mismatched revision readback",
+              "anchorSymbol": "RecipeProductionGateway",
+              "assertedBehavior": "授权false或旧revision inspection均拒绝。",
+              "assertionExcerpt": ".rejects.toThrow('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "pr-10",
+            "from": "p4",
+            "to": "pe",
+            "label": "读回冲突不覆盖",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "assertPreparedRecipeInspection",
+              "excerpt": "throw new Error('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');"
+            },
+            "test": {
+              "relation": "indirect",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "fails closed for unauthorized or mismatched revision readback",
+              "anchorSymbol": "RecipeProductionGateway",
+              "assertedBehavior": "通过Gateway返回旧revision inspection，assertPreparedRecipeInspection拒绝；此helper由Gateway间接调用。",
+              "assertionExcerpt": ".rejects.toThrow('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "pr-11",
+            "from": "p6",
+            "to": "pe",
+            "label": "端口已产生效果后可抛错",
+            "kind": "state",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const saved = await this.#knowledgeService.create(data, { userId: context.userId });"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "replays a persist-before-journal-consumed crash without a second Recipe",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。",
+              "assertionExcerpt": "expect(create).toHaveBeenCalledTimes(1);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "pr-12",
+            "from": "pe",
+            "to": "pr",
+            "label": "调用方按原身份检查",
+            "kind": "boundary",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "replays a persist-before-journal-consumed crash without a second Recipe",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。",
+              "assertionExcerpt": "expect(create).toHaveBeenCalledTimes(1);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "pr-13",
+            "from": "pr",
+            "to": "p1",
+            "label": "显式同身份重调",
+            "kind": "recovery",
+            "source": {
+              "path": "src/service/knowledge/RecipeProductionGateway.ts",
+              "symbol": "RecipeProductionGateway",
+              "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/StrictPreparedRecipeGateway.test.ts",
+              "caseTitle": "replays a persist-before-journal-consumed crash without a second Recipe",
+              "anchorSymbol": "gateway",
+              "assertedBehavior": "create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。",
+              "assertionExcerpt": "expect(create).toHaveBeenCalledTimes(1);",
+              "scenarioKind": "recovered"
+            }
+          }
+        ]
+      },
+      {
+        "id": "strict-wal-checkpoint",
+        "title": "WAL checkpoint：已提交不等于主文件可签",
+        "viewType": "R0",
+        "description": "reader释放与重试由调用方执行；FULL可部分推进。receipt validator是独立身份校验，不重读磁盘。",
+        "nodes": [
+          {
+            "id": "w1",
+            "label": "同handle / runtime / context",
+            "role": "operation"
+          },
+          {
+            "id": "w2",
+            "label": "同步FULL checkpoint",
+            "role": "operation"
+          },
+          {
+            "id": "w3",
+            "label": "busy或页未完整追赶",
+            "role": "operation"
+          },
+          {
+            "id": "w4",
+            "label": "stderr诊断 / 不签receipt",
+            "role": "operation"
+          },
+          {
+            "id": "w5",
+            "label": "调用方释放自己reader",
+            "role": "boundary"
+          },
+          {
+            "id": "w6",
+            "label": "integrity / FK检查",
+            "role": "operation"
+          },
+          {
+            "id": "w7",
+            "label": "读取当次主DB hash",
+            "role": "operation"
+          },
+          {
+            "id": "w8",
+            "label": "绑定context并签receipt",
+            "role": "operation"
+          },
+          {
+            "id": "w9",
+            "label": "独立validator / 磁盘对照",
+            "role": "boundary"
+          }
+        ],
+        "edges": [
+          {
+            "id": "wc-1",
+            "from": "w1",
+            "to": "w2",
+            "label": "身份重验后FULL",
+            "kind": "call",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "runtime.sqlite.pragma('wal_checkpoint(FULL)')"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/ProductionPersistenceContracts.test.ts",
+              "caseTitle": "rejects an old revision receipt and checkpoint under a new current context",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "不同runtime/revision/context不能复用旧handle或checkpoint回执。",
+              "assertionExcerpt": ".toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');",
+              "scenarioKind": "rejected"
+            }
+          },
+          {
+            "id": "wc-2",
+            "from": "w2",
+            "to": "w3",
+            "label": "busy或log不等于checkpointed",
+            "kind": "state",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "if (!checkpoint || checkpoint.busy !== 0 || checkpoint.log !== checkpoint.checkpointed) {"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/ProductionPersistenceContracts.test.ts",
+              "caseTitle": "refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+              "assertionExcerpt": "expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-3",
+            "from": "w3",
+            "to": "w4",
+            "label": "拒绝不回滚已提交数据",
+            "kind": "state",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "const code = 'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE';"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "WAL reader blocking ends only after explicit release and checkpoint retry",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。",
+              "assertionExcerpt": "expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-4",
+            "from": "w4",
+            "to": "w5",
+            "label": "明确指示由owner释放事务",
+            "kind": "boundary",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "nextAction: 'release active read transactions and retry checkpoint before sealing',"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/ProductionPersistenceContracts.test.ts",
+              "caseTitle": "refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+              "assertionExcerpt": "expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-5",
+            "from": "w5",
+            "to": "w1",
+            "label": "调用者显式同context重试",
+            "kind": "recovery",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "runtime.sqlite.pragma('wal_checkpoint(FULL)')"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "WAL reader blocking ends only after explicit release and checkpoint retry",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。",
+              "assertionExcerpt": "expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-6",
+            "from": "w2",
+            "to": "w6",
+            "label": "完整追赶后校验DB",
+            "kind": "call",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "if (runtime.sqlite.pragma('integrity_check', { simple: true }) !== 'ok') {"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/ProductionPersistenceContracts.test.ts",
+              "caseTitle": "refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+              "assertionExcerpt": "expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-7",
+            "from": "w6",
+            "to": "w7",
+            "label": "FK检查后读主文件",
+            "kind": "call",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "databaseHash: hashBytes(fs.readFileSync(handle.resolver.databasePath)),"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "WAL reader blocking ends only after explicit release and checkpoint retry",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。",
+              "assertionExcerpt": "expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-8",
+            "from": "w7",
+            "to": "w8",
+            "label": "绑定context与initReceipt",
+            "kind": "data",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "createPrivateCorpusRevisionCheckpointV1",
+              "excerpt": "return freezeDeep({ ...semantic, checkpointHash: hashCanonicalJson(semantic) });"
+            },
+            "test": {
+              "relation": "direct",
+              "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+              "caseTitle": "WAL reader blocking ends only after explicit release and checkpoint retry",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。",
+              "assertionExcerpt": "expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);",
+              "scenarioKind": "recovered"
+            }
+          },
+          {
+            "id": "wc-9",
+            "from": "w8",
+            "to": "w9",
+            "label": "调用者独立重验 / 比较磁盘",
+            "kind": "binding",
+            "source": {
+              "path": "src/service/production/ProductionPersistenceContracts.ts",
+              "symbol": "validatePrivateCorpusRevisionCheckpointV1",
+              "excerpt": "const validatedInit = validatePrivateCorpusRevisionInitReceiptV1("
+            },
+            "test": {
+              "relation": "direct",
+              "path": "test/ProductionPersistenceContracts.test.ts",
+              "caseTitle": "refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+              "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+              "assertedBehavior": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+              "assertionExcerpt": "expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));",
+              "scenarioKind": "recovered"
+            }
+          }
+        ]
       }
     ],
     "configPaths": [
@@ -14288,8 +15843,8 @@
     "truthKind": "current-code",
     "baselineCommit": "35302912ac2efaa6a1bc65fdc112a16da75d845f",
     "reviewDepth": "L3",
-    "reviewedAt": "2026-10-23",
-    "reviewOrigin": "architecture-atlas/implementation-2026-10-23/semantic-review.md",
+    "reviewedAt": "2026-10-23T16:05:54.815Z",
+    "reviewOrigin": "architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md",
     "dependencySelection": [
       "src/service/production/StrictProductionAuthority.ts",
       "src/service/production/StrictFactExecution.ts",
@@ -14303,7 +15858,7 @@
       "src/service/knowledge/KnowledgeService.ts"
     ],
     "sourceFingerprint": "dd69171ac7cf27cd3e4ce4308a17dfe57d17993224afb597c333a945f4f72f9b",
-    "contextFingerprint": "030063ae57b172a14f2eb0677117a9b01db52f910a5208cc4ad82714bfcfe880",
+    "contextFingerprint": "aa3e593899189f32454bb445ada215ca2b199f05fef4abf1933ae74c0062c063",
     "moduleDetails": [
       {
         "name": "严格事实执行：完整冻结subject",
@@ -14663,17 +16218,21 @@
           "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
         },
         "input": "reviewed item/projection；prepareRecipePersistenceV1 派生的 ID 和预期 DB/file/journal hashes；G1/Admission/G2 同链 receipts；journalToken 与 authorize/inspect adapters。",
-        "output": "Gateway 返回 created 或 recovered、精确 inspection、prepared 和 strictUuidAllocations=0；调用者再用实际 ID/hash/lifecycle 构造独立 StrictPersistenceReceipt。",
-        "calls": "prepare helper 只派生身份；persistPreparedReviewedCandidate 重验投影与授权链→journal 授权→已有行精确 inspection 则 recovered，否则 KnowledgeService.create→核对 ID→重新 inspect→返回。",
-        "sideEffects": "可能真实调用知识写入；授权前不写、已有一致行不重复写。发生写后读回失败时主写入可能已存在，不能当作回滚；显式恢复继续使用同 prepared 身份。",
-        "limits": "缺 authorize/inspect、任一 fingerprint/receipt 链不符或已有行hash冲突均停止。不得换新 UUID 掩盖分歧；Gateway 的 created/recovered 不自动等于 refs、coverage 或 serving 完成。",
+        "output": "created或recovered及strictUuidAllocations=0；写前拒绝、ID分歧、读回缺失或读回冲突均抛错。",
+        "calls": "先同步admit source、端口存在、authored projection和G1→Admission→G2；再await authorize，再await inspect；existing全10字段匹配则recovered。missing才await create，核对ID后再次await inspect并返回created。",
+        "sideEffects": "Core只执行注入的授权/inspection/knowledgeService.create协议。create已产生效果后抛错会直接传播，无内部回滚、自动重试或journal consumed写入。",
+        "limits": "preparedRecipeId仅绑定规定的5项身份，preparedHash另外绑定cell/parents/expected hashes/journal step；ID一致不足。inspection只比较端口返回的10字段，不负责重新计算文件/DB hash。V08是内存/注入端口合同；返回recovered不证明refs、coverage、Serving或外层journal完成。",
         "graphRefs": [
           "strict-admission-persistence",
-          "strict-final-serving"
+          "strict-final-serving",
+          "strict-prepared-replay"
         ],
         "failureRefs": [
           "stf-prepared-authority-mismatch",
-          "stf-prepared-after-write"
+          "stf-prepared-after-write",
+          "stf-prepared-authorization",
+          "stf-prepared-inspection-conflict",
+          "stf-prepared-item-mismatch"
         ],
         "apiRefs": [
           ".",
@@ -14707,6 +16266,31 @@
           "./production"
         ],
         "aliases": []
+      },
+      {
+        "id": "M15-17",
+        "name": "Private revision checkpoint：读事务、主文件与回执边界",
+        "entry": {
+          "path": "src/service/production/ProductionPersistenceContracts.ts",
+          "symbol": "createPrivateCorpusRevisionCheckpointV1",
+          "excerpt": "runtime.sqlite.pragma('wal_checkpoint(FULL)')"
+        },
+        "input": "同revision的注册handle/runtime、expectedCurrentContext；数据库可能存在已提交但尚在WAL的页。",
+        "output": "FULL完整、integrity=ok、FK无违规后返回冻结checkpoint receipt；busy/partial、runtime/context错配或完整性失败均拒绝。",
+        "calls": "handle与context重验→同步SQLite FULL→检查busy/log/checkpointed→integrity_check→foreign_key_check→读取主DB字节hash→绑定initReceipt/context。validatePrivateCorpusRevisionCheckpointV1由调用者另行调用。",
+        "sideEffects": "FULL可推进主文件；失败也可能部分checkpoint。错误不回滚writer已提交数据，不释放别人的reader，也不自动重试。",
+        "limits": "主文件hash只代表该次读取；没有额外writer的隔离样本不等于全系统封存。validator核对身份/回执自洽，不重新读当前磁盘。fixture busy_timeout=1ms不是生产默认值。",
+        "aliases": [],
+        "graphRefs": [
+          "strict-wal-checkpoint"
+        ],
+        "failureRefs": [
+          "stf-wal-not-sealed",
+          "stf-checkpoint-context"
+        ],
+        "apiRefs": [
+          "./workspace"
+        ]
       }
     ],
     "failureModes": [
@@ -14865,8 +16449,8 @@
       {
         "id": "stf-wal-not-sealed",
         "trigger": "旧读事务使FULL WAL checkpoint busy或log页未全部checkpointed",
-        "remainingState": "已提交数据可能仍在WAL，主DB hash不能表示全部已提交状态；不返回checkpoint receipt",
-        "automaticAction": "检查busy/log/checkpointed，记录明确诊断并抛WAL_CHECKPOINT_INCOMPLETE",
+        "remainingState": "writer已提交的数据可仍在WAL，主DB不包含全部提交；FULL可能已部分推进。没有checkpoint receipt，不表示事务回滚。",
+        "automaticAction": "检查busy/log/checkpointed，输出run/revision与页数诊断，抛PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE；不返回receipt。",
         "explicitRecovery": "持有reader的owner释放读事务后显式重试checkpoint；不是自动回滚已提交数据",
         "stopCondition": "WAL未全入主DB前不可签发封存hash",
         "source": {
@@ -14879,24 +16463,80 @@
           "path": "test/ProductionPersistenceContracts.test.ts",
           "caseTitle": "refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
           "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
-          "assertedBehavior": "旧reader阻塞WAL时拒绝签DB hash，ROLLBACK释放后checkpoint通过且hash变化。",
-          "assertionExcerpt": "expect(() => createPrivateCorpusRevisionCheckpointV1(handle, runtime, context)).toThrow(\n        'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE'\n      )",
-          "scenarioKind": "recovery"
+          "assertedBehavior": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+          "assertionExcerpt": "expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));",
+          "scenarioKind": "recovered"
         },
         "aliases": [
           "stf-wal-not-sealed--旧读事务使full-wal-checkpoint-busy或log页未全部checkpointed"
         ],
         "moduleRefs": [
-          "M15-07"
+          "M15-07",
+          "M15-17"
         ],
         "graphRefs": [
           "strict-final-serving",
-          "strict-recovery"
+          "strict-recovery",
+          "strict-wal-checkpoint"
         ],
         "apiRefs": [
           "./production",
           "./workspace"
-        ]
+        ],
+        "runbook": {
+          "preconditions": "同一revision/handle/runtime/expected context可核验，保留原错误；仅操作本运行负责的数据库。",
+          "checks": [
+            {
+              "observe": "读取精确错误码与stderr的runId/revisionId/busy/logPages/checkpointedPages。",
+              "meaning": "FULL可能返回busy而不抛SQLite错误；Core据状态拒绝签发，已提交数据仍可在WAL。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "createPrivateCorpusRevisionCheckpointV1",
+                "excerpt": "const code = 'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE';"
+              },
+              "fields": [
+                "busy",
+                "logPages",
+                "checkpointedPages",
+                "nextAction"
+              ]
+            },
+            {
+              "observe": "由持有reader的owner确认读事务及可见数据，另查writer提交状态。",
+              "meaning": "旧reader只见旧快照不代表writer未提交；Core不会替owner释放事务。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "createPrivateCorpusRevisionCheckpointV1",
+                "excerpt": "nextAction: 'release active read transactions and retry checkpoint before sealing',"
+              },
+              "fields": [
+                "reader.inTransaction",
+                "writerRows",
+                "readerRows"
+              ]
+            },
+            {
+              "observe": "显式重试后核对integrity/FK，并将receipt.databaseHash与当次主文件字节比较。",
+              "meaning": "随后调用validator校验context；不能用历史validator通过替代现场磁盘读回。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "createPrivateCorpusRevisionCheckpointV1",
+                "excerpt": "databaseHash: hashBytes(fs.readFileSync(handle.resolver.databasePath)),"
+              },
+              "fields": [
+                "databaseHash",
+                "checkpointHash",
+                "initReceiptHash",
+                "sqliteIntegrity",
+                "foreignKeyViolationCount"
+              ]
+            }
+          ],
+          "action": "持有reader的owner正常结束自己的读事务后，调用者显式再次createPrivateCorpusRevisionCheckpointV1；成功后另调validator并独立核对当次主文件hash。",
+          "identity": "复用同run/revision/fixpoint/config/runtimeReceiptHash context；同handle注册的新SQLite连接可用，未注册或其他revision的runtime拒绝。context变更不能复用旧回执身份。",
+          "verify": "无阻挡样本中writer/reader均可见2行；回执hash与主文件一致，独立validator通过。probe的checkpointAfterRetry是另一次PASSIVE读数，不伪称内部FULL返回。",
+          "stop": "reader仍阻挡、context错配、integrity/FK失败或hash无法对照时停止；不得删除-wal/-shm、换DB文件或造receipt。"
+        }
       },
       {
         "id": "stf-r01-value-integrity-gap",
@@ -15154,26 +16794,86 @@
           "excerpt": "assertStrictPersistenceAuthorityV1({\n      prepared,"
         },
         "test": {
-          "relation": "indirect",
+          "relation": "direct",
           "path": "test/StrictPreparedRecipeGateway.test.ts",
           "caseTitle": "rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write",
-          "anchorSymbol": "RecipeProductionGateway",
-          "assertedBehavior": "准入fingerprint被改后，journal授权、inspection和create均不调用。",
-          "assertionExcerpt": "expect(inspectPreparedRecipe).not.toHaveBeenCalled();",
-          "scenarioKind": "failure",
-          "reason": "直接调用gateway，间接覆盖持久授权校验；非直接调用G2构造器。"
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "G1→Admission→G2身份错配在端口访问之前拒绝。",
+          "assertionExcerpt": "expect(authorizePreparedRecipe).not.toHaveBeenCalled();",
+          "scenarioKind": "rejected"
         },
         "moduleRefs": [
           "M15-15"
         ],
         "graphRefs": [
           "strict-admission-persistence",
-          "strict-final-serving"
+          "strict-final-serving",
+          "strict-prepared-replay"
         ],
         "apiRefs": [
           ".",
           "./knowledge"
-        ]
+        ],
+        "runbook": {
+          "preconditions": "原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。",
+          "checks": [
+            {
+              "observe": "保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。",
+              "meaning": "ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "prepareRecipePersistenceV1",
+                "excerpt": "const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));"
+              },
+              "fields": [
+                "runId",
+                "analysisFixpointHash",
+                "privateCorpusRevision",
+                "admissionId",
+                "authoredFingerprint",
+                "preparedHash"
+              ]
+            },
+            {
+              "observe": "确认authorize端口存在且允许原token；记录inspect是否返回existing。",
+              "meaning": "token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "RecipeProductionGateway",
+                "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+              },
+              "fields": [
+                "journalToken",
+                "existing"
+              ]
+            },
+            {
+              "observe": "逐项对照inspection与prepared/context的10字段。",
+              "meaning": "只比较端口返回值；该步骤不是现场文件/DB hash重算。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "assertPreparedRecipeInspection",
+                "excerpt": "inspection.fileHash !== prepared.expectedFileHash"
+              },
+              "fields": [
+                "id",
+                "privateCorpusRevision",
+                "preparedHash",
+                "admissionId",
+                "g1ReceiptHash",
+                "admissionReceiptHash",
+                "g2ReceiptHash",
+                "authoredFingerprint",
+                "dbHash",
+                "fileHash"
+              ]
+            }
+          ],
+          "action": "追查payload或authority链哪个版本已变化；对正确输入重新完成真实评审链，不能单改hash或跳过G2。",
+          "identity": "恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。",
+          "verify": "精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。",
+          "stop": "写前拒绝是正确拒绝，不是已恢复；不得访问未获授权的create端口。"
+        }
       },
       {
         "id": "stf-coverage-nonterminal",
@@ -15240,9 +16940,9 @@
       {
         "id": "stf-prepared-after-write",
         "trigger": "真实写入端口已保存行后抛错，Gateway尚未完成读回/消费结果",
-        "remainingState": "同prepared ID的存储可能已经存在；Gateway本次抛错，不保证自动回滚。",
+        "remainingState": "注入create端口可能已保存其负责的数据后抛错，Gateway未返回；现成V08用内存stored模拟该边界，不证明真实落盘。",
         "automaticAction": "异常向调用者传播；此入口没有自动换ID或重跑。",
-        "explicitRecovery": "调用者排除故障后显式重调同item、prepared及同链context；Gateway先inspect，精确匹配则recovered且不再create。",
+        "explicitRecovery": "调用者排故后使用同item/prepared/context再次进入；精确inspection则recovered、不再create；Core没有自动重试或消费journal。",
         "stopCondition": "旧记录的revision/hash/fingerprint不匹配则停止；不能仅凭ID存在就接受，不能新建UUID绕过。",
         "source": {
           "path": "src/service/knowledge/RecipeProductionGateway.ts",
@@ -15253,25 +16953,448 @@
           "relation": "direct",
           "path": "test/StrictPreparedRecipeGateway.test.ts",
           "caseTitle": "replays a persist-before-journal-consumed crash without a second Recipe",
-          "anchorSymbol": "RecipeProductionGateway",
-          "assertedBehavior": "注入create先保存fixture inspection再抛错；显式同身份重试返回recovered、相同ID且create仅调用一次。该case是端口注入，非真实SQLite/Markdown崩溃证明。",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。",
           "assertionExcerpt": "expect(create).toHaveBeenCalledTimes(1);",
-          "scenarioKind": "recovery"
+          "scenarioKind": "recovered"
         },
         "moduleRefs": [
           "M15-15"
         ],
         "graphRefs": [
-          "strict-admission-persistence"
+          "strict-admission-persistence",
+          "strict-prepared-replay"
         ],
         "apiRefs": [
           ".",
           "./knowledge"
-        ]
+        ],
+        "runbook": {
+          "preconditions": "原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。",
+          "checks": [
+            {
+              "observe": "保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。",
+              "meaning": "ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "prepareRecipePersistenceV1",
+                "excerpt": "const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));"
+              },
+              "fields": [
+                "runId",
+                "analysisFixpointHash",
+                "privateCorpusRevision",
+                "admissionId",
+                "authoredFingerprint",
+                "preparedHash"
+              ]
+            },
+            {
+              "observe": "确认authorize端口存在且允许原token；记录inspect是否返回existing。",
+              "meaning": "token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "RecipeProductionGateway",
+                "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+              },
+              "fields": [
+                "journalToken",
+                "existing"
+              ]
+            },
+            {
+              "observe": "逐项对照inspection与prepared/context的10字段。",
+              "meaning": "只比较端口返回值；该步骤不是现场文件/DB hash重算。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "assertPreparedRecipeInspection",
+                "excerpt": "inspection.fileHash !== prepared.expectedFileHash"
+              },
+              "fields": [
+                "id",
+                "privateCorpusRevision",
+                "preparedHash",
+                "admissionId",
+                "g1ReceiptHash",
+                "admissionReceiptHash",
+                "g2ReceiptHash",
+                "authoredFingerprint",
+                "dbHash",
+                "fileHash"
+              ]
+            }
+          ],
+          "action": "排除端口故障后显式persistPreparedReviewedCandidate(item, prepared, context)，先允许Core检查existing，不能直接绕过inspection重复create。",
+          "identity": "恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。",
+          "verify": "精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。",
+          "stop": "身份变更、authorize拒绝、inspection不匹配或持续missing时停止；不签外层发布完成。"
+        }
+      },
+      {
+        "id": "stf-prepared-authorization",
+        "trigger": "authorizePreparedRecipe对当前journal token/prepared返回false",
+        "remainingState": "尚未inspect/create；输入仍由调用者保留。",
+        "automaticAction": "await授权结果后抛STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED。",
+        "explicitRecovery": "由授权owner检查原token与真实journal依据；有效授权前不进入写入。",
+        "stopCondition": "不能伪造token、改ID或绕过授权。",
+        "source": {
+          "path": "src/service/knowledge/RecipeProductionGateway.ts",
+          "symbol": "RecipeProductionGateway",
+          "excerpt": "throw new Error('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');"
+        },
+        "test": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "fails closed for unauthorized or mismatched revision readback",
+          "anchorSymbol": "RecipeProductionGateway",
+          "assertedBehavior": "授权false或旧revision inspection均拒绝。",
+          "assertionExcerpt": ".rejects.toThrow('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');",
+          "scenarioKind": "rejected"
+        },
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "graphRefs": [
+          "strict-prepared-replay"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。",
+          "checks": [
+            {
+              "observe": "保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。",
+              "meaning": "ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "prepareRecipePersistenceV1",
+                "excerpt": "const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));"
+              },
+              "fields": [
+                "runId",
+                "analysisFixpointHash",
+                "privateCorpusRevision",
+                "admissionId",
+                "authoredFingerprint",
+                "preparedHash"
+              ]
+            },
+            {
+              "observe": "确认authorize端口存在且允许原token；记录inspect是否返回existing。",
+              "meaning": "token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "RecipeProductionGateway",
+                "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+              },
+              "fields": [
+                "journalToken",
+                "existing"
+              ]
+            },
+            {
+              "observe": "逐项对照inspection与prepared/context的10字段。",
+              "meaning": "只比较端口返回值；该步骤不是现场文件/DB hash重算。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "assertPreparedRecipeInspection",
+                "excerpt": "inspection.fileHash !== prepared.expectedFileHash"
+              },
+              "fields": [
+                "id",
+                "privateCorpusRevision",
+                "preparedHash",
+                "admissionId",
+                "g1ReceiptHash",
+                "admissionReceiptHash",
+                "g2ReceiptHash",
+                "authoredFingerprint",
+                "dbHash",
+                "fileHash"
+              ]
+            }
+          ],
+          "action": "授权owner修正真实授权依据后再用匹配材料显式进入。",
+          "identity": "恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。",
+          "verify": "精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。",
+          "stop": "授权持续拒绝或journal来源不明时停止。"
+        }
+      },
+      {
+        "id": "stf-prepared-inspection-conflict",
+        "trigger": "existing/读回inspection与prepared/context任一身份字段不符",
+        "remainingState": "现存inspection与存储由端口拥有，Core不覆盖冲突记录。",
+        "automaticAction": "assertPreparedRecipeInspection抛STRICT_PREPARED_PERSISTENCE_DIVERGENCE。",
+        "explicitRecovery": "读回原数据与10项身份来源，由owner决定正确版本；保留冲突材料。",
+        "stopCondition": "不能把相同ID当作精确恢复，也不能重写expected hashes消除冲突。",
+        "source": {
+          "path": "src/service/knowledge/RecipeProductionGateway.ts",
+          "symbol": "assertPreparedRecipeInspection",
+          "excerpt": "throw new Error('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');"
+        },
+        "test": {
+          "relation": "indirect",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "fails closed for unauthorized or mismatched revision readback",
+          "anchorSymbol": "RecipeProductionGateway",
+          "assertedBehavior": "通过Gateway返回旧revision inspection，assertPreparedRecipeInspection拒绝；此helper由Gateway间接调用。",
+          "assertionExcerpt": ".rejects.toThrow('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');",
+          "scenarioKind": "rejected"
+        },
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "graphRefs": [
+          "strict-prepared-replay"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。",
+          "checks": [
+            {
+              "observe": "保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。",
+              "meaning": "ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "prepareRecipePersistenceV1",
+                "excerpt": "const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));"
+              },
+              "fields": [
+                "runId",
+                "analysisFixpointHash",
+                "privateCorpusRevision",
+                "admissionId",
+                "authoredFingerprint",
+                "preparedHash"
+              ]
+            },
+            {
+              "observe": "确认authorize端口存在且允许原token；记录inspect是否返回existing。",
+              "meaning": "token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "RecipeProductionGateway",
+                "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+              },
+              "fields": [
+                "journalToken",
+                "existing"
+              ]
+            },
+            {
+              "observe": "逐项对照inspection与prepared/context的10字段。",
+              "meaning": "只比较端口返回值；该步骤不是现场文件/DB hash重算。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "assertPreparedRecipeInspection",
+                "excerpt": "inspection.fileHash !== prepared.expectedFileHash"
+              },
+              "fields": [
+                "id",
+                "privateCorpusRevision",
+                "preparedHash",
+                "admissionId",
+                "g1ReceiptHash",
+                "admissionReceiptHash",
+                "g2ReceiptHash",
+                "authoredFingerprint",
+                "dbHash",
+                "fileHash"
+              ]
+            }
+          ],
+          "action": "先复核inspection如何产生，确认哪个身份不同；没有一致材料就停止写入。",
+          "identity": "恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。",
+          "verify": "精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。",
+          "stop": "旧revision、preparedHash或receipt链不符时停止。"
+        }
+      },
+      {
+        "id": "stf-prepared-item-mismatch",
+        "trigger": "G1评审后的item字段或隐藏fallback payload改变",
+        "remainingState": "未访问authorize/inspect/create，原持久对象未由该调用改变。",
+        "automaticAction": "assertPreparedRecipeAuthoringProjection在端口之前拒绝。",
+        "explicitRecovery": "恢复正确被评审payload；真实内容改变应重做完整评审绑定。",
+        "stopCondition": "不能用旧authority批准新内容。",
+        "source": {
+          "path": "src/service/knowledge/RecipeProductionGateway.ts",
+          "symbol": "RecipeProductionGateway",
+          "excerpt": "const strictPayload = assertPreparedRecipeAuthoringProjection("
+        },
+        "test": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "rejects an item changed after G1 review before journal authorization or write",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "评审后的payload变化在授权/inspection/create之前拒绝。",
+          "assertionExcerpt": "expect(inspectPreparedRecipe).not.toHaveBeenCalled();",
+          "scenarioKind": "rejected"
+        },
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "graphRefs": [
+          "strict-prepared-replay"
+        ],
+        "apiRefs": [
+          "./knowledge"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。",
+          "checks": [
+            {
+              "observe": "保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。",
+              "meaning": "ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "prepareRecipePersistenceV1",
+                "excerpt": "const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));"
+              },
+              "fields": [
+                "runId",
+                "analysisFixpointHash",
+                "privateCorpusRevision",
+                "admissionId",
+                "authoredFingerprint",
+                "preparedHash"
+              ]
+            },
+            {
+              "observe": "确认authorize端口存在且允许原token；记录inspect是否返回existing。",
+              "meaning": "token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "RecipeProductionGateway",
+                "excerpt": "const existing = await this.#inspectPreparedRecipe(prepared);"
+              },
+              "fields": [
+                "journalToken",
+                "existing"
+              ]
+            },
+            {
+              "observe": "逐项对照inspection与prepared/context的10字段。",
+              "meaning": "只比较端口返回值；该步骤不是现场文件/DB hash重算。",
+              "source": {
+                "path": "src/service/knowledge/RecipeProductionGateway.ts",
+                "symbol": "assertPreparedRecipeInspection",
+                "excerpt": "inspection.fileHash !== prepared.expectedFileHash"
+              },
+              "fields": [
+                "id",
+                "privateCorpusRevision",
+                "preparedHash",
+                "admissionId",
+                "g1ReceiptHash",
+                "admissionReceiptHash",
+                "g2ReceiptHash",
+                "authoredFingerprint",
+                "dbHash",
+                "fileHash"
+              ]
+            }
+          ],
+          "action": "对照原reviewedProjection和item；变化合法也必须重新绑定评审链。",
+          "identity": "恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。",
+          "verify": "精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。",
+          "stop": "payload无法解释或隐藏fallback字段存在时停止。"
+        }
+      },
+      {
+        "id": "stf-checkpoint-context",
+        "trigger": "handle/runtime或expected run/revision/fixpoint/config/runtime不匹配",
+        "remainingState": "旧handle、回执和数据库仍保留；当前调用未获准把它们当新context使用。",
+        "automaticAction": "身份校验在checkpoint或历史receipt重验时拒绝。",
+        "explicitRecovery": "重取属于当前revision且在handle登记的runtime及正确context；同handle正常新开连接不要求创建新revision。",
+        "stopCondition": "不能复制旧回执到新context或只替换字段。",
+        "source": {
+          "path": "src/service/production/ProductionPersistenceContracts.ts",
+          "symbol": "createPrivateCorpusRevisionCheckpointV1",
+          "excerpt": "handle.assertRuntime(runtime);"
+        },
+        "test": {
+          "relation": "direct",
+          "path": "test/ProductionPersistenceContracts.test.ts",
+          "caseTitle": "rejects an old revision receipt and checkpoint under a new current context",
+          "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+          "assertedBehavior": "不同runtime/revision/context不能复用旧handle或checkpoint回执。",
+          "assertionExcerpt": ".toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');",
+          "scenarioKind": "rejected"
+        },
+        "moduleRefs": [
+          "M15-17"
+        ],
+        "graphRefs": [
+          "strict-wal-checkpoint"
+        ],
+        "apiRefs": [
+          "./workspace"
+        ],
+        "aliases": [],
+        "runbook": {
+          "preconditions": "同一revision/handle/runtime/expected context可核验，保留原错误；仅操作本运行负责的数据库。",
+          "checks": [
+            {
+              "observe": "读取精确错误码与stderr的runId/revisionId/busy/logPages/checkpointedPages。",
+              "meaning": "FULL可能返回busy而不抛SQLite错误；Core据状态拒绝签发，已提交数据仍可在WAL。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "createPrivateCorpusRevisionCheckpointV1",
+                "excerpt": "const code = 'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE';"
+              },
+              "fields": [
+                "busy",
+                "logPages",
+                "checkpointedPages",
+                "nextAction"
+              ]
+            },
+            {
+              "observe": "由持有reader的owner确认读事务及可见数据，另查writer提交状态。",
+              "meaning": "旧reader只见旧快照不代表writer未提交；Core不会替owner释放事务。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "createPrivateCorpusRevisionCheckpointV1",
+                "excerpt": "nextAction: 'release active read transactions and retry checkpoint before sealing',"
+              },
+              "fields": [
+                "reader.inTransaction",
+                "writerRows",
+                "readerRows"
+              ]
+            },
+            {
+              "observe": "显式重试后核对integrity/FK，并将receipt.databaseHash与当次主文件字节比较。",
+              "meaning": "随后调用validator校验context；不能用历史validator通过替代现场磁盘读回。",
+              "source": {
+                "path": "src/service/production/ProductionPersistenceContracts.ts",
+                "symbol": "createPrivateCorpusRevisionCheckpointV1",
+                "excerpt": "databaseHash: hashBytes(fs.readFileSync(handle.resolver.databasePath)),"
+              },
+              "fields": [
+                "databaseHash",
+                "checkpointHash",
+                "initReceiptHash",
+                "sqliteIntegrity",
+                "foreignKeyViolationCount"
+              ]
+            }
+          ],
+          "action": "排查哪个runtime/revision/context被混用，使用真正对应当前上下文的handle与材料再显式检查。",
+          "identity": "复用同run/revision/fixpoint/config/runtimeReceiptHash context；同handle注册的新SQLite连接可用，未注册或其他revision的runtime拒绝。context变更不能复用旧回执身份。",
+          "verify": "错配被拒绝且不签当前回执；正确context路径另由W1/W3证明。",
+          "stop": "reader仍阻挡、context错配、integrity/FK失败或hash无法对照时停止；不得删除-wal/-shm、换DB文件或造receipt。"
+        }
       }
     ],
     "path": "maps/15-strict-production-authority/README.md",
-    "body": "## 分母、执行与独立评审\n\n严格计划从认证planning facts、维度和lens catalog及runtime硬预算生成完整义务分母；超cap或缺backend时关闭成功路径，不用first-N裁掉义务。executeStrictFactScheduleV1先校验输入和注册身份，再按义务执行。subject binding来自认证inventory，文件内容来自冻结工件；direct witness需要Evidence Ledger真实code.read内容、行范围、blob与ProjectContext ref共同匹配。\n\n内部harvest逐文件调用真实AST、ProjectContext或配置backend。backend/witness authority有进程内注册身份，自报executeFile不能代替注册。每个文件都有执行账目；任一失败后不发布该harvest的部分fact，但保留staged/discarded/emitted分母。unknown、failed和完整空结果不同。Population保留重复、排除、无模式等处置；cluster、induction、falsification与expression lineage必须守恒，不能靠“已完成”字符串授权。\n\n独立语义评审要求Producer和Reviewer的run/invocation/output不同。V5 durable gateway从evidenceStore实际load证据，核对harvest group、reviewer模型装载回执，再签Ed25519回执；消费端使用预先批准的trust policy验证，不能信任任务payload自带key root。模型推理由外层host adapter完成，Core拥有确定性约束和回执验证。\n\n## 统一入口与接通范围\n\ncreateStrictProductionAuthorityReceiptV1重验schedule lineage、fact execution、population、review、cluster、analysis evidence、expression closure、fixpoint以及candidate/admission/terminal证据，再产生authorityHash。它已实现且有公共合同组合测试，但本轮在Main、Plugin、Agent真实源码中仍未发现直接外层调用。Main实际消费executeStrictFactScheduleV1、private revision和route primitives；不能把统一入口画成所有外层生产必经节点。\n\nR01已确认：结构复制后的FactRecord.value被改写而保留factId/valueHash等字段时，公开统一authority仍可能通过且authorityHash相同。当前validateFactRecordGraphV1校验ID图、premise和无环，未从value重建其hash；正例测试不抵消此缺口。该结论限定Core公开重验边界，不宣称已证明完整外层发布利用链。\n\n## 准入、持久与恢复\n\nG1硬轴通过后，Admission对完整accepted corpus做去重/合并；独立G2再绑定G1和Admission的fingerprint、revision与novelty/duplicate决策。prepared persistence由run/fixpoint/revision/admission/fingerprint派生确定ID并绑定DB/file/journal hash，真正Gateway写入后才能签持久回执。Candidate coverage与final serving coverage不同，不能用content-ready代替ready。\n\n私有revision初始化创建固定且原先不存在的namespace，逐层拒绝symlink、执行真实migration、检查空corpus和SQLite；恢复只打开已有revision，不创建或迁移。checkpoint必须FULL WAL完成才能签DB hash。route preparation输出canonical bytes，Core仅分类null需写、完全相同表示rename已成功、其余冲突；真实route安装与切换由外层完成。下面恢复图包含两组独立保证，未用虚构箭头把checkpoint直接等同serving或发布。\n\n## 准入到serving：精确输入输出与真实接线\n\n| Core owner | 输入与输出 | 不能自动推导的结论 |\n| --- | --- | --- |\n| `RecipeProductionGateway.admitCandidate` | item、G1、reviewed projection与run/fixpoint/revision；通过注入inspection加载完整accepted corpus，输出projection与Admission receipt | 这是评估阶段，不调用知识写入；complete/truncated/continuation必须匹配 |\n| `createStrictG2ReceiptV1` | G1、Admission、reviewed fingerprint、Producer/Reviewer身份、六轴、novelty、duplicate；输出pass/revise/reject receipt | 构造器不执行模型；相同Producer/Reviewer identity拒绝 |\n| `prepareRecipePersistenceV1` | run、fixpoint、revision、admission、authoredFingerprint及预期DB/file/journal hashes；输出确定preparedRecipeId与preparedHash | 它不消费G2，也不写盘；顺序由宿主控制，不能画成G2内部自动调用prepare |\n| `persistPreparedReviewedCandidate` | item、prepared、G1/Admission/G2、reviewedProjection、journalToken；校验后返回created/recovered与精确inspection | 先inspection已有行可直接恢复；新写才调用注入KnowledgeService.create，随后必须再inspection |\n| `createStrictPersistenceReceiptV1` | prepared与完整授权链，以及实际ID、authoredFingerprint、storage/DB/file hashes、lifecycle；输出独立receipt | 此函数不读磁盘；Main从真实Gateway与存储检查结果组装输入，它并非Gateway内部自动调用 |\n| refs与production binding | 三组非空同集ref、persistence receipt、run/plan/manifest/cell/module；输出ref receipt与bindingHash | 不能把外层未核验的普通字符串冒充已观察存储事实 |\n| candidate/final coverage | 完整required cell宇宙和binding hashes→candidate receipt；candidate receipt、G4/data hashes、final IDs/fingerprints→final receipt | content-ready与ready是两个阶段；Core核对集合和绑定，实际G4/ready检查由宿主实施 |\n| serving与route | finalCoverage、servingValidation、vector、certified facts等hash→serving manifest；manifest hash与lineage→canonical route | Core不构建向量、不执行外层serving oracle、不安装公共route |\n\n真实Main `StrictPrivateCorpusRuntime`为Gateway注入KnowledgeService、repository/file inspection和journal授权，实际调用prepared写入；随后另行构造持久receipt、refs、binding并推进private corpus状态。`StrictFinalizationRuntime`聚合required cells，调用Core final coverage，执行外层serving验证后绑定Core serving manifest和route。Atlas的data边只表示这些构造器消费字段；消费者证据记录真实外层接线，不把它升级为统一authority已接通。Gateway测试中的create/inspection是注入fixture，能证明调用和幂等分支；真实Markdown/SQLite耐久写链另见知识持久化专题及其真实runtime测试。\n\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n独立语义评审的权威来自三段不同事实：证据store实际读到了什么，宿主adapter实际返回了什么，以及消费端预先信任谁。V5 gateway先按semanticRequest的完整harvest-group集合加载证据，生成evidence authority与load receipt，再构造固定V4 request/prompt交hostGateway。这里同一物理文件可支持多个scale/harvest，但不能丢掉其中一条执行receipt，也不能通过复制证据根多算分母。\n\nV4 hostGateway保存实际adapter和模型load receipt的进程内authority。execute核对当前request，调用adapter.invoke，然后检查success、零tool calls、精确JSON decision和reviewer独立身份。之后才检查execution/invocation/output是否复用并登记Set。因此这套重复防护是结果权威防复用，不是外部模型调用前去重；失败或重复时已经发生的load/invoke不会被Core回滚。模型重试与执行日志属于宿主owner。\n\n签名也有清晰边界。createDurableAttestationV5对request、host execution与load receipts的规范payload签Ed25519，并自验结果。新进程的assertSemanticDispositionReviewDurableAttestationV5只需要serialized材料和预批准trust policy，不依赖原WeakMap；它重建每个load receipt，核对一对一证据authority、完整执行集合、模型load receipt及签名。这个纯验证器不写跨进程一次消费账本，不能把valid signature误读成“本次从未消费”。消费合同还必须把完整请求与expectedSemanticRequest再比对，才产出可用于处置的KnowledgeDispositionReview。\n\n可恢复与不可修补的情形也不同：损坏attestation应从可信store重取；输入请求变了就需新评审；reader阻塞WAL应由持有事务者释放后重试checkpoint。Core不自动丢弃已创建私有revision、不自动修改模型输出、不让旧签名改绑新请求。现有Atlas仍没有统一createStrictProductionAuthorityReceiptV1直接外层消费证据；本轮仅Core深化，不把primitive接线提升为统一入口必经。R01明确保留为当前内容完整性缺口，说明hash集合自洽与实际value内容可信仍有差距。\n\n## 从执行结果形成可核验分析材料\n\n事实执行返回receipt后，调用者还要说明每条观察的去向。population把accepted、duplicate、excluded、error、inspected-no-pattern与omitted都纳入完整分母，并以真实execution集合决定complete或unknown。仅传若干hash、标记complete或删去失败观察，都不能获得完整资格。\n\ncluster承载调用者提出的机制，Core核验成员和全部事实，允许一条观察进入多个机制簇，但保留唯一disposition。induction记录recurring或bounded-singleton，既不生成假设也不扩写证据；零假设必须有独立精确review。falsification核验已登记反证、真实execution和review，缺项优先unknown，只有完整范围才能survived/refuted。R01仍限制fact.value完整性，不因新增解释或hash节点而消失。\n\n## 评审、准入、写入和服务是不同完成点\n\nV5 durable知识处置review与候选G1/Admission/G2是不同合同。全库Admission不写Recipe；prepared确定ID也不执行G2；Gateway仅在同链授权和journal许可后写入或精确恢复。持久化之后还需实际refs、production binding、完整candidate coverage、final ready与serving validation；Core的manifest/route构造器不代替这些外层检查，也不执行公开rename。J04逐段标明call、data/binding和host-action，避免把阅读顺序画成无人接线的自动流水线。",
+    "body": "## 分母、执行与独立评审\n\n严格计划从认证planning facts、维度和lens catalog及runtime硬预算生成完整义务分母；超cap或缺backend时关闭成功路径，不用first-N裁掉义务。executeStrictFactScheduleV1先校验输入和注册身份，再按义务执行。subject binding来自认证inventory，文件内容来自冻结工件；direct witness需要Evidence Ledger真实code.read内容、行范围、blob与ProjectContext ref共同匹配。\n\n内部harvest逐文件调用真实AST、ProjectContext或配置backend。backend/witness authority有进程内注册身份，自报executeFile不能代替注册。每个文件都有执行账目；任一失败后不发布该harvest的部分fact，但保留staged/discarded/emitted分母。unknown、failed和完整空结果不同。Population保留重复、排除、无模式等处置；cluster、induction、falsification与expression lineage必须守恒，不能靠“已完成”字符串授权。\n\n独立语义评审要求Producer和Reviewer的run/invocation/output不同。V5 durable gateway从evidenceStore实际load证据，核对harvest group、reviewer模型装载回执，再签Ed25519回执；消费端使用预先批准的trust policy验证，不能信任任务payload自带key root。模型推理由外层host adapter完成，Core拥有确定性约束和回执验证。\n\n## 统一入口与接通范围\n\ncreateStrictProductionAuthorityReceiptV1重验schedule lineage、fact execution、population、review、cluster、analysis evidence、expression closure、fixpoint以及candidate/admission/terminal证据，再产生authorityHash。它已实现且有公共合同组合测试，但本轮在Main、Plugin、Agent真实源码中仍未发现直接外层调用。Main实际消费executeStrictFactScheduleV1、private revision和route primitives；不能把统一入口画成所有外层生产必经节点。\n\nR01已确认：结构复制后的FactRecord.value被改写而保留factId/valueHash等字段时，公开统一authority仍可能通过且authorityHash相同。当前validateFactRecordGraphV1校验ID图、premise和无环，未从value重建其hash；正例测试不抵消此缺口。该结论限定Core公开重验边界，不宣称已证明完整外层发布利用链。\n\n## 准入、持久与恢复\n\nG1硬轴通过后，Admission对完整accepted corpus做去重/合并；独立G2再绑定G1和Admission的fingerprint、revision与novelty/duplicate决策。prepared persistence由run/fixpoint/revision/admission/fingerprint派生确定ID并绑定DB/file/journal hash，真正Gateway写入后才能签持久回执。Candidate coverage与final serving coverage不同，不能用content-ready代替ready。\n\n私有revision初始化创建固定且原先不存在的namespace，逐层拒绝symlink、执行真实migration、检查空corpus和SQLite；恢复只打开已有revision，不创建或迁移。checkpoint必须FULL WAL完成才能签DB hash。route preparation输出canonical bytes，Core仅分类null需写、完全相同表示rename已成功、其余冲突；真实route安装与切换由外层完成。下面恢复图包含两组独立保证，未用虚构箭头把checkpoint直接等同serving或发布。\n\n## 准入到serving：精确输入输出与真实接线\n\n| Core owner | 输入与输出 | 不能自动推导的结论 |\n| --- | --- | --- |\n| `RecipeProductionGateway.admitCandidate` | item、G1、reviewed projection与run/fixpoint/revision；通过注入inspection加载完整accepted corpus，输出projection与Admission receipt | 这是评估阶段，不调用知识写入；complete/truncated/continuation必须匹配 |\n| `createStrictG2ReceiptV1` | G1、Admission、reviewed fingerprint、Producer/Reviewer身份、六轴、novelty、duplicate；输出pass/revise/reject receipt | 构造器不执行模型；相同Producer/Reviewer identity拒绝 |\n| `prepareRecipePersistenceV1` | run、fixpoint、revision、admission、authoredFingerprint及预期DB/file/journal hashes；输出确定preparedRecipeId与preparedHash | 它不消费G2，也不写盘；顺序由宿主控制，不能画成G2内部自动调用prepare |\n| `persistPreparedReviewedCandidate` | item、prepared、G1/Admission/G2、reviewedProjection、journalToken；校验后返回created/recovered与精确inspection | 先inspection已有行可直接恢复；新写才调用注入KnowledgeService.create，随后必须再inspection |\n| `createStrictPersistenceReceiptV1` | prepared与完整授权链，以及实际ID、authoredFingerprint、storage/DB/file hashes、lifecycle；输出独立receipt | 此函数不读磁盘；Main从真实Gateway与存储检查结果组装输入，它并非Gateway内部自动调用 |\n| refs与production binding | 三组非空同集ref、persistence receipt、run/plan/manifest/cell/module；输出ref receipt与bindingHash | 不能把外层未核验的普通字符串冒充已观察存储事实 |\n| candidate/final coverage | 完整required cell宇宙和binding hashes→candidate receipt；candidate receipt、G4/data hashes、final IDs/fingerprints→final receipt | content-ready与ready是两个阶段；Core核对集合和绑定，实际G4/ready检查由宿主实施 |\n| serving与route | finalCoverage、servingValidation、vector、certified facts等hash→serving manifest；manifest hash与lineage→canonical route | Core不构建向量、不执行外层serving oracle、不安装公共route |\n\n真实Main `StrictPrivateCorpusRuntime`为Gateway注入KnowledgeService、repository/file inspection和journal授权，实际调用prepared写入；随后另行构造持久receipt、refs、binding并推进private corpus状态。`StrictFinalizationRuntime`聚合required cells，调用Core final coverage，执行外层serving验证后绑定Core serving manifest和route。Atlas的data边只表示这些构造器消费字段；消费者证据记录真实外层接线，不把它升级为统一authority已接通。Gateway测试中的create/inspection是注入fixture，能证明调用和幂等分支；真实Markdown/SQLite耐久写链另见知识持久化专题及其真实runtime测试。\n\n\n## 视图与术语\n\n本页手工图描述已核对的关系与关键分叉；F1 也承担所列调用范围的业务纵切（V0）阅读，不能推出未画出的宿主自动调度。F0 文件依赖精选由同页选择集和 TypeScript 导入图生成，不是运行时轨迹。S0/R0 只描述正文指定的 owner、状态和恢复前提。公开 API、全部文件及变更影响见阅读器的对应入口。\n\n`source` 为代码来源，`direct` 为直接绑定调用及断言，`indirect` 为经 helper/fixture 或间接行为的断言，`none` 为明确未覆盖。正文中的“宿主”指真实外层装配，不属于 Core 内部运行时。\n\n## 模块协作与恢复边界深化\n\n独立语义评审的权威来自三段不同事实：证据store实际读到了什么，宿主adapter实际返回了什么，以及消费端预先信任谁。V5 gateway先按semanticRequest的完整harvest-group集合加载证据，生成evidence authority与load receipt，再构造固定V4 request/prompt交hostGateway。这里同一物理文件可支持多个scale/harvest，但不能丢掉其中一条执行receipt，也不能通过复制证据根多算分母。\n\nV4 hostGateway保存实际adapter和模型load receipt的进程内authority。execute核对当前request，调用adapter.invoke，然后检查success、零tool calls、精确JSON decision和reviewer独立身份。之后才检查execution/invocation/output是否复用并登记Set。因此这套重复防护是结果权威防复用，不是外部模型调用前去重；失败或重复时已经发生的load/invoke不会被Core回滚。模型重试与执行日志属于宿主owner。\n\n签名也有清晰边界。createDurableAttestationV5对request、host execution与load receipts的规范payload签Ed25519，并自验结果。新进程的assertSemanticDispositionReviewDurableAttestationV5只需要serialized材料和预批准trust policy，不依赖原WeakMap；它重建每个load receipt，核对一对一证据authority、完整执行集合、模型load receipt及签名。这个纯验证器不写跨进程一次消费账本，不能把valid signature误读成“本次从未消费”。消费合同还必须把完整请求与expectedSemanticRequest再比对，才产出可用于处置的KnowledgeDispositionReview。\n\n可恢复与不可修补的情形也不同：损坏attestation应从可信store重取；输入请求变了就需新评审；reader阻塞WAL应由持有事务者释放后重试checkpoint。Core不自动丢弃已创建私有revision、不自动修改模型输出、不让旧签名改绑新请求。现有Atlas仍没有统一createStrictProductionAuthorityReceiptV1直接外层消费证据；本轮仅Core深化，不把primitive接线提升为统一入口必经。R01明确保留为当前内容完整性缺口，说明hash集合自洽与实际value内容可信仍有差距。\n\n## 从执行结果形成可核验分析材料\n\n事实执行返回receipt后，调用者还要说明每条观察的去向。population把accepted、duplicate、excluded、error、inspected-no-pattern与omitted都纳入完整分母，并以真实execution集合决定complete或unknown。仅传若干hash、标记complete或删去失败观察，都不能获得完整资格。\n\ncluster承载调用者提出的机制，Core核验成员和全部事实，允许一条观察进入多个机制簇，但保留唯一disposition。induction记录recurring或bounded-singleton，既不生成假设也不扩写证据；零假设必须有独立精确review。falsification核验已登记反证、真实execution和review，缺项优先unknown，只有完整范围才能survived/refuted。R01仍限制fact.value完整性，不因新增解释或hash节点而消失。\n\n## 评审、准入、写入和服务是不同完成点\n\nV5 durable知识处置review与候选G1/Admission/G2是不同合同。全库Admission不写Recipe；prepared确定ID也不执行G2；Gateway仅在同链授权和journal许可后写入或精确恢复。持久化之后还需实际refs、production binding、完整candidate coverage、final ready与serving validation；Core的manifest/route构造器不代替这些外层检查，也不执行公开rename。J04逐段标明call、data/binding和host-action，避免把阅读顺序画成无人接线的自动流水线。\n\n## 0.3 同身份重放与checkpoint恢复\n\nPrepared重放依赖完整item/prepared/authority与注入端口的精确inspection。V08沿用内存端口合同，固定db/file hash不等于现场字节校验；Core不自动消费journal或重试。\n\nWAL checkpoint由调用者在同context中显式请求。V09用真实双连接观察writer已提交而旧reader仍停在旧快照；释放reader后重试并独立读主文件hash。FULL失败可部分推进，validator也不会重读当前磁盘，二者边界分别保存。",
     "freshness": "matched"
   },
   {

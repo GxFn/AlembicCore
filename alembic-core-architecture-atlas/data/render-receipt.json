@@ -1,7 +1,7 @@
 {
   "renderer": "11.17.2",
   "configDigest": "b403c5af96f6d11e5fc875c5adc4af2643f7396ca61313a374b18fd48c391695",
-  "harnessDigest": "1df539815a9182ba417c6b3b6f9583775b75b6b1ef48d938d57acb6aacdd73bb",
+  "harnessDigest": "b066c7785efa7561517c70d5bac1e2e2be9568f7c7d296e7372e213402954020",
   "diagrams": [
     {
       "id": "certified-capture-freeze",
@@ -144,8 +144,16 @@
       "digest": "41af02ef2b329b6bbacd05b41afe723558a898b81cdde762f36133d0c7376386"
     },
     {
+      "id": "knowledge-delete-recovery",
+      "digest": "8aa133d1d81c9c13bc00ff31c9a7e7b9ca2e65e1c991c0c009ce6bb100cf1b4e"
+    },
+    {
       "id": "knowledge-recovery",
       "digest": "51c33a864ce22d62787c8f3b312a83d600d80c4f2c2a1781968c476e4f16c35c"
+    },
+    {
+      "id": "knowledge-sync-post-maintenance",
+      "digest": "2c091263f9495a9c237770177aa0057251e46f6fbf7a92a136b92597707de498"
     },
     {
       "id": "knowledge-uow-partial-compensation",
@@ -177,7 +185,7 @@
     },
     {
       "id": "r3-core-recovery-owners",
-      "digest": "e1913f0857c729b027976f2c90424d38e4553f0e490cfd271965362115528a5e"
+      "digest": "4a627a1364bfbd773047a1db9a296561a6c51ed2284339653f58689d7978b953"
     },
     {
       "id": "r3-file-index-and-wal",
@@ -256,8 +264,16 @@
       "digest": "144725ae1c4e3b69bcbb2834fd6ac4319c7bebd31a2440fa126c3498cfdd9500"
     },
     {
+      "id": "strict-prepared-replay",
+      "digest": "8d2c26af2a1d29985a2ac09c2b8add79d1648f260492907439b97aa2670c2fbe"
+    },
+    {
       "id": "strict-recovery",
       "digest": "2b8dd1c3350126dde6b33c12506fdbb733347436d9b61135b83ab98090c110e2"
+    },
+    {
+      "id": "strict-wal-checkpoint",
+      "digest": "a184f095a2a7b2fc140bc0f97ef147260354311009eec0d58d49951aa792c93b"
     },
     {
       "id": "syntax-evidence-and-tree",
@@ -294,8 +310,8 @@
     },
     {
       "id": "r3-core-recovery-owners",
-      "svgBytes": 19122,
-      "width": 828.87109375,
+      "svgBytes": 19186,
+      "width": 826.47265625,
       "height": 204.60000610351562,
       "missingLabels": []
     },
@@ -566,6 +582,20 @@
       "missingLabels": []
     },
     {
+      "id": "knowledge-delete-recovery",
+      "svgBytes": 31731,
+      "width": 731.416015625,
+      "height": 971.7999877929688,
+      "missingLabels": []
+    },
+    {
+      "id": "knowledge-sync-post-maintenance",
+      "svgBytes": 29424,
+      "width": 769.171875,
+      "height": 814.5999755859375,
+      "missingLabels": []
+    },
+    {
       "id": "dependencies-10",
       "svgBytes": 28961,
       "width": 1436.255859375,
@@ -713,6 +743,20 @@
       "missingLabels": []
     },
     {
+      "id": "strict-prepared-replay",
+      "svgBytes": 34640,
+      "width": 1095.576171875,
+      "height": 814.5999755859375,
+      "missingLabels": []
+    },
+    {
+      "id": "strict-wal-checkpoint",
+      "svgBytes": 29054,
+      "width": 726.013671875,
+      "height": 710.2000122070312,
+      "missingLabels": []
+    },
+    {
       "id": "dependencies-15",
       "svgBytes": 40046,
       "width": 1268.4921875,
@@ -782,7 +826,7 @@
     "height": 900
   },
   "theme": "light",
-  "observedAt": "2026-10-23T14:12:42.112Z",
+  "observedAt": "2026-10-23T16:24:06.144Z",
   "checks": {
     "htmlSanitization": true
   }

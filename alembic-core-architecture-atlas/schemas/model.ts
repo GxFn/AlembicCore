@@ -114,7 +114,7 @@ export interface FailureMode {
   apiRefs?: string[];
   runbook?: {
     preconditions: string;
-    checks: Array<{ observe: string; meaning: string }>;
+    checks: Array<{ observe: string; meaning: string; source?: SourceAnchor; fields?: string[] }>;
     action: string;
     identity: string;
     verify: string;

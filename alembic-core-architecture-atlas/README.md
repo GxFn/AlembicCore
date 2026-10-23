@@ -29,6 +29,7 @@ npm run dev
 | `render:verify` | 独立本地服务；在浏览器显式点击后实际渲染每图并生成固定路径回执 |
 | `check:render` | 只读检查图源、实际版本、配置与harness是否仍匹配已有回执 |
 | `check:reader` | 复验独立 UI/内容摘要与代表视口交互记录 |
+| `typecheck:probes` | 独立检查Atlas探针及其引用的Core类型；不修改产品tsconfig |
 | `check:isolation` | 检查产品包、脚本、依赖和构建边界未引入 Atlas |
 | `check` | helper测试、类型、结构、来源、回执、隔离和独立构建 |
 
@@ -68,7 +69,7 @@ npm run dev
 
 ## 0.2：业务旅程、精确定位与运行证据
 
-当前详情层为119个功能单元、116项失败情形和70张图。新增的四条旅程使用同一正典中的模块、图边和失败引用：
+0.2交付的详情层为119个功能单元、116项失败情形和70张图。该阶段新增的四条旅程使用同一正典中的模块、图边和失败引用：
 
 - [J01 知识提交到可查询](journeys/j01.md)：区分创建、同步、发布、向量维护与查询完成。
 - [J02 源码到关系证据与认证](journeys/j02.md)：分别选择live、索引和冻结读取。
@@ -93,3 +94,20 @@ npm run review:append -- reviews/output-budget-review.json
 运行回执目前保守绑定完整Core产品库存，因此来源变化可能要求重跑全部选定样本；主要实现路径仅是导航，不冒充完整传递依赖。全量产品测试历史仍单列。八个核心对象说明身份、生产/消费方、持久化、失效和阶段含义，不把所有说明性阶段都称作持久状态机。
 
 便携使用可直接构建/浏览已保存派生快照；缺少原ledger或消费者仓库时不能在新位置签发来源/运行通过。工作区`check`需要这些材料，静态build与普通页面不读取产品运行数据。版本0.2与内容摘要标识Atlas；SOURCE hash标识所依据的Core源码，二者不是同一种版本。
+
+## 0.3：四条恢复链与逐case证据
+
+当前详情层为121功能单元、124失败情形、74图；5条旅程36步骤、9个核心对象。17专题保持L3，运行证据按所列case单独解释。
+
+- [知识删除](journeys/j05.md)：文件拒绝、文件已删而DB拒绝、后置listener失败分别检查；只有主行仍在的分歧才按同ID delete重试。
+- [syncAll后置维护](maps/10-knowledge-authoring-persistence/README.md#graph-knowledge-sync-post-maintenance)：DB效果、调用completed、嵌套业务报告与真实store分开。V07包含真实HNSW恢复，以及短暂读取失败与真实缺文件的对照。
+- [Prepared重放](maps/15-strict-production-authority/README.md#graph-strict-prepared-replay)：同完整身份先授权/inspect，已有精确记录避免再次create。V08是内存/注入端口合同，未证明真实文件、SQLite、journal或进程恢复。
+- [WAL checkpoint](maps/15-strict-production-authority/README.md#graph-strict-wal-checkpoint)：真实双连接中reader阻挡、owner释放、显式重试；回执hash与当次主文件独立比较。
+
+V06–V09为每个选定case保存稳定ID、精确测试文件/完整标题、业务结论、故障/动作、断言与状态观察映射。失败卡、模块及具体旅程步骤可直达case再返回。执行通过与正常路径、恢复验证、拒绝验证、边界观察、风险观察分别显示；历史或缺材料不支持当前结论。V01–V05仍保持原run级范围，没有自动补成逐case覆盖。
+
+`check:evidence`从固定原始report/observations重新核对case和实际字段，包括hash字段间比较；不以自报布尔替代实际读数。回执不能覆盖正典claim/outcome/refs。缺失、错归属、坏形状及评估异常保留失败状态；历史材料不重写。
+
+失败页新增“尚无模块归属 / 尚无分步恢复清单 / 尚无逐case映射”筛选，分类仅服务阅读。恢复清单给出观察源码与字段，没有的产品观测不虚构。根README的两份新阅读记录以追加方式保存。
+
+在Atlas目录使用`npm run evidence:run -- V06`至`V09`显式复验，或`all`执行九组。修改共享harness后旧证据会过期，应产生新原始记录并刷新派生快照。实际结果及fixture限制见[运行证据](evidence/README.md)；本阶段不修复Core产品、不接管Agent，也未重跑全量产品测试。

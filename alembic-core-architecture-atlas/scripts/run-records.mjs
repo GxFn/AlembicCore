@@ -1,9 +1,40 @@
 import { readFileSync } from 'node:fs';
 import { sha, safeFile } from './contracts.mjs';
-import { requiredHarnessFiles, assessRunReport } from './run-contracts.mjs';
+import { requiredHarnessFiles, assessRunReport, assessCaseEvidence } from './run-contracts.mjs';
 // 便携摘要不是原始运行权威；只有显式维护检查才接触ledger并重评选定case。
+const executionFields = new Set([
+  'schemaVersion',
+  'id',
+  'title',
+  'status',
+  'observedAt',
+  'exitCode',
+  'sourceDigest',
+  'sourceScope',
+  'environment',
+  'harnessFiles',
+  'cases',
+  'caseResults',
+  'probeObservations',
+  'errors',
+  'rawRef',
+  'rawSha256',
+  'consoleRef',
+  'consoleSha256',
+  'command',
+  'receiptRef',
+  'receiptSha256',
+  'observationsRef',
+  'observationsSha256',
+]);
 export function verifyRunRecord({ atlas, ledger, productDigest, record, spec, environment }) {
-  const fail = (status, verification) => ({ ...record, status, verification });
+  // 回执不能借额外字段改写正典case、失败归属或业务结论，即便其本地字节摘要一致。
+  const execution = Object.fromEntries(
+    Object.entries(record).filter(([key]) => executionFields.has(key)),
+  );
+  const fail = (status, verification) => ({ ...execution, status, verification });
+  if (Object.keys(record).some((key) => !executionFields.has(key)))
+    return fail('unavailable', '运行回执含非执行字段；正典映射不可由回执覆盖');
   if (record.id !== spec.id) return fail('unavailable', '回执身份不符');
   const harness = record.harnessFiles ?? [];
   if (
@@ -28,20 +59,6 @@ export function verifyRunRecord({ atlas, ledger, productDigest, record, spec, en
     const { receiptRef, receiptSha256, ...summary } = record;
     if (JSON.stringify(JSON.parse(raws[3])) !== JSON.stringify(summary))
       throw Error('run-summary-mismatch');
-    const assessment = assessRunReport(JSON.parse(raws[0]), spec, record.exitCode);
-    if (JSON.stringify(assessment.cases) !== JSON.stringify(record.cases))
-      throw Error('run-cases-mismatch');
-    if (JSON.stringify(JSON.parse(raws[2])) !== JSON.stringify(record.probeObservations))
-      throw Error('run-observations-mismatch');
-    if (
-      record.status === 'passed' &&
-      (assessment.errors.length ||
-        (record.errors ?? []).length ||
-        (record.probeObservations ?? []).length !== (spec.expectedProbeCount ?? 0))
-    )
-      throw Error('run-pass-not-supported');
-    if (record.status !== 'passed' && record.status !== 'failed')
-      throw Error('run-recorded-status-invalid');
     if (!record.environment || !environment) return fail('unavailable', '运行环境身份缺失');
     if (Object.entries(environment).some(([k, v]) => record.environment[k] !== v))
       return fail('stale', '运行工具或平台已变；仅保留历史执行结论');
@@ -50,6 +67,24 @@ export function verifyRunRecord({ atlas, ledger, productDigest, record, spec, en
       harness.some((f) => sha(readFileSync(safeFile(atlas, f.path))) !== f.sha256)
     )
       return fail('stale', '生产来源或探针已变；仅保留历史执行结论');
+    const assessment = assessRunReport(JSON.parse(raws[0]), spec, record.exitCode);
+    if (JSON.stringify(assessment.cases) !== JSON.stringify(record.cases))
+      throw Error('run-cases-mismatch');
+    if (JSON.stringify(JSON.parse(raws[2])) !== JSON.stringify(record.probeObservations))
+      throw Error('run-observations-mismatch');
+    const evidence = assessCaseEvidence(spec, assessment.cases, JSON.parse(raws[2]));
+    if (JSON.stringify(evidence.caseResults) !== JSON.stringify(record.caseResults ?? []))
+      throw Error('run-case-evidence-mismatch');
+    if (
+      record.status === 'passed' &&
+      (assessment.errors.length ||
+        evidence.errors.length ||
+        (record.errors ?? []).length ||
+        (record.probeObservations ?? []).length !== (spec.expectedProbeCount ?? 0))
+    )
+      throw Error('run-pass-not-supported');
+    if (record.status !== 'passed' && record.status !== 'failed')
+      throw Error('run-recorded-status-invalid');
     return fail(
       record.status,
       '快照生成时已核对原始报告、case、实际观察与来源；浏览器不实时访问ledger',

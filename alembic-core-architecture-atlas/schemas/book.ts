@@ -1,4 +1,10 @@
-import type { AtlasDocument, FailureMode, ModuleDetail, SourceAnchor } from './model.ts';
+import type {
+  AtlasDocument,
+  FailureMode,
+  ModuleDetail,
+  SourceAnchor,
+  TestEvidence,
+} from './model.ts';
 export type JourneyRelation = 'call' | 'data' | 'binding' | 'host-action' | 'reading-order';
 export interface JourneyStep {
   id: string;
@@ -47,7 +53,48 @@ export interface CoreObject {
   path?: string;
   body?: string;
 }
+export type CaseOutcome =
+  | 'normal'
+  | 'recovered'
+  | 'rejected'
+  | 'observed-boundary'
+  | 'risk-observed';
+export interface CaseEvidence {
+  id: string;
+  testFile: string;
+  caseTitle: string;
+  outcome: CaseOutcome;
+  fixture: 'real-io' | 'port-contract' | 'mixed';
+  claim: string;
+  fault: string;
+  action: string;
+  moduleRefs: string[];
+  failureRefs: string[];
+  stepRefs: string[];
+  assertion: TestEvidence;
+  observationChecks: Array<{
+    observationId: string;
+    field: string;
+    equals?: unknown;
+    equalsField?: string;
+    notEqualsField?: string;
+    greaterThanField?: string;
+    format?: 'sha256';
+  }>;
+  limitations: string[];
+}
+export interface CaseEvidenceLink {
+  id: string;
+  title: string;
+  href: string;
+  outcome: CaseOutcome;
+  fixture: CaseEvidence['fixture'];
+  verified: boolean;
+  runStatus: string;
+}
 export interface RunRecord {
+  caseEvidence?: CaseEvidence[];
+  caseResults?: Array<{ id: string; status: 'supported' | 'unsupported'; errors: string[] }>;
   command?: { executable: string; args: string[] };
   receiptRef?: string;
   receiptSha256?: string;
@@ -69,7 +116,7 @@ export interface RunRecord {
   observedAt?: string;
   sourceDigest?: string;
   environment?: Record<string, string>;
-  cases?: Array<{ title: string; status: string; duration?: number }>;
+  cases?: Array<{ title: string; status: string; duration?: number; testFile?: string }>;
   rawRef?: string;
   rawSha256?: string;
   inputFiles?: Array<{ root: string; path: string; sha256: string }>;

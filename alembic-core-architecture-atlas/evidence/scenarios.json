@@ -298,5 +298,1208 @@
     "testNamePattern": "(shared-harvest semantic evidence authority binds one physical evidence root across the complete canonical harvest-group set|shared-harvest semantic evidence authority binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart|shared-harvest semantic evidence authority rejects incomplete, overlapping, mixed-harvest, rebound, and noncanonical binding sets|shared-harvest semantic evidence authority fails closed on cross-harvest group, root, request, load, and attestation tampering)$",
     "status": "not-run",
     "expectedProbeCount": 0
+  },
+  {
+    "id": "V06",
+    "title": "知识删除：文件、目标事务与后置事件分段恢复",
+    "journeyRefs": [
+      "J05"
+    ],
+    "failureRefs": [
+      "K3-DELETE-FILE",
+      "K3-DELETE-DB",
+      "K3-DELETE-POST"
+    ],
+    "testFiles": [
+      "test/KnowledgeServicePersistence.test.ts",
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    ],
+    "supportFiles": [
+      "test/support/knowledge-runtime.ts",
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "testNamePattern": "^(?:KnowledgeService file-first commands delete preserves DB truth on unlink failure|KnowledgeService file-first commands delete preserves DB truth on ambiguous-owner failure|KnowledgeService file-first commands delete retains deletion of an index row whose file is already absent|KnowledgeService file-first commands delete deletes dependent proposal, warning and lifecycle rows in the repository transaction|KnowledgeService file-first commands delete reports a DB ABORT after file removal and supports retry|KnowledgeService file-first commands delete reports a DB IGNORE after file removal and supports retry|Atlas persistence recovery deletion DB failure leaves a retryable identity|Atlas persistence recovery deletion listener failure does not restore committed truth|KnowledgeService file-first commands keeps reverse-reference cleanup durable after deleting its target)$",
+    "expectedCaseTitles": [
+      "KnowledgeService file-first commands delete preserves DB truth on unlink failure",
+      "KnowledgeService file-first commands delete preserves DB truth on ambiguous-owner failure",
+      "KnowledgeService file-first commands delete retains deletion of an index row whose file is already absent",
+      "KnowledgeService file-first commands delete deletes dependent proposal, warning and lifecycle rows in the repository transaction",
+      "KnowledgeService file-first commands delete reports a DB ABORT after file removal and supports retry",
+      "KnowledgeService file-first commands delete reports a DB IGNORE after file removal and supports retry",
+      "Atlas persistence recovery deletion DB failure leaves a retryable identity",
+      "Atlas persistence recovery deletion listener failure does not restore committed truth",
+      "KnowledgeService file-first commands keeps reverse-reference cleanup durable after deleting its target"
+    ],
+    "expectedCaseCount": 9,
+    "expectedProbeCount": 2,
+    "caseEvidence": [
+      {
+        "id": "V06-D1",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands delete preserves DB truth on unlink failure",
+        "outcome": "rejected",
+        "fixture": "real-io",
+        "claim": "unlink拒绝后文件和主行仍在，未发删除事件。",
+        "fault": "只对目标文件unlink注入错误",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "K3-DELETE-FILE"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-01"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "preserves DB truth on %s failure",
+          "anchorSymbol": "service",
+          "assertedBehavior": "unlink拒绝后文件和主行仍在，未发删除事件。",
+          "assertionExcerpt": "expect(fs.existsSync(file)).toBe(true);",
+          "scenarioKind": "rejected"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      },
+      {
+        "id": "V06-D2",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands delete preserves DB truth on ambiguous-owner failure",
+        "outcome": "rejected",
+        "fixture": "real-io",
+        "claim": "文件ID归属歧义阻断删除，DB未改变。",
+        "fault": "目标Markdown含重复id字段",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "K3-DELETE-FILE"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-01"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "preserves DB truth on %s failure",
+          "anchorSymbol": "service",
+          "assertedBehavior": "文件ID归属歧义阻断删除，DB未改变。",
+          "assertionExcerpt": "expect(await env.repo.findById(id)).not.toBeNull();",
+          "scenarioKind": "rejected"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      },
+      {
+        "id": "V06-D3",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands delete retains deletion of an index row whose file is already absent",
+        "outcome": "normal",
+        "fixture": "real-io",
+        "claim": "文件已不存在仍可清理现存DB主行。",
+        "fault": "调用前显式移除fixture文件",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-02"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "retains deletion of an index row whose file is already absent",
+          "anchorSymbol": "service",
+          "assertedBehavior": "文件已不存在仍可清理现存DB主行。",
+          "assertionExcerpt": "expect(await env.repo.findById(id)).toBeNull();",
+          "scenarioKind": "normal"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      },
+      {
+        "id": "V06-D4",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands delete deletes dependent proposal, warning and lifecycle rows in the repository transaction",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "目标/FK事务拒绝时保留从表；排故后service.delete清理主行与所列从表。",
+        "fault": "所选case内明确注入；正常路径无注入",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "K3-DELETE-DB"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-02"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "deletes dependent proposal, warning and lifecycle rows in the repository transaction",
+          "anchorSymbol": "service",
+          "assertedBehavior": "目标/FK事务拒绝时保留从表；排故后service.delete清理主行与所列从表。",
+          "assertionExcerpt": "expect(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "失败段直接调用repository.delete；不证明全部referrer与文件受同一事务保护。"
+        ]
+      },
+      {
+        "id": "V06-D5",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands delete reports a DB ABORT after file removal and supports retry",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。",
+        "fault": "目标DELETE触发器RAISE(ABORT)",
+        "action": "移除触发器后显式service.delete(id, context)",
+        "failureRefs": [
+          "K3-DELETE-DB"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-02"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "reports a DB %s after file removal and supports retry",
+          "anchorSymbol": "service",
+          "assertedBehavior": "ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。",
+          "assertionExcerpt": "expect(await env.repo.findById(id)).toBeNull();",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      },
+      {
+        "id": "V06-D6",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands delete reports a DB IGNORE after file removal and supports retry",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "IGNORE不会成为假成功；分歧后同ID再次delete完成清理。",
+        "fault": "目标DELETE触发器RAISE(IGNORE)",
+        "action": "移除触发器后显式service.delete(id, context)",
+        "failureRefs": [
+          "K3-DELETE-DB"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-02"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "reports a DB %s after file removal and supports retry",
+          "anchorSymbol": "service",
+          "assertedBehavior": "IGNORE不会成为假成功；分歧后同ID再次delete完成清理。",
+          "assertionExcerpt": "expect(fs.existsSync(file)).toBe(false);",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      },
+      {
+        "id": "V06-D7",
+        "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+        "caseTitle": "Atlas persistence recovery deletion DB failure leaves a retryable identity",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。",
+        "fault": "真实SQLite DELETE触发器拒绝",
+        "action": "排除DB触发器后显式重试同ID delete",
+        "failureRefs": [
+          "K3-DELETE-DB"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-02",
+          "J05-04"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "deletion DB failure leaves a retryable identity",
+          "anchorSymbol": "service",
+          "assertedBehavior": "同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。",
+          "assertionExcerpt": "expect(recovered).toEqual(",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [
+          {
+            "observationId": "delete-state",
+            "field": "before.rows",
+            "equals": 1
+          },
+          {
+            "observationId": "delete-state",
+            "field": "failed.rows",
+            "equals": 1
+          },
+          {
+            "observationId": "delete-state",
+            "field": "failed.fileExists",
+            "equals": false
+          },
+          {
+            "observationId": "delete-state",
+            "field": "failed.events",
+            "equals": 0
+          },
+          {
+            "observationId": "delete-state",
+            "field": "recovered.rows",
+            "equals": 0
+          },
+          {
+            "observationId": "delete-state",
+            "field": "recovered.sameId",
+            "equals": true
+          },
+          {
+            "observationId": "delete-state",
+            "field": "recovered.events",
+            "equals": 1
+          },
+          {
+            "observationId": "delete-state",
+            "field": "recovered.id",
+            "equalsField": "entryId"
+          }
+        ],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      },
+      {
+        "id": "V06-D8",
+        "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+        "caseTitle": "Atlas persistence recovery deletion listener failure does not restore committed truth",
+        "outcome": "observed-boundary",
+        "fixture": "mixed",
+        "claim": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+        "fault": "审计port拒绝及同步EventBus listener抛错",
+        "action": "重读已删除真相后用同ID再次调用以核对NotFound；不补回实体",
+        "failureRefs": [
+          "K3-DELETE-POST"
+        ],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-03",
+          "J05-04"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "deletion listener failure does not restore committed truth",
+          "anchorSymbol": "service",
+          "assertedBehavior": "审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。",
+          "assertionExcerpt": "expect({ auditAttempts, listenerAttempts }).toEqual(",
+          "scenarioKind": "observed-boundary"
+        },
+        "observationChecks": [
+          {
+            "observationId": "delete-post",
+            "field": "rows",
+            "equals": 0
+          },
+          {
+            "observationId": "delete-post",
+            "field": "fileExists",
+            "equals": false
+          },
+          {
+            "observationId": "delete-post",
+            "field": "auditAttempts",
+            "equals": 1
+          },
+          {
+            "observationId": "delete-post",
+            "field": "listenerAttempts",
+            "equals": 1
+          },
+          {
+            "observationId": "delete-post",
+            "field": "retryRejectedAsNotFound",
+            "equals": true
+          },
+          {
+            "observationId": "delete-post",
+            "field": "auditFailureWasNonBlocking",
+            "equals": true
+          }
+        ],
+        "limitations": [
+          "边界观察成立不表示失败的审计或listener已恢复。",
+          "审计是拒绝端口夹具，文件与SQLite为真实实现。"
+        ]
+      },
+      {
+        "id": "V06-D9",
+        "testFile": "test/KnowledgeServicePersistence.test.ts",
+        "caseTitle": "KnowledgeService file-first commands keeps reverse-reference cleanup durable after deleting its target",
+        "outcome": "normal",
+        "fixture": "real-io",
+        "claim": "删除目标后反向引用清理在显式sync之后仍保持。",
+        "fault": "所选case内明确注入；正常路径无注入",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [],
+        "moduleRefs": [
+          "M10-06"
+        ],
+        "stepRefs": [
+          "J05-02"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeServicePersistence.test.ts",
+          "caseTitle": "keeps reverse-reference cleanup durable after deleting its target",
+          "anchorSymbol": "service",
+          "assertedBehavior": "删除目标后反向引用清理在显式sync之后仍保持。",
+          "assertionExcerpt": "expect(await related()).toEqual([]);",
+          "scenarioKind": "normal"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "只证明所列case，其他副作用、并发与宿主接线未验证。"
+        ]
+      }
+    ],
+    "sourcePaths": [
+      "src/service/knowledge/KnowledgeService.ts",
+      "src/service/knowledge/commitKnowledgeWrite.ts",
+      "src/service/knowledge/KnowledgeFileWriter.ts",
+      "src/repository/knowledge/KnowledgeRepositoryImpl.ts",
+      "src/infrastructure/event/EventBus.ts"
+    ],
+    "fixtureDescription": "真实Markdown/SQLite；目标删除触发器、文件I/O与后置事件故障分开。",
+    "limitations": [
+      "同ID重试限于主行仍存在的分歧；主行已无不能靠再次delete重放消费者。",
+      "审计失败non-blocking，事件计数不是向量已刷盘证明。"
+    ],
+    "status": "not-run"
+  },
+  {
+    "id": "V07",
+    "title": "syncAll：后置维护拒绝、真实store恢复与返回状态边界",
+    "journeyRefs": [
+      "J01"
+    ],
+    "failureRefs": [
+      "K3-SYNC-VECTOR",
+      "K3-SYNC-RESULT",
+      "K3-SYNC-SKIP"
+    ],
+    "testFiles": [
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+      "test/KnowledgeProductizationLifecycle.test.ts"
+    ],
+    "supportFiles": [
+      "test/support/knowledge-runtime.ts",
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "testNamePattern": "^(?:Atlas persistence recovery sync maintenance rejection preserves DB changes and recovers the real vector store|Atlas persistence recovery sync completed can carry a failed maintenance business report|Atlas persistence recovery sync read failure and real file absence produce distinguishable orphan observations|Knowledge productization lifecycle deprecates an orphan for an empty corpus and awaits authoritative vector maintenance)$",
+    "expectedCaseTitles": [
+      "Atlas persistence recovery sync maintenance rejection preserves DB changes and recovers the real vector store",
+      "Atlas persistence recovery sync completed can carry a failed maintenance business report",
+      "Atlas persistence recovery sync read failure and real file absence produce distinguishable orphan observations",
+      "Knowledge productization lifecycle deprecates an orphan for an empty corpus and awaits authoritative vector maintenance"
+    ],
+    "expectedCaseCount": 4,
+    "expectedProbeCount": 3,
+    "caseEvidence": [
+      {
+        "id": "V07-S1",
+        "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+        "caseTitle": "Atlas persistence recovery sync maintenance rejection preserves DB changes and recovers the real vector store",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+        "fault": "真实store.remove对选定region暂时抛错；其他写入真实",
+        "action": "fixture将Core reconcileIndex.errors转reject；恢复remove后调用者显式syncAll并flush、同进程新adapter重开",
+        "failureRefs": [
+          "K3-SYNC-VECTOR"
+        ],
+        "moduleRefs": [
+          "M10-04"
+        ],
+        "stepRefs": [
+          "J01-05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "sync maintenance rejection preserves DB changes and recovers the real vector store",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。",
+          "assertionExcerpt": "expect(recovered.reopenedIds).toEqual([]);",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [
+          {
+            "observationId": "sync-vector",
+            "field": "failed.lifecycle",
+            "equals": "deprecated"
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "failed.regionPresent",
+            "equals": true
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "failed.syncReturnedReport",
+            "equals": false
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.sameId",
+            "equals": true
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.maintenanceStatus",
+            "equals": "completed"
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.reopenedIds",
+            "equals": []
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.legacyPresent",
+            "equals": false
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.regionPresent",
+            "equals": false
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.lifecycle",
+            "equals": "deprecated"
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.report.finalInspection.healthy",
+            "equals": true
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.report.errors",
+            "equals": []
+          },
+          {
+            "observationId": "sync-vector",
+            "field": "recovered.id",
+            "equalsField": "entryId"
+          }
+        ],
+        "limitations": [
+          "错误报告转reject是fixture端口策略，不是syncAll或当前外层宿主的隐式策略。",
+          "使用实际Markdown、SQLite、VectorService和HNSW；无embedding/API请求。",
+          "同进程新adapter重开，不证明断电、跨进程或外层多代际发布。"
+        ]
+      },
+      {
+        "id": "V07-S2",
+        "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+        "caseTitle": "Atlas persistence recovery sync completed can carry a failed maintenance business report",
+        "outcome": "observed-boundary",
+        "fixture": "port-contract",
+        "claim": "completed只说明端口resolve；嵌套业务报告仍可failed。",
+        "fault": "端口resolve一份failed报告",
+        "action": "读取外层调用状态和嵌套业务报告",
+        "failureRefs": [
+          "K3-SYNC-RESULT"
+        ],
+        "moduleRefs": [
+          "M10-04"
+        ],
+        "stepRefs": [
+          "J01-05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "sync completed can carry a failed maintenance business report",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "completed只说明端口resolve；嵌套业务报告仍可failed。",
+          "assertionExcerpt": "expect(report.vectorMaintenanceStatus).toBe('completed');",
+          "scenarioKind": "observed-boundary"
+        },
+        "observationChecks": [
+          {
+            "observationId": "sync-result",
+            "field": "invocationStatus",
+            "equals": "completed"
+          },
+          {
+            "observationId": "sync-result",
+            "field": "businessReport.status",
+            "equals": "failed"
+          },
+          {
+            "observationId": "sync-result",
+            "field": "contractOnly",
+            "equals": true
+          }
+        ],
+        "limitations": [
+          "仅证明Core端口返回合同；该case没有实际向量维护。"
+        ]
+      },
+      {
+        "id": "V07-S3",
+        "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+        "caseTitle": "Atlas persistence recovery sync read failure and real file absence produce distinguishable orphan observations",
+        "outcome": "risk-observed",
+        "fixture": "real-io",
+        "claim": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+        "fault": "精确目标文件的一次readFileSync失败；另做实际无文件control",
+        "action": "dryRun→受控正式写→解除读故障后同根sync→实际缺文件对照",
+        "failureRefs": [
+          "K3-SYNC-SKIP"
+        ],
+        "moduleRefs": [
+          "M10-04"
+        ],
+        "stepRefs": [
+          "J01-05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "sync read failure and real file absence produce distinguishable orphan observations",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。",
+          "assertionExcerpt": "expect(recovered).toMatchObject(",
+          "scenarioKind": "risk-observed"
+        },
+        "observationChecks": [
+          {
+            "observationId": "sync-read-skip",
+            "field": "dryRun.maintenanceStatus",
+            "equals": "skipped-dry-run"
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "failed.skipped",
+            "equals": 1
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "failed.lifecycle",
+            "equals": "deprecated"
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "failed.fileExists",
+            "equals": true
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "recovered.skipped",
+            "equals": 0
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "recovered.lifecycle",
+            "equals": "active"
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "absentControl.fileExists",
+            "equals": false
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "sameFileHash",
+            "equals": true
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "recovered.fileHash",
+            "equalsField": "failed.fileHash",
+            "format": "sha256"
+          },
+          {
+            "observationId": "sync-read-skip",
+            "field": "failed.orphaned.0",
+            "equalsField": "entryId"
+          }
+        ],
+        "limitations": [
+          "这是本轮受控行为观察，不意味着自动恢复可靠，也未修复产品。",
+          "orphaned报告不独立证明文件被删除；此case未配置向量维护。"
+        ]
+      },
+      {
+        "id": "V07-S4",
+        "testFile": "test/KnowledgeProductizationLifecycle.test.ts",
+        "caseTitle": "Knowledge productization lifecycle deprecates an orphan for an empty corpus and awaits authoritative vector maintenance",
+        "outcome": "normal",
+        "fixture": "mixed",
+        "claim": "空文件语料仍做孤儿检查；syncAll等待维护Promise后返回。",
+        "fault": "所选case内明确注入；正常路径无注入",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [],
+        "moduleRefs": [
+          "M10-04"
+        ],
+        "stepRefs": [
+          "J01-05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/KnowledgeProductizationLifecycle.test.ts",
+          "caseTitle": "deprecates an orphan for an empty corpus and awaits authoritative vector maintenance",
+          "anchorSymbol": "sync",
+          "assertedBehavior": "空文件语料仍做孤儿检查；syncAll等待维护Promise后返回。",
+          "assertionExcerpt": "expect(settled).toBe(false);",
+          "scenarioKind": "normal"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "Markdown/SQLite真实，维护是受控Promise；不证明store恢复。"
+        ]
+      }
+    ],
+    "sourcePaths": [
+      "src/service/knowledge/KnowledgeSyncService.ts",
+      "src/service/vector/VectorService.ts",
+      "src/service/vector/SyncCoordinator.ts",
+      "src/infrastructure/vector/HnswVectorAdapter.ts",
+      "src/service/vector/RecipeVectorGeneration.ts"
+    ],
+    "fixtureDescription": "真实Markdown/SQLite/VectorService/HNSW；明确标注fixture维护端口包装策略。",
+    "limitations": [
+      "completed仅表示端口返回，nested report及store须另查。",
+      "没有外部embedding/API，空权威语料的删除恢复不证明生成向量质量。",
+      "read skip是受控观察，不修改Core故障语义。"
+    ],
+    "status": "not-run"
+  },
+  {
+    "id": "V08",
+    "title": "Strict prepared：同身份端口重放与写前拒绝",
+    "journeyRefs": [
+      "J04"
+    ],
+    "failureRefs": [
+      "stf-prepared-after-write",
+      "stf-prepared-authorization",
+      "stf-prepared-inspection-conflict",
+      "stf-prepared-item-mismatch",
+      "stf-prepared-authority-mismatch"
+    ],
+    "testFiles": [
+      "test/StrictPreparedRecipeGateway.test.ts",
+      "test/ProductionPersistenceContracts.test.ts"
+    ],
+    "supportFiles": [
+      "test/support/knowledge-runtime.ts",
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "testNamePattern": "^(?:strict prepared Recipe Gateway path authorizes the internal prepared ID, reads it back, and reports zero UUID allocation|strict prepared Recipe Gateway path recovers an exact persist-before-consumed row without creating a duplicate|strict prepared Recipe Gateway path replays a persist-before-journal-consumed crash without a second Recipe|strict prepared Recipe Gateway path fails closed for unauthorized or mismatched revision readback|strict prepared Recipe Gateway path rejects an item changed after G1 review before journal authorization or write|strict prepared Recipe Gateway path rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write|production persistence contracts derives a deterministic prepared Recipe ID from journal-bound identity)$",
+    "expectedCaseTitles": [
+      "strict prepared Recipe Gateway path authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+      "strict prepared Recipe Gateway path recovers an exact persist-before-consumed row without creating a duplicate",
+      "strict prepared Recipe Gateway path replays a persist-before-journal-consumed crash without a second Recipe",
+      "strict prepared Recipe Gateway path fails closed for unauthorized or mismatched revision readback",
+      "strict prepared Recipe Gateway path rejects an item changed after G1 review before journal authorization or write",
+      "strict prepared Recipe Gateway path rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write",
+      "production persistence contracts derives a deterministic prepared Recipe ID from journal-bound identity"
+    ],
+    "expectedCaseCount": 7,
+    "expectedProbeCount": 0,
+    "caseEvidence": [
+      {
+        "id": "V08-P1",
+        "testFile": "test/StrictPreparedRecipeGateway.test.ts",
+        "caseTitle": "strict prepared Recipe Gateway path authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+        "outcome": "normal",
+        "fixture": "port-contract",
+        "claim": "有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。",
+        "fault": "所选case内明确注入；正常路径无注入",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。",
+          "assertionExcerpt": "expect(result.status).toBe('created');",
+          "scenarioKind": "normal"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "内存stored与vi.fn端口；无真实文件/SQLite/journal或进程崩溃。",
+          "inspection的db/file hash为预设值；不证明现场字节完整性。"
+        ]
+      },
+      {
+        "id": "V08-P2",
+        "testFile": "test/StrictPreparedRecipeGateway.test.ts",
+        "caseTitle": "strict prepared Recipe Gateway path recovers an exact persist-before-consumed row without creating a duplicate",
+        "outcome": "recovered",
+        "fixture": "port-contract",
+        "claim": "精确已有inspection返回recovered，本次不调用create。",
+        "fault": "所选case内明确注入；正常路径无注入",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "stf-prepared-after-write"
+        ],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "recovers an exact persist-before-consumed row without creating a duplicate",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "精确已有inspection返回recovered，本次不调用create。",
+          "assertionExcerpt": "expect(create).not.toHaveBeenCalled();",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "内存stored与vi.fn端口；无真实文件/SQLite/journal或进程崩溃。",
+          "inspection的db/file hash为预设值；不证明现场字节完整性。"
+        ]
+      },
+      {
+        "id": "V08-P3",
+        "testFile": "test/StrictPreparedRecipeGateway.test.ts",
+        "caseTitle": "strict prepared Recipe Gateway path replays a persist-before-journal-consumed crash without a second Recipe",
+        "outcome": "recovered",
+        "fixture": "port-contract",
+        "claim": "create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。",
+        "fault": "create设置内存stored后抛错",
+        "action": "同item/prepared/context显式重调",
+        "failureRefs": [
+          "stf-prepared-after-write"
+        ],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "replays a persist-before-journal-consumed crash without a second Recipe",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。",
+          "assertionExcerpt": "expect(create).toHaveBeenCalledTimes(1);",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "内存stored与vi.fn端口；无真实文件/SQLite/journal或进程崩溃。",
+          "inspection的db/file hash为预设值；不证明现场字节完整性。"
+        ]
+      },
+      {
+        "id": "V08-P4",
+        "testFile": "test/StrictPreparedRecipeGateway.test.ts",
+        "caseTitle": "strict prepared Recipe Gateway path fails closed for unauthorized or mismatched revision readback",
+        "outcome": "rejected",
+        "fixture": "port-contract",
+        "claim": "授权false或旧revision inspection均拒绝。",
+        "fault": "授权返回false；另一个gateway返回旧revision",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "stf-prepared-authorization",
+          "stf-prepared-inspection-conflict"
+        ],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "fails closed for unauthorized or mismatched revision readback",
+          "anchorSymbol": "RecipeProductionGateway",
+          "assertedBehavior": "授权false或旧revision inspection均拒绝。",
+          "assertionExcerpt": ".rejects.toThrow('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');",
+          "scenarioKind": "rejected"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "内存stored与vi.fn端口；无真实文件/SQLite/journal或进程崩溃。",
+          "inspection的db/file hash为预设值；不证明现场字节完整性。",
+          "此case包含授权拒绝与revision冲突两段；冲突的精确断言另见对应failure条目。"
+        ]
+      },
+      {
+        "id": "V08-P5",
+        "testFile": "test/StrictPreparedRecipeGateway.test.ts",
+        "caseTitle": "strict prepared Recipe Gateway path rejects an item changed after G1 review before journal authorization or write",
+        "outcome": "rejected",
+        "fixture": "port-contract",
+        "claim": "评审后的payload变化在授权/inspection/create之前拒绝。",
+        "fault": "修改被评审payload的多个字段",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "stf-prepared-item-mismatch"
+        ],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "rejects an item changed after G1 review before journal authorization or write",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "评审后的payload变化在授权/inspection/create之前拒绝。",
+          "assertionExcerpt": "expect(inspectPreparedRecipe).not.toHaveBeenCalled();",
+          "scenarioKind": "rejected"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "内存stored与vi.fn端口；无真实文件/SQLite/journal或进程崩溃。",
+          "inspection的db/file hash为预设值；不证明现场字节完整性。"
+        ]
+      },
+      {
+        "id": "V08-P6",
+        "testFile": "test/StrictPreparedRecipeGateway.test.ts",
+        "caseTitle": "strict prepared Recipe Gateway path rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write",
+        "outcome": "rejected",
+        "fixture": "port-contract",
+        "claim": "G1→Admission→G2身份错配在端口访问之前拒绝。",
+        "fault": "Admission finalAdmittedFingerprint篡改",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "stf-prepared-authority-mismatch"
+        ],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/StrictPreparedRecipeGateway.test.ts",
+          "caseTitle": "rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write",
+          "anchorSymbol": "gateway",
+          "assertedBehavior": "G1→Admission→G2身份错配在端口访问之前拒绝。",
+          "assertionExcerpt": "expect(authorizePreparedRecipe).not.toHaveBeenCalled();",
+          "scenarioKind": "rejected"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "内存stored与vi.fn端口；无真实文件/SQLite/journal或进程崩溃。",
+          "inspection的db/file hash为预设值；不证明现场字节完整性。"
+        ]
+      },
+      {
+        "id": "V08-P7",
+        "testFile": "test/ProductionPersistenceContracts.test.ts",
+        "caseTitle": "production persistence contracts derives a deterministic prepared Recipe ID from journal-bound identity",
+        "outcome": "normal",
+        "fixture": "port-contract",
+        "claim": "ID只绑定规定身份；cell/parents变化可保留ID但preparedHash改变。",
+        "fault": "所选case内明确注入；正常路径无注入",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [],
+        "moduleRefs": [
+          "M15-15"
+        ],
+        "stepRefs": [
+          "J04-S05"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/ProductionPersistenceContracts.test.ts",
+          "caseTitle": "derives a deterministic prepared Recipe ID from journal-bound identity",
+          "anchorSymbol": "prepareRecipePersistenceV1",
+          "assertedBehavior": "ID只绑定规定身份；cell/parents变化可保留ID但preparedHash改变。",
+          "assertionExcerpt": "expect(relocated.preparedHash).not.toBe(left.preparedHash);",
+          "scenarioKind": "normal"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "纯内存合同，不涉及真实journal或存储。",
+          "仅比较ID不能代替preparedHash和完整授权链检查。"
+        ]
+      }
+    ],
+    "sourcePaths": [
+      "src/service/knowledge/RecipeProductionGateway.ts",
+      "src/service/production/ProductionPersistenceContracts.ts"
+    ],
+    "fixtureDescription": "现成Core合同case；内存inspection与注入授权/创建端口，纯函数ID对照。",
+    "limitations": [
+      "crash是create夹具设置stored后抛错，非真实DB/文件/journal/进程中断。",
+      "dbHash/fileHash是预期值；不因返回recovered推断现场完整hash匹配。",
+      "不执行Agent、Main持久化、journal consumed或公开发布。"
+    ],
+    "status": "not-run"
+  },
+  {
+    "id": "V09",
+    "title": "WAL checkpoint：真实reader阻挡、显式释放与同context重试",
+    "journeyRefs": [
+      "J04"
+    ],
+    "failureRefs": [
+      "stf-wal-not-sealed",
+      "stf-checkpoint-context"
+    ],
+    "testFiles": [
+      "test/ProductionPersistenceContracts.test.ts",
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    ],
+    "supportFiles": [
+      "test/support/knowledge-runtime.ts",
+      "test/setup.ts",
+      "vitest.config.ts"
+    ],
+    "testNamePattern": "^(?:production persistence contracts refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file|production persistence contracts rejects an old revision receipt and checkpoint under a new current context|Atlas persistence recovery WAL reader blocking ends only after explicit release and checkpoint retry)$",
+    "expectedCaseTitles": [
+      "production persistence contracts refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+      "production persistence contracts rejects an old revision receipt and checkpoint under a new current context",
+      "Atlas persistence recovery WAL reader blocking ends only after explicit release and checkpoint retry"
+    ],
+    "expectedCaseCount": 3,
+    "expectedProbeCount": 1,
+    "caseEvidence": [
+      {
+        "id": "V09-W1",
+        "testFile": "test/ProductionPersistenceContracts.test.ts",
+        "caseTitle": "production persistence contracts refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+        "fault": "真实SQLite旧读事务",
+        "action": "持有reader的调用方ROLLBACK，再次checkpoint",
+        "failureRefs": [
+          "stf-wal-not-sealed"
+        ],
+        "moduleRefs": [
+          "M15-17"
+        ],
+        "stepRefs": [
+          "J04-S08"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/ProductionPersistenceContracts.test.ts",
+          "caseTitle": "refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file",
+          "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+          "assertedBehavior": "旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。",
+          "assertionExcerpt": "expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "真实双连接，单进程，无其他新writer；不证明进程崩溃或停写封存。"
+        ]
+      },
+      {
+        "id": "V09-W2",
+        "testFile": "test/ProductionPersistenceContracts.test.ts",
+        "caseTitle": "production persistence contracts rejects an old revision receipt and checkpoint under a new current context",
+        "outcome": "rejected",
+        "fixture": "real-io",
+        "claim": "错配runtime/revision/context不能混用handle或checkpoint；同handle注册的新连接不等于错配。",
+        "fault": "旧handle配新runtime；旧回执配新context",
+        "action": "仅执行case中明确调用，不推断自动恢复",
+        "failureRefs": [
+          "stf-checkpoint-context"
+        ],
+        "moduleRefs": [
+          "M15-17"
+        ],
+        "stepRefs": [
+          "J04-S08"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "test/ProductionPersistenceContracts.test.ts",
+          "caseTitle": "rejects an old revision receipt and checkpoint under a new current context",
+          "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+          "assertedBehavior": "不同runtime/revision/context不能复用旧handle或checkpoint回执。",
+          "assertionExcerpt": ".toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');",
+          "scenarioKind": "rejected"
+        },
+        "observationChecks": [],
+        "limitations": [
+          "validator重验身份和回执自洽，不重新读取当前磁盘。"
+        ]
+      },
+      {
+        "id": "V09-W3",
+        "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+        "caseTitle": "Atlas persistence recovery WAL reader blocking ends only after explicit release and checkpoint retry",
+        "outcome": "recovered",
+        "fixture": "real-io",
+        "claim": "writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。",
+        "fault": "真实reader固定旧快照；fixture busy_timeout=1ms",
+        "action": "reader owner显式ROLLBACK后重试Core FULL checkpoint",
+        "failureRefs": [
+          "stf-wal-not-sealed"
+        ],
+        "moduleRefs": [
+          "M15-17"
+        ],
+        "stepRefs": [
+          "J04-S08"
+        ],
+        "assertion": {
+          "relation": "direct",
+          "path": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+          "caseTitle": "WAL reader blocking ends only after explicit release and checkpoint retry",
+          "anchorSymbol": "createPrivateCorpusRevisionCheckpointV1",
+          "assertedBehavior": "writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。",
+          "assertionExcerpt": "expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);",
+          "scenarioKind": "recovered"
+        },
+        "observationChecks": [
+          {
+            "observationId": "checkpoint-state",
+            "field": "blocked.writerRows",
+            "equals": 2
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "blocked.readerRows",
+            "equals": 1
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "blocked.readerInTransaction",
+            "equals": true
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "blocked.receiptIssued",
+            "equals": false
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.writerRows",
+            "equals": 2
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.readerRows",
+            "equals": 2
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.readerInTransaction",
+            "equals": false
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.validationPassed",
+            "equals": true
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "hashMatchesDisk",
+            "equals": true
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "sourceMainFileChanged",
+            "equals": true
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.databaseHash",
+            "equalsField": "recovered.actualDatabaseHash",
+            "format": "sha256"
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.databaseHash",
+            "notEqualsField": "staleHash",
+            "format": "sha256"
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "blocked.passiveCheckpoint.log",
+            "greaterThanField": "blocked.passiveCheckpoint.checkpointed"
+          },
+          {
+            "observationId": "checkpoint-state",
+            "field": "recovered.checkpointAfterRetry.log",
+            "equalsField": "recovered.checkpointAfterRetry.checkpointed"
+          }
+        ],
+        "limitations": [
+          "FULL失败也可能部分推进，不承诺失败时主文件完全不变。",
+          "checkpointAfterRetry是另一次PASSIVE观察，不是Core内部FULL原始返回。",
+          "没有调用宿主公开route或Serving发布。"
+        ]
+      }
+    ],
+    "sourcePaths": [
+      "src/service/production/ProductionPersistenceContracts.ts",
+      "src/infrastructure/database/DatabaseConnection.ts",
+      "src/shared/WorkspaceResolver.ts"
+    ],
+    "fixtureDescription": "真实临时private revision与SQLite双连接；单进程无额外writer。",
+    "limitations": [
+      "已提交数据可仍在WAL；拒绝receipt不等于回滚事务。",
+      "FULL可能部分推进；当前样本不提供断电或全系统并发封存保证。",
+      "validator只核对身份/回执，磁盘hash由probe独立读回。"
+    ],
+    "status": "not-run"
   }
 ]

@@ -4,7 +4,8 @@ import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import YAML from 'yaml';
 import { snapshot, sha, safeFile } from './contracts.mjs';
-import { buildBookIndex, validateBook } from '../src/book-model.ts';
+import { buildBookIndex, validateBook, caseEvidenceLinks } from '../src/book-model.ts';
+import { caseEvidenceMarkdown, caseLinksMarkdown } from '../src/case-content.ts';
 import { writeIfChanged } from './snapshot-state.mjs';
 const atlas = resolve(dirname(fileURLToPath(import.meta.url)), '..'),
   core = resolve(atlas, '..');
@@ -43,7 +44,12 @@ export function coreObjects() {
 }
 export function runScenarios() {
   const p = resolve(atlas, 'evidence/scenarios.json');
-  return existsSync(p) ? json(p) : [];
+  return existsSync(p)
+    ? json(p).map((spec) => ({
+        ...spec,
+        ...(spec.caseEvidence ? { observations: spec.caseEvidence.map((c) => c.claim) } : {}),
+      }))
+    : [];
 }
 export function runRecords(productDigest) {
   return runScenarios().map((spec) => {
@@ -66,6 +72,8 @@ export function runRecords(productDigest) {
             vitest: json(resolve(core, 'node_modules/vitest/package.json')).version,
           },
         }),
+        id: spec.id,
+        title: spec.title,
       };
     } catch (error) {
       return { ...spec, status: 'unavailable', verification: `回执无法读取：${error.message}` };
@@ -103,16 +111,19 @@ export function topicNavigation(book, topicId) {
   const failureIds = new Set(book.failures.filter((f) => f.topicId === topicId).map((f) => f.id));
   const all = bookLinks(book),
     links = {},
-    backlinks = {};
+    backlinks = {},
+    proofs = {};
   for (const m of book.modules.filter((m) => moduleIds.has(m.id))) {
     for (const id of [...(m.graphRefs ?? []), ...(m.failureRefs ?? []), ...(m.apiRefs ?? [])])
       links[id] = all[id];
     backlinks[m.id] = m.journeys;
+    proofs[m.id] = caseEvidenceLinks(book, m.id, 'moduleRefs');
   }
   for (const f of book.failures.filter((f) => failureIds.has(f.id))) {
     for (const id of [...(f.moduleRefs ?? []), ...(f.graphRefs ?? []), ...(f.apiRefs ?? [])])
       links[id] = all[id];
     backlinks[f.id] = f.journeys;
+    proofs[f.id] = caseEvidenceLinks(book, f.id, 'failureRefs');
   }
   for (const e of book.edges.filter((e) => e.topicId === topicId))
     backlinks[e.id] = book.journeys.flatMap((j) =>
@@ -125,7 +136,7 @@ export function topicNavigation(book, topicId) {
           route: `#journeys~${s.id}`,
         })),
     );
-  return { links, backlinks };
+  return { links, backlinks, proofs };
 }
 export function markdownNavigation(book, documents, from) {
   const routes = new Map(documents.map((d) => [d.topicId, d.path]));
@@ -160,6 +171,12 @@ export function markdownNavigation(book, documents, from) {
         items.map((item) => ({ ...item, route: convert(item.route) })),
       ]),
     ),
+    proofs: Object.fromEntries(
+      Object.entries(navigation.proofs).map(([id, items]) => [
+        id,
+        items.map((item) => ({ ...item, href: convert(item.href) })),
+      ]),
+    ),
     convert,
   };
 }
@@ -192,7 +209,7 @@ export function readingProjection(entity, book, documents) {
       entity.steps
         .map(
           (s) =>
-            `<a id="${s.id}"></a>\n\n### ${s.id} · ${s.title}\n\n关系类型：${s.relation}\n\n| 项目 | 内容 |\n| --- | --- |\n| 输入 | ${mdCell(s.input)} |\n| 输出 | ${mdCell(s.output)} |\n| 状态 | ${mdCell(s.state)} |\n| 动作与停止 | ${mdCell(s.action)} |\n\n功能：${refs(s.moduleRefs, 'module')}\n\n对象：${refs(s.objectRefs ?? [], 'object')}\n\n图边：${refs(s.edgeRefs, 'edge')}\n\n失败：${refs(s.failureRefs, 'failure')}\n\n源码：\`${s.source.path}#${s.source.symbol}\`\n\n${codeBlock(s.source.excerpt)}`,
+            `<a id="${s.id}"></a>\n\n### ${s.id} · ${s.title}\n\n关系类型：${s.relation}\n\n| 项目 | 内容 |\n| --- | --- |\n| 输入 | ${mdCell(s.input)} |\n| 输出 | ${mdCell(s.output)} |\n| 状态 | ${mdCell(s.state)} |\n| 动作与停止 | ${mdCell(s.action)} |\n\n功能：${refs(s.moduleRefs, 'module')}\n\n对象：${refs(s.objectRefs ?? [], 'object')}\n\n图边：${refs(s.edgeRefs, 'edge')}\n\n失败：${refs(s.failureRefs, 'failure')}\n\n源码：\`${s.source.path}#${s.source.symbol}\`\n\n${codeBlock(s.source.excerpt)}${caseLinksMarkdown(caseEvidenceLinks(book, s.id, 'stepRefs').map((l) => ({ ...l, href: n.convert(l.href) })))}`,
         )
         .join('\n\n') +
       `\n\n## 核心对象与运行范围\n\n对象：${refs(entity.objectRefs, 'object')}\n\n运行：${refs(entity.runRefs, 'run')}\n\n运行只覆盖各样本声明范围，不等于整条旅程通过。\n\n公开入口规则：${entity.entryApis.map((a) => `[${a}](${n.convert('#api~' + encodeURIComponent(a))})`).join(' · ')}`;
@@ -217,18 +234,22 @@ export function writeReadingProjections(book, documents) {
     const raw = readFileSync(path, 'utf8').split('<!-- atlas:generated:start -->')[0].trimEnd();
     writeIfChanged(path, raw + '\n' + readingProjection(e, book, documents));
   }
+  writeIfChanged(resolve(atlas, 'evidence/README.md'), evidenceProjection(book, documents));
+}
+export function evidenceProjection(book, documents) {
+  const convert = markdownNavigation(book, documents, 'evidence/README.md').convert;
   const text =
     '# 独立运行证据\n\n由明确执行命令产生回执，再由inventory:write派生。通过只对所列样本及来源身份成立。\n\n' +
     book.runs
       .map(
         (r) =>
-          `<a id="${r.id}"></a>\n\n## ${r.id} · ${r.title}\n\n状态：${r.status} · ${r.verification ?? '未运行'}\n\n环境：${JSON.stringify(r.environment ?? {})}\n\n实际执行：${r.observedAt ?? '尚无'}；case数：${r.cases?.length ?? 0}。\n\n原始记录：\`${r.rawRef ?? '未产生'}\`\n\n${r.limitations.map((x) => '- ' + x).join('\n')}`,
+          `<a id="${r.id}"></a>\n\n## ${r.id} · ${r.title}\n\n状态：${r.status} · ${r.verification ?? '未运行'}\n\n环境：${JSON.stringify(r.environment ?? {})}\n\n实际执行：${r.observedAt ?? '尚无'}；case数：${r.cases?.length ?? 0}。\n\n原始记录：\`${r.rawRef ?? '未产生'}\`\n\n${r.limitations.map((x) => '- ' + x).join('\n')}${caseEvidenceMarkdown(r, book, convert)}`,
       )
       .join('\n\n');
-  writeIfChanged(resolve(atlas, 'evidence/README.md'), text + '\n');
+  return text + '\n';
 }
 export function checkReadingProjections(book, documents) {
-  return [...book.journeys, ...book.objects].flatMap((e) => {
+  const errors = [...book.journeys, ...book.objects].flatMap((e) => {
     const raw = readFileSync(resolve(atlas, e.path), 'utf8');
     const actual =
       '\n<!-- atlas:generated:start -->' + (raw.split('<!-- atlas:generated:start -->')[1] ?? '');
@@ -236,4 +257,10 @@ export function checkReadingProjections(book, documents) {
       ? []
       : [`${e.path}:reading-projection-drift`];
   });
+  if (
+    readFileSync(resolve(atlas, 'evidence/README.md'), 'utf8') !==
+    evidenceProjection(book, documents)
+  )
+    errors.push('evidence/README.md:case-projection-drift');
+  return errors;
 }

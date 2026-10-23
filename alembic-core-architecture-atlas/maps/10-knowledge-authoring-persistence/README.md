@@ -78,6 +78,7 @@ sourcePaths:
   - src/service/knowledge/validation/recipe/index.ts
   - src/shared/sourceRefPath.ts
   - test/support/knowledge-runtime.ts
+  - src/infrastructure/vector/HnswVectorAdapter.ts
 testPaths:
   - test/FailureSemanticsCO3.test.ts
   - test/KnowledgeFileWriter.test.ts
@@ -85,6 +86,7 @@ testPaths:
   - test/KnowledgeServicePersistence.test.ts
   - test/support/knowledge-runtime.ts
   - test/unit/RecipeProductionGateway.test.ts
+  - alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
 consumerRefs:
   - repository: Alembic
     path: lib/injection/modules/KnowledgeModule.ts
@@ -94,6 +96,7 @@ risks:
   - R02：FsSourceRefResolver的lexical containment不能阻止symlink读到根外；本页不据此推断全部来源均安全。
   - 读回wrong-id虽会触发DivergenceError，但既有参数化恢复case没有逐项覆盖该分支。
   - 关系、审计、事件、向量与主写入具有先后/异步边界，不是全链原子事务。
+  - V07-S3受控短暂读取失败可使仍存在的文件进入orphan并暂时deprecated；风险观察未修改产品。
 diagrams:
   - id: knowledge-create
     title: 知识创建的文件优先提交
@@ -199,8 +202,7 @@ diagrams:
           caseTitle: reports %s as divergence and sync can restore the durable file
           anchorSymbol: run
           assertedBehavior: 通过case内run(command)调用公开KnowledgeService：abort/missing-readback/ignored-write三种DB故障导致分歧；删除故障trigger后显式env.sync恢复
-          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia:
-            'KnowledgeSyncService.sync' },"
+          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia: 'KnowledgeSyncService.sync' },"
           scenarioKind: recovery
       - id: KW-05
         from: service
@@ -300,8 +302,7 @@ diagrams:
           caseTitle: reports %s as divergence and sync can restore the durable file
           anchorSymbol: run
           assertedBehavior: 通过case内run(command)调用公开KnowledgeService：abort/missing-readback/ignored-write三种DB故障导致分歧；删除故障trigger后显式env.sync恢复
-          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia:
-            'KnowledgeSyncService.sync' },"
+          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia: 'KnowledgeSyncService.sync' },"
           scenarioKind: recovery
       - id: KR-03
         from: divergence
@@ -318,8 +319,7 @@ diagrams:
           caseTitle: reports %s as divergence and sync can restore the durable file
           anchorSymbol: run
           assertedBehavior: 通过case内run(command)调用公开KnowledgeService：abort/missing-readback/ignored-write三种DB故障导致分歧；删除故障trigger后显式env.sync恢复
-          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia:
-            'KnowledgeSyncService.sync' },"
+          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia: 'KnowledgeSyncService.sync' },"
           scenarioKind: recovery
       - id: KR-04
         from: operator
@@ -336,8 +336,7 @@ diagrams:
           caseTitle: reports %s as divergence and sync can restore the durable file
           anchorSymbol: run
           assertedBehavior: 通过case内run(command)调用公开KnowledgeService：abort/missing-readback/ignored-write三种DB故障导致分歧；删除故障trigger后显式env.sync恢复
-          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia:
-            'KnowledgeSyncService.sync' },"
+          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia: 'KnowledgeSyncService.sync' },"
           scenarioKind: recovery
       - id: KR-05
         from: sync
@@ -496,8 +495,7 @@ diagrams:
         source:
           path: src/service/knowledge/KnowledgeSyncService.ts
           symbol: KnowledgeSyncService
-          excerpt: report.vectorMaintenanceReport = await
-            this.#vectorMaintenance.reconcileAuthoritativeCorpus();
+          excerpt: report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
         test:
           relation: indirect
           path: test/KnowledgeProductizationLifecycle.test.ts
@@ -506,6 +504,432 @@ diagrams:
           assertedBehavior: 真实Markdown/DB孤儿处理+受控维护Promise，syncAll等待后置维护；不证明维护失败原子性
           assertionExcerpt: expect(settled).toBe(false);
           scenarioKind: positive
+  - id: knowledge-delete-recovery
+    title: 删除失败后先确定哪一段已完成
+    viewType: R0
+    description: 只画fileStore已注入路径；文件、referrer、目标/FK事务、审计、事件并非一个事务。恢复箭头由调用者显式执行。
+    nodes:
+      - id: d1
+        label: 现存id / delete
+        role: operation
+      - id: d2
+        label: 同步owner检查与remove
+        role: operation
+      - id: d3
+        label: await逐个referrer更新
+        role: operation
+      - id: d4
+        label: await目标/FK事务
+        role: operation
+      - id: d5
+        label: 兼容清理 / non-blocking audit
+        role: operation
+      - id: d6
+        label: 同步emit / 返回
+        role: operation
+      - id: df
+        label: FileWriteError
+        role: operation
+      - id: dd
+        label: DivergenceError
+        role: operation
+      - id: dp
+        label: 后置错误 / 已删除
+        role: operation
+      - id: dr
+        label: 调用者读回并选择动作
+        role: boundary
+    edges:
+      - id: kd-1
+        from: d1
+        to: d2
+        label: file-first协调器选择remove
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: "fileOperation: 'remove',"
+        test:
+          relation: direct
+          path: test/KnowledgeServicePersistence.test.ts
+          caseTitle: preserves DB truth on %s failure
+          anchorSymbol: service
+          assertedBehavior: unlink拒绝后文件和主行仍在，未发删除事件。
+          assertionExcerpt: expect(fs.existsSync(file)).toBe(true);
+          scenarioKind: rejected
+      - id: kd-2
+        from: d2
+        to: d3
+        label: 文件完成后await反向引用更新
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: await this.#removeReverseRelationsDurably(id);
+        test:
+          relation: direct
+          path: test/KnowledgeServicePersistence.test.ts
+          caseTitle: keeps reverse-reference cleanup durable after deleting its target
+          anchorSymbol: service
+          assertedBehavior: 删除目标后反向引用清理在显式sync之后仍保持。
+          assertionExcerpt: expect(await related()).toEqual([]);
+          scenarioKind: normal
+      - id: kd-3
+        from: d3
+        to: d4
+        label: referrer后提交目标事务
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: const deleted = await this.repository.delete(id);
+        test:
+          relation: direct
+          path: test/KnowledgeServicePersistence.test.ts
+          caseTitle: deletes dependent proposal, warning and lifecycle rows in the repository transaction
+          anchorSymbol: service
+          assertedBehavior: 目标/FK事务拒绝时保留从表；排故后service.delete清理主行与所列从表。
+          assertionExcerpt: "expect(db.prepare(`SELECT count(*) AS n FROM ${table}`).get()).toEqual({ n: 0 });"
+          scenarioKind: recovered
+      - id: kd-4
+        from: d4
+        to: d5
+        label: 目标事务后兼容清理与audit
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: await this._audit('delete_knowledge', id, context.userId, {
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: deletion listener failure does not restore committed truth
+          anchorSymbol: service
+          assertedBehavior: 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。
+          assertionExcerpt: expect({ auditAttempts, listenerAttempts }).toEqual(
+          scenarioKind: observed-boundary
+      - id: kd-5
+        from: d5
+        to: d6
+        label: 同步emit不等于消费者已耐久
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: deletion listener failure does not restore committed truth
+          anchorSymbol: service
+          assertedBehavior: 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。
+          assertionExcerpt: expect({ auditAttempts, listenerAttempts }).toEqual(
+          scenarioKind: observed-boundary
+      - id: kd-6
+        from: d2
+        to: df
+        label: 文件拒绝阻断DB
+        kind: state
+        source:
+          path: src/service/knowledge/commitKnowledgeWrite.ts
+          symbol: commitKnowledgeWrite
+          excerpt: "throw new FileWriteError(fileFailureMessage, { cause: error });"
+        test:
+          relation: direct
+          path: test/KnowledgeServicePersistence.test.ts
+          caseTitle: preserves DB truth on %s failure
+          anchorSymbol: service
+          assertedBehavior: unlink拒绝后文件和主行仍在，未发删除事件。
+          assertionExcerpt: expect(fs.existsSync(file)).toBe(true);
+          scenarioKind: rejected
+      - id: kd-7
+        from: d4
+        to: dd
+        label: 文件/DB分歧外抛
+        kind: state
+        source:
+          path: src/service/knowledge/commitKnowledgeWrite.ts
+          symbol: commitKnowledgeWrite
+          excerpt: "throw new DivergenceError(dbFailureMessage, details, { cause: error });"
+        test:
+          relation: direct
+          path: test/KnowledgeServicePersistence.test.ts
+          caseTitle: reports a DB %s after file removal and supports retry
+          anchorSymbol: service
+          assertedBehavior: ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。
+          assertionExcerpt: expect(await env.repo.findById(id)).toBeNull();
+          scenarioKind: recovered
+      - id: kd-8
+        from: d6
+        to: dp
+        label: listener拒绝不补回真相
+        kind: state
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: this.logger.error('Error deleting knowledge entry', {
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: deletion listener failure does not restore committed truth
+          anchorSymbol: service
+          assertedBehavior: 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。
+          assertionExcerpt: expect({ auditAttempts, listenerAttempts }).toEqual(
+          scenarioKind: observed-boundary
+      - id: kd-9
+        from: dd
+        to: dr
+        label: 调用方按reconcileVia检查
+        kind: recovery
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: "reconcileVia: 'KnowledgeService.delete',"
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: deletion DB failure leaves a retryable identity
+          anchorSymbol: service
+          assertedBehavior: 同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。
+          assertionExcerpt: expect(recovered).toEqual(
+          scenarioKind: recovered
+      - id: kd-10
+        from: dr
+        to: d1
+        label: 仍有主行才显式同ID重试
+        kind: recovery
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: const entry = await this._findOrThrow(id);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: deletion DB failure leaves a retryable identity
+          anchorSymbol: service
+          assertedBehavior: 同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。
+          assertionExcerpt: expect(recovered).toEqual(
+          scenarioKind: recovered
+      - id: kd-11
+        from: dp
+        to: dr
+        label: 主行已无则检查消费方
+        kind: boundary
+        source:
+          path: src/service/knowledge/KnowledgeService.ts
+          symbol: KnowledgeService
+          excerpt: throw new NotFoundError('Knowledge entry not found', 'knowledge', id);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: deletion listener failure does not restore committed truth
+          anchorSymbol: service
+          assertedBehavior: 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。
+          assertionExcerpt: expect({ auditAttempts, listenerAttempts }).toEqual(
+          scenarioKind: observed-boundary
+  - id: knowledge-sync-post-maintenance
+    title: syncAll先改变DB，再等待独立维护
+    viewType: R0
+    description: completed仅表示维护调用返回。reject与resolve-failed是不同分支；真实store恢复由单独标注的fixture接线验证。
+    nodes:
+      - id: s1
+        label: 显式syncAll
+        role: operation
+      - id: s2
+        label: sync逐文件 / 登记id / upsert
+        role: operation
+      - id: s3
+        label: orphan检查 / 可deprecate
+        role: operation
+      - id: s4
+        label: await注入维护端口
+        role: operation
+      - id: s5
+        label: completed + unknown report
+        role: operation
+      - id: s6
+        label: reject / DB效果仍在
+        role: operation
+      - id: s7
+        label: 调用方读回DB与store
+        role: boundary
+      - id: s8
+        label: 非PersistenceError skip
+        role: operation
+      - id: s9
+        label: dryRun或未配置跳过维护
+        role: operation
+    edges:
+      - id: ks-1
+        from: s1
+        to: s2
+        label: 同步先执行
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: const syncReport = this.sync(db, opts);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync maintenance rejection preserves DB changes and recovers the real vector store
+          anchorSymbol: sync
+          assertedBehavior: 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。
+          assertionExcerpt: expect(recovered.reopenedIds).toEqual([]);
+          scenarioKind: recovered
+      - id: ks-2
+        from: s2
+        to: s3
+        label: 循环结束后检查未登记id
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: report.orphaned = this._detectOrphans(repo, syncedIds, dryRun);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync read failure and real file absence produce distinguishable orphan observations
+          anchorSymbol: sync
+          assertedBehavior: 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。
+          assertionExcerpt: expect(recovered).toMatchObject(
+          scenarioKind: risk-observed
+      - id: ks-3
+        from: s2
+        to: s8
+        label: 普通异常记录并skip
+        kind: state
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: report.skipped++;
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync read failure and real file absence produce distinguishable orphan observations
+          anchorSymbol: sync
+          assertedBehavior: 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。
+          assertionExcerpt: expect(recovered).toMatchObject(
+          scenarioKind: risk-observed
+      - id: ks-4
+        from: s8
+        to: s3
+        label: 未登记id仍可能被选中
+        kind: state
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: report.orphaned = this._detectOrphans(repo, syncedIds, dryRun);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync read failure and real file absence produce distinguishable orphan observations
+          anchorSymbol: sync
+          assertedBehavior: 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。
+          assertionExcerpt: expect(recovered).toMatchObject(
+          scenarioKind: risk-observed
+      - id: ks-5
+        from: s3
+        to: s4
+        label: 直接DB变化后才await维护
+        kind: call
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
+        test:
+          relation: direct
+          path: test/KnowledgeProductizationLifecycle.test.ts
+          caseTitle: deprecates an orphan for an empty corpus and awaits authoritative vector maintenance
+          anchorSymbol: sync
+          assertedBehavior: 空文件语料仍做孤儿检查；syncAll等待维护Promise后返回。
+          assertionExcerpt: expect(settled).toBe(false);
+          scenarioKind: normal
+      - id: ks-6
+        from: s4
+        to: s5
+        label: resolve只标调用完成
+        kind: state
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: report.vectorMaintenanceStatus = 'completed';
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync completed can carry a failed maintenance business report
+          anchorSymbol: sync
+          assertedBehavior: completed只说明端口resolve；嵌套业务报告仍可failed。
+          assertionExcerpt: expect(report.vectorMaintenanceStatus).toBe('completed');
+          scenarioKind: observed-boundary
+      - id: ks-7
+        from: s4
+        to: s6
+        label: reject传播 / 不撤销sync
+        kind: state
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync maintenance rejection preserves DB changes and recovers the real vector store
+          anchorSymbol: sync
+          assertedBehavior: 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。
+          assertionExcerpt: expect(recovered.reopenedIds).toEqual([]);
+          scenarioKind: recovered
+      - id: ks-8
+        from: s6
+        to: s7
+        label: 调用方保留残留与诊断
+        kind: boundary
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: const syncReport = this.sync(db, opts);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync maintenance rejection preserves DB changes and recovers the real vector store
+          anchorSymbol: sync
+          assertedBehavior: 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。
+          assertionExcerpt: expect(recovered.reopenedIds).toEqual([]);
+          scenarioKind: recovered
+      - id: ks-9
+        from: s7
+        to: s1
+        label: 排故后显式重调
+        kind: recovery
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: const syncReport = this.sync(db, opts);
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync maintenance rejection preserves DB changes and recovers the real vector store
+          anchorSymbol: sync
+          assertedBehavior: 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。
+          assertionExcerpt: expect(recovered.reopenedIds).toEqual([]);
+          scenarioKind: recovered
+      - id: ks-10
+        from: s1
+        to: s9
+        label: dryRun / 未配置有独立状态
+        kind: state
+        source:
+          path: src/service/knowledge/KnowledgeSyncService.ts
+          symbol: KnowledgeSyncService
+          excerpt: "vectorMaintenanceStatus: opts.dryRun ? 'skipped-dry-run' : 'not-configured',"
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: sync read failure and real file absence produce distinguishable orphan observations
+          anchorSymbol: sync
+          assertedBehavior: 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。
+          assertionExcerpt: expect(recovered).toMatchObject(
+          scenarioKind: risk-observed
 configPaths:
   - package.json
   - tsconfig.json
@@ -514,8 +938,8 @@ configPaths:
 truthKind: current-code
 baselineCommit: 35302912ac2efaa6a1bc65fdc112a16da75d845f
 reviewDepth: L3
-reviewedAt: 2026-10-22
-reviewOrigin: architecture-atlas/reviews/2026-10-22-r3/semantic-review.md
+reviewedAt: 2026-10-23T16:05:54.737Z
+reviewOrigin: architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md
 dependencySelection:
   - src/service/knowledge/KnowledgeService.ts
   - src/service/knowledge/commitKnowledgeWrite.ts
@@ -527,8 +951,8 @@ dependencySelection:
   - src/domain/knowledge/evidence-ledger/index.ts
   - src/domain/knowledge/FieldSpec.ts
   - src/domain/knowledge/index.ts
-sourceFingerprint: 56ca283e06bff39c898dff0fb8ec81f622c19e8884a8bad3cbe30fe9b9769ed5
-contextFingerprint: b076c784791e5b9fe356741ff1a1a01c51d4cf33d206227573d362aee598e911
+sourceFingerprint: c6e590df483ed1223bac18b728314f32802cf5642db37f3cb4f203b3528bf4a5
+contextFingerprint: d7550fd3607ddf88e611a6c1d25f939379b10d1adeb276fd9a0195c6fa37d0d4
 moduleDetails:
   - name: 结构、内容、唯一性分层校验
     entry:
@@ -598,10 +1022,12 @@ moduleDetails:
       symbol: KnowledgeSyncService
       excerpt: const syncReport = this.sync(db, opts);
     input: DB句柄、dryRun/force/skipViolations、可选vectorMaintenance
-    output: sync计数、violations/orphaned/skipped、向量维护状态
-    calls: _collectMdFiles；parseKnowledgeMarkdown；RawDbSyncAdapter；_detectOrphans；reconcileAuthoritativeCorpus
+    output: sync返回synced/created/updated/skipped/orphaned/violations；syncAll维护reject时不返回报告；resolve时原样携带unknown
+      report，completed只表示端口完成调用。
+    calls: syncAll先同步sync→收集Markdown→读取/解析→登记id→审计/构造行/upsert→孤儿检查，之后才await注入的reconcileAuthoritativeCorpus。sync本身不经KnowledgeService事件，向量维护须显式端口。
     sideEffects: 逐文件upsert；手改审计；孤儿deprecated；最后显式await向量维护
-    limits: 同步不经KnowledgeService事件；DB完成后向量失败不会反向回滚DB；dryRun不做这些写入。
+    limits: 没有跨文件/DB/向量事务。非PersistenceError异常可skip，id登记前后决定是否进入孤儿集合；orphaned不独立证明磁盘文件已删除。completed不保证nested
+      report成功或向量健康，未配置为not-configured，dryRun不调用维护。
     id: M10-04
     aliases:
       - markdown同步及后置向量维护
@@ -609,10 +1035,12 @@ moduleDetails:
       - knowledge-recovery
       - r3-authoring-and-sync-effects
       - vector-generation-visibility
+      - knowledge-sync-post-maintenance
     failureRefs:
       - K3-SYNC-AUDIT
       - K3-SYNC-SKIP
       - K3-SYNC-VECTOR
+      - K3-SYNC-RESULT
     apiRefs:
       - .
       - ./knowledge
@@ -634,6 +1062,26 @@ moduleDetails:
     failureRefs: []
     apiRefs:
       - .
+      - ./knowledge
+  - id: M10-06
+    name: 知识删除：文件、目标事务与后置效果分段
+    entry:
+      path: src/service/knowledge/KnowledgeService.ts
+      symbol: KnowledgeService
+      excerpt: "reconcileVia: 'KnowledgeService.delete',"
+    input: 现存知识id、ServiceContext、明确注入的fileStore/仓储及可选审计与事件端口。
+    output: 主链完成返回{success:true,id}；FileWriteError、DivergenceError或后置listener错误分别对应不同已发生状态。起初主行不存在时NotFound。
+    calls: delete先登记activeDeletes并移除该id待处理关系任务→_findOrThrow→commitKnowledgeWrite(remove)→逐个referrer持久更新→目标/FK仓储事务→兼容清理→_audit→同步emit。
+    sideEffects: 目标Markdown先移除；referrer逐个file-first更新不属于目标删除事务。目标/FK事务后仍有兼容清理、non-blocking审计及同步事件；finally只解除activeDeletes计数。
+    limits: fileStore缺失为DB-only兼容路径。remove=false可继续索引清理；成功返回不证明异步边清理、审计或向量已耐久。同ID重试只针对仍有主行的分歧，主行已无不能靠再次delete重放listener。
+    aliases: []
+    graphRefs:
+      - knowledge-delete-recovery
+    failureRefs:
+      - K3-DELETE-FILE
+      - K3-DELETE-DB
+      - K3-DELETE-POST
+    apiRefs:
       - ./knowledge
 failureModes:
   - id: K3-VALIDATION
@@ -775,8 +1223,8 @@ failureModes:
       - .
       - ./knowledge
   - id: K3-SYNC-SKIP
-    trigger: 逐文件读取/解析等非PersistenceError
-    remainingState: 可留原DB状态；没有成功登记ID的项可能随后参与孤儿判断
+    trigger: 逐文件读取、解析或未分类处理异常，且不是PersistenceError
+    remainingState: 本轮已有DB写入保留；失败发生在登记id之前时，仍存在的文件可能进入orphan并被deprecated；登记后失败不由本轮缺id分支再判孤儿。
     automaticAction: 记录error、skipped++，继续其他文件与孤儿检测
     explicitRecovery: 宿主检查失败路径是否仍存在/可读，再重试sync并核对lifecycle；不能把skipped看作无副作用
     stopCondition: 仅该文件步骤跳过；孤儿检测没有按同一文件再次确认存在的保证
@@ -785,8 +1233,13 @@ failureModes:
       symbol: KnowledgeSyncService
       excerpt: report.skipped++;
     test:
-      relation: none
-      reason: 本次未定位“现存文件临时不可读→孤儿分类”的同一集成断言；保留源码限制而非新复现缺陷。
+      relation: direct
+      path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+      caseTitle: sync read failure and real file absence produce distinguishable orphan observations
+      anchorSymbol: sync
+      assertedBehavior: 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。
+      assertionExcerpt: expect(recovered).toMatchObject(
+      scenarioKind: risk-observed
     aliases:
       - k3-sync-skip--逐文件读取解析等非persistenceerror
     moduleRefs:
@@ -794,35 +1247,64 @@ failureModes:
     graphRefs:
       - knowledge-recovery
       - r3-authoring-and-sync-effects
+      - knowledge-sync-post-maintenance
     apiRefs:
       - .
       - ./knowledge
     runbook:
-      preconditions: sync 中发生逐文件读取/解析的非 PersistenceError，report.skipped 增加。此指南是源码导出的检查建议，现有 Atlas 未声明对应端到端恢复测试已覆盖。
+      preconditions: 保留同一root/DB/id、原文件字节和本轮skipped/orphaned报告；先确认失败发生于读取/登记id之前还是之后。
       checks:
-        - observe: 定位日志中的失败文件，确认文件仍存在且可读/可解析
-          meaning: skip 可能来自暂时读取失败，不代表文件被删除。
-        - observe: 按该文件原 id 检查 DB lifecycle 与 orphaned 结果
-          meaning: 本次失败项可能未登记到有效 ID 集，后续孤儿检测仍继续，不能假设完全无副作用。
-      action: 修复文件权限/内容或解析输入，先 dryRun 审阅同根同步将做的变化，再显式重新 sync；若已被判孤儿则单独核对文件和 lifecycle 纠正路径，不能无条件批量
-        reactivate。
-      identity: 使用文件原 id 与实际来源路径；不要复制出另一个新 id 来绕开孤儿诊断。
-      verify: 确认失败文件不再 skipped、DB 与文件内容一致，检查 lifecycle 与 orphaned 报告的最终值；单独记录仍无集成运行证明的限制。
-      stop: 文件归属、id 或 lifecycle 改动原因不明时停止；审计 PersistenceError 不是可忽略 skip。
+        - observe: 读实际sourceFile是否仍在、id与hash是否一致，核对skipped及orphaned。
+          meaning: 受控一次读取失败能产生orphan，即便文件仍在；报告名称不独立证明磁盘删除。
+          source:
+            path: src/service/knowledge/KnowledgeSyncService.ts
+            symbol: KnowledgeSyncService
+            excerpt: report.orphaned = this._detectOrphans(repo, syncedIds, dryRun);
+          fields:
+            - sourceFile
+            - id
+            - skipped
+            - orphaned
+        - observe: 重读DB lifecycle并比较文件中lifecycle。
+          meaning: 正式扫描可能已deprecated，dryRun只报告；内容与向量需另核。
+          source:
+            path: src/service/knowledge/KnowledgeSyncService.ts
+            symbol: KnowledgeSyncService
+            excerpt: syncedIds.add(parsed.id as string);
+          fields:
+            - lifecycle
+            - syncedIds
+        - observe: 检查PersistenceError还是普通skip日志。
+          meaning: 前者直接终止；后者记录错误后继续，不自动重试读取。
+          source:
+            path: src/service/knowledge/KnowledgeSyncService.ts
+            symbol: KnowledgeSyncService
+            excerpt: if (err instanceof PersistenceError) {
+          fields:
+            - error
+            - skipped
+      action: 排除读取故障并确认文件真相后显式重扫；有维护端口时分别检查其报告与store。先dryRun不能替代正式写后的读回。
+      identity: 复用原id与原文件；不能用重新create掩盖暂时读失败。
+      verify: 读取恢复后skipped=0，文件仍同hash，DB按文件恢复；真实缺文件control与读取失败分开。当前样本不证明向量修复。
+      stop: 文件归属/hash不明、PersistenceError或真实写入仍失败时停止；不因orphaned直接删除仍在的文件。
   - id: K3-SYNC-VECTOR
     trigger: syncAll中权威向量维护reject
     remainingState: Markdown与DB同步已完成；向量可能部分变化
-    automaticAction: await的错误向调用方传播，不生成completed维护状态
+    automaticAction: await维护端口reject直接传播，syncAll没有专用错误重试/DB回滚；此前同步效果保留。
     explicitRecovery: 排除provider/store问题后显式reconcile或syncAll；读者保留DB/向量不一致诊断
     stopCondition: 无自动重试、无DB回滚，不能当作整个syncAll未执行
     source:
       path: src/service/knowledge/KnowledgeSyncService.ts
       symbol: KnowledgeSyncService
-      excerpt: report.vectorMaintenanceReport = await
-        this.#vectorMaintenance.reconcileAuthoritativeCorpus();
+      excerpt: report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
     test:
-      relation: none
-      reason: 本轮未定位该reject穿过syncAll并核对DB保留的具体case；不借其他vector测试冒充。
+      relation: direct
+      path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+      caseTitle: sync maintenance rejection preserves DB changes and recovers the real vector store
+      anchorSymbol: sync
+      assertedBehavior: 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。
+      assertionExcerpt: expect(recovered.reopenedIds).toEqual([]);
+      scenarioKind: recovered
     aliases:
       - k3-sync-vector--syncall中权威向量维护reject
     moduleRefs:
@@ -831,21 +1313,218 @@ failureModes:
       - knowledge-recovery
       - r3-authoring-and-sync-effects
       - vector-generation-visibility
+      - knowledge-sync-post-maintenance
     apiRefs:
       - .
       - ./knowledge
     runbook:
-      preconditions: syncAll 已执行 sync(db, opts) 后在 reconcileAuthoritativeCorpus await 处拒绝；能访问同一 DB 与注入的
-        vectorMaintenance 端口。
+      preconditions: 确认syncAll已完成同步后，注入维护端口确实reject；保存原id、root、DB与端口错误。不要把resolve的failed报告误归为此分支。
       checks:
-        - observe: 分别检查 Markdown→DB 同步结果与 DB 当前行
-          meaning: DB 部分已完成，reject 不能当作整次未执行。
-        - observe: 检查 provider/store 原始错误及活跃向量代际/维护诊断
-          meaning: 向量可能未完成或部分变化，不能用 DB 更新计数代替 dense 可见性。
-      action: 修复明确的 provider/store 故障后，由宿主显式重试权威 corpus reconcile，或按原同步选项重试 syncAll；恢复过程中保留 DB/向量分歧说明。
-      identity: 保持相同知识实体 ID 和权威 corpus 来源；新向量 generation 的身份遵从 manager/router，不能手工把 failed 改 ready。
-      verify: 重读 DB 仍保留已同步条目；确认维护返回实际完成状态和期望代际/检查结果，再用受限业务 query 检查相应候选是否通过 live truth。
-      stop: 向量端口缺失、权威 corpus 未确认或 inspection 未通过时不能宣称向量恢复；不得回滚已同步 DB 来掩盖后置失败。
+        - observe: 重读DB lifecycle/正文及源Markdown，确认直接同步的效果。
+          meaning: 调用拒绝不代表DB没改；本样本文件已无且DB已deprecated。
+          source:
+            path: src/service/knowledge/KnowledgeSyncService.ts
+            symbol: KnowledgeSyncService
+            excerpt: const syncReport = this.sync(db, opts);
+          fields:
+            - id
+            - lifecycle
+            - sourceFile
+        - observe: 保存端口错误及实际对账errors/inspection，读真实store残留ID。
+          meaning: Core此层没有专用向量失败诊断；fixture将reconcileIndex.errors转reject，非宿主默认策略。
+          source:
+            path: src/service/knowledge/KnowledgeSyncService.ts
+            symbol: KnowledgeSyncService
+            excerpt: report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
+          fields:
+            - errors
+            - initialInspection
+            - finalInspection
+            - vectorIds
+        - observe: 明确store.flush与新adapter读回是否都完成。
+          meaning: 内存删除不等于快照耐久；本样本以真实HNSW新adapter确认两类向量均已无。
+          source:
+            path: src/infrastructure/vector/HnswVectorAdapter.ts
+            symbol: HnswVectorAdapter
+            excerpt: async flush() {
+          fields:
+            - listIds
+            - getById
+            - flush
+      action: 修复实际store故障，再由调用方同root/DB/options显式syncAll或其明确维护协议；检查nested report后显式flush并读回。
+      identity: 复用原知识id与权威语料；二次sync的orphaned可为空，因为DB前次已变更。
+      verify: DB保持目标状态、维护errors为空、真实store不再暴露目标；本probe另用同进程新HNSW adapter重开确认。
+      stop: errors/degraded/inspection仍不符合目标、来源冲突或flush失败时停止；不能把completed本身作为健康证明。
+  - id: K3-DELETE-FILE
+    trigger: 目标remove遇到unlink、读取或owner歧义拒绝
+    remainingState: 协调器尚未开始DB回调；目标文件是否存在仍需读回。
+    automaticAction: 记录entryId/operation/fileOperation并抛FileWriteError，不继续DB提交。
+    explicitRecovery: 先核对owner/路径，再排除明确I/O故障，主行仍在时同ID delete。
+    stopCondition: 归属不清时停止，不能直接unlink或清DB。
+    source:
+      path: src/service/knowledge/commitKnowledgeWrite.ts
+      symbol: commitKnowledgeWrite
+      excerpt: "throw new FileWriteError(fileFailureMessage, { cause: error });"
+    test:
+      relation: direct
+      path: test/KnowledgeServicePersistence.test.ts
+      caseTitle: preserves DB truth on %s failure
+      anchorSymbol: service
+      assertedBehavior: unlink拒绝后文件和主行仍在，未发删除事件。
+      assertionExcerpt: expect(fs.existsSync(file)).toBe(true);
+      scenarioKind: rejected
+    moduleRefs:
+      - M10-06
+    graphRefs:
+      - knowledge-delete-recovery
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。
+      checks: &a1
+        - observe: 先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。
+          meaning: FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。
+          source:
+            path: src/service/knowledge/commitKnowledgeWrite.ts
+            symbol: commitKnowledgeWrite
+            excerpt: "logger.error('Knowledge mutation aborted before DB commit: file persistence failed', {"
+          fields:
+            - error.name
+            - error.cause
+            - entryId
+            - operation
+            - fileOperation
+        - observe: 读回目标主行、目标FK从表和相关referrer的关系/Markdown。
+          meaning: referrer可先变化；它们不与目标删除组成一个跨文件事务。
+          source:
+            path: src/service/knowledge/KnowledgeService.ts
+            symbol: KnowledgeService
+            excerpt: await this.#removeReverseRelationsDurably(id);
+          fields:
+            - id
+            - sourceFile
+            - relations.related
+        - observe: 主行已无时检查audit warning与同步listener错误，另外核对消费方。
+          meaning: 审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。
+          source:
+            path: src/service/knowledge/KnowledgeService.ts
+            symbol: KnowledgeService
+            excerpt: "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+          fields:
+            - knowledge:deleted
+            - entryId
+            - Audit log failed (non-blocking)
+      action: 修复可核验的文件I/O原因后显式重试同ID delete。
+      identity: 复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。
+      verify: 目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。
+      stop: owner/路径无法确认、错误原因仍在时停止。
+  - id: K3-DELETE-DB
+    trigger: 目标文件移除后，referrer更新或目标/FK提交失败
+    remainingState: 文件已无；目标主行可能仍在；部分referrer可能已经改写。目标事务内失败的从表回滚不扩展到其他资源。
+    automaticAction: 抛带knowledge.delete与reconcileVia=KnowledgeService.delete的DivergenceError，无自动sync或文件恢复。
+    explicitRecovery: 排除DB根因并读回确认目标仍在，再同ID显式delete。
+    stopCondition: 目标已无或身份冲突时停止统一重试，转入后置效果检查。
+    source:
+      path: src/service/knowledge/commitKnowledgeWrite.ts
+      symbol: commitKnowledgeWrite
+      excerpt: "throw new DivergenceError(dbFailureMessage, details, { cause: error });"
+    test:
+      relation: direct
+      path: test/KnowledgeServicePersistence.test.ts
+      caseTitle: reports a DB %s after file removal and supports retry
+      anchorSymbol: service
+      assertedBehavior: ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。
+      assertionExcerpt: expect(await env.repo.findById(id)).toBeNull();
+      scenarioKind: recovered
+    moduleRefs:
+      - M10-06
+      - M01-05
+    graphRefs:
+      - knowledge-delete-recovery
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。
+      checks: *a1
+      action: 目标主行仍在时，排除锁/受控触发器/连接故障后显式KnowledgeService.delete(id, context)。
+      identity: 复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。
+      verify: 目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。
+      stop: 不以重新create、删除DB或sync替代删除；referrer失败原因未核实不能声称全体一致。
+  - id: K3-DELETE-POST
+    trigger: 目标删除完成后同步knowledge:deleted listener抛错
+    remainingState: 文件和主行已删除，审计可能仅尝试；失败listener的效果未证明完成。
+    automaticAction: delete外层记录错误并重抛；finally释放删除标记，不补回已删实体。
+    explicitRecovery: 读回已提交状态，定位具体listener/消费方的恢复协议；本入口没有统一重放消费者能力。
+    stopCondition: 再次delete通常NotFound，不能以新create或盲目重试恢复后置效果。
+    source:
+      path: src/service/knowledge/KnowledgeService.ts
+      symbol: KnowledgeService
+      excerpt: "this._eventBus.emit('knowledge:deleted', { entryId: id });"
+    test:
+      relation: direct
+      path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+      caseTitle: deletion listener failure does not restore committed truth
+      anchorSymbol: service
+      assertedBehavior: 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。
+      assertionExcerpt: expect({ auditAttempts, listenerAttempts }).toEqual(
+      scenarioKind: observed-boundary
+    moduleRefs:
+      - M10-06
+    graphRefs:
+      - knowledge-delete-recovery
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。
+      checks: *a1
+      action: 先确认持久删除已经完成，再按实际消费方合同处置；当前样本只观察listener失败，不签消费者恢复。
+      identity: 复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。
+      verify: 目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。
+      stop: 主行已无时停止重复delete；未找到明确消费恢复入口则保留失败材料，交调用方判断。
+  - id: K3-SYNC-RESULT
+    trigger: 维护端口resolve，但其unknown业务报告为failed/degraded
+    remainingState: syncAll已设置vectorMaintenanceStatus=completed；nested report未被Core解释。
+    automaticAction: 原样返回维护report，不转译其业务status/errors为异常。
+    explicitRecovery: 调用者读取真实报告并按端口协议处理；另外核对store。
+    stopCondition: 不能把completed当向量健康、检索完整或公开可见。
+    source:
+      path: src/service/knowledge/KnowledgeSyncService.ts
+      symbol: KnowledgeSyncService
+      excerpt: report.vectorMaintenanceStatus = 'completed';
+    test:
+      relation: direct
+      path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+      caseTitle: sync completed can carry a failed maintenance business report
+      anchorSymbol: sync
+      assertedBehavior: completed只说明端口resolve；嵌套业务报告仍可failed。
+      assertionExcerpt: expect(report.vectorMaintenanceStatus).toBe('completed');
+      scenarioKind: observed-boundary
+    moduleRefs:
+      - M10-04
+    graphRefs:
+      - knowledge-sync-post-maintenance
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 端口正常resolve，且报告内容可读。
+      checks:
+        - observe: 同时读取vectorMaintenanceStatus和vectorMaintenanceReport。
+          meaning: completed与nested failed可以同时出现；本case只证明返回合同。
+          source:
+            path: src/service/knowledge/KnowledgeSyncService.ts
+            symbol: KnowledgeSyncService
+            excerpt: report.vectorMaintenanceStatus = 'completed';
+          fields:
+            - vectorMaintenanceStatus
+            - vectorMaintenanceReport
+      action: 按注入端口的实际report合同判断下一步；没有可核验store结果时保留未知。
+      identity: 保留本次报告与源/DB身份，不将它改写为新的恢复回执。
+      verify: 业务成功需独立report与store断言，本合同case没有该证明。
+      stop: 报告failed/degraded或含未知诊断时停止宣称维护健康。
 ---
 
 ## 入口、输入与责任
@@ -860,9 +1539,9 @@ failureModes:
 
 ## 分歧恢复与限制
 
-DivergenceError中的reconcileVia只是恢复提示，不会自动调用sync。宿主/操作者排除DB故障后显式调用KnowledgeSyncService.sync或syncAll：扫描candidates/recipes，解析wire与hash，经RawDbSyncAdapter upsert索引，报告手改与孤儿。syncAll另行await可选的权威向量维护；它不能依赖此处没有发出的服务事件。部分读取/解析错误可跳过并报告，审计持久化错误继续上抛。
+DivergenceError中的operation/reconcileVia决定恢复分流。仅当create/update等persist路径保留原文件真相时，调用者排除DB故障后显式sync/syncAll；knowledge.delete分歧需确认主行仍在再同IDdelete，详见删除操作卡。sync/syncAll的扫描路径为：扫描candidates/recipes，解析wire与hash，经RawDbSyncAdapter upsert索引，报告手改与孤儿。syncAll另行await可选的权威向量维护；它不能依赖此处没有发出的服务事件。部分读取/解析错误可跳过并报告，审计持久化错误继续上抛。
 
-既有真实SQLite/Markdown测试覆盖文件拒绝和三种DB故障恢复；读回错误id分支尚未见对应具体case，不冒充完整覆盖。来源解析的symlink边界问题R02仍在专题02记录。此页是源码与既有断言复核，未重新执行产品测试，也未修复产品缺陷。
+既有真实SQLite/Markdown测试覆盖文件拒绝和三种DB故障恢复；读回错误id分支尚未见对应具体case，不冒充完整覆盖。来源解析的symlink边界问题R02仍在专题02记录。上述覆盖描述属于2026-10-22源码复核；0.3新增V06/V07的实际范围见独立证据记录，产品缺陷未修复。
 
 ## 视图与术语
 
@@ -872,9 +1551,15 @@ DivergenceError中的reconcileVia只是恢复提示，不会自动调用sync。�
 
 ## 模块协作与恢复边界深化
 
-候选验证、服务创建和同步是三个用例边界。统一校验器同时返回结构诊断与含唯一性的最终结果；Gateway按候选收集拒绝/创建，不提供整批事务。普通融合建议故障会退回直接提交，质量评分故障可保留created，因此返回集合需要逐项理解。服务提交前的Hook block与提交后的关系/审计/事件不是同一阶段。同步是对Markdown内容的索引重建，逐文件前进；审计失败上抛，其余文件错误可跳过，后续孤儿扫描仍运行。syncAll在这些DB变更之后才等待向量维护。恢复必须先区分“未进入写入”“文件/DB分歧”“主数据已变而衍生失败”，而不是收到异常就重建全部或再次create。此处沿用既有测试源码，mock gateway测试仅证明策略分支；没有新执行产品测试。
+候选验证、服务创建和同步是三个用例边界。统一校验器同时返回结构诊断与含唯一性的最终结果；Gateway按候选收集拒绝/创建，不提供整批事务。普通融合建议故障会退回直接提交，质量评分故障可保留created，因此返回集合需要逐项理解。服务提交前的Hook block与提交后的关系/审计/事件不是同一阶段。同步是对Markdown内容的索引重建，逐文件前进；审计失败上抛，其余文件错误可跳过，后续孤儿扫描仍运行。syncAll在这些DB变更之后才等待向量维护。恢复必须先区分“未进入写入”“文件/DB分歧”“主数据已变而衍生失败”，而不是收到异常就重建全部或再次create。该段形成于2026-10-22源码复核；mock gateway测试仅证明策略分支，后续V06/V07按各自运行范围单列。
 
 [FigJam：知识写入与显式恢复](https://www.figma.com/board/NFOhWgtow19Hss7laEFzpC)是本页创建/更新路径的辅助总览，覆盖文件优先、DB分歧与调用者显式sync；不将其扩展到删除、批次补偿或后置衍生效果的事务保证。仓库图与源码锚点是维护依据。
+
+## 0.3 删除与同步恢复操作
+
+删除是独立操作，见[删除阅读路径](../../journeys/j05.md)。不能把create分歧的sync建议套用到已删除文件的DB cleanup。审计失败只warn，事件listener抛错则可能发生在主行已无之后；先读回当前真相。
+
+syncAll先改DB，再等待注入维护。completed只表示端口resolve，未知业务report可能失败；reject则没有SyncAllReport而DB效果保留。V07分别给真实HNSW恢复、resolve-failed合同、短暂读取失败与真实缺文件对照。fixture把reconcileIndex.errors转reject的策略有单独说明，不声称当前宿主必然抛错。
 
 <!-- atlas:generated:start -->
 
@@ -949,14 +1634,21 @@ DivergenceError中的reconcileVia只是恢复提示，不会自动调用sync。�
 | 检查项 | 功能与边界 |
 | --- | --- |
 | 输入 | DB句柄、dryRun/force/skipViolations、可选vectorMaintenance |
-| 输出 | sync计数、violations/orphaned/skipped、向量维护状态 |
-| 后续调用 / 绑定 | _collectMdFiles；parseKnowledgeMarkdown；RawDbSyncAdapter；_detectOrphans；reconcileAuthoritativeCorpus |
+| 输出 | sync返回synced/created/updated/skipped/orphaned/violations；syncAll维护reject时不返回报告；resolve时原样携带unknown report，completed只表示端口完成调用。 |
+| 后续调用 / 绑定 | syncAll先同步sync→收集Markdown→读取/解析→登记id→审计/构造行/upsert→孤儿检查，之后才await注入的reconcileAuthoritativeCorpus。sync本身不经KnowledgeService事件，向量维护须显式端口。 |
 | 状态与副作用 | 逐文件upsert；手改审计；孤儿deprecated；最后显式await向量维护 |
-| 能力边界 | 同步不经KnowledgeService事件；DB完成后向量失败不会反向回滚DB；dryRun不做这些写入。 |
+| 能力边界 | 没有跨文件/DB/向量事务。非PersistenceError异常可skip，id登记前后决定是否进入孤儿集合；orphaned不独立证明磁盘文件已删除。completed不保证nested report成功或向量健康，未配置为not-configured，dryRun不调用维护。 |
 
-关联：[文件与数据库分歧的显式恢复](README.md#graph-knowledge-recovery) · [校验、创建与同步的不同完成边界](README.md#graph-r3-authoring-and-sync-effects) · [影子代际到可见路由](../12-vector-generations/README.md#graph-vector-generation-visibility) · [K3-SYNC-AUDIT · 手改violation的审计insert失败](README.md#f-K3-SYNC-AUDIT) · [K3-SYNC-SKIP · 逐文件读取/解析等非PersistenceError](README.md#f-K3-SYNC-SKIP) · [K3-SYNC-VECTOR · syncAll中权威向量维护reject](README.md#f-K3-SYNC-VECTOR) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
+关联：[文件与数据库分歧的显式恢复](README.md#graph-knowledge-recovery) · [校验、创建与同步的不同完成边界](README.md#graph-r3-authoring-and-sync-effects) · [影子代际到可见路由](../12-vector-generations/README.md#graph-vector-generation-visibility) · [syncAll先改变DB，再等待独立维护](README.md#graph-knowledge-sync-post-maintenance) · [K3-SYNC-AUDIT · 手改violation的审计insert失败](README.md#f-K3-SYNC-AUDIT) · [K3-SYNC-SKIP · 逐文件读取、解析或未分类处理异常，且不是PersistenceError](README.md#f-K3-SYNC-SKIP) · [K3-SYNC-VECTOR · syncAll中权威向量维护reject](README.md#f-K3-SYNC-VECTOR) · [K3-SYNC-RESULT · 维护端口resolve，但其unknown业务报告为failed/degraded](README.md#f-K3-SYNC-RESULT) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[一次知识从提交到可查询 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) · [一次知识从提交到可查询 · 需要 dense 检索时单独确认向量路由可见](../../journeys/j01.md#J01-07)
+
+逐case运行依据（快照）：
+
+- [V07-S1 · 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。](../../evidence/README.md#case-V07-S1) — 恢复验证；所列断言已核验
+- [V07-S2 · completed只说明端口resolve；嵌套业务报告仍可failed。](../../evidence/README.md#case-V07-S2) — 边界观察；所列断言已核验
+- [V07-S3 · 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。](../../evidence/README.md#case-V07-S3) — 风险观察；所列断言已核验
+- [V07-S4 · 空文件语料仍做孤儿检查；syncAll等待维护Promise后返回。](../../evidence/README.md#case-V07-S4) — 正常路径；所列断言已核验
 
 <a id="m-M10-05" class="stable-anchor"></a>
 <a id="recipe就绪与发布委托" class="stable-anchor"></a>
@@ -976,6 +1668,37 @@ DivergenceError中的reconcileVia只是恢复提示，不会自动调用sync。�
 关联：[staging晋级、复核与分段发布](../14-sustain-proposals/README.md#graph-r3-staging-two-phase-effects) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[一次知识从提交到可查询 · 显式检查 readiness 并执行合法发布/晋级](../../journeys/j01.md#J01-06)
+
+<a id="m-M10-06" class="stable-anchor"></a>
+
+
+### 知识删除：文件、目标事务与后置效果分段
+
+入口：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`
+
+| 检查项 | 功能与边界 |
+| --- | --- |
+| 输入 | 现存知识id、ServiceContext、明确注入的fileStore/仓储及可选审计与事件端口。 |
+| 输出 | 主链完成返回{success:true,id}；FileWriteError、DivergenceError或后置listener错误分别对应不同已发生状态。起初主行不存在时NotFound。 |
+| 后续调用 / 绑定 | delete先登记activeDeletes并移除该id待处理关系任务→_findOrThrow→commitKnowledgeWrite(remove)→逐个referrer持久更新→目标/FK仓储事务→兼容清理→_audit→同步emit。 |
+| 状态与副作用 | 目标Markdown先移除；referrer逐个file-first更新不属于目标删除事务。目标/FK事务后仍有兼容清理、non-blocking审计及同步事件；finally只解除activeDeletes计数。 |
+| 能力边界 | fileStore缺失为DB-only兼容路径。remove=false可继续索引清理；成功返回不证明异步边清理、审计或向量已耐久。同ID重试只针对仍有主行的分歧，主行已无不能靠再次delete重放listener。 |
+
+关联：[删除失败后先确定哪一段已完成](README.md#graph-knowledge-delete-recovery) · [K3-DELETE-FILE · 目标remove遇到unlink、读取或owner歧义拒绝](README.md#f-K3-DELETE-FILE) · [K3-DELETE-DB · 目标文件移除后，referrer更新或目标/FK提交失败](README.md#f-K3-DELETE-DB) · [K3-DELETE-POST · 目标删除完成后同步knowledge:deleted listener抛错](README.md#f-K3-DELETE-POST) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[知识删除与部分完成后的恢复 · 确认目标存在、文件归属和删除入口](../../journeys/j05.md#J05-01) · [知识删除与部分完成后的恢复 · 文件先移除，再更新referrer与删除目标事务](../../journeys/j05.md#J05-02) · [知识删除与部分完成后的恢复 · 独立观察兼容清理、审计和事件](../../journeys/j05.md#J05-03) · [知识删除与部分完成后的恢复 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04)
+
+逐case运行依据（快照）：
+
+- [V06-D1 · unlink拒绝后文件和主行仍在，未发删除事件。](../../evidence/README.md#case-V06-D1) — 拒绝验证；所列断言已核验
+- [V06-D2 · 文件ID归属歧义阻断删除，DB未改变。](../../evidence/README.md#case-V06-D2) — 拒绝验证；所列断言已核验
+- [V06-D3 · 文件已不存在仍可清理现存DB主行。](../../evidence/README.md#case-V06-D3) — 正常路径；所列断言已核验
+- [V06-D4 · 目标/FK事务拒绝时保留从表；排故后service.delete清理主行与所列从表。](../../evidence/README.md#case-V06-D4) — 恢复验证；所列断言已核验
+- [V06-D5 · ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。](../../evidence/README.md#case-V06-D5) — 恢复验证；所列断言已核验
+- [V06-D6 · IGNORE不会成为假成功；分歧后同ID再次delete完成清理。](../../evidence/README.md#case-V06-D6) — 恢复验证；所列断言已核验
+- [V06-D7 · 同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。](../../evidence/README.md#case-V06-D7) — 恢复验证；所列断言已核验
+- [V06-D8 · 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。](../../evidence/README.md#case-V06-D8) — 边界观察；所列断言已核验
+- [V06-D9 · 删除目标后反向引用清理在显式sync之后仍保持。](../../evidence/README.md#case-V06-D9) — 正常路径；所列断言已核验
 
 
 ## 生成的图与逐边依据
@@ -1104,6 +1827,107 @@ class n6 store
 | <a id="e-r3-authoring-and-sync-effects--K3-E4"></a>K3-E4 | created之后尝试评分 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | indirect | Quality scoring 失败不应阻塞创建 | [J01 · 区分主写入与衍生效果的完成](../../journeys/j01.md#J01-04) |
 | <a id="e-r3-authoring-and-sync-effects--K3-E5"></a>K3-E5 | 先同步Markdown到DB | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | indirect | deprecates an orphan for an empty corpus and awaits authoritative vector maintenance |  |
 | <a id="e-r3-authoring-and-sync-effects--K3-E6"></a>K3-E6 | DB同步后await维护 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | indirect | deprecates an orphan for an empty corpus and awaits authoritative vector maintenance | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+
+<a id="graph-knowledge-delete-recovery"></a>
+
+### 删除失败后先确定哪一段已完成
+
+图 ID：`knowledge-delete-recovery` · R0 · 只画fileStore已注入路径；文件、referrer、目标/FK事务、审计、事件并非一个事务。恢复箭头由调用者显式执行。
+
+```mermaid
+flowchart TD
+accTitle: 删除失败后先确定哪一段已完成
+accDescr: 只画fileStore已注入路径；文件、referrer、目标/FK事务、审计、事件并非一个事务。恢复箭头由调用者显式执行。
+n0["现存id / delete"]
+n1["同步owner检查与remove"]
+n2["await逐个referrer更新"]
+n3["await目标/FK事务"]
+n4["兼容清理 / non-blocking audit"]
+n5["同步emit / 返回"]
+n6["FileWriteError"]
+n7["DivergenceError"]
+n8["后置错误 / 已删除"]
+n9["调用者读回并选择动作"]
+n0 e0@-->|"file-first协调器选择remove"| n1
+n1 e1@-->|"文件完成后await反向引用更新"| n2
+n2 e2@-->|"referrer后提交目标事务"| n3
+n3 e3@-->|"目标事务后兼容清理与audit"| n4
+n4 e4@-->|"同步emit不等于消费者已耐久"| n5
+n1 e5@-->|"文件拒绝阻断DB"| n6
+n3 e6@-->|"文件/DB分歧外抛"| n7
+n5 e7@-->|"listener拒绝不补回真相"| n8
+n7 e8@-->|"调用方按reconcileVia检查"| n9
+n9 e9@-->|"仍有主行才显式同ID重试"| n0
+n8 e10@-->|"主行已无则检查消费方"| n9
+classDef entry fill:#e1f1ed,stroke:#44796b,color:#173d33
+classDef host fill:#eef0f8,stroke:#7a85a3,color:#303c5c
+classDef store fill:#e5eff7,stroke:#7596b2,color:#243e54
+classDef error fill:#fff0d9,stroke:#b68a3a,color:#634d29
+class n9 host
+```
+
+| 边 ID | 关系 | 源码定位 | 断言关系 | case / 缺口 | 相关旅程步骤 |
+| --- | --- | --- | --- | --- | --- |
+| <a id="e-knowledge-delete-recovery--kd-1"></a>kd-1 | file-first协调器选择remove | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | preserves DB truth on %s failure | [J05 · 确认目标存在、文件归属和删除入口](../../journeys/j05.md#J05-01) |
+| <a id="e-knowledge-delete-recovery--kd-2"></a>kd-2 | 文件完成后await反向引用更新 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | keeps reverse-reference cleanup durable after deleting its target | [J05 · 文件先移除，再更新referrer与删除目标事务](../../journeys/j05.md#J05-02) |
+| <a id="e-knowledge-delete-recovery--kd-3"></a>kd-3 | referrer后提交目标事务 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletes dependent proposal, warning and lifecycle rows in the repository transaction | [J05 · 文件先移除，再更新referrer与删除目标事务](../../journeys/j05.md#J05-02) |
+| <a id="e-knowledge-delete-recovery--kd-4"></a>kd-4 | 目标事务后兼容清理与audit | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletion listener failure does not restore committed truth | [J05 · 独立观察兼容清理、审计和事件](../../journeys/j05.md#J05-03) |
+| <a id="e-knowledge-delete-recovery--kd-5"></a>kd-5 | 同步emit不等于消费者已耐久 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletion listener failure does not restore committed truth | [J05 · 独立观察兼容清理、审计和事件](../../journeys/j05.md#J05-03) |
+| <a id="e-knowledge-delete-recovery--kd-6"></a>kd-6 | 文件拒绝阻断DB | `src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite` | direct | preserves DB truth on %s failure | [J05 · 确认目标存在、文件归属和删除入口](../../journeys/j05.md#J05-01) |
+| <a id="e-knowledge-delete-recovery--kd-7"></a>kd-7 | 文件/DB分歧外抛 | `src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite` | direct | reports a DB %s after file removal and supports retry | [J05 · 文件先移除，再更新referrer与删除目标事务](../../journeys/j05.md#J05-02) |
+| <a id="e-knowledge-delete-recovery--kd-8"></a>kd-8 | listener拒绝不补回真相 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletion listener failure does not restore committed truth | [J05 · 独立观察兼容清理、审计和事件](../../journeys/j05.md#J05-03) |
+| <a id="e-knowledge-delete-recovery--kd-9"></a>kd-9 | 调用方按reconcileVia检查 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletion DB failure leaves a retryable identity | [J05 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04) |
+| <a id="e-knowledge-delete-recovery--kd-10"></a>kd-10 | 仍有主行才显式同ID重试 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletion DB failure leaves a retryable identity | [J05 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04) |
+| <a id="e-knowledge-delete-recovery--kd-11"></a>kd-11 | 主行已无则检查消费方 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` | direct | deletion listener failure does not restore committed truth | [J05 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04) |
+
+<a id="graph-knowledge-sync-post-maintenance"></a>
+
+### syncAll先改变DB，再等待独立维护
+
+图 ID：`knowledge-sync-post-maintenance` · R0 · completed仅表示维护调用返回。reject与resolve-failed是不同分支；真实store恢复由单独标注的fixture接线验证。
+
+```mermaid
+flowchart TD
+accTitle: syncAll先改变DB，再等待独立维护
+accDescr: completed仅表示维护调用返回。reject与resolve-failed是不同分支；真实store恢复由单独标注的fixture接线验证。
+n0["显式syncAll"]
+n1["sync逐文件 / 登记id / upsert"]
+n2["orphan检查 / 可deprecate"]
+n3["await注入维护端口"]
+n4["completed + unknown report"]
+n5["reject / DB效果仍在"]
+n6["调用方读回DB与store"]
+n7["非PersistenceError skip"]
+n8["dryRun或未配置跳过维护"]
+n0 e0@-->|"同步先执行"| n1
+n1 e1@-->|"循环结束后检查未登记id"| n2
+n1 e2@-->|"普通异常记录并skip"| n7
+n7 e3@-->|"未登记id仍可能被选中"| n2
+n2 e4@-->|"直接DB变化后才await维护"| n3
+n3 e5@-->|"resolve只标调用完成"| n4
+n3 e6@-->|"reject传播 / 不撤销sync"| n5
+n5 e7@-->|"调用方保留残留与诊断"| n6
+n6 e8@-->|"排故后显式重调"| n0
+n0 e9@-->|"dryRun / 未配置有独立状态"| n8
+classDef entry fill:#e1f1ed,stroke:#44796b,color:#173d33
+classDef host fill:#eef0f8,stroke:#7a85a3,color:#303c5c
+classDef store fill:#e5eff7,stroke:#7596b2,color:#243e54
+classDef error fill:#fff0d9,stroke:#b68a3a,color:#634d29
+class n6 host
+```
+
+| 边 ID | 关系 | 源码定位 | 断言关系 | case / 缺口 | 相关旅程步骤 |
+| --- | --- | --- | --- | --- | --- |
+| <a id="e-knowledge-sync-post-maintenance--ks-1"></a>ks-1 | 同步先执行 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync maintenance rejection preserves DB changes and recovers the real vector store | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-2"></a>ks-2 | 循环结束后检查未登记id | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync read failure and real file absence produce distinguishable orphan observations | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-3"></a>ks-3 | 普通异常记录并skip | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync read failure and real file absence produce distinguishable orphan observations | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-4"></a>ks-4 | 未登记id仍可能被选中 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync read failure and real file absence produce distinguishable orphan observations | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-5"></a>ks-5 | 直接DB变化后才await维护 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | deprecates an orphan for an empty corpus and awaits authoritative vector maintenance | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-6"></a>ks-6 | resolve只标调用完成 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync completed can carry a failed maintenance business report | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-7"></a>ks-7 | reject传播 / 不撤销sync | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync maintenance rejection preserves DB changes and recovers the real vector store | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-8"></a>ks-8 | 调用方保留残留与诊断 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync maintenance rejection preserves DB changes and recovers the real vector store | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-9"></a>ks-9 | 排故后显式重调 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync maintenance rejection preserves DB changes and recovers the real vector store | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
+| <a id="e-knowledge-sync-post-maintenance--ks-10"></a>ks-10 | dryRun / 未配置有独立状态 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` | direct | sync read failure and real file absence produce distinguishable orphan observations | [J01 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) |
 
 <a id="graph-dependencies-10"></a>
 
@@ -1312,11 +2136,11 @@ expect((caught as PersistenceError).details.operation).toBe('audit-insert-run');
 <a id="f-K3-SYNC-SKIP" class="stable-anchor"></a>
 <a id="k3-sync-skip--逐文件读取解析等非persistenceerror" class="stable-anchor"></a>
 
-### K3-SYNC-SKIP · 逐文件读取/解析等非PersistenceError
+### K3-SYNC-SKIP · 逐文件读取、解析或未分类处理异常，且不是PersistenceError
 
 | 检查项 | 当前代码语义 |
 | --- | --- |
-| 已留下什么 | 可留原DB状态；没有成功登记ID的项可能随后参与孤儿判断 |
+| 已留下什么 | 本轮已有DB写入保留；失败发生在登记id之前时，仍存在的文件可能进入orphan并被deprecated；登记后失败不由本轮缺id分支再判孤儿。 |
 | Core自动做什么 | 记录error、skipped++，继续其他文件与孤儿检测 |
 | 谁显式恢复 | 宿主检查失败路径是否仍存在/可读，再重试sync并核对lifecycle；不能把skipped看作无副作用 |
 | 必须停止的条件 | 仅该文件步骤跳过；孤儿检测没有按同一文件再次确认存在的保证 |
@@ -1324,28 +2148,39 @@ expect((caught as PersistenceError).details.operation).toBe('audit-insert-run');
 
 #### 恢复检查顺序
 
-前提：sync 中发生逐文件读取/解析的非 PersistenceError，report.skipped 增加。此指南是源码导出的检查建议，现有 Atlas 未声明对应端到端恢复测试已覆盖。
+前提：保留同一root/DB/id、原文件字节和本轮skipped/orphaned报告；先确认失败发生于读取/登记id之前还是之后。
 
-1. 定位日志中的失败文件，确认文件仍存在且可读/可解析 — skip 可能来自暂时读取失败，不代表文件被删除。
-2. 按该文件原 id 检查 DB lifecycle 与 orphaned 结果 — 本次失败项可能未登记到有效 ID 集，后续孤儿检测仍继续，不能假设完全无副作用。
+1. 读实际sourceFile是否仍在、id与hash是否一致，核对skipped及orphaned。 — 受控一次读取失败能产生orphan，即便文件仍在；报告名称不独立证明磁盘删除。（观察来源：`src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService`；字段：sourceFile、id、skipped、orphaned）
+2. 重读DB lifecycle并比较文件中lifecycle。 — 正式扫描可能已deprecated，dryRun只报告；内容与向量需另核。（观察来源：`src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService`；字段：lifecycle、syncedIds）
+3. 检查PersistenceError还是普通skip日志。 — 前者直接终止；后者记录错误后继续，不自动重试读取。（观察来源：`src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService`；字段：error、skipped）
 
-显式动作：修复文件权限/内容或解析输入，先 dryRun 审阅同根同步将做的变化，再显式重新 sync；若已被判孤儿则单独核对文件和 lifecycle 纠正路径，不能无条件批量 reactivate。
+显式动作：排除读取故障并确认文件真相后显式重扫；有维护端口时分别检查其报告与store。先dryRun不能替代正式写后的读回。
 
-重试身份：使用文件原 id 与实际来源路径；不要复制出另一个新 id 来绕开孤儿诊断。
+重试身份：复用原id与原文件；不能用重新create掩盖暂时读失败。
 
-完成断言：确认失败文件不再 skipped、DB 与文件内容一致，检查 lifecycle 与 orphaned 报告的最终值；单独记录仍无集成运行证明的限制。
+完成断言：读取恢复后skipped=0，文件仍同hash，DB按文件恢复；真实缺文件control与读取失败分开。当前样本不证明向量修复。
 
-停止条件：文件归属、id 或 lifecycle 改动原因不明时停止；审计 PersistenceError 不是可忽略 skip。
+停止条件：文件归属/hash不明、PersistenceError或真实写入仍失败时停止；不因orphaned直接删除仍在的文件。
 
 ```ts
 report.skipped++;
 ```
 
-关联：[Markdown同步及后置向量维护](README.md#m-M10-04) · [文件与数据库分歧的显式恢复](README.md#graph-knowledge-recovery) · [校验、创建与同步的不同完成边界](README.md#graph-r3-authoring-and-sync-effects) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
+关联：[Markdown同步及后置向量维护](README.md#m-M10-04) · [文件与数据库分歧的显式恢复](README.md#graph-knowledge-recovery) · [校验、创建与同步的不同完成边界](README.md#graph-r3-authoring-and-sync-effects) · [syncAll先改变DB，再等待独立维护](README.md#graph-knowledge-sync-post-maintenance) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[一次知识从提交到可查询 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05)
 
-断言关系：**none**。本次未定位“现存文件临时不可读→孤儿分类”的同一集成断言；保留源码限制而非新复现缺陷。
+逐case运行依据（快照）：
+
+- [V07-S3 · 受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。](../../evidence/README.md#case-V07-S3) — 风险观察；所列断言已核验
+
+断言关系：**direct**。`alembic-core-architecture-atlas/probes/persistence-recovery.test.ts` · `sync read failure and real file absence produce distinguishable orphan observations`
+
+受控短暂读取失败可把仍存在的文件判作orphan；排故重扫恢复文件中的lifecycle。（risk-observed）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect(recovered).toMatchObject(
+```
 
 <a id="f-K3-SYNC-VECTOR" class="stable-anchor"></a>
 <a id="k3-sync-vector--syncall中权威向量维护reject" class="stable-anchor"></a>
@@ -1355,35 +2190,244 @@ report.skipped++;
 | 检查项 | 当前代码语义 |
 | --- | --- |
 | 已留下什么 | Markdown与DB同步已完成；向量可能部分变化 |
-| Core自动做什么 | await的错误向调用方传播，不生成completed维护状态 |
+| Core自动做什么 | await维护端口reject直接传播，syncAll没有专用错误重试/DB回滚；此前同步效果保留。 |
 | 谁显式恢复 | 排除provider/store问题后显式reconcile或syncAll；读者保留DB/向量不一致诊断 |
 | 必须停止的条件 | 无自动重试、无DB回滚，不能当作整个syncAll未执行 |
 | 源码定位 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` |
 
 #### 恢复检查顺序
 
-前提：syncAll 已执行 sync(db, opts) 后在 reconcileAuthoritativeCorpus await 处拒绝；能访问同一 DB 与注入的 vectorMaintenance 端口。
+前提：确认syncAll已完成同步后，注入维护端口确实reject；保存原id、root、DB与端口错误。不要把resolve的failed报告误归为此分支。
 
-1. 分别检查 Markdown→DB 同步结果与 DB 当前行 — DB 部分已完成，reject 不能当作整次未执行。
-2. 检查 provider/store 原始错误及活跃向量代际/维护诊断 — 向量可能未完成或部分变化，不能用 DB 更新计数代替 dense 可见性。
+1. 重读DB lifecycle/正文及源Markdown，确认直接同步的效果。 — 调用拒绝不代表DB没改；本样本文件已无且DB已deprecated。（观察来源：`src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService`；字段：id、lifecycle、sourceFile）
+2. 保存端口错误及实际对账errors/inspection，读真实store残留ID。 — Core此层没有专用向量失败诊断；fixture将reconcileIndex.errors转reject，非宿主默认策略。（观察来源：`src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService`；字段：errors、initialInspection、finalInspection、vectorIds）
+3. 明确store.flush与新adapter读回是否都完成。 — 内存删除不等于快照耐久；本样本以真实HNSW新adapter确认两类向量均已无。（观察来源：`src/infrastructure/vector/HnswVectorAdapter.ts#HnswVectorAdapter`；字段：listIds、getById、flush）
 
-显式动作：修复明确的 provider/store 故障后，由宿主显式重试权威 corpus reconcile，或按原同步选项重试 syncAll；恢复过程中保留 DB/向量分歧说明。
+显式动作：修复实际store故障，再由调用方同root/DB/options显式syncAll或其明确维护协议；检查nested report后显式flush并读回。
 
-重试身份：保持相同知识实体 ID 和权威 corpus 来源；新向量 generation 的身份遵从 manager/router，不能手工把 failed 改 ready。
+重试身份：复用原知识id与权威语料；二次sync的orphaned可为空，因为DB前次已变更。
 
-完成断言：重读 DB 仍保留已同步条目；确认维护返回实际完成状态和期望代际/检查结果，再用受限业务 query 检查相应候选是否通过 live truth。
+完成断言：DB保持目标状态、维护errors为空、真实store不再暴露目标；本probe另用同进程新HNSW adapter重开确认。
 
-停止条件：向量端口缺失、权威 corpus 未确认或 inspection 未通过时不能宣称向量恢复；不得回滚已同步 DB 来掩盖后置失败。
+停止条件：errors/degraded/inspection仍不符合目标、来源冲突或flush失败时停止；不能把completed本身作为健康证明。
 
 ```ts
 report.vectorMaintenanceReport = await this.#vectorMaintenance.reconcileAuthoritativeCorpus();
 ```
 
-关联：[Markdown同步及后置向量维护](README.md#m-M10-04) · [文件与数据库分歧的显式恢复](README.md#graph-knowledge-recovery) · [校验、创建与同步的不同完成边界](README.md#graph-r3-authoring-and-sync-effects) · [影子代际到可见路由](../12-vector-generations/README.md#graph-vector-generation-visibility) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
+关联：[Markdown同步及后置向量维护](README.md#m-M10-04) · [文件与数据库分歧的显式恢复](README.md#graph-knowledge-recovery) · [校验、创建与同步的不同完成边界](README.md#graph-r3-authoring-and-sync-effects) · [影子代际到可见路由](../12-vector-generations/README.md#graph-vector-generation-visibility) · [syncAll先改变DB，再等待独立维护](README.md#graph-knowledge-sync-post-maintenance) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[一次知识从提交到可查询 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05) · [一次知识从提交到可查询 · 需要 dense 检索时单独确认向量路由可见](../../journeys/j01.md#J01-07)
 
-断言关系：**none**。本轮未定位该reject穿过syncAll并核对DB保留的具体case；不借其他vector测试冒充。
+逐case运行依据（快照）：
+
+- [V07-S1 · 维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。](../../evidence/README.md#case-V07-S1) — 恢复验证；所列断言已核验
+
+断言关系：**direct**。`alembic-core-architecture-atlas/probes/persistence-recovery.test.ts` · `sync maintenance rejection preserves DB changes and recovers the real vector store`
+
+维护端口拒绝时DB已deprecated且region仍在；显式重试后真实HNSW新adapter重开无遗留向量。（recovered）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect(recovered.reopenedIds).toEqual([]);
+```
+
+<a id="f-K3-DELETE-FILE" class="stable-anchor"></a>
+
+
+### K3-DELETE-FILE · 目标remove遇到unlink、读取或owner歧义拒绝
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 协调器尚未开始DB回调；目标文件是否存在仍需读回。 |
+| Core自动做什么 | 记录entryId/operation/fileOperation并抛FileWriteError，不继续DB提交。 |
+| 谁显式恢复 | 先核对owner/路径，再排除明确I/O故障，主行仍在时同ID delete。 |
+| 必须停止的条件 | 归属不清时停止，不能直接unlink或清DB。 |
+| 源码定位 | `src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite` |
+
+#### 恢复检查顺序
+
+前提：只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。
+
+1. 先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。 — FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。（观察来源：`src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite`；字段：error.name、error.cause、entryId、operation、fileOperation）
+2. 读回目标主行、目标FK从表和相关referrer的关系/Markdown。 — referrer可先变化；它们不与目标删除组成一个跨文件事务。（观察来源：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`；字段：id、sourceFile、relations.related）
+3. 主行已无时检查audit warning与同步listener错误，另外核对消费方。 — 审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。（观察来源：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`；字段：knowledge:deleted、entryId、Audit log failed (non-blocking)）
+
+显式动作：修复可核验的文件I/O原因后显式重试同ID delete。
+
+重试身份：复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。
+
+完成断言：目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。
+
+停止条件：owner/路径无法确认、错误原因仍在时停止。
+
+```ts
+throw new FileWriteError(fileFailureMessage, { cause: error });
+```
+
+关联：[知识删除：文件、目标事务与后置效果分段](README.md#m-M10-06) · [删除失败后先确定哪一段已完成](README.md#graph-knowledge-delete-recovery) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[知识删除与部分完成后的恢复 · 确认目标存在、文件归属和删除入口](../../journeys/j05.md#J05-01) · [知识删除与部分完成后的恢复 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04)
+
+逐case运行依据（快照）：
+
+- [V06-D1 · unlink拒绝后文件和主行仍在，未发删除事件。](../../evidence/README.md#case-V06-D1) — 拒绝验证；所列断言已核验
+- [V06-D2 · 文件ID归属歧义阻断删除，DB未改变。](../../evidence/README.md#case-V06-D2) — 拒绝验证；所列断言已核验
+
+断言关系：**direct**。`test/KnowledgeServicePersistence.test.ts` · `preserves DB truth on %s failure`
+
+unlink拒绝后文件和主行仍在，未发删除事件。（rejected）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect(fs.existsSync(file)).toBe(true);
+```
+
+<a id="f-K3-DELETE-DB" class="stable-anchor"></a>
+
+
+### K3-DELETE-DB · 目标文件移除后，referrer更新或目标/FK提交失败
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 文件已无；目标主行可能仍在；部分referrer可能已经改写。目标事务内失败的从表回滚不扩展到其他资源。 |
+| Core自动做什么 | 抛带knowledge.delete与reconcileVia=KnowledgeService.delete的DivergenceError，无自动sync或文件恢复。 |
+| 谁显式恢复 | 排除DB根因并读回确认目标仍在，再同ID显式delete。 |
+| 必须停止的条件 | 目标已无或身份冲突时停止统一重试，转入后置效果检查。 |
+| 源码定位 | `src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite` |
+
+#### 恢复检查顺序
+
+前提：只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。
+
+1. 先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。 — FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。（观察来源：`src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite`；字段：error.name、error.cause、entryId、operation、fileOperation）
+2. 读回目标主行、目标FK从表和相关referrer的关系/Markdown。 — referrer可先变化；它们不与目标删除组成一个跨文件事务。（观察来源：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`；字段：id、sourceFile、relations.related）
+3. 主行已无时检查audit warning与同步listener错误，另外核对消费方。 — 审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。（观察来源：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`；字段：knowledge:deleted、entryId、Audit log failed (non-blocking)）
+
+显式动作：目标主行仍在时，排除锁/受控触发器/连接故障后显式KnowledgeService.delete(id, context)。
+
+重试身份：复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。
+
+完成断言：目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。
+
+停止条件：不以重新create、删除DB或sync替代删除；referrer失败原因未核实不能声称全体一致。
+
+```ts
+throw new DivergenceError(dbFailureMessage, details, { cause: error });
+```
+
+关联：[知识删除：文件、目标事务与后置效果分段](README.md#m-M10-06) · [文件优先知识提交](../01-overall-package-boundaries/README.md#m-M01-05) · [删除失败后先确定哪一段已完成](README.md#graph-knowledge-delete-recovery) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[知识删除与部分完成后的恢复 · 文件先移除，再更新referrer与删除目标事务](../../journeys/j05.md#J05-02) · [知识删除与部分完成后的恢复 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04)
+
+逐case运行依据（快照）：
+
+- [V06-D4 · 目标/FK事务拒绝时保留从表；排故后service.delete清理主行与所列从表。](../../evidence/README.md#case-V06-D4) — 恢复验证；所列断言已核验
+- [V06-D5 · ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。](../../evidence/README.md#case-V06-D5) — 恢复验证；所列断言已核验
+- [V06-D6 · IGNORE不会成为假成功；分歧后同ID再次delete完成清理。](../../evidence/README.md#case-V06-D6) — 恢复验证；所列断言已核验
+- [V06-D7 · 同一fixture记录文件先删、DB拒绝、同ID重试后主行消失与事件一次。](../../evidence/README.md#case-V06-D7) — 恢复验证；所列断言已核验
+
+断言关系：**direct**。`test/KnowledgeServicePersistence.test.ts` · `reports a DB %s after file removal and supports retry`
+
+ABORT后目标文件已无、主行仍在；同ID再次delete完成清理。（recovered）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect(await env.repo.findById(id)).toBeNull();
+```
+
+<a id="f-K3-DELETE-POST" class="stable-anchor"></a>
+
+
+### K3-DELETE-POST · 目标删除完成后同步knowledge:deleted listener抛错
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 文件和主行已删除，审计可能仅尝试；失败listener的效果未证明完成。 |
+| Core自动做什么 | delete外层记录错误并重抛；finally释放删除标记，不补回已删实体。 |
+| 谁显式恢复 | 读回已提交状态，定位具体listener/消费方的恢复协议；本入口没有统一重放消费者能力。 |
+| 必须停止的条件 | 再次delete通常NotFound，不能以新create或盲目重试恢复后置效果。 |
+| 源码定位 | `src/service/knowledge/KnowledgeService.ts#KnowledgeService` |
+
+#### 恢复检查顺序
+
+前提：只处理已确认归属的同一知识根/DB/id；保存原异常和当前状态，先确定失败阶段。
+
+1. 先保存FileWriteError的name/cause、原id/sourceFile及文件错误日志，再读文件归属和主行。 — FileWriteError没有DivergenceError.details；entryId/operation/fileOperation来自对应日志。（观察来源：`src/service/knowledge/commitKnowledgeWrite.ts#commitKnowledgeWrite`；字段：error.name、error.cause、entryId、operation、fileOperation）
+2. 读回目标主行、目标FK从表和相关referrer的关系/Markdown。 — referrer可先变化；它们不与目标删除组成一个跨文件事务。（观察来源：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`；字段：id、sourceFile、relations.related）
+3. 主行已无时检查audit warning与同步listener错误，另外核对消费方。 — 审计拒绝被warn；同步emit异常可让调用拒绝但不会补回已删除数据。（观察来源：`src/service/knowledge/KnowledgeService.ts#KnowledgeService`；字段：knowledge:deleted、entryId、Audit log failed (non-blocking)）
+
+显式动作：先确认持久删除已经完成，再按实际消费方合同处置；当前样本只观察listener失败，不签消费者恢复。
+
+重试身份：复用原id和原目标。只有目标主行仍存在时才能按同ID重试delete；不得新建替代实体或用sync代替删除。
+
+完成断言：目标文件和主行均不存在；所列FK从表已清理，referrer关系经读回/同步后仍无旧引用；事件发出和消费者完成分别记录。
+
+停止条件：主行已无时停止重复delete；未找到明确消费恢复入口则保留失败材料，交调用方判断。
+
+```ts
+this._eventBus.emit('knowledge:deleted', { entryId: id });
+```
+
+关联：[知识删除：文件、目标事务与后置效果分段](README.md#m-M10-06) · [删除失败后先确定哪一段已完成](README.md#graph-knowledge-delete-recovery) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[知识删除与部分完成后的恢复 · 独立观察兼容清理、审计和事件](../../journeys/j05.md#J05-03) · [知识删除与部分完成后的恢复 · 读回状态后选择显式重试或停止](../../journeys/j05.md#J05-04)
+
+逐case运行依据（快照）：
+
+- [V06-D8 · 审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。](../../evidence/README.md#case-V06-D8) — 边界观察；所列断言已核验
+
+断言关系：**direct**。`alembic-core-architecture-atlas/probes/persistence-recovery.test.ts` · `deletion listener failure does not restore committed truth`
+
+审计拒绝不阻断；同步事件报错发生在删除后，再delete得到NotFound。（observed-boundary）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect({ auditAttempts, listenerAttempts }).toEqual(
+```
+
+<a id="f-K3-SYNC-RESULT" class="stable-anchor"></a>
+
+
+### K3-SYNC-RESULT · 维护端口resolve，但其unknown业务报告为failed/degraded
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | syncAll已设置vectorMaintenanceStatus=completed；nested report未被Core解释。 |
+| Core自动做什么 | 原样返回维护report，不转译其业务status/errors为异常。 |
+| 谁显式恢复 | 调用者读取真实报告并按端口协议处理；另外核对store。 |
+| 必须停止的条件 | 不能把completed当向量健康、检索完整或公开可见。 |
+| 源码定位 | `src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService` |
+
+#### 恢复检查顺序
+
+前提：端口正常resolve，且报告内容可读。
+
+1. 同时读取vectorMaintenanceStatus和vectorMaintenanceReport。 — completed与nested failed可以同时出现；本case只证明返回合同。（观察来源：`src/service/knowledge/KnowledgeSyncService.ts#KnowledgeSyncService`；字段：vectorMaintenanceStatus、vectorMaintenanceReport）
+
+显式动作：按注入端口的实际report合同判断下一步；没有可核验store结果时保留未知。
+
+重试身份：保留本次报告与源/DB身份，不将它改写为新的恢复回执。
+
+完成断言：业务成功需独立report与store断言，本合同case没有该证明。
+
+停止条件：报告failed/degraded或含未知诊断时停止宣称维护健康。
+
+```ts
+report.vectorMaintenanceStatus = 'completed';
+```
+
+关联：[Markdown同步及后置向量维护](README.md#m-M10-04) · [syncAll先改变DB，再等待独立维护](README.md#graph-knowledge-sync-post-maintenance) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[一次知识从提交到可查询 · 需要修复或手改同步时，显式扫描 Markdown](../../journeys/j01.md#J01-05)
+
+逐case运行依据（快照）：
+
+- [V07-S2 · completed只说明端口resolve；嵌套业务报告仍可failed。](../../evidence/README.md#case-V07-S2) — 边界观察；所列断言已核验
+
+断言关系：**direct**。`alembic-core-architecture-atlas/probes/persistence-recovery.test.ts` · `sync completed can carry a failed maintenance business report`
+
+completed只说明端口resolve；嵌套业务报告仍可failed。（observed-boundary）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect(report.vectorMaintenanceStatus).toBe('completed');
+```
 
 
 <!-- atlas:generated:end -->

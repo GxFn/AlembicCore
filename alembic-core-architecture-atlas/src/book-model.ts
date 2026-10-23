@@ -1,6 +1,33 @@
-import type { BookInput, BookIndex, SearchEntry, JourneyBacklink } from '../schemas/book.ts';
+import type {
+  BookInput,
+  BookIndex,
+  SearchEntry,
+  JourneyBacklink,
+  CaseEvidenceLink,
+} from '../schemas/book.ts';
 export const moduleRoute = (topic: string, id: string) => `#${topic}~m-${id}`;
 export const failureRoute = (topic: string, id: string) => `#${topic}~f-${id}`;
+export function caseEvidenceLinks(
+  book: Pick<BookIndex, 'runs'>,
+  id: string,
+  field: 'moduleRefs' | 'failureRefs' | 'stepRefs',
+): CaseEvidenceLink[] {
+  return book.runs.flatMap((r) =>
+    (r.caseEvidence ?? [])
+      .filter((c) => c[field].includes(id))
+      .map((c) => ({
+        id: c.id,
+        title: c.claim,
+        href: `#runs~case-${c.id}`,
+        outcome: c.outcome,
+        fixture: c.fixture,
+        verified:
+          r.status === 'passed' &&
+          r.caseResults?.some((x) => x.id === c.id && x.status === 'supported') === true,
+        runStatus: r.status,
+      })),
+  );
+}
 const textOf = (value: unknown) => JSON.stringify(value).toLowerCase();
 // 关联由正典明确声明。此投影只建立导航，不把相同路径/符号自动解释为调用边。
 export function buildBookIndex(input: BookInput): BookIndex {
@@ -72,7 +99,11 @@ export function buildBookIndex(input: BookInput): BookIndex {
     for (const s of j.steps) add(s.id, '步骤', s.title, j.title, `#journeys~${s.id}`, s);
   }
   for (const o of objects) add(o.id, '对象', o.title, o.identity, `#objects~${o.id}`, o);
-  for (const r of runs) add(r.id, '运行证据', r.title, r.status, `#runs~${r.id}`, r);
+  for (const r of runs) {
+    add(r.id, '运行证据', r.title, r.status, `#runs~${r.id}`, r);
+    for (const c of r.caseEvidence ?? [])
+      add(c.id, 'Case证据', c.claim, `${r.id} · ${c.caseTitle}`, `#runs~case-${c.id}`, c);
+  }
   for (const a of input.api.entries)
     add(
       a.name,
@@ -249,11 +280,30 @@ export function validateBook(input: BookInput): string[] {
     refs(o.id, o.failureRefs, failures, 'failure');
     if (!o.states.length || !o.source?.excerpt) errors.push(`${o.id}:incomplete`);
   }
+  const steps = new Set(book.journeys.flatMap((j) => j.steps.map((s) => s.id)));
+  unique(
+    book.runs.flatMap((r) => (r.caseEvidence ?? []).map((c) => c.id)),
+    'case-evidence',
+  );
   for (const r of book.runs) {
     refs(r.id, r.journeyRefs, journeys, 'journey');
     refs(r.id, r.failureRefs, failures, 'failure');
     if (!['not-run', 'passed', 'failed', 'stale', 'missing', 'unavailable'].includes(r.status))
       errors.push(`${r.id}:status`);
+    for (const c of r.caseEvidence ?? []) {
+      refs(c.id, c.moduleRefs, modules, 'module');
+      refs(c.id, c.failureRefs, failures, 'failure');
+      refs(c.id, c.stepRefs, steps, 'step');
+      fields(c.id, c as unknown as Record<string, unknown>, [
+        'testFile',
+        'caseTitle',
+        'claim',
+        'fault',
+        'action',
+      ]);
+      if (!c.moduleRefs.length || !c.limitations.length || !c.assertion.assertionExcerpt)
+        errors.push(`${c.id}:incomplete-case-evidence`);
+    }
   }
   return errors;
 }

@@ -3,5 +3,15 @@
     "id": "file-review-20261023-output-budget",
     "path": "architecture-atlas/reviews/2026-10-23/files/file-review-20261023-output-budget.json",
     "sha256": "a4d9f0930e02c3e1d0f9f29a432e6b5472de43dae9e2cf470e600005c674cd25"
+  },
+  {
+    "id": "file-review-20261023-readme-en",
+    "path": "architecture-atlas/reviews/2026-10-23/files/file-review-20261023-readme-en.json",
+    "sha256": "d600d15867b3ae78500c3a32674563756486cefb737cd407d45052480fa9a9eb"
+  },
+  {
+    "id": "file-review-20261023-readme-zh",
+    "path": "architecture-atlas/reviews/2026-10-23/files/file-review-20261023-readme-zh.json",
+    "sha256": "8b8c4426fffe370652d5f5efa78bd4011ef74e69766f9865426f56e863467806"
   }
 ]

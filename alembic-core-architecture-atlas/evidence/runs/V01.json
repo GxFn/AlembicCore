@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "observationsRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T13-41-16-867Z/observations.json",
-  "observationsSha256": "1b912ba09cc771051d46a46c8760fb877649710039b13792ab696cad68422c51",
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T16-41-02-466Z/observations.json",
+  "observationsSha256": "26e4e115c506a8e5acbaac60eac6424c7d1b76ca2cbd853e2acd2a75afbeeea7",
   "id": "V01",
   "title": "知识文件先行：DB分歧、阻断与显式同步",
   "status": "passed",
-  "observedAt": "2026-10-23T13:41:21.658Z",
+  "observedAt": "2026-10-23T16:41:05.961Z",
   "exitCode": 0,
   "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
   "sourceScope": "完整Core产品库存，变化时保守要求重验",
@@ -18,11 +18,23 @@
   "harnessFiles": [
     {
       "path": "scripts/run-evidence.mjs",
-      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
     },
     {
       "path": "scripts/run-contracts.mjs",
-      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
     },
     {
       "path": "scripts/contracts.mjs",
@@ -30,145 +42,176 @@
     },
     {
       "path": "probes/vitest.config.ts",
-      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
     },
     {
       "path": "probes/recovery.test.ts",
-      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
     },
     {
       "path": "evidence/scenarios.json",
-      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
     }
   ],
   "cases": [
     {
       "title": "KnowledgeService file-first commands create commits durable truth that survives synchronization",
       "status": "passed",
-      "duration": 118.60308299999997
+      "duration": 93.94241699999998,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands create aborts before DB mutation when the file store rejects the write",
       "status": "passed",
-      "duration": 16.246417000000065
+      "duration": 16.706457999999884,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands create reports abort as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 34.644207999999935
+      "duration": 27.23675000000003,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands create reports missing-readback as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 27.651832999999897
+      "duration": 25.32616699999994,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands create reports ignored-write as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 24.860541999999896
+      "duration": 21.936541000000034,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands update commits durable truth that survives synchronization",
       "status": "passed",
-      "duration": 39.856583
+      "duration": 34.443624999999884,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands update aborts before DB mutation when the file store rejects the write",
       "status": "passed",
-      "duration": 23.378000000000156
+      "duration": 23.64691700000003,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands update reports abort as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 36.948250000000144
+      "duration": 31.191458999999895,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands update reports missing-readback as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 33.72849999999994
+      "duration": 32.8576250000001,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands update reports ignored-write as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 33.03670800000009
+      "duration": 30.169374999999945,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands quality commits durable truth that survives synchronization",
       "status": "passed",
-      "duration": 33.66154199999983
+      "duration": 30.94899999999984,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands quality aborts before DB mutation when the file store rejects the write",
       "status": "passed",
-      "duration": 26.217291999999816
+      "duration": 22.572083999999904,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands quality reports abort as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 34.50554199999988
+      "duration": 35.38129200000003,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands quality reports missing-readback as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 40.921749999999975
+      "duration": 33.37066699999991,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands quality reports ignored-write as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 36.779459000000315
+      "duration": 32.64437500000008,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands deprecate commits durable truth that survives synchronization",
       "status": "passed",
-      "duration": 35.70245900000009
+      "duration": 31.96529099999998,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands deprecate aborts before DB mutation when the file store rejects the write",
       "status": "passed",
-      "duration": 26.058500000000095
+      "duration": 22.767624999999953,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands deprecate reports abort as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 39.66345799999999
+      "duration": 31.452707999999802,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands deprecate reports missing-readback as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 34.763334000000214
+      "duration": 31.40800000000013,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "KnowledgeService file-first commands deprecate reports ignored-write as divergence and sync can restore the durable file",
       "status": "passed",
-      "duration": 35.99170800000002
+      "duration": 33.060833,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
     },
     {
       "title": "Atlas Core recovery probe knowledge divergence preserves file hash and explicit sync is idempotent",
       "status": "passed",
-      "duration": 97.60249999999996
+      "duration": 48.404583,
+      "testFile": "alembic-core-architecture-atlas/probes/recovery.test.ts"
     },
     {
       "title": "Atlas Core recovery probe knowledge file rejection leaves no database row",
       "status": "passed",
-      "duration": 19.260375000000067
+      "duration": 15.14470899999992,
+      "testFile": "alembic-core-architecture-atlas/probes/recovery.test.ts"
     }
   ],
+  "caseResults": [],
   "probeObservations": [
     {
       "scenario": "V01",
       "fileCount": 1,
       "beforeDbRows": 0,
       "recoveredDbRows": 1,
-      "fileHash": "c0136c8a989c9d26d85b00cb3a8624baef4f825c662d9bdbccc6664fbd75516f",
-      "recoveredFileHash": "c0136c8a989c9d26d85b00cb3a8624baef4f825c662d9bdbccc6664fbd75516f",
+      "fileHash": "1116c205a66cf80f260f97f822ded454f5b08329aaad95783ef4e3a44c1a9c22",
+      "recoveredFileHash": "1116c205a66cf80f260f97f822ded454f5b08329aaad95783ef4e3a44c1a9c22",
       "secondSyncSameHash": true
     }
   ],
   "errors": [],
-  "rawRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T13-41-16-867Z/report.json",
-  "rawSha256": "42950cfaac15ad435f86c14cc1d94e7f3984e3bfa680edcbc1960a45ded719ca",
-  "consoleRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T13-41-16-867Z/console.txt",
-  "consoleSha256": "d6f382806bd363e723276bd91d15ebba6d376967ef79a4f3443d5615c84d3ec2",
+  "rawRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T16-41-02-466Z/report.json",
+  "rawSha256": "e337528bb5149e2c91e8869d259efc7865015347ab77b74dcf39296854c244f6",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T16-41-02-466Z/console.txt",
+  "consoleSha256": "1b88394eae2c80cf3fae2ea5967fbe55690185d31796839c270992f057d63a95",
   "command": {
     "executable": "node",
     "args": [
@@ -184,6 +227,6 @@
       "--outputFile=<fixed-atlas-build-report>"
     ]
   },
-  "receiptRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T13-41-16-867Z/receipt.json",
-  "receiptSha256": "2f48f7edf761f7773c2aa5e95ec7d73b5603323dbaf9290e4a77f1c462a3a20d"
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v01-2026-10-23T16-41-02-466Z/receipt.json",
+  "receiptSha256": "f1064f0d737630deaebf864b64ec9c63721cd2d1589d2dbba1dba995313d848e"
 }

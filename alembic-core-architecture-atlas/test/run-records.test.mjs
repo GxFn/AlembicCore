@@ -98,3 +98,106 @@ test('重复预期标题或预期count不符不能折叠成一次通过', () => 
       .length,
   );
 });
+
+test('原始材料一致但观察未满足case声明时，维护复验仍拒绝伪supported', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'atlas-case-proof-'));
+  try {
+    const atlas = path.join(root, 'atlas'),
+      ledger = path.join(root, 'ledger');
+    fs.mkdirSync(ledger);
+    for (const p of requiredHarnessFiles) {
+      fs.mkdirSync(path.dirname(path.join(atlas, p)), { recursive: true });
+      fs.writeFileSync(path.join(atlas, p), 'fixture');
+    }
+    const spec = {
+      id: 'V06',
+      expectedCaseTitles: ['delete retry'],
+      expectedCaseCount: 1,
+      expectedProbeCount: 1,
+      testFiles: ['test/delete.test.ts'],
+      caseEvidence: [
+        {
+          id: 'V06-D1',
+          testFile: 'test/delete.test.ts',
+          caseTitle: 'delete retry',
+          outcome: 'recovered',
+          fixture: 'real-io',
+          claim: '主行已删除',
+          fault: 'DB拒绝',
+          action: '同ID重试',
+          moduleRefs: ['M10-06'],
+          failureRefs: ['F-delete'],
+          stepRefs: [],
+          limitations: ['只覆盖此夹具'],
+          assertion: {
+            relation: 'direct',
+            path: 'test/delete.test.ts',
+            caseTitle: 'retry',
+            anchorSymbol: 'service',
+            assertionExcerpt: 'expect(rows).toBe(0);',
+          },
+          observationChecks: [{ observationId: 'state', field: 'rows', equals: 0 }],
+        },
+      ],
+    };
+    const raw = {
+      success: true,
+      testResults: [
+        {
+          name: '<core>/test/delete.test.ts',
+          assertionResults: [{ fullName: 'delete retry', status: 'passed' }],
+        },
+      ],
+    };
+    const environment = {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      vitest: 'fixture',
+    };
+    const seal = (rows, extra = {}) => {
+      const report = JSON.stringify(raw),
+        observations = JSON.stringify([
+          { scenario: 'V06', caseId: 'V06-D1', observationId: 'state', rows },
+        ]);
+      const record = {
+        id: 'V06',
+        status: 'passed',
+        exitCode: 0,
+        sourceDigest: 'source-A',
+        environment,
+        harnessFiles: requiredHarnessFiles.map((p) => ({ path: p, sha256: sha('fixture') })),
+        cases: assessRunReport(raw, spec, 0).cases,
+        errors: [],
+        probeObservations: JSON.parse(observations),
+        caseResults: [{ id: 'V06-D1', status: 'supported', errors: [] }],
+        rawRef: 'report.json',
+        rawSha256: sha(report),
+        consoleRef: 'console.txt',
+        consoleSha256: sha('output'),
+        observationsRef: 'observations.json',
+        observationsSha256: sha(observations),
+      };
+      fs.writeFileSync(path.join(ledger, 'report.json'), report);
+      fs.writeFileSync(path.join(ledger, 'console.txt'), 'output');
+      fs.writeFileSync(path.join(ledger, 'observations.json'), observations);
+      Object.assign(record, extra);
+      const receipt = JSON.stringify(record);
+      fs.writeFileSync(path.join(ledger, 'receipt.json'), receipt);
+      return { ...record, receiptRef: 'receipt.json', receiptSha256: sha(receipt) };
+    };
+    const evaluate = (record) =>
+      verifyRunRecord({ atlas, ledger, productDigest: 'source-A', record, spec, environment });
+    assert.equal(evaluate(seal(1)).status, 'unavailable');
+    assert.equal(evaluate(seal(0)).status, 'passed');
+    const forged = evaluate(
+      seal(0, {
+        caseEvidence: [{ ...spec.caseEvidence[0], claim: '全系统恢复', outcome: 'normal' }],
+      }),
+    );
+    assert.equal(forged.status, 'unavailable');
+    assert.equal(forged.caseEvidence, undefined);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

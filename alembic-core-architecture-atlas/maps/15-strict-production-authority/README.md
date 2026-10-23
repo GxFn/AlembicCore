@@ -23,6 +23,7 @@ testPaths:
   - test/StrictFactExecution.test.ts
   - test/StrictPreparedRecipeGateway.test.ts
   - test/StrictSemanticEvidenceAuthority.test.ts
+  - alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
 consumerRefs:
   - repository: Alembic
     path: lib/recipe-pipeline/generate/strict/StrictFactExecutionRuntime.ts
@@ -39,8 +40,7 @@ consumerRefs:
   - repository: Alembic
     path: lib/recipe-pipeline/generate/strict/StrictPrivateCorpusRuntime.ts
     excerpt: "knowledgeService: options.knowledgeService,"
-    meaning: Main把真实KnowledgeService注入Core Gateway，inspection另从repository与Markdown文件核对；测试gateway
-      fixture不能代替此接线。
+    meaning: Main注入真实KnowledgeService；inspection查询repository、检查部分字段/Markdown及文件存在，返回预期dbHash/fileHash而非此处完整重算。此接线不升级V08内存合同为真实落盘证明。
   - repository: Alembic
     path: lib/recipe-pipeline/generate/strict/StrictPrivateCorpusRuntime.ts
     excerpt: const persisted = await context.gateway.persistPreparedReviewedCandidate(
@@ -48,8 +48,7 @@ consumerRefs:
   - repository: Alembic
     path: lib/recipe-pipeline/generate/strict/StrictPrivateCorpusRuntime.ts
     excerpt: "actualRecipeId: persisted.recipe.id,"
-    meaning: Main将Gateway实际结果交给createStrictPersistenceReceiptV1，再构造refs与production
-      binding；不是Gateway自动签该receipt。
+    meaning: Main将Gateway实际结果交给createStrictPersistenceReceiptV1，再构造refs与production binding；不是Gateway自动签该receipt。
   - repository: Alembic
     path: lib/recipe-pipeline/generate/strict/StrictFinalizationRuntime.ts
     excerpt: const finalCoverage = createFinalCoverageBindingReceiptV1({
@@ -242,8 +241,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -260,8 +259,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -278,8 +277,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -296,8 +295,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -314,8 +313,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -332,8 +331,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -350,8 +349,8 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap
-            primitives through one public contract
+          caseTitle: consumes fact, population, cluster, review, expression, attempt, admission, and cap primitives
+            through one public contract
           anchorSymbol: createStrictProductionAuthorityReceiptV1
           assertedBehavior: 组合完整输入通过并守恒candidate预算；删terminalEvidence必须拒绝。
           assertionExcerpt: ).toThrow('STRICT_PRODUCTION_TERMINAL_EVIDENCE_MISMATCH');
@@ -432,8 +431,8 @@ diagrams:
         test:
           relation: direct
           path: test/ProductionPersistenceContracts.test.ts
-          caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching
-            the database file
+          caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database
+            file
           anchorSymbol: createPrivateCorpusRevisionCheckpointV1
           assertedBehavior: 旧reader阻止WAL checkpoint时不签回执，释放后hash绑定当前DB。
           assertionExcerpt: expect(receipt.databaseHash).not.toBe(staleDatabaseHash);
@@ -453,8 +452,7 @@ diagrams:
           caseTitle: uses byte-exact public-route crash recovery; semantic equality is not enough
           anchorSymbol: classifyPublicKnowledgeRouteRecoveryV1
           assertedBehavior: null、精确字节相同及仅语义相同字节不同分别分类。
-          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null,
-            prepared)).toBe('write-prepared-route');
+          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null, prepared)).toBe('write-prepared-route');
           scenarioKind: recovery
       - id: st-r4
         from: str-classify
@@ -471,8 +469,7 @@ diagrams:
           caseTitle: uses byte-exact public-route crash recovery; semantic equality is not enough
           anchorSymbol: classifyPublicKnowledgeRouteRecoveryV1
           assertedBehavior: null、精确字节相同及仅语义相同字节不同分别分类。
-          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null,
-            prepared)).toBe('write-prepared-route');
+          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null, prepared)).toBe('write-prepared-route');
           scenarioKind: recovery
       - id: st-r5
         from: str-classify
@@ -489,8 +486,7 @@ diagrams:
           caseTitle: uses byte-exact public-route crash recovery; semantic equality is not enough
           anchorSymbol: classifyPublicKnowledgeRouteRecoveryV1
           assertedBehavior: null、精确字节相同及仅语义相同字节不同分别分类。
-          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null,
-            prepared)).toBe('write-prepared-route');
+          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null, prepared)).toBe('write-prepared-route');
           scenarioKind: recovery
       - id: st-r6
         from: str-classify
@@ -507,8 +503,7 @@ diagrams:
           caseTitle: uses byte-exact public-route crash recovery; semantic equality is not enough
           anchorSymbol: classifyPublicKnowledgeRouteRecoveryV1
           assertedBehavior: null、精确字节相同及仅语义相同字节不同分别分类。
-          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null,
-            prepared)).toBe('write-prepared-route');
+          assertionExcerpt: expect(classifyPublicKnowledgeRouteRecoveryV1(null, prepared)).toBe('write-prepared-route');
           scenarioKind: recovery
   - id: strict-admission-persistence
     title: 完整准入、独立G2与真实prepared写入口
@@ -986,7 +981,7 @@ diagrams:
           caseTitle: rehydrates and verifies a serialized Agent attestation without producer module state
           anchorSymbol: consumeMainSemanticDispositionReviewDurableAttestationV5
           assertedBehavior: V5 serialized fixture在新进程验证后生成review，execution receipt hashes保持预期请求集合。
-          assertionExcerpt: >-
+          assertionExcerpt: |-
             expect(review.executionReceiptHashes).toEqual(
                     fixture.expectedSemanticRequest.executionReceipts.map((receipt) => receipt.receiptHash)
                   )
@@ -1007,7 +1002,7 @@ diagrams:
           caseTitle: rehydrates and verifies a serialized Agent attestation without producer module state
           anchorSymbol: consumeMainSemanticDispositionReviewDurableAttestationV5
           assertedBehavior: V5 serialized fixture在新进程验证后生成review，execution receipt hashes保持预期请求集合。
-          assertionExcerpt: >-
+          assertionExcerpt: |-
             expect(review.executionReceiptHashes).toEqual(
                     fixture.expectedSemanticRequest.executionReceipts.map((receipt) => receipt.receiptHash)
                   )
@@ -1028,7 +1023,7 @@ diagrams:
           caseTitle: rehydrates and verifies a serialized Agent attestation without producer module state
           anchorSymbol: consumeMainSemanticDispositionReviewDurableAttestationV5
           assertedBehavior: V5 serialized fixture在新进程验证后生成review，execution receipt hashes保持预期请求集合。
-          assertionExcerpt: >-
+          assertionExcerpt: |-
             expect(review.executionReceiptHashes).toEqual(
                     fixture.expectedSemanticRequest.executionReceipts.map((receipt) => receipt.receiptHash)
                   )
@@ -1109,8 +1104,7 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: fails caller-declared completion closed and conserves every disposition with execution
-            lineage
+          caseTitle: fails caller-declared completion closed and conserves every disposition with execution lineage
           anchorSymbol: canonicalizeObservationPopulationV1
           assertedBehavior: 完整声明仍需真实 receipt 集合及错误观察约束；有 error 的五类 disposition 守恒为 unknown。
           assertionExcerpt: |-
@@ -1131,8 +1125,7 @@ diagrams:
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
-          caseTitle: fails caller-declared completion closed and conserves every disposition with execution
-            lineage
+          caseTitle: fails caller-declared completion closed and conserves every disposition with execution lineage
           anchorSymbol: canonicalizeObservationPopulationV1
           assertedBehavior: 完整声明仍需真实 receipt 集合及错误观察约束；有 error 的五类 disposition 守恒为 unknown。
           assertionExcerpt: |-
@@ -1147,13 +1140,11 @@ diagrams:
         source:
           path: src/service/production/StrictAnalysisContracts.ts
           symbol: canonicalizeKnowledgeClustersV1
-          excerpt: const observations = new Map(population.observations.map((row) => [row.observationId,
-            row]));
+          excerpt: const observations = new Map(population.observations.map((row) => [row.observationId, row]));
         test:
           relation: direct
           path: test/StrictAnalysisProductionContracts.test.ts
-          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one
-            disposition
+          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one disposition
           anchorSymbol: canonicalizeKnowledgeClustersV1
           assertedBehavior: 同一观察可属于多个机制簇；合并时必须覆盖全部成员 fact，缺失成员证据拒绝。
           assertionExcerpt: ).toThrow('CLUSTER_MEMBER_EVIDENCE_INCOMPLETE');
@@ -1170,8 +1161,7 @@ diagrams:
         test:
           relation: direct
           path: test/StrictAnalysisProductionContracts.test.ts
-          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one
-            disposition
+          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one disposition
           anchorSymbol: canonicalizeKnowledgeClustersV1
           assertedBehavior: 同一观察可属于多个机制簇；合并时必须覆盖全部成员 fact，缺失成员证据拒绝。
           assertionExcerpt: ).toThrow('CLUSTER_MEMBER_EVIDENCE_INCOMPLETE');
@@ -1188,8 +1178,7 @@ diagrams:
         test:
           relation: direct
           path: test/StrictAnalysisProductionContracts.test.ts
-          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one
-            disposition
+          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one disposition
           anchorSymbol: canonicalizeKnowledgeClustersV1
           assertedBehavior: 同一观察可属于多个机制簇；合并时必须覆盖全部成员 fact，缺失成员证据拒绝。
           assertionExcerpt: ).toThrow('CLUSTER_MEMBER_EVIDENCE_INCOMPLETE');
@@ -1202,13 +1191,11 @@ diagrams:
         source:
           path: src/service/production/StrictAnalysisContracts.ts
           symbol: canonicalizeKnowledgeClustersV1
-          excerpt: "return freezeDeep({ ...semantic, clusterSetHash: hashKnowledgeClusterSetV1(clusterSet)
-            });"
+          excerpt: "return freezeDeep({ ...semantic, clusterSetHash: hashKnowledgeClusterSetV1(clusterSet) });"
         test:
           relation: direct
           path: test/StrictAnalysisProductionContracts.test.ts
-          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one
-            disposition
+          caseTitle: canonicalizes one-to-many cluster membership while giving every observation one disposition
           anchorSymbol: canonicalizeKnowledgeClustersV1
           assertedBehavior: 同一观察可属于多个机制簇；合并时必须覆盖全部成员 fact，缺失成员证据拒绝。
           assertionExcerpt: ).toThrow('CLUSTER_MEMBER_EVIDENCE_INCOMPLETE');
@@ -1284,7 +1271,7 @@ diagrams:
           caseTitle: supports singleton and recurring induction while rejecting string-certified zero
           anchorSymbol: createInductionReceiptV1
           assertedBehavior: 仅一个 observation 不能声称 recurring；需明确 bounded-singleton 或补齐真实重复观察。
-          assertionExcerpt: >-
+          assertionExcerpt: |-
             expect(() =>
                   createInductionReceiptV1({
                     populationHash: 'sha256:population',
@@ -1364,8 +1351,7 @@ diagrams:
         source:
           path: src/service/production/StrictAnalysisContracts.ts
           symbol: createFalsificationReceiptV1
-          excerpt: const executions = normalizeFalsificationExecutions(input.executions,
-            enrolledCounterqueryIds);
+          excerpt: const executions = normalizeFalsificationExecutions(input.executions, enrolledCounterqueryIds);
         test:
           relation: direct
           path: test/StrictSemanticEvidenceAuthority.test.ts
@@ -1466,8 +1452,7 @@ diagrams:
         source:
           path: src/service/production/StrictAnalysisContracts.ts
           symbol: decideFalsificationVerdict
-          excerpt: "return executions.some((row) => row.counterexampleFactIds.length > 0) ? 'refuted' :
-            'survived';"
+          excerpt: "return executions.some((row) => row.counterexampleFactIds.length > 0) ? 'refuted' : 'survived';"
         test:
           relation: indirect
           path: test/StrictSemanticEvidenceAuthority.test.ts
@@ -1477,6 +1462,453 @@ diagrams:
           assertionExcerpt: expect(terminal.verdict).toBe('survived');
           scenarioKind: positive-and-negative
           reason: 该case覆盖完整无反例的survived；refuted分支此处仅有源码依据，未声称同case已覆盖。
+  - id: strict-prepared-replay
+    title: Prepared重放：先重验授权，再精确inspect
+    viewType: R0
+    description: authorize/inspect/create均为注入端口；Core不写journal consumed、不重算端口hash，也不自动重试。V08明确使用内存合同。
+    nodes:
+      - id: p1
+        label: 同item / prepared / context
+        role: operation
+      - id: p2
+        label: 同步payload与authority重验
+        role: operation
+      - id: p3
+        label: await authorize端口
+        role: operation
+      - id: p4
+        label: await inspect端口
+        role: operation
+      - id: p5
+        label: 精确existing / recovered
+        role: operation
+      - id: p6
+        label: missing / await create
+        role: operation
+      - id: p7
+        label: ID核对 / await再inspect
+        role: operation
+      - id: p8
+        label: 精确匹配 / created
+        role: operation
+      - id: pe
+        label: 拒绝或端口异常
+        role: operation
+      - id: pr
+        label: 调用方保留身份并排故
+        role: boundary
+    edges:
+      - id: pr-1
+        from: p1
+        to: p2
+        label: 任何写前同步核对
+        kind: call
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: assertStrictPersistenceAuthorityV1({
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write
+          anchorSymbol: gateway
+          assertedBehavior: G1→Admission→G2身份错配在端口访问之前拒绝。
+          assertionExcerpt: expect(authorizePreparedRecipe).not.toHaveBeenCalled();
+          scenarioKind: rejected
+      - id: pr-2
+        from: p2
+        to: p3
+        label: 重验后await授权
+        kind: call
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: "!(await this.#authorizePreparedRecipe("
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: authorizes the internal prepared ID, reads it back, and reports zero UUID allocation
+          anchorSymbol: gateway
+          assertedBehavior: 有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。
+          assertionExcerpt: expect(result.status).toBe('created');
+          scenarioKind: normal
+      - id: pr-3
+        from: p3
+        to: p4
+        label: 授权允许才inspect
+        kind: call
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: const existing = await this.#inspectPreparedRecipe(prepared);
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: recovers an exact persist-before-consumed row without creating a duplicate
+          anchorSymbol: gateway
+          assertedBehavior: 精确已有inspection返回recovered，本次不调用create。
+          assertionExcerpt: expect(create).not.toHaveBeenCalled();
+          scenarioKind: recovered
+      - id: pr-4
+        from: p4
+        to: p5
+        label: existing须10字段匹配
+        kind: state
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: assertPreparedRecipeInspection(existing, prepared, context);
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: recovers an exact persist-before-consumed row without creating a duplicate
+          anchorSymbol: gateway
+          assertedBehavior: 精确已有inspection返回recovered，本次不调用create。
+          assertionExcerpt: expect(create).not.toHaveBeenCalled();
+          scenarioKind: recovered
+      - id: pr-5
+        from: p4
+        to: p6
+        label: missing才create固定ID
+        kind: call
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: "const saved = await this.#knowledgeService.create(data, { userId: context.userId });"
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: authorizes the internal prepared ID, reads it back, and reports zero UUID allocation
+          anchorSymbol: gateway
+          assertedBehavior: 有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。
+          assertionExcerpt: expect(result.status).toBe('created');
+          scenarioKind: normal
+      - id: pr-6
+        from: p6
+        to: p7
+        label: create返回后再次读回
+        kind: call
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: const inspected = await this.#inspectPreparedRecipe(prepared);
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: authorizes the internal prepared ID, reads it back, and reports zero UUID allocation
+          anchorSymbol: gateway
+          assertedBehavior: 有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。
+          assertionExcerpt: expect(result.status).toBe('created');
+          scenarioKind: normal
+      - id: pr-7
+        from: p7
+        to: p8
+        label: 精确inspection才能created
+        kind: state
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: assertPreparedRecipeInspection(inspected, prepared, context);
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: authorizes the internal prepared ID, reads it back, and reports zero UUID allocation
+          anchorSymbol: gateway
+          assertedBehavior: 有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。
+          assertionExcerpt: expect(result.status).toBe('created');
+          scenarioKind: normal
+      - id: pr-8
+        from: p2
+        to: pe
+        label: payload/authority错配写前拒绝
+        kind: state
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: const strictPayload = assertPreparedRecipeAuthoringProjection(
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: rejects an item changed after G1 review before journal authorization or write
+          anchorSymbol: gateway
+          assertedBehavior: 评审后的payload变化在授权/inspection/create之前拒绝。
+          assertionExcerpt: expect(inspectPreparedRecipe).not.toHaveBeenCalled();
+          scenarioKind: rejected
+      - id: pr-9
+        from: p3
+        to: pe
+        label: 授权拒绝
+        kind: state
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: throw new Error('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: fails closed for unauthorized or mismatched revision readback
+          anchorSymbol: RecipeProductionGateway
+          assertedBehavior: 授权false或旧revision inspection均拒绝。
+          assertionExcerpt: .rejects.toThrow('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+          scenarioKind: rejected
+      - id: pr-10
+        from: p4
+        to: pe
+        label: 读回冲突不覆盖
+        kind: state
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: assertPreparedRecipeInspection
+          excerpt: throw new Error('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+        test:
+          relation: indirect
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: fails closed for unauthorized or mismatched revision readback
+          anchorSymbol: RecipeProductionGateway
+          assertedBehavior: 通过Gateway返回旧revision inspection，assertPreparedRecipeInspection拒绝；此helper由Gateway间接调用。
+          assertionExcerpt: .rejects.toThrow('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+          scenarioKind: rejected
+      - id: pr-11
+        from: p6
+        to: pe
+        label: 端口已产生效果后可抛错
+        kind: state
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: "const saved = await this.#knowledgeService.create(data, { userId: context.userId });"
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: replays a persist-before-journal-consumed crash without a second Recipe
+          anchorSymbol: gateway
+          assertedBehavior: create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。
+          assertionExcerpt: expect(create).toHaveBeenCalledTimes(1);
+          scenarioKind: recovered
+      - id: pr-12
+        from: pe
+        to: pr
+        label: 调用方按原身份检查
+        kind: boundary
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: const existing = await this.#inspectPreparedRecipe(prepared);
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: replays a persist-before-journal-consumed crash without a second Recipe
+          anchorSymbol: gateway
+          assertedBehavior: create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。
+          assertionExcerpt: expect(create).toHaveBeenCalledTimes(1);
+          scenarioKind: recovered
+      - id: pr-13
+        from: pr
+        to: p1
+        label: 显式同身份重调
+        kind: recovery
+        source:
+          path: src/service/knowledge/RecipeProductionGateway.ts
+          symbol: RecipeProductionGateway
+          excerpt: const existing = await this.#inspectPreparedRecipe(prepared);
+        test:
+          relation: direct
+          path: test/StrictPreparedRecipeGateway.test.ts
+          caseTitle: replays a persist-before-journal-consumed crash without a second Recipe
+          anchorSymbol: gateway
+          assertedBehavior: create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。
+          assertionExcerpt: expect(create).toHaveBeenCalledTimes(1);
+          scenarioKind: recovered
+  - id: strict-wal-checkpoint
+    title: WAL checkpoint：已提交不等于主文件可签
+    viewType: R0
+    description: reader释放与重试由调用方执行；FULL可部分推进。receipt validator是独立身份校验，不重读磁盘。
+    nodes:
+      - id: w1
+        label: 同handle / runtime / context
+        role: operation
+      - id: w2
+        label: 同步FULL checkpoint
+        role: operation
+      - id: w3
+        label: busy或页未完整追赶
+        role: operation
+      - id: w4
+        label: stderr诊断 / 不签receipt
+        role: operation
+      - id: w5
+        label: 调用方释放自己reader
+        role: boundary
+      - id: w6
+        label: integrity / FK检查
+        role: operation
+      - id: w7
+        label: 读取当次主DB hash
+        role: operation
+      - id: w8
+        label: 绑定context并签receipt
+        role: operation
+      - id: w9
+        label: 独立validator / 磁盘对照
+        role: boundary
+    edges:
+      - id: wc-1
+        from: w1
+        to: w2
+        label: 身份重验后FULL
+        kind: call
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: runtime.sqlite.pragma('wal_checkpoint(FULL)')
+        test:
+          relation: direct
+          path: test/ProductionPersistenceContracts.test.ts
+          caseTitle: rejects an old revision receipt and checkpoint under a new current context
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: 不同runtime/revision/context不能复用旧handle或checkpoint回执。
+          assertionExcerpt: .toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');
+          scenarioKind: rejected
+      - id: wc-2
+        from: w2
+        to: w3
+        label: busy或log不等于checkpointed
+        kind: state
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: if (!checkpoint || checkpoint.busy !== 0 || checkpoint.log !== checkpoint.checkpointed) {
+        test:
+          relation: direct
+          path: test/ProductionPersistenceContracts.test.ts
+          caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database
+            file
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。
+          assertionExcerpt: expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
+          scenarioKind: recovered
+      - id: wc-3
+        from: w3
+        to: w4
+        label: 拒绝不回滚已提交数据
+        kind: state
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: const code = 'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE';
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: WAL reader blocking ends only after explicit release and checkpoint retry
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。
+          assertionExcerpt: expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);
+          scenarioKind: recovered
+      - id: wc-4
+        from: w4
+        to: w5
+        label: 明确指示由owner释放事务
+        kind: boundary
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: "nextAction: 'release active read transactions and retry checkpoint before sealing',"
+        test:
+          relation: direct
+          path: test/ProductionPersistenceContracts.test.ts
+          caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database
+            file
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。
+          assertionExcerpt: expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
+          scenarioKind: recovered
+      - id: wc-5
+        from: w5
+        to: w1
+        label: 调用者显式同context重试
+        kind: recovery
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: runtime.sqlite.pragma('wal_checkpoint(FULL)')
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: WAL reader blocking ends only after explicit release and checkpoint retry
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。
+          assertionExcerpt: expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);
+          scenarioKind: recovered
+      - id: wc-6
+        from: w2
+        to: w6
+        label: 完整追赶后校验DB
+        kind: call
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: "if (runtime.sqlite.pragma('integrity_check', { simple: true }) !== 'ok') {"
+        test:
+          relation: direct
+          path: test/ProductionPersistenceContracts.test.ts
+          caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database
+            file
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。
+          assertionExcerpt: expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
+          scenarioKind: recovered
+      - id: wc-7
+        from: w6
+        to: w7
+        label: FK检查后读主文件
+        kind: call
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: "databaseHash: hashBytes(fs.readFileSync(handle.resolver.databasePath)),"
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: WAL reader blocking ends only after explicit release and checkpoint retry
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。
+          assertionExcerpt: expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);
+          scenarioKind: recovered
+      - id: wc-8
+        from: w7
+        to: w8
+        label: 绑定context与initReceipt
+        kind: data
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: createPrivateCorpusRevisionCheckpointV1
+          excerpt: "return freezeDeep({ ...semantic, checkpointHash: hashCanonicalJson(semantic) });"
+        test:
+          relation: direct
+          path: alembic-core-architecture-atlas/probes/persistence-recovery.test.ts
+          caseTitle: WAL reader blocking ends only after explicit release and checkpoint retry
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。
+          assertionExcerpt: expect(recovered.databaseHash).toBe(recovered.actualDatabaseHash);
+          scenarioKind: recovered
+      - id: wc-9
+        from: w8
+        to: w9
+        label: 调用者独立重验 / 比较磁盘
+        kind: binding
+        source:
+          path: src/service/production/ProductionPersistenceContracts.ts
+          symbol: validatePrivateCorpusRevisionCheckpointV1
+          excerpt: const validatedInit = validatePrivateCorpusRevisionInitReceiptV1(
+        test:
+          relation: direct
+          path: test/ProductionPersistenceContracts.test.ts
+          caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database
+            file
+          anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+          assertedBehavior: 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。
+          assertionExcerpt: expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
+          scenarioKind: recovered
 configPaths:
   - package.json
   - tsconfig.json
@@ -1485,8 +1917,8 @@ configPaths:
 truthKind: current-code
 baselineCommit: 35302912ac2efaa6a1bc65fdc112a16da75d845f
 reviewDepth: L3
-reviewedAt: 2026-10-23
-reviewOrigin: architecture-atlas/implementation-2026-10-23/semantic-review.md
+reviewedAt: 2026-10-23T16:05:54.815Z
+reviewOrigin: architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md
 dependencySelection:
   - src/service/production/StrictProductionAuthority.ts
   - src/service/production/StrictFactExecution.ts
@@ -1499,7 +1931,7 @@ dependencySelection:
   - src/service/knowledge/RecipeProductionGateway.ts
   - src/service/knowledge/KnowledgeService.ts
 sourceFingerprint: dd69171ac7cf27cd3e4ce4308a17dfe57d17993224afb597c333a945f4f72f9b
-contextFingerprint: 030063ae57b172a14f2eb0677117a9b01db52f910a5208cc4ad82714bfcfe880
+contextFingerprint: aa3e593899189f32454bb445ada215ca2b199f05fef4abf1933ae74c0062c063
 moduleDetails:
   - name: 严格事实执行：完整冻结subject
     entry:
@@ -1656,18 +2088,16 @@ moduleDetails:
       path: src/service/production/StrictAnalysisContracts.ts
       symbol: canonicalizeObservationPopulationV1
       excerpt: const execution = validatePopulationExecutionReceipts(input, denominator);
-    input: populationId/revision/parentPopulationHash/sourceRevisionVectorHash；expected
-      observation/obligation 与 receipt/output/denominator hashes；五类观察和 omitted IDs；实际
-      executionReceipts。
-    output: 按 ID 规范的
-      ObservationPopulationV1、conservation、completion=complete|unknown、populationHash。revision=1 无
+    input: populationId/revision/parentPopulationHash/sourceRevisionVectorHash；expected observation/obligation 与
+      receipt/output/denominator hashes；五类观察和 omitted IDs；实际 executionReceipts。
+    output: 按 ID 规范的 ObservationPopulationV1、conservation、completion=complete|unknown、populationHash。revision=1 无
       parent，后续 revision 必须带 parent。
     calls: revision→rows→denominator→execution receipts→观察 lineage/duplicate
       target/no-pattern→conservation→receipt conservation；complete 还要求 caller complete、无
       truncation/continuation/omitted/error。
     sideEffects: 纯内存规范化与冻结。不会扫描源码、补跑缺失义务或删除失败观察；unknown 返回保留输入中的可解释分母。
-    limits: 只有哈希字符串而没有实际执行 receipt，不能签出 complete；每个 disposition 的去向需与 expected IDs 一致。canonicalizer
-      只核验本合同，完整 fact value 真实性仍受 R01 已知缺口约束。
+    limits: 只有哈希字符串而没有实际执行 receipt，不能签出 complete；每个 disposition 的去向需与 expected IDs 一致。canonicalizer 只核验本合同，完整 fact
+      value 真实性仍受 R01 已知缺口约束。
     graphRefs:
       - strict-population-cluster-formation
     failureRefs:
@@ -1684,11 +2114,11 @@ moduleDetails:
       excerpt: const dispositions = [...observations.keys()]
     input: 已构造 population 与 Analyst 提供的 clusters（机制内容、observationIds、全部 mechanismEvidenceFactIds、lens
       IDs），以及未成簇观察的 nonClusteredDispositions。
-    output: 每个簇的 canonical clusterId/memberLineage/成员 facts、subject/variant/outlier/negativeControl
-      聚合；每条 accepted observation 恰一条 disposition；clusterSetHash。
+    output: 每个簇的 canonical clusterId/memberLineage/成员 facts、subject/variant/outlier/negativeControl 聚合；每条 accepted
+      observation 恰一条 disposition；clusterSetHash。
     calls: canonicalizeKnowledgeCluster→校验重复
-      cluster/disposition→createKnowledgeClusterDisposition→validateNonClusteredDisposition；discarded
-      必须独立 review 绑定同 population 和精确提案，unresolved 必须 owner/resumePoint。
+      cluster/disposition→createKnowledgeClusterDisposition→validateNonClusteredDisposition；discarded 必须独立
+      review 绑定同 population 和精确提案，unresolved 必须 owner/resumePoint。
     sideEffects: 不自动推断或生成语义机制，不调用模型，不改变 population。一个 observation 可属于多个簇，但不能同时被声明 non-clustered。
     limits: 同名 mechanismKey 不是合并授权：机制内容与所有成员 fact 也进入身份。unknown population 可以被规范化，不因此变成可终结的生产授权；终态须由后续
       authority/fixpoint 再验。
@@ -1733,13 +2163,13 @@ moduleDetails:
     input: hypothesisId、enrolledCounterqueryIds、CounterqueryExecutionV1（execution receipt 与
       counterexampleFactIds）、required/not-required applicability、currentAnalysisFixpointHash、独立
       dispositionReview。
-    output: 冻结的 FalsificationReceiptV1、receiptHash，verdict 为
-      unknown/refuted/survived/not-required。每项反例必须属于相应 execution receipt emittedFactIds。
-    calls: review integrity/current fixpoint→执行去重并检查 enrolled/receipt 身份→applicability→精确提案
-      hash→not-required 专门分支，或校验 review执行集合→判定完整性和反例。
+    output: 冻结的 FalsificationReceiptV1、receiptHash，verdict 为 unknown/refuted/survived/not-required。每项反例必须属于相应
+      execution receipt emittedFactIds。
+    calls: review integrity/current fixpoint→执行去重并检查 enrolled/receipt 身份→applicability→精确提案 hash→not-required
+      专门分支，或校验 review执行集合→判定完整性和反例。
     sideEffects: 不会运行 counterquery、寻找反例或重试；只核验已提供的执行和独立评审材料。
-    limits: required 至少登记一项；漏执行、failed/unknown、零 expectedFileCount、未完全 inspected、truncated/continuation
-      均使 verdict unknown。survived 只对已登记且完整执行的范围成立；not-required 需要 review 证明且登记/执行都为空。
+    limits: required 至少登记一项；漏执行、failed/unknown、零 expectedFileCount、未完全 inspected、truncated/continuation 均使 verdict
+      unknown。survived 只对已登记且完整执行的范围成立；not-required 需要 review 证明且登记/执行都为空。
     graphRefs:
       - strict-induction-falsification-formation
     failureRefs:
@@ -1755,16 +2185,15 @@ moduleDetails:
       path: src/service/knowledge/RecipeProductionGateway.ts
       symbol: RecipeProductionGateway
       excerpt: return executeStrictCandidateAdmission({
-    input: CreateRecipeItem、reviewedProjection、G1 receipt、run/fixpoint/private revision 坐标；注入完整 accepted
-      corpus inspector 与 consolidation advisor。
-    output: StrictCandidateAdmissionResultV1：与同一 reviewed fingerprint 绑定的 admission 结果和 corpus
-      inspection；尚无新的 Recipe 持久写入。
+    input: CreateRecipeItem、reviewedProjection、G1 receipt、run/fixpoint/private revision 坐标；注入完整 accepted corpus
+      inspector 与 consolidation advisor。
+    output: StrictCandidateAdmissionResultV1：与同一 reviewed fingerprint 绑定的 admission 结果和 corpus inspection；尚无新的
+      Recipe 持久写入。
     calls: admitCandidate 检查必要 adapter/G1 pass/投影相同后 executeStrictCandidateAdmission；加载完整 corpus，再运行现有
       validation/dedup/consolidation 并构造 receipt。
-    sideEffects: 读取完整 accepted corpus；此准入方法不调用 KnowledgeService.create/update 或 proposal 写路径。G1 receipt
-      自身是轴结果的纯构造。
-    limits: 缺 inspector/advisor、G1 mismatch 或 corpus incomplete/truncated 必须停止；不得用局部搜索结果冒充完整 accepted
-      corpus。准入与后续 G2/持久化是独立调用。
+    sideEffects: 读取完整 accepted corpus；此准入方法不调用 KnowledgeService.create/update 或 proposal 写路径。G1 receipt 自身是轴结果的纯构造。
+    limits: 缺 inspector/advisor、G1 mismatch 或 corpus incomplete/truncated 必须停止；不得用局部搜索结果冒充完整 accepted corpus。准入与后续
+      G2/持久化是独立调用。
     graphRefs:
       - strict-admission-persistence
     failureRefs:
@@ -1783,11 +2212,11 @@ moduleDetails:
       rows、novelty、duplicate、repairAttempt、calibration/ruleVersion 与 permittedRepairFields。
     output: 包含 G1/Admission hashes、run/fixpoint/private revision、各轴与 novelty/duplicate 决策的
       StrictG2ReceiptV1；deriveStrictG2Verdict 决定 verdict。
-    calls: 先 assert G1/Admission 完整性和 fingerprint 链，再规范并区分 producer/reviewer；duplicate 必须与同一 corpus
-      revision/算法的 no-match 一致；规范修复字段后冻结。
+    calls: 先 assert G1/Admission 完整性和 fingerprint 链，再规范并区分 producer/reviewer；duplicate 必须与同一 corpus revision/算法的
+      no-match 一致；规范修复字段后冻结。
     sideEffects: 纯构造，不调用评审模型、Admission 或 prepared writer；也不因构造成功而自动创建 recipe。
-    limits: producer/reviewer 同身份拒绝；admission 的合并/重复结果不能改写成 admit；只有 revise 可带
-      permittedRepairFields。此卡不把 V5 知识处置评审自动等同于候选 G2。
+    limits: producer/reviewer 同身份拒绝；admission 的合并/重复结果不能改写成 admit；只有 revise 可带 permittedRepairFields。此卡不把 V5
+      知识处置评审自动等同于候选 G2。
     graphRefs:
       - strict-admission-persistence
     failureRefs: []
@@ -1801,21 +2230,25 @@ moduleDetails:
       path: src/service/knowledge/RecipeProductionGateway.ts
       symbol: RecipeProductionGateway
       excerpt: const existing = await this.#inspectPreparedRecipe(prepared);
-    input: reviewed item/projection；prepareRecipePersistenceV1 派生的 ID 和预期 DB/file/journal
-      hashes；G1/Admission/G2 同链 receipts；journalToken 与 authorize/inspect adapters。
-    output: Gateway 返回 created 或 recovered、精确 inspection、prepared 和 strictUuidAllocations=0；调用者再用实际
-      ID/hash/lifecycle 构造独立 StrictPersistenceReceipt。
-    calls: prepare helper 只派生身份；persistPreparedReviewedCandidate 重验投影与授权链→journal 授权→已有行精确 inspection 则
-      recovered，否则 KnowledgeService.create→核对 ID→重新 inspect→返回。
-    sideEffects: 可能真实调用知识写入；授权前不写、已有一致行不重复写。发生写后读回失败时主写入可能已存在，不能当作回滚；显式恢复继续使用同 prepared 身份。
-    limits: 缺 authorize/inspect、任一 fingerprint/receipt 链不符或已有行hash冲突均停止。不得换新 UUID 掩盖分歧；Gateway 的
-      created/recovered 不自动等于 refs、coverage 或 serving 完成。
+    input: reviewed item/projection；prepareRecipePersistenceV1 派生的 ID 和预期 DB/file/journal hashes；G1/Admission/G2
+      同链 receipts；journalToken 与 authorize/inspect adapters。
+    output: created或recovered及strictUuidAllocations=0；写前拒绝、ID分歧、读回缺失或读回冲突均抛错。
+    calls: 先同步admit source、端口存在、authored projection和G1→Admission→G2；再await authorize，再await
+      inspect；existing全10字段匹配则recovered。missing才await create，核对ID后再次await inspect并返回created。
+    sideEffects: Core只执行注入的授权/inspection/knowledgeService.create协议。create已产生效果后抛错会直接传播，无内部回滚、自动重试或journal consumed写入。
+    limits: preparedRecipeId仅绑定规定的5项身份，preparedHash另外绑定cell/parents/expected hashes/journal
+      step；ID一致不足。inspection只比较端口返回的10字段，不负责重新计算文件/DB
+      hash。V08是内存/注入端口合同；返回recovered不证明refs、coverage、Serving或外层journal完成。
     graphRefs:
       - strict-admission-persistence
       - strict-final-serving
+      - strict-prepared-replay
     failureRefs:
       - stf-prepared-authority-mismatch
       - stf-prepared-after-write
+      - stf-prepared-authorization
+      - stf-prepared-inspection-conflict
+      - stf-prepared-item-mismatch
     apiRefs:
       - .
       - ./knowledge
@@ -1826,18 +2259,17 @@ moduleDetails:
       path: src/service/production/ProductionPersistenceContracts.ts
       symbol: createFinalCoverageBindingReceiptV1
       excerpt: assertCandidateCoverageReceiptHash(input.candidateCoverage);
-    input: candidate coverage 的完整 required cells 与 production binding hashes；实际 G4/candidate data
-      manifest；final recipe IDs/fingerprints；serving validation/vector/certified facts 与 route
-      lineage。
+    input: candidate coverage 的完整 required cells 与 production binding hashes；实际 G4/candidate data manifest；final
+      recipe IDs/fingerprints；serving validation/vector/certified facts 与 route lineage。
     output: 独立的 CandidateCoverageReceipt、FinalCoverageBindingReceipt、ServingSnapshotManifest 和
       PreparedPublicKnowledgeRoute。每段各有 hash，不能相互替代。
     calls: createCandidateCoverageReceiptV1 拒绝 missing/duplicate/nonterminal
       cells；createFinalCoverageBindingReceiptV1 重验 candidate hash 与相同 cell/recipe
-      集合；createServingSnapshotManifestV1 绑定 validation hash；preparePublicKnowledgeRouteV1 仅返回
-      canonical bytes，classify... 按字节分类恢复。
+      集合；createServingSnapshotManifestV1 绑定 validation hash；preparePublicKnowledgeRouteV1 仅返回 canonical
+      bytes，classify... 按字节分类恢复。
     sideEffects: 这些构造器不查询磁盘、不执行 G4/向量检索、不 rename 公共路由。实际检查、收集各 hash 和原子切换由外层显式调用方负责。
-    limits: content-ready candidate 与 final ready 不同；hash 绑定不证明被引用材料确实执行。公开 route 时间变化即使 semanticHash
-      相同也可能 byte conflict；不得把语义相等当作可覆盖授权。
+    limits: content-ready candidate 与 final ready 不同；hash 绑定不证明被引用材料确实执行。公开 route 时间变化即使 semanticHash 相同也可能 byte
+      conflict；不得把语义相等当作可覆盖授权。
     graphRefs:
       - strict-final-serving
       - strict-recovery
@@ -1848,6 +2280,26 @@ moduleDetails:
       - ./knowledge
       - ./production
     aliases: []
+  - id: M15-17
+    name: Private revision checkpoint：读事务、主文件与回执边界
+    entry:
+      path: src/service/production/ProductionPersistenceContracts.ts
+      symbol: createPrivateCorpusRevisionCheckpointV1
+      excerpt: runtime.sqlite.pragma('wal_checkpoint(FULL)')
+    input: 同revision的注册handle/runtime、expectedCurrentContext；数据库可能存在已提交但尚在WAL的页。
+    output: FULL完整、integrity=ok、FK无违规后返回冻结checkpoint receipt；busy/partial、runtime/context错配或完整性失败均拒绝。
+    calls: handle与context重验→同步SQLite
+      FULL→检查busy/log/checkpointed→integrity_check→foreign_key_check→读取主DB字节hash→绑定initReceipt/context。validatePrivateCorpusRevisionCheckpointV1由调用者另行调用。
+    sideEffects: FULL可推进主文件；失败也可能部分checkpoint。错误不回滚writer已提交数据，不释放别人的reader，也不自动重试。
+    limits: 主文件hash只代表该次读取；没有额外writer的隔离样本不等于全系统封存。validator核对身份/回执自洽，不重新读当前磁盘。fixture busy_timeout=1ms不是生产默认值。
+    aliases: []
+    graphRefs:
+      - strict-wal-checkpoint
+    failureRefs:
+      - stf-wal-not-sealed
+      - stf-checkpoint-context
+    apiRefs:
+      - ./workspace
 failureModes:
   - id: stf-evidence-load
     trigger: evidenceStore loadOperationId为空/同次重复，或证据ID/session/semanticRole/harvest集合与请求不一致
@@ -1920,8 +2372,7 @@ failureModes:
       - strict-durable-review
     apiRefs: []
   - id: stf-durable-tamper
-    trigger: serialized attestation的group、root、request、load receipt、hash或signature被改；或expected trust
-      policy不符
+    trigger: serialized attestation的group、root、request、load receipt、hash或signature被改；或expected trust policy不符
     remainingState: 原serialized材料可保留供审查；validator无写副作用
     automaticAction: 重建loadReceipt、核对完整执行集合、验Ed25519与policy，不符即拒绝
     explicitRecovery: 调用方从原可信store重取未损坏attestation及预批准policy；若真实输入改变需重做评审
@@ -1975,8 +2426,8 @@ failureModes:
       - ./production
   - id: stf-wal-not-sealed
     trigger: 旧读事务使FULL WAL checkpoint busy或log页未全部checkpointed
-    remainingState: 已提交数据可能仍在WAL，主DB hash不能表示全部已提交状态；不返回checkpoint receipt
-    automaticAction: 检查busy/log/checkpointed，记录明确诊断并抛WAL_CHECKPOINT_INCOMPLETE
+    remainingState: writer已提交的数据可仍在WAL，主DB不包含全部提交；FULL可能已部分推进。没有checkpoint receipt，不表示事务回滚。
+    automaticAction: 检查busy/log/checkpointed，输出run/revision与页数诊断，抛PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE；不返回receipt。
     explicitRecovery: 持有reader的owner释放读事务后显式重试checkpoint；不是自动回滚已提交数据
     stopCondition: WAL未全入主DB前不可签发封存hash
     source:
@@ -1986,25 +2437,65 @@ failureModes:
     test:
       relation: direct
       path: test/ProductionPersistenceContracts.test.ts
-      caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching
-        the database file
+      caseTitle: refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database
+        file
       anchorSymbol: createPrivateCorpusRevisionCheckpointV1
-      assertedBehavior: 旧reader阻塞WAL时拒绝签DB hash，ROLLBACK释放后checkpoint通过且hash变化。
-      assertionExcerpt: |-
-        expect(() => createPrivateCorpusRevisionCheckpointV1(handle, runtime, context)).toThrow(
-                'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE'
-              )
-      scenarioKind: recovery
+      assertedBehavior: 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。
+      assertionExcerpt: expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
+      scenarioKind: recovered
     aliases:
       - stf-wal-not-sealed--旧读事务使full-wal-checkpoint-busy或log页未全部checkpointed
     moduleRefs:
       - M15-07
+      - M15-17
     graphRefs:
       - strict-final-serving
       - strict-recovery
+      - strict-wal-checkpoint
     apiRefs:
       - ./production
       - ./workspace
+    runbook:
+      preconditions: 同一revision/handle/runtime/expected context可核验，保留原错误；仅操作本运行负责的数据库。
+      checks: &a2
+        - observe: 读取精确错误码与stderr的runId/revisionId/busy/logPages/checkpointedPages。
+          meaning: FULL可能返回busy而不抛SQLite错误；Core据状态拒绝签发，已提交数据仍可在WAL。
+          source:
+            path: src/service/production/ProductionPersistenceContracts.ts
+            symbol: createPrivateCorpusRevisionCheckpointV1
+            excerpt: const code = 'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE';
+          fields:
+            - busy
+            - logPages
+            - checkpointedPages
+            - nextAction
+        - observe: 由持有reader的owner确认读事务及可见数据，另查writer提交状态。
+          meaning: 旧reader只见旧快照不代表writer未提交；Core不会替owner释放事务。
+          source:
+            path: src/service/production/ProductionPersistenceContracts.ts
+            symbol: createPrivateCorpusRevisionCheckpointV1
+            excerpt: "nextAction: 'release active read transactions and retry checkpoint before sealing',"
+          fields:
+            - reader.inTransaction
+            - writerRows
+            - readerRows
+        - observe: 显式重试后核对integrity/FK，并将receipt.databaseHash与当次主文件字节比较。
+          meaning: 随后调用validator校验context；不能用历史validator通过替代现场磁盘读回。
+          source:
+            path: src/service/production/ProductionPersistenceContracts.ts
+            symbol: createPrivateCorpusRevisionCheckpointV1
+            excerpt: "databaseHash: hashBytes(fs.readFileSync(handle.resolver.databasePath)),"
+          fields:
+            - databaseHash
+            - checkpointHash
+            - initReceiptHash
+            - sqliteIntegrity
+            - foreignKeyViolationCount
+      action: 持有reader的owner正常结束自己的读事务后，调用者显式再次createPrivateCorpusRevisionCheckpointV1；成功后另调validator并独立核对当次主文件hash。
+      identity: 复用同run/revision/fixpoint/config/runtimeReceiptHash
+        context；同handle注册的新SQLite连接可用，未注册或其他revision的runtime拒绝。context变更不能复用旧回执身份。
+      verify: 无阻挡样本中writer/reader均可见2行；回执hash与主文件一致，独立validator通过。probe的checkpointAfterRetry是另一次PASSIVE读数，不伪称内部FULL返回。
+      stop: reader仍阻挡、context错配、integrity/FK失败或hash无法对照时停止；不得删除-wal/-shm、换DB文件或造receipt。
   - id: stf-r01-value-integrity-gap
     trigger: 结构复制/序列化后的FactRecord.value改变但保留factId/valueHash等身份（R01）
     remainingState: 当前公开重验仍可能通过，authorityHash不变；不是已被系统拒绝的安全失败
@@ -2032,8 +2523,7 @@ failureModes:
     trigger: 声明 complete 但实际执行不足、含 error/omitted，或仍有 truncation/continuation
     remainingState: 规范 population 保留分母与五类处置、omitted IDs；completion=unknown，未写任何持久对象。
     automaticAction: 依据 receiptAuthorityComplete 和剩余字段计算 unknown；不补跑，不将 error 静默排除。
-    explicitRecovery: 调用者检查 obligation/receipt/output/denominator集合及失败观察；完成缺失执行后形成有父hash的新 population
-      revision，重新构造下游材料。
+    explicitRecovery: 调用者检查 obligation/receipt/output/denominator集合及失败观察；完成缺失执行后形成有父hash的新 population revision，重新构造下游材料。
     stopCondition: 不能复用旧 complete 标记或删除 error/omitted 减小分母；未知状态不能当作最终完整证据。
     source:
       path: src/service/production/StrictAnalysisContracts.ts
@@ -2044,8 +2534,7 @@ failureModes:
     test:
       relation: direct
       path: test/StrictSemanticEvidenceAuthority.test.ts
-      caseTitle: fails caller-declared completion closed and conserves every disposition with execution
-        lineage
+      caseTitle: fails caller-declared completion closed and conserves every disposition with execution lineage
       anchorSymbol: canonicalizeObservationPopulationV1
       assertedBehavior: 完整声明仍需真实 receipt 集合及错误观察约束；有 error 的五类 disposition 守恒为 unknown。
       assertionExcerpt: |-
@@ -2099,7 +2588,7 @@ failureModes:
       caseTitle: supports singleton and recurring induction while rejecting string-certified zero
       anchorSymbol: createInductionReceiptV1
       assertedBehavior: 仅一个 observation 不能声称 recurring；需明确 bounded-singleton 或补齐真实重复观察。
-      assertionExcerpt: >-
+      assertionExcerpt: |-
         expect(() =>
               createInductionReceiptV1({
                 populationHash: 'sha256:population',
@@ -2264,22 +2753,68 @@ failureModes:
         assertStrictPersistenceAuthorityV1({
               prepared,
     test:
-      relation: indirect
+      relation: direct
       path: test/StrictPreparedRecipeGateway.test.ts
       caseTitle: rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write
-      anchorSymbol: RecipeProductionGateway
-      assertedBehavior: 准入fingerprint被改后，journal授权、inspection和create均不调用。
-      assertionExcerpt: expect(inspectPreparedRecipe).not.toHaveBeenCalled();
-      scenarioKind: failure
-      reason: 直接调用gateway，间接覆盖持久授权校验；非直接调用G2构造器。
+      anchorSymbol: gateway
+      assertedBehavior: G1→Admission→G2身份错配在端口访问之前拒绝。
+      assertionExcerpt: expect(authorizePreparedRecipe).not.toHaveBeenCalled();
+      scenarioKind: rejected
     moduleRefs:
       - M15-15
     graphRefs:
       - strict-admission-persistence
       - strict-final-serving
+      - strict-prepared-replay
     apiRefs:
       - .
       - ./knowledge
+    runbook:
+      preconditions: 原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+      checks: &a1
+        - observe: 保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。
+          meaning: ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。
+          source:
+            path: src/service/production/ProductionPersistenceContracts.ts
+            symbol: prepareRecipePersistenceV1
+            excerpt: const preparedRecipeId = deterministicUuid(hashCanonicalJson(preparedIdentity));
+          fields:
+            - runId
+            - analysisFixpointHash
+            - privateCorpusRevision
+            - admissionId
+            - authoredFingerprint
+            - preparedHash
+        - observe: 确认authorize端口存在且允许原token；记录inspect是否返回existing。
+          meaning: token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。
+          source:
+            path: src/service/knowledge/RecipeProductionGateway.ts
+            symbol: RecipeProductionGateway
+            excerpt: const existing = await this.#inspectPreparedRecipe(prepared);
+          fields:
+            - journalToken
+            - existing
+        - observe: 逐项对照inspection与prepared/context的10字段。
+          meaning: 只比较端口返回值；该步骤不是现场文件/DB hash重算。
+          source:
+            path: src/service/knowledge/RecipeProductionGateway.ts
+            symbol: assertPreparedRecipeInspection
+            excerpt: inspection.fileHash !== prepared.expectedFileHash
+          fields:
+            - id
+            - privateCorpusRevision
+            - preparedHash
+            - admissionId
+            - g1ReceiptHash
+            - admissionReceiptHash
+            - g2ReceiptHash
+            - authoredFingerprint
+            - dbHash
+            - fileHash
+      action: 追查payload或authority链哪个版本已变化；对正确输入重新完成真实评审链，不能单改hash或跳过G2。
+      identity: 恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+      verify: 精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+      stop: 写前拒绝是正确拒绝，不是已恢复；不得访问未获授权的create端口。
   - id: stf-coverage-nonterminal
     trigger: candidate coverage 中存在 failed/unknown cell
     remainingState: 原候选与持久化资料保持不变；没有 CandidateCoverageReceipt。
@@ -2331,9 +2866,9 @@ failureModes:
       - ./production
   - id: stf-prepared-after-write
     trigger: 真实写入端口已保存行后抛错，Gateway尚未完成读回/消费结果
-    remainingState: 同prepared ID的存储可能已经存在；Gateway本次抛错，不保证自动回滚。
+    remainingState: 注入create端口可能已保存其负责的数据后抛错，Gateway未返回；现成V08用内存stored模拟该边界，不证明真实落盘。
     automaticAction: 异常向调用者传播；此入口没有自动换ID或重跑。
-    explicitRecovery: 调用者排除故障后显式重调同item、prepared及同链context；Gateway先inspect，精确匹配则recovered且不再create。
+    explicitRecovery: 调用者排故后使用同item/prepared/context再次进入；精确inspection则recovered、不再create；Core没有自动重试或消费journal。
     stopCondition: 旧记录的revision/hash/fingerprint不匹配则停止；不能仅凭ID存在就接受，不能新建UUID绕过。
     source:
       path: src/service/knowledge/RecipeProductionGateway.ts
@@ -2343,18 +2878,155 @@ failureModes:
       relation: direct
       path: test/StrictPreparedRecipeGateway.test.ts
       caseTitle: replays a persist-before-journal-consumed crash without a second Recipe
-      anchorSymbol: RecipeProductionGateway
-      assertedBehavior: 注入create先保存fixture
-        inspection再抛错；显式同身份重试返回recovered、相同ID且create仅调用一次。该case是端口注入，非真实SQLite/Markdown崩溃证明。
+      anchorSymbol: gateway
+      assertedBehavior: create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。
       assertionExcerpt: expect(create).toHaveBeenCalledTimes(1);
-      scenarioKind: recovery
+      scenarioKind: recovered
     moduleRefs:
       - M15-15
     graphRefs:
       - strict-admission-persistence
+      - strict-prepared-replay
     apiRefs:
       - .
       - ./knowledge
+    runbook:
+      preconditions: 原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+      checks: *a1
+      action: 排除端口故障后显式persistPreparedReviewedCandidate(item, prepared,
+        context)，先允许Core检查existing，不能直接绕过inspection重复create。
+      identity: 恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+      verify: 精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+      stop: 身份变更、authorize拒绝、inspection不匹配或持续missing时停止；不签外层发布完成。
+  - id: stf-prepared-authorization
+    trigger: authorizePreparedRecipe对当前journal token/prepared返回false
+    remainingState: 尚未inspect/create；输入仍由调用者保留。
+    automaticAction: await授权结果后抛STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED。
+    explicitRecovery: 由授权owner检查原token与真实journal依据；有效授权前不进入写入。
+    stopCondition: 不能伪造token、改ID或绕过授权。
+    source:
+      path: src/service/knowledge/RecipeProductionGateway.ts
+      symbol: RecipeProductionGateway
+      excerpt: throw new Error('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+    test:
+      relation: direct
+      path: test/StrictPreparedRecipeGateway.test.ts
+      caseTitle: fails closed for unauthorized or mismatched revision readback
+      anchorSymbol: RecipeProductionGateway
+      assertedBehavior: 授权false或旧revision inspection均拒绝。
+      assertionExcerpt: .rejects.toThrow('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+      scenarioKind: rejected
+    moduleRefs:
+      - M15-15
+    graphRefs:
+      - strict-prepared-replay
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+      checks: *a1
+      action: 授权owner修正真实授权依据后再用匹配材料显式进入。
+      identity: 恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+      verify: 精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+      stop: 授权持续拒绝或journal来源不明时停止。
+  - id: stf-prepared-inspection-conflict
+    trigger: existing/读回inspection与prepared/context任一身份字段不符
+    remainingState: 现存inspection与存储由端口拥有，Core不覆盖冲突记录。
+    automaticAction: assertPreparedRecipeInspection抛STRICT_PREPARED_PERSISTENCE_DIVERGENCE。
+    explicitRecovery: 读回原数据与10项身份来源，由owner决定正确版本；保留冲突材料。
+    stopCondition: 不能把相同ID当作精确恢复，也不能重写expected hashes消除冲突。
+    source:
+      path: src/service/knowledge/RecipeProductionGateway.ts
+      symbol: assertPreparedRecipeInspection
+      excerpt: throw new Error('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+    test:
+      relation: indirect
+      path: test/StrictPreparedRecipeGateway.test.ts
+      caseTitle: fails closed for unauthorized or mismatched revision readback
+      anchorSymbol: RecipeProductionGateway
+      assertedBehavior: 通过Gateway返回旧revision inspection，assertPreparedRecipeInspection拒绝；此helper由Gateway间接调用。
+      assertionExcerpt: .rejects.toThrow('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+      scenarioKind: rejected
+    moduleRefs:
+      - M15-15
+    graphRefs:
+      - strict-prepared-replay
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+      checks: *a1
+      action: 先复核inspection如何产生，确认哪个身份不同；没有一致材料就停止写入。
+      identity: 恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+      verify: 精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+      stop: 旧revision、preparedHash或receipt链不符时停止。
+  - id: stf-prepared-item-mismatch
+    trigger: G1评审后的item字段或隐藏fallback payload改变
+    remainingState: 未访问authorize/inspect/create，原持久对象未由该调用改变。
+    automaticAction: assertPreparedRecipeAuthoringProjection在端口之前拒绝。
+    explicitRecovery: 恢复正确被评审payload；真实内容改变应重做完整评审绑定。
+    stopCondition: 不能用旧authority批准新内容。
+    source:
+      path: src/service/knowledge/RecipeProductionGateway.ts
+      symbol: RecipeProductionGateway
+      excerpt: const strictPayload = assertPreparedRecipeAuthoringProjection(
+    test:
+      relation: direct
+      path: test/StrictPreparedRecipeGateway.test.ts
+      caseTitle: rejects an item changed after G1 review before journal authorization or write
+      anchorSymbol: gateway
+      assertedBehavior: 评审后的payload变化在授权/inspection/create之前拒绝。
+      assertionExcerpt: expect(inspectPreparedRecipe).not.toHaveBeenCalled();
+      scenarioKind: rejected
+    moduleRefs:
+      - M15-15
+    graphRefs:
+      - strict-prepared-replay
+    apiRefs:
+      - ./knowledge
+    aliases: []
+    runbook:
+      preconditions: 原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+      checks: *a1
+      action: 对照原reviewedProjection和item；变化合法也必须重新绑定评审链。
+      identity: 恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+      verify: 精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+      stop: payload无法解释或隐藏fallback字段存在时停止。
+  - id: stf-checkpoint-context
+    trigger: handle/runtime或expected run/revision/fixpoint/config/runtime不匹配
+    remainingState: 旧handle、回执和数据库仍保留；当前调用未获准把它们当新context使用。
+    automaticAction: 身份校验在checkpoint或历史receipt重验时拒绝。
+    explicitRecovery: 重取属于当前revision且在handle登记的runtime及正确context；同handle正常新开连接不要求创建新revision。
+    stopCondition: 不能复制旧回执到新context或只替换字段。
+    source:
+      path: src/service/production/ProductionPersistenceContracts.ts
+      symbol: createPrivateCorpusRevisionCheckpointV1
+      excerpt: handle.assertRuntime(runtime);
+    test:
+      relation: direct
+      path: test/ProductionPersistenceContracts.test.ts
+      caseTitle: rejects an old revision receipt and checkpoint under a new current context
+      anchorSymbol: createPrivateCorpusRevisionCheckpointV1
+      assertedBehavior: 不同runtime/revision/context不能复用旧handle或checkpoint回执。
+      assertionExcerpt: .toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');
+      scenarioKind: rejected
+    moduleRefs:
+      - M15-17
+    graphRefs:
+      - strict-wal-checkpoint
+    apiRefs:
+      - ./workspace
+    aliases: []
+    runbook:
+      preconditions: 同一revision/handle/runtime/expected context可核验，保留原错误；仅操作本运行负责的数据库。
+      checks: *a2
+      action: 排查哪个runtime/revision/context被混用，使用真正对应当前上下文的handle与材料再显式检查。
+      identity: 复用同run/revision/fixpoint/config/runtimeReceiptHash
+        context；同handle注册的新SQLite连接可用，未注册或其他revision的runtime拒绝。context变更不能复用旧回执身份。
+      verify: 错配被拒绝且不签当前回执；正确context路径另由W1/W3证明。
+      stop: reader仍阻挡、context错配、integrity/FK失败或hash无法对照时停止；不得删除-wal/-shm、换DB文件或造receipt。
 ---
 
 ## 分母、执行与独立评审
@@ -2418,6 +3090,12 @@ cluster承载调用者提出的机制，Core核验成员和全部事实，允许
 ## 评审、准入、写入和服务是不同完成点
 
 V5 durable知识处置review与候选G1/Admission/G2是不同合同。全库Admission不写Recipe；prepared确定ID也不执行G2；Gateway仅在同链授权和journal许可后写入或精确恢复。持久化之后还需实际refs、production binding、完整candidate coverage、final ready与serving validation；Core的manifest/route构造器不代替这些外层检查，也不执行公开rename。J04逐段标明call、data/binding和host-action，避免把阅读顺序画成无人接线的自动流水线。
+
+## 0.3 同身份重放与checkpoint恢复
+
+Prepared重放依赖完整item/prepared/authority与注入端口的精确inspection。V08沿用内存端口合同，固定db/file hash不等于现场字节校验；Core不自动消费journal或重试。
+
+WAL checkpoint由调用者在同context中显式请求。V09用真实双连接观察writer已提交而旧reader仍停在旧快照；释放reader后重试并独立读主文件hash。FULL失败可部分推进，validator也不会重读当前磁盘，二者边界分别保存。
 
 <!-- atlas:generated:start -->
 
@@ -2697,14 +3375,24 @@ V5 durable知识处置review与候选G1/Admission/G2是不同合同。全库Admi
 | 检查项 | 功能与边界 |
 | --- | --- |
 | 输入 | reviewed item/projection；prepareRecipePersistenceV1 派生的 ID 和预期 DB/file/journal hashes；G1/Admission/G2 同链 receipts；journalToken 与 authorize/inspect adapters。 |
-| 输出 | Gateway 返回 created 或 recovered、精确 inspection、prepared 和 strictUuidAllocations=0；调用者再用实际 ID/hash/lifecycle 构造独立 StrictPersistenceReceipt。 |
-| 后续调用 / 绑定 | prepare helper 只派生身份；persistPreparedReviewedCandidate 重验投影与授权链→journal 授权→已有行精确 inspection 则 recovered，否则 KnowledgeService.create→核对 ID→重新 inspect→返回。 |
-| 状态与副作用 | 可能真实调用知识写入；授权前不写、已有一致行不重复写。发生写后读回失败时主写入可能已存在，不能当作回滚；显式恢复继续使用同 prepared 身份。 |
-| 能力边界 | 缺 authorize/inspect、任一 fingerprint/receipt 链不符或已有行hash冲突均停止。不得换新 UUID 掩盖分歧；Gateway 的 created/recovered 不自动等于 refs、coverage 或 serving 完成。 |
+| 输出 | created或recovered及strictUuidAllocations=0；写前拒绝、ID分歧、读回缺失或读回冲突均抛错。 |
+| 后续调用 / 绑定 | 先同步admit source、端口存在、authored projection和G1→Admission→G2；再await authorize，再await inspect；existing全10字段匹配则recovered。missing才await create，核对ID后再次await inspect并返回created。 |
+| 状态与副作用 | Core只执行注入的授权/inspection/knowledgeService.create协议。create已产生效果后抛错会直接传播，无内部回滚、自动重试或journal consumed写入。 |
+| 能力边界 | preparedRecipeId仅绑定规定的5项身份，preparedHash另外绑定cell/parents/expected hashes/journal step；ID一致不足。inspection只比较端口返回的10字段，不负责重新计算文件/DB hash。V08是内存/注入端口合同；返回recovered不证明refs、coverage、Serving或外层journal完成。 |
 
-关联：[完整准入、独立G2与真实prepared写入口](README.md#graph-strict-admission-persistence) · [持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · [stf-prepared-authority-mismatch · G1 → Admission → G2 链或 reviewed fingerprint 与 prepared 不匹配](README.md#f-stf-prepared-authority-mismatch) · [stf-prepared-after-write · 真实写入端口已保存行后抛错，Gateway尚未完成读回/消费结果](README.md#f-stf-prepared-after-write) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
+关联：[完整准入、独立G2与真实prepared写入口](README.md#graph-strict-admission-persistence) · [持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · [Prepared重放：先重验授权，再精确inspect](README.md#graph-strict-prepared-replay) · [stf-prepared-authority-mismatch · G1 → Admission → G2 链或 reviewed fingerprint 与 prepared 不匹配](README.md#f-stf-prepared-authority-mismatch) · [stf-prepared-after-write · 真实写入端口已保存行后抛错，Gateway尚未完成读回/消费结果](README.md#f-stf-prepared-after-write) · [stf-prepared-authorization · authorizePreparedRecipe对当前journal token/prepared返回false](README.md#f-stf-prepared-authorization) · [stf-prepared-inspection-conflict · existing/读回inspection与prepared/context任一身份字段不符](README.md#f-stf-prepared-inspection-conflict) · [stf-prepared-item-mismatch · G1评审后的item字段或隐藏fallback payload改变](README.md#f-stf-prepared-item-mismatch) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) · [从独立评审到准入、prepared写入与公开Serving合同 · 把真实读回结果绑定持久化与引用](../../journeys/j04.md#J04-S06)
+
+逐case运行依据（快照）：
+
+- [V08-P1 · 有效输入在端口合同内固定prepared ID并读回created，UUID新增为0。](../../evidence/README.md#case-V08-P1) — 正常路径；所列断言已核验
+- [V08-P2 · 精确已有inspection返回recovered，本次不调用create。](../../evidence/README.md#case-V08-P2) — 恢复验证；所列断言已核验
+- [V08-P3 · create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。](../../evidence/README.md#case-V08-P3) — 恢复验证；所列断言已核验
+- [V08-P4 · 授权false或旧revision inspection均拒绝。](../../evidence/README.md#case-V08-P4) — 拒绝验证；所列断言已核验
+- [V08-P5 · 评审后的payload变化在授权/inspection/create之前拒绝。](../../evidence/README.md#case-V08-P5) — 拒绝验证；所列断言已核验
+- [V08-P6 · G1→Admission→G2身份错配在端口访问之前拒绝。](../../evidence/README.md#case-V08-P6) — 拒绝验证；所列断言已核验
+- [V08-P7 · ID只绑定规定身份；cell/parents变化可保留ID但preparedHash改变。](../../evidence/README.md#case-V08-P7) — 正常路径；所列断言已核验
 
 <a id="m-M15-16" class="stable-anchor"></a>
 
@@ -2724,6 +3412,31 @@ V5 durable知识处置review与候选G1/Admission/G2是不同合同。全库Admi
 关联：[持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · [私有revision与公共route的独立恢复边界](README.md#graph-strict-recovery) · [stf-coverage-nonterminal · candidate coverage 中存在 failed/unknown cell](README.md#f-stf-coverage-nonterminal) · [stf-route-byte-conflict · 当前公开 route 字节与 prepared canonicalBytes 不同，即使语义hash相同](README.md#f-stf-route-byte-conflict) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)、[@alembic/core/production](../../data/public-api.json)
 
 返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 完整候选覆盖与最终ready集合分别闭合](../../journeys/j04.md#J04-S07) · [从独立评审到准入、prepared写入与公开Serving合同 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08)
+
+<a id="m-M15-17" class="stable-anchor"></a>
+
+
+### Private revision checkpoint：读事务、主文件与回执边界
+
+入口：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`
+
+| 检查项 | 功能与边界 |
+| --- | --- |
+| 输入 | 同revision的注册handle/runtime、expectedCurrentContext；数据库可能存在已提交但尚在WAL的页。 |
+| 输出 | FULL完整、integrity=ok、FK无违规后返回冻结checkpoint receipt；busy/partial、runtime/context错配或完整性失败均拒绝。 |
+| 后续调用 / 绑定 | handle与context重验→同步SQLite FULL→检查busy/log/checkpointed→integrity_check→foreign_key_check→读取主DB字节hash→绑定initReceipt/context。validatePrivateCorpusRevisionCheckpointV1由调用者另行调用。 |
+| 状态与副作用 | FULL可推进主文件；失败也可能部分checkpoint。错误不回滚writer已提交数据，不释放别人的reader，也不自动重试。 |
+| 能力边界 | 主文件hash只代表该次读取；没有额外writer的隔离样本不等于全系统封存。validator核对身份/回执自洽，不重新读当前磁盘。fixture busy_timeout=1ms不是生产默认值。 |
+
+关联：[WAL checkpoint：已提交不等于主文件可签](README.md#graph-strict-wal-checkpoint) · [stf-wal-not-sealed · 旧读事务使FULL WAL checkpoint busy或log页未全部checkpointed](README.md#f-stf-wal-not-sealed) · [stf-checkpoint-context · handle/runtime或expected run/revision/fixpoint/config/runtime不匹配](README.md#f-stf-checkpoint-context) · 包入口 [@alembic/core/workspace](../../data/public-api.json)
+
+返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08)
+
+逐case运行依据（快照）：
+
+- [V09-W1 · 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。](../../evidence/README.md#case-V09-W1) — 恢复验证；所列断言已核验
+- [V09-W2 · 错配runtime/revision/context不能混用handle或checkpoint；同handle注册的新连接不等于错配。](../../evidence/README.md#case-V09-W2) — 拒绝验证；所列断言已核验
+- [V09-W3 · writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。](../../evidence/README.md#case-V09-W3) — 恢复验证；所列断言已核验
 
 
 ## 生成的图与逐边依据
@@ -3068,6 +3781,110 @@ class n2 host
 | <a id="e-strict-induction-falsification-formation--ifc-9"></a>ifc-9 | 缺项优先返回unknown | `src/service/production/StrictAnalysisContracts.ts#decideFalsificationVerdict` | indirect | never lets an enrolled but empty counterquery execution survive falsification | [J03 · 执行材料齐备后才判定反证结果](../../journeys/j03.md#J03-S08) |
 | <a id="e-strict-induction-falsification-formation--ifc-10"></a>ifc-10 | 全部完整后再看反例 | `src/service/production/StrictAnalysisContracts.ts#decideFalsificationVerdict` | indirect | never lets an enrolled but empty counterquery execution survive falsification | [J03 · 执行材料齐备后才判定反证结果](../../journeys/j03.md#J03-S08) |
 
+<a id="graph-strict-prepared-replay"></a>
+
+### Prepared重放：先重验授权，再精确inspect
+
+图 ID：`strict-prepared-replay` · R0 · authorize/inspect/create均为注入端口；Core不写journal consumed、不重算端口hash，也不自动重试。V08明确使用内存合同。
+
+```mermaid
+flowchart TD
+accTitle: Prepared重放：先重验授权，再精确inspect
+accDescr: authorize/inspect/create均为注入端口；Core不写journal consumed、不重算端口hash，也不自动重试。V08明确使用内存合同。
+n0["同item / prepared / context"]
+n1["同步payload与authority重验"]
+n2["await authorize端口"]
+n3["await inspect端口"]
+n4["精确existing / recovered"]
+n5["missing / await create"]
+n6["ID核对 / await再inspect"]
+n7["精确匹配 / created"]
+n8["拒绝或端口异常"]
+n9["调用方保留身份并排故"]
+n0 e0@-->|"任何写前同步核对"| n1
+n1 e1@-->|"重验后await授权"| n2
+n2 e2@-->|"授权允许才inspect"| n3
+n3 e3@-->|"existing须10字段匹配"| n4
+n3 e4@-->|"missing才create固定ID"| n5
+n5 e5@-->|"create返回后再次读回"| n6
+n6 e6@-->|"精确inspection才能created"| n7
+n1 e7@-->|"payload/authority错配写前拒绝"| n8
+n2 e8@-->|"授权拒绝"| n8
+n3 e9@-->|"读回冲突不覆盖"| n8
+n5 e10@-->|"端口已产生效果后可抛错"| n8
+n8 e11@-->|"调用方按原身份检查"| n9
+n9 e12@-->|"显式同身份重调"| n0
+classDef entry fill:#e1f1ed,stroke:#44796b,color:#173d33
+classDef host fill:#eef0f8,stroke:#7a85a3,color:#303c5c
+classDef store fill:#e5eff7,stroke:#7596b2,color:#243e54
+classDef error fill:#fff0d9,stroke:#b68a3a,color:#634d29
+class n9 host
+```
+
+| 边 ID | 关系 | 源码定位 | 断言关系 | case / 缺口 | 相关旅程步骤 |
+| --- | --- | --- | --- | --- | --- |
+| <a id="e-strict-prepared-replay--pr-1"></a>pr-1 | 任何写前同步核对 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-2"></a>pr-2 | 重验后await授权 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | authorizes the internal prepared ID, reads it back, and reports zero UUID allocation | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-3"></a>pr-3 | 授权允许才inspect | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | recovers an exact persist-before-consumed row without creating a duplicate | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-4"></a>pr-4 | existing须10字段匹配 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | recovers an exact persist-before-consumed row without creating a duplicate | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-5"></a>pr-5 | missing才create固定ID | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | authorizes the internal prepared ID, reads it back, and reports zero UUID allocation | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-6"></a>pr-6 | create返回后再次读回 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | authorizes the internal prepared ID, reads it back, and reports zero UUID allocation | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-7"></a>pr-7 | 精确inspection才能created | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | authorizes the internal prepared ID, reads it back, and reports zero UUID allocation | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-8"></a>pr-8 | payload/authority错配写前拒绝 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | rejects an item changed after G1 review before journal authorization or write | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-9"></a>pr-9 | 授权拒绝 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | fails closed for unauthorized or mismatched revision readback | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-10"></a>pr-10 | 读回冲突不覆盖 | `src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection` | indirect | fails closed for unauthorized or mismatched revision readback | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-11"></a>pr-11 | 端口已产生效果后可抛错 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | replays a persist-before-journal-consumed crash without a second Recipe | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-12"></a>pr-12 | 调用方按原身份检查 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | replays a persist-before-journal-consumed crash without a second Recipe | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+| <a id="e-strict-prepared-replay--pr-13"></a>pr-13 | 显式同身份重调 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` | direct | replays a persist-before-journal-consumed crash without a second Recipe | [J04 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) |
+
+<a id="graph-strict-wal-checkpoint"></a>
+
+### WAL checkpoint：已提交不等于主文件可签
+
+图 ID：`strict-wal-checkpoint` · R0 · reader释放与重试由调用方执行；FULL可部分推进。receipt validator是独立身份校验，不重读磁盘。
+
+```mermaid
+flowchart TD
+accTitle: WAL checkpoint：已提交不等于主文件可签
+accDescr: reader释放与重试由调用方执行；FULL可部分推进。receipt validator是独立身份校验，不重读磁盘。
+n0["同handle / runtime / context"]
+n1["同步FULL checkpoint"]
+n2["busy或页未完整追赶"]
+n3["stderr诊断 / 不签receipt"]
+n4["调用方释放自己reader"]
+n5["integrity / FK检查"]
+n6["读取当次主DB hash"]
+n7["绑定context并签receipt"]
+n8["独立validator / 磁盘对照"]
+n0 e0@-->|"身份重验后FULL"| n1
+n1 e1@-->|"busy或log不等于checkpointed"| n2
+n2 e2@-->|"拒绝不回滚已提交数据"| n3
+n3 e3@-->|"明确指示由owner释放事务"| n4
+n4 e4@-->|"调用者显式同context重试"| n0
+n1 e5@-->|"完整追赶后校验DB"| n5
+n5 e6@-->|"FK检查后读主文件"| n6
+n6 e7@-->|"绑定context与initReceipt"| n7
+n7 e8@-->|"调用者独立重验 / 比较磁盘"| n8
+classDef entry fill:#e1f1ed,stroke:#44796b,color:#173d33
+classDef host fill:#eef0f8,stroke:#7a85a3,color:#303c5c
+classDef store fill:#e5eff7,stroke:#7596b2,color:#243e54
+classDef error fill:#fff0d9,stroke:#b68a3a,color:#634d29
+class n4 host
+class n8 host
+```
+
+| 边 ID | 关系 | 源码定位 | 断言关系 | case / 缺口 | 相关旅程步骤 |
+| --- | --- | --- | --- | --- | --- |
+| <a id="e-strict-wal-checkpoint--wc-1"></a>wc-1 | 身份重验后FULL | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | rejects an old revision receipt and checkpoint under a new current context | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-2"></a>wc-2 | busy或log不等于checkpointed | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-3"></a>wc-3 | 拒绝不回滚已提交数据 | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | WAL reader blocking ends only after explicit release and checkpoint retry | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-4"></a>wc-4 | 明确指示由owner释放事务 | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-5"></a>wc-5 | 调用者显式同context重试 | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | WAL reader blocking ends only after explicit release and checkpoint retry | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-6"></a>wc-6 | 完整追赶后校验DB | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-7"></a>wc-7 | FK检查后读主文件 | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | WAL reader blocking ends only after explicit release and checkpoint retry | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-8"></a>wc-8 | 绑定context与initReceipt | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` | direct | WAL reader blocking ends only after explicit release and checkpoint retry | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+| <a id="e-strict-wal-checkpoint--wc-9"></a>wc-9 | 调用者独立重验 / 比较磁盘 | `src/service/production/ProductionPersistenceContracts.ts#validatePrivateCorpusRevisionCheckpointV1` | direct | refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file | [J04 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08) |
+
 <a id="graph-dependencies-15"></a>
 
 ### 文件依赖精选 · 静态关系
@@ -3284,28 +4101,47 @@ fail('SEMANTIC_DISPOSITION_REVIEW_MAIN_CONSUMER_MISMATCH');
 
 | 检查项 | 当前代码语义 |
 | --- | --- |
-| 已留下什么 | 已提交数据可能仍在WAL，主DB hash不能表示全部已提交状态；不返回checkpoint receipt |
-| Core自动做什么 | 检查busy/log/checkpointed，记录明确诊断并抛WAL_CHECKPOINT_INCOMPLETE |
+| 已留下什么 | writer已提交的数据可仍在WAL，主DB不包含全部提交；FULL可能已部分推进。没有checkpoint receipt，不表示事务回滚。 |
+| Core自动做什么 | 检查busy/log/checkpointed，输出run/revision与页数诊断，抛PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE；不返回receipt。 |
 | 谁显式恢复 | 持有reader的owner释放读事务后显式重试checkpoint；不是自动回滚已提交数据 |
 | 必须停止的条件 | WAL未全入主DB前不可签发封存hash |
 | 源码定位 | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` |
+
+#### 恢复检查顺序
+
+前提：同一revision/handle/runtime/expected context可核验，保留原错误；仅操作本运行负责的数据库。
+
+1. 读取精确错误码与stderr的runId/revisionId/busy/logPages/checkpointedPages。 — FULL可能返回busy而不抛SQLite错误；Core据状态拒绝签发，已提交数据仍可在WAL。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`；字段：busy、logPages、checkpointedPages、nextAction）
+2. 由持有reader的owner确认读事务及可见数据，另查writer提交状态。 — 旧reader只见旧快照不代表writer未提交；Core不会替owner释放事务。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`；字段：reader.inTransaction、writerRows、readerRows）
+3. 显式重试后核对integrity/FK，并将receipt.databaseHash与当次主文件字节比较。 — 随后调用validator校验context；不能用历史validator通过替代现场磁盘读回。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`；字段：databaseHash、checkpointHash、initReceiptHash、sqliteIntegrity、foreignKeyViolationCount）
+
+显式动作：持有reader的owner正常结束自己的读事务后，调用者显式再次createPrivateCorpusRevisionCheckpointV1；成功后另调validator并独立核对当次主文件hash。
+
+重试身份：复用同run/revision/fixpoint/config/runtimeReceiptHash context；同handle注册的新SQLite连接可用，未注册或其他revision的runtime拒绝。context变更不能复用旧回执身份。
+
+完成断言：无阻挡样本中writer/reader均可见2行；回执hash与主文件一致，独立validator通过。probe的checkpointAfterRetry是另一次PASSIVE读数，不伪称内部FULL返回。
+
+停止条件：reader仍阻挡、context错配、integrity/FK失败或hash无法对照时停止；不得删除-wal/-shm、换DB文件或造receipt。
 
 ```ts
 if (!checkpoint || checkpoint.busy !== 0 || checkpoint.log !== checkpoint.checkpointed) {
 ```
 
-关联：[private revision：耐久命名空间与checkpoint](README.md#m-M15-07) · [持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · [私有revision与公共route的独立恢复边界](README.md#graph-strict-recovery) · 包入口 [@alembic/core/production](../../data/public-api.json)、[@alembic/core/workspace](../../data/public-api.json)
+关联：[private revision：耐久命名空间与checkpoint](README.md#m-M15-07) · [Private revision checkpoint：读事务、主文件与回执边界](README.md#m-M15-17) · [持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · [私有revision与公共route的独立恢复边界](README.md#graph-strict-recovery) · [WAL checkpoint：已提交不等于主文件可签](README.md#graph-strict-wal-checkpoint) · 包入口 [@alembic/core/production](../../data/public-api.json)、[@alembic/core/workspace](../../data/public-api.json)
 
 返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08)
 
+逐case运行依据（快照）：
+
+- [V09-W1 · 旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。](../../evidence/README.md#case-V09-W1) — 恢复验证；所列断言已核验
+- [V09-W3 · writer已提交2行而旧reader只见1行；释放后同context重试，回执hash等于真实主文件。](../../evidence/README.md#case-V09-W3) — 恢复验证；所列断言已核验
+
 断言关系：**direct**。`test/ProductionPersistenceContracts.test.ts` · `refuses a checkpoint receipt while a reader prevents committed WAL pages from reaching the database file`
 
-旧reader阻塞WAL时拒绝签DB hash，ROLLBACK释放后checkpoint通过且hash变化。（recovery）。这里只定位断言；实际运行范围见独立运行证据。
+旧读事务阻挡主文件追赶，释放reader后checkpoint回执hash匹配当次主文件。（recovered）。这里只定位断言；实际运行范围见独立运行证据。
 
 ```ts
-expect(() => createPrivateCorpusRevisionCheckpointV1(handle, runtime, context)).toThrow(
-        'PRIVATE_CORPUS_REVISION_WAL_CHECKPOINT_INCOMPLETE'
-      )
+expect(receipt.databaseHash).toBe(hashBytes(fs.readFileSync(handle.resolver.databasePath)));
 ```
 
 <a id="f-stf-r01-value-integrity-gap" class="stable-anchor"></a>
@@ -3593,21 +4429,41 @@ complete=false/truncated=true的corpus在准入阶段拒绝。（failure）。�
 | 必须停止的条件 | 不能跳过 G2、换 prepared ID 或绕过 journal 授权继续写。 |
 | 源码定位 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` |
 
+#### 恢复检查顺序
+
+前提：原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+
+1. 保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。 — ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#prepareRecipePersistenceV1`；字段：runId、analysisFixpointHash、privateCorpusRevision、admissionId、authoredFingerprint、preparedHash）
+2. 确认authorize端口存在且允许原token；记录inspect是否返回existing。 — token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway`；字段：journalToken、existing）
+3. 逐项对照inspection与prepared/context的10字段。 — 只比较端口返回值；该步骤不是现场文件/DB hash重算。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection`；字段：id、privateCorpusRevision、preparedHash、admissionId、g1ReceiptHash、admissionReceiptHash、g2ReceiptHash、authoredFingerprint、dbHash、fileHash）
+
+显式动作：追查payload或authority链哪个版本已变化；对正确输入重新完成真实评审链，不能单改hash或跳过G2。
+
+重试身份：恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+
+完成断言：精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+
+停止条件：写前拒绝是正确拒绝，不是已恢复；不得访问未获授权的create端口。
+
 ```ts
 assertStrictPersistenceAuthorityV1({
       prepared,
 ```
 
-关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [完整准入、独立G2与真实prepared写入口](README.md#graph-strict-admission-persistence) · [持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
+关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [完整准入、独立G2与真实prepared写入口](README.md#graph-strict-admission-persistence) · [持久绑定、候选覆盖与最终serving绑定](README.md#graph-strict-final-serving) · [Prepared重放：先重验授权，再精确inspect](README.md#graph-strict-prepared-replay) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 独立G2与同一fingerprint链绑定](../../journeys/j04.md#J04-S04) · [从独立评审到准入、prepared写入与公开Serving合同 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05) · [从独立评审到准入、prepared写入与公开Serving合同 · 把真实读回结果绑定持久化与引用](../../journeys/j04.md#J04-S06)
 
-断言关系：**indirect**。`test/StrictPreparedRecipeGateway.test.ts` · `rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write`
+逐case运行依据（快照）：
 
-准入fingerprint被改后，journal授权、inspection和create均不调用。（failure）。这里只定位断言；实际运行范围见独立运行证据。
+- [V08-P6 · G1→Admission→G2身份错配在端口访问之前拒绝。](../../evidence/README.md#case-V08-P6) — 拒绝验证；所列断言已核验
+
+断言关系：**direct**。`test/StrictPreparedRecipeGateway.test.ts` · `rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write`
+
+G1→Admission→G2身份错配在端口访问之前拒绝。（rejected）。这里只定位断言；实际运行范围见独立运行证据。
 
 ```ts
-expect(inspectPreparedRecipe).not.toHaveBeenCalled();
+expect(authorizePreparedRecipe).not.toHaveBeenCalled();
 ```
 
 <a id="f-stf-coverage-nonterminal" class="stable-anchor"></a>
@@ -3675,26 +4531,243 @@ return 'conflict';
 
 | 检查项 | 当前代码语义 |
 | --- | --- |
-| 已留下什么 | 同prepared ID的存储可能已经存在；Gateway本次抛错，不保证自动回滚。 |
+| 已留下什么 | 注入create端口可能已保存其负责的数据后抛错，Gateway未返回；现成V08用内存stored模拟该边界，不证明真实落盘。 |
 | Core自动做什么 | 异常向调用者传播；此入口没有自动换ID或重跑。 |
-| 谁显式恢复 | 调用者排除故障后显式重调同item、prepared及同链context；Gateway先inspect，精确匹配则recovered且不再create。 |
+| 谁显式恢复 | 调用者排故后使用同item/prepared/context再次进入；精确inspection则recovered、不再create；Core没有自动重试或消费journal。 |
 | 必须停止的条件 | 旧记录的revision/hash/fingerprint不匹配则停止；不能仅凭ID存在就接受，不能新建UUID绕过。 |
 | 源码定位 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` |
+
+#### 恢复检查顺序
+
+前提：原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+
+1. 保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。 — ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#prepareRecipePersistenceV1`；字段：runId、analysisFixpointHash、privateCorpusRevision、admissionId、authoredFingerprint、preparedHash）
+2. 确认authorize端口存在且允许原token；记录inspect是否返回existing。 — token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway`；字段：journalToken、existing）
+3. 逐项对照inspection与prepared/context的10字段。 — 只比较端口返回值；该步骤不是现场文件/DB hash重算。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection`；字段：id、privateCorpusRevision、preparedHash、admissionId、g1ReceiptHash、admissionReceiptHash、g2ReceiptHash、authoredFingerprint、dbHash、fileHash）
+
+显式动作：排除端口故障后显式persistPreparedReviewedCandidate(item, prepared, context)，先允许Core检查existing，不能直接绕过inspection重复create。
+
+重试身份：恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+
+完成断言：精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+
+停止条件：身份变更、authorize拒绝、inspection不匹配或持续missing时停止；不签外层发布完成。
 
 ```ts
 const existing = await this.#inspectPreparedRecipe(prepared);
 ```
 
-关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [完整准入、独立G2与真实prepared写入口](README.md#graph-strict-admission-persistence) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
+关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [完整准入、独立G2与真实prepared写入口](README.md#graph-strict-admission-persistence) · [Prepared重放：先重验授权，再精确inspect](README.md#graph-strict-prepared-replay) · 包入口 [@alembic/core](../../data/public-api.json)、[@alembic/core/knowledge](../../data/public-api.json)
 
 返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05)
 
+逐case运行依据（快照）：
+
+- [V08-P2 · 精确已有inspection返回recovered，本次不调用create。](../../evidence/README.md#case-V08-P2) — 恢复验证；所列断言已核验
+- [V08-P3 · create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。](../../evidence/README.md#case-V08-P3) — 恢复验证；所列断言已核验
+
 断言关系：**direct**。`test/StrictPreparedRecipeGateway.test.ts` · `replays a persist-before-journal-consumed crash without a second Recipe`
 
-注入create先保存fixture inspection再抛错；显式同身份重试返回recovered、相同ID且create仅调用一次。该case是端口注入，非真实SQLite/Markdown崩溃证明。（recovery）。这里只定位断言；实际运行范围见独立运行证据。
+create夹具先保存内存inspection再抛错；同身份重调recovered，总create仅一次。（recovered）。这里只定位断言；实际运行范围见独立运行证据。
 
 ```ts
 expect(create).toHaveBeenCalledTimes(1);
+```
+
+<a id="f-stf-prepared-authorization" class="stable-anchor"></a>
+
+
+### stf-prepared-authorization · authorizePreparedRecipe对当前journal token/prepared返回false
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 尚未inspect/create；输入仍由调用者保留。 |
+| Core自动做什么 | await授权结果后抛STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED。 |
+| 谁显式恢复 | 由授权owner检查原token与真实journal依据；有效授权前不进入写入。 |
+| 必须停止的条件 | 不能伪造token、改ID或绕过授权。 |
+| 源码定位 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` |
+
+#### 恢复检查顺序
+
+前提：原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+
+1. 保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。 — ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#prepareRecipePersistenceV1`；字段：runId、analysisFixpointHash、privateCorpusRevision、admissionId、authoredFingerprint、preparedHash）
+2. 确认authorize端口存在且允许原token；记录inspect是否返回existing。 — token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway`；字段：journalToken、existing）
+3. 逐项对照inspection与prepared/context的10字段。 — 只比较端口返回值；该步骤不是现场文件/DB hash重算。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection`；字段：id、privateCorpusRevision、preparedHash、admissionId、g1ReceiptHash、admissionReceiptHash、g2ReceiptHash、authoredFingerprint、dbHash、fileHash）
+
+显式动作：授权owner修正真实授权依据后再用匹配材料显式进入。
+
+重试身份：恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+
+完成断言：精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+
+停止条件：授权持续拒绝或journal来源不明时停止。
+
+```ts
+throw new Error('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+```
+
+关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [Prepared重放：先重验授权，再精确inspect](README.md#graph-strict-prepared-replay) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05)
+
+逐case运行依据（快照）：
+
+- [V08-P4 · 授权false或旧revision inspection均拒绝。](../../evidence/README.md#case-V08-P4) — 拒绝验证；所列断言已核验
+
+断言关系：**direct**。`test/StrictPreparedRecipeGateway.test.ts` · `fails closed for unauthorized or mismatched revision readback`
+
+授权false或旧revision inspection均拒绝。（rejected）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+.rejects.toThrow('STRICT_PREPARED_PERSISTENCE_UNAUTHORIZED');
+```
+
+<a id="f-stf-prepared-inspection-conflict" class="stable-anchor"></a>
+
+
+### stf-prepared-inspection-conflict · existing/读回inspection与prepared/context任一身份字段不符
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 现存inspection与存储由端口拥有，Core不覆盖冲突记录。 |
+| Core自动做什么 | assertPreparedRecipeInspection抛STRICT_PREPARED_PERSISTENCE_DIVERGENCE。 |
+| 谁显式恢复 | 读回原数据与10项身份来源，由owner决定正确版本；保留冲突材料。 |
+| 必须停止的条件 | 不能把相同ID当作精确恢复，也不能重写expected hashes消除冲突。 |
+| 源码定位 | `src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection` |
+
+#### 恢复检查顺序
+
+前提：原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+
+1. 保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。 — ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#prepareRecipePersistenceV1`；字段：runId、analysisFixpointHash、privateCorpusRevision、admissionId、authoredFingerprint、preparedHash）
+2. 确认authorize端口存在且允许原token；记录inspect是否返回existing。 — token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway`；字段：journalToken、existing）
+3. 逐项对照inspection与prepared/context的10字段。 — 只比较端口返回值；该步骤不是现场文件/DB hash重算。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection`；字段：id、privateCorpusRevision、preparedHash、admissionId、g1ReceiptHash、admissionReceiptHash、g2ReceiptHash、authoredFingerprint、dbHash、fileHash）
+
+显式动作：先复核inspection如何产生，确认哪个身份不同；没有一致材料就停止写入。
+
+重试身份：恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+
+完成断言：精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+
+停止条件：旧revision、preparedHash或receipt链不符时停止。
+
+```ts
+throw new Error('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+```
+
+关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [Prepared重放：先重验授权，再精确inspect](README.md#graph-strict-prepared-replay) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05)
+
+逐case运行依据（快照）：
+
+- [V08-P4 · 授权false或旧revision inspection均拒绝。](../../evidence/README.md#case-V08-P4) — 拒绝验证；所列断言已核验
+
+断言关系：**indirect**。`test/StrictPreparedRecipeGateway.test.ts` · `fails closed for unauthorized or mismatched revision readback`
+
+通过Gateway返回旧revision inspection，assertPreparedRecipeInspection拒绝；此helper由Gateway间接调用。（rejected）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+.rejects.toThrow('STRICT_PREPARED_PERSISTENCE_DIVERGENCE');
+```
+
+<a id="f-stf-prepared-item-mismatch" class="stable-anchor"></a>
+
+
+### stf-prepared-item-mismatch · G1评审后的item字段或隐藏fallback payload改变
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 未访问authorize/inspect/create，原持久对象未由该调用改变。 |
+| Core自动做什么 | assertPreparedRecipeAuthoringProjection在端口之前拒绝。 |
+| 谁显式恢复 | 恢复正确被评审payload；真实内容改变应重做完整评审绑定。 |
+| 必须停止的条件 | 不能用旧authority批准新内容。 |
+| 源码定位 | `src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway` |
+
+#### 恢复检查顺序
+
+前提：原输入、prepared、reviewed projection及G1/Admission/G2仍可追溯；先判定失败在授权前、inspect、create还是读回之后。
+
+1. 保留原item、preparedRecipeId、preparedHash、run/fixpoint/revision和全部G1/Admission/G2。 — ID相同仍可能preparedHash不同；payload或authority变化须停止旧材料重放。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#prepareRecipePersistenceV1`；字段：runId、analysisFixpointHash、privateCorpusRevision、admissionId、authoredFingerprint、preparedHash）
+2. 确认authorize端口存在且允许原token；记录inspect是否返回existing。 — token字符串不证明真实journal耐久。Core先授权后inspect，缺记录与冲突记录分开。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#RecipeProductionGateway`；字段：journalToken、existing）
+3. 逐项对照inspection与prepared/context的10字段。 — 只比较端口返回值；该步骤不是现场文件/DB hash重算。（观察来源：`src/service/knowledge/RecipeProductionGateway.ts#assertPreparedRecipeInspection`；字段：id、privateCorpusRevision、preparedHash、admissionId、g1ReceiptHash、admissionReceiptHash、g2ReceiptHash、authoredFingerprint、dbHash、fileHash）
+
+显式动作：对照原reviewedProjection和item；变化合法也必须重新绑定评审链。
+
+重试身份：恢复重调复用同item/prepared/context及有效原授权；不随机新ID、不改预期hash掩盖差异。
+
+完成断言：精确已有inspection应返回recovered且本次不create；create后抛错的合同样本在第二次调用后总create=1。created须再次inspect匹配。保留fixture类型，不扩大为真实存储或journal恢复。
+
+停止条件：payload无法解释或隐藏fallback字段存在时停止。
+
+```ts
+const strictPayload = assertPreparedRecipeAuthoringProjection(
+```
+
+关联：[Prepared 持久化：确定 ID、journal 授权与精确读回](README.md#m-M15-15) · [Prepared重放：先重验授权，再精确inspect](README.md#graph-strict-prepared-replay) · 包入口 [@alembic/core/knowledge](../../data/public-api.json)
+
+返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 准备确定身份并写入或精确恢复](../../journeys/j04.md#J04-S05)
+
+逐case运行依据（快照）：
+
+- [V08-P5 · 评审后的payload变化在授权/inspection/create之前拒绝。](../../evidence/README.md#case-V08-P5) — 拒绝验证；所列断言已核验
+
+断言关系：**direct**。`test/StrictPreparedRecipeGateway.test.ts` · `rejects an item changed after G1 review before journal authorization or write`
+
+评审后的payload变化在授权/inspection/create之前拒绝。（rejected）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+expect(inspectPreparedRecipe).not.toHaveBeenCalled();
+```
+
+<a id="f-stf-checkpoint-context" class="stable-anchor"></a>
+
+
+### stf-checkpoint-context · handle/runtime或expected run/revision/fixpoint/config/runtime不匹配
+
+| 检查项 | 当前代码语义 |
+| --- | --- |
+| 已留下什么 | 旧handle、回执和数据库仍保留；当前调用未获准把它们当新context使用。 |
+| Core自动做什么 | 身份校验在checkpoint或历史receipt重验时拒绝。 |
+| 谁显式恢复 | 重取属于当前revision且在handle登记的runtime及正确context；同handle正常新开连接不要求创建新revision。 |
+| 必须停止的条件 | 不能复制旧回执到新context或只替换字段。 |
+| 源码定位 | `src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1` |
+
+#### 恢复检查顺序
+
+前提：同一revision/handle/runtime/expected context可核验，保留原错误；仅操作本运行负责的数据库。
+
+1. 读取精确错误码与stderr的runId/revisionId/busy/logPages/checkpointedPages。 — FULL可能返回busy而不抛SQLite错误；Core据状态拒绝签发，已提交数据仍可在WAL。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`；字段：busy、logPages、checkpointedPages、nextAction）
+2. 由持有reader的owner确认读事务及可见数据，另查writer提交状态。 — 旧reader只见旧快照不代表writer未提交；Core不会替owner释放事务。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`；字段：reader.inTransaction、writerRows、readerRows）
+3. 显式重试后核对integrity/FK，并将receipt.databaseHash与当次主文件字节比较。 — 随后调用validator校验context；不能用历史validator通过替代现场磁盘读回。（观察来源：`src/service/production/ProductionPersistenceContracts.ts#createPrivateCorpusRevisionCheckpointV1`；字段：databaseHash、checkpointHash、initReceiptHash、sqliteIntegrity、foreignKeyViolationCount）
+
+显式动作：排查哪个runtime/revision/context被混用，使用真正对应当前上下文的handle与材料再显式检查。
+
+重试身份：复用同run/revision/fixpoint/config/runtimeReceiptHash context；同handle注册的新SQLite连接可用，未注册或其他revision的runtime拒绝。context变更不能复用旧回执身份。
+
+完成断言：错配被拒绝且不签当前回执；正确context路径另由W1/W3证明。
+
+停止条件：reader仍阻挡、context错配、integrity/FK失败或hash无法对照时停止；不得删除-wal/-shm、换DB文件或造receipt。
+
+```ts
+handle.assertRuntime(runtime);
+```
+
+关联：[Private revision checkpoint：读事务、主文件与回执边界](README.md#m-M15-17) · [WAL checkpoint：已提交不等于主文件可签](README.md#graph-strict-wal-checkpoint) · 包入口 [@alembic/core/workspace](../../data/public-api.json)
+
+返回业务旅程：[从独立评审到准入、prepared写入与公开Serving合同 · 形成Serving快照合同，公开route仍显式切换](../../journeys/j04.md#J04-S08)
+
+逐case运行依据（快照）：
+
+- [V09-W2 · 错配runtime/revision/context不能混用handle或checkpoint；同handle注册的新连接不等于错配。](../../evidence/README.md#case-V09-W2) — 拒绝验证；所列断言已核验
+
+断言关系：**direct**。`test/ProductionPersistenceContracts.test.ts` · `rejects an old revision receipt and checkpoint under a new current context`
+
+不同runtime/revision/context不能复用旧handle或checkpoint回执。（rejected）。这里只定位断言；实际运行范围见独立运行证据。
+
+```ts
+.toThrow('PRIVATE_CORPUS_REVISION_RUNTIME_MISMATCH');
 ```
 
 

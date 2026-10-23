@@ -1,4 +1,4 @@
-import type { BookIndex, JourneyBacklink, SearchEntry } from './book.ts';
+import type { BookIndex, JourneyBacklink, SearchEntry, CaseEvidenceLink } from './book.ts';
 import type { AtlasDocument, Graph, SourceFile } from './model.ts';
 export interface AssetRef {
   url: string;
@@ -25,6 +25,7 @@ export interface AtlasBootstrap {
 }
 export interface TopicAsset {
   navigation: {
+    proofs?: Record<string, CaseEvidenceLink[]>;
     links: Record<string, { title: string; href: string }>;
     backlinks: Record<string, JourneyBacklink[]>;
   };

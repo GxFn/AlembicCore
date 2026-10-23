@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "observationsRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/observations.json",
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T16-41-13-618Z/observations.json",
   "observationsSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
   "id": "V05",
   "title": "严格语义评审离线回执：V4/V5序列化、新进程重验与篡改拒绝",
   "status": "passed",
-  "observedAt": "2026-10-23T13:41:39.356Z",
+  "observedAt": "2026-10-23T16:41:20.170Z",
   "exitCode": 0,
   "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
   "sourceScope": "完整Core产品库存，变化时保守要求重验",
@@ -18,11 +18,23 @@
   "harnessFiles": [
     {
       "path": "scripts/run-evidence.mjs",
-      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
     },
     {
       "path": "scripts/run-contracts.mjs",
-      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
     },
     {
       "path": "scripts/contracts.mjs",
@@ -30,45 +42,58 @@
     },
     {
       "path": "probes/vitest.config.ts",
-      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
     },
     {
       "path": "probes/recovery.test.ts",
-      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
     },
     {
       "path": "evidence/scenarios.json",
-      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
     }
   ],
   "cases": [
     {
       "title": "shared-harvest semantic evidence authority binds one physical evidence root across the complete canonical harvest-group set",
       "status": "passed",
-      "duration": 2303.0209589999995
+      "duration": 1948.2820000000002,
+      "testFile": "test/SharedHarvestSemanticEvidenceAuthority.test.ts"
     },
     {
       "title": "shared-harvest semantic evidence authority binds one authenticated file evidence to the exact two-scale receipt set and re-verifies after restart",
       "status": "passed",
-      "duration": 2088.709667
+      "duration": 1804.2328750000001,
+      "testFile": "test/SharedHarvestSemanticEvidenceAuthority.test.ts"
     },
     {
       "title": "shared-harvest semantic evidence authority rejects incomplete, overlapping, mixed-harvest, rebound, and noncanonical binding sets",
       "status": "passed",
-      "duration": 93.2432090000002
+      "duration": 81.85037499999999,
+      "testFile": "test/SharedHarvestSemanticEvidenceAuthority.test.ts"
     },
     {
       "title": "shared-harvest semantic evidence authority fails closed on cross-harvest group, root, request, load, and attestation tampering",
       "status": "passed",
-      "duration": 80.27199999999993
+      "duration": 74.75608399999965,
+      "testFile": "test/SharedHarvestSemanticEvidenceAuthority.test.ts"
     }
   ],
+  "caseResults": [],
   "probeObservations": [],
   "errors": [],
-  "rawRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/report.json",
-  "rawSha256": "5af61b3df16c4843391d0d3bcb9a31a12dd7e100b6cb3aae8ef7b9886d24f3f1",
-  "consoleRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/console.txt",
-  "consoleSha256": "fe4070d78e0a620a73c23dfced7de5f9efd82393ffceb635354dcbdbc5d90561",
+  "rawRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T16-41-13-618Z/report.json",
+  "rawSha256": "0dca43ea10b90500f1ae019687aa05fd3822e073ead214fafe427ffd3ae6ea3e",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T16-41-13-618Z/console.txt",
+  "consoleSha256": "0494428843c9c4ea82674538394b27b8582a975b9bdcd6174d3bc0393d78acf2",
   "command": {
     "executable": "node",
     "args": [
@@ -83,6 +108,6 @@
       "--outputFile=<fixed-atlas-build-report>"
     ]
   },
-  "receiptRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T13-41-31-829Z/receipt.json",
-  "receiptSha256": "2d3e8fa1c4bfc253f3bffe4565edf57d0291f5dfc9a1c67eb6917220b0d35ec0"
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v05-2026-10-23T16-41-13-618Z/receipt.json",
+  "receiptSha256": "8ca66102046b0e3a48ba38a7b14032df6c02d7b4912d41371e7b1d4e708ef207"
 }

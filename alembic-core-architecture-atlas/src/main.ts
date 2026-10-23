@@ -197,7 +197,7 @@ function overview() {
     .map(([n, label]) => `<div class="metric"><strong>${n}</strong><span>${label}</span></div>`)
     .join(
       '',
-    )}</div><div class="routes"><a class="route" href="#01"><small>01 / UNDERSTAND</small><strong>理解架构 →</strong><p>从包边界和事实责任开始。</p></a><a class="route" href="#10"><small>02 / TRACE</small><strong>排查写入失败 →</strong><p>跟随文件优先提交与显式恢复。</p></a><a class="route" href="#impact"><small>03 / CHANGE</small><strong>评估修改影响 →</strong><p>找出依赖、消费者和复核范围。</p></a></div><div class="note"><a href="#journeys">四条业务旅程 →</a> · <a href="#objects">核心对象与生命周期 →</a> · <a href="#failures">精确失败定位 →</a> · <a href="#runs">独立运行证据 →</a></div><h2>从问题进入专题</h2><div class="topic-grid">${topicIndex.map((t) => `<a class="topic-card" href="#${t.id}"><span class="topic-num">${t.id}</span><div><h3>${esc(t.title)}</h3><p>${esc(t.question)}</p><small>${t.ownedFileCount} 个主归属文件 · ${esc(t.reviewDepth)}</small></div></a>`).join('')}</div><div class="note warning">${review.knownRisks.length} 项已知源码问题保留在受影响专题中。来源匹配不等于功能无缺陷，也不表示本轮重跑产品测试。</div>`;
+    )}</div><div class="routes"><a class="route" href="#01"><small>01 / UNDERSTAND</small><strong>理解架构 →</strong><p>从包边界和事实责任开始。</p></a><a class="route" href="#10"><small>02 / TRACE</small><strong>排查写入失败 →</strong><p>跟随文件优先提交与显式恢复。</p></a><a class="route" href="#impact"><small>03 / CHANGE</small><strong>评估修改影响 →</strong><p>找出依赖、消费者和复核范围。</p></a></div><div class="note"><a href="#journeys">${summary.journeyCount}条业务旅程 →</a> · <a href="#objects">核心对象与生命周期 →</a> · <a href="#failures">精确失败定位 →</a> · <a href="#runs">独立运行证据 →</a></div><h2>从问题进入专题</h2><div class="topic-grid">${topicIndex.map((t) => `<a class="topic-card" href="#${t.id}"><span class="topic-num">${t.id}</span><div><h3>${esc(t.title)}</h3><p>${esc(t.question)}</p><small>${t.ownedFileCount} 个主归属文件 · ${esc(t.reviewDepth)}</small></div></a>`).join('')}</div><div class="note warning">${review.knownRisks.length} 项已知源码问题保留在受影响专题中。来源匹配不等于功能无缺陷，也不表示本轮重跑产品测试。</div>`;
 }
 function fileIndex(anchor: string) {
   const selected = files.find((f) => f.path === anchor);
@@ -436,15 +436,16 @@ async function renderPage(id: string) {
   else if (id === 'runs' && book) main.innerHTML = runsPage(book);
   else if (id === 'failures' && book) {
     main.innerHTML =
-      '<h1>失败与恢复入口</h1><p class="lead">按错误、状态、源码路径或failure ID定位，先看残留状态，再选择显式恢复。</p><input id="failure-filter" aria-label="筛选失败与恢复" placeholder="例如 DivergenceError、租约、stf-population-unknown"/><div id="failure-results"></div>';
+      '<h1>失败与恢复入口</h1><p class="lead">按错误、状态、源码路径或failure ID定位，先看残留状态，再选择显式恢复。</p><input id="failure-filter" aria-label="筛选失败与恢复" placeholder="例如 DivergenceError、租约、stf-population-unknown"/><label class="gap-filter">阅读缺口 <select id="failure-gap" aria-label="筛选阅读缺口"><option value="all">全部条目</option><option value="no-module">尚无模块归属</option><option value="no-runbook">尚无分步恢复清单</option><option value="no-case">尚无逐case映射</option></select></label><p class="status-line">缺口分类帮助选取阅读任务，不是产品质量分数；run级证据与逐case映射分别保留。</p><div id="failure-results"></div>';
     const results = main.querySelector('#failure-results')!;
     results.innerHTML = failuresPage(book);
-    main
-      .querySelector<HTMLInputElement>('#failure-filter')!
-      .addEventListener(
-        'input',
-        (e) => (results.innerHTML = failuresPage(book!, (e.target as HTMLInputElement).value)),
-      );
+    const filter = main.querySelector<HTMLInputElement>('#failure-filter')!;
+    const gap = main.querySelector<HTMLSelectElement>('#failure-gap')!;
+    const refresh = () => {
+      results.innerHTML = failuresPage(book!, filter.value, gap.value);
+    };
+    filter.addEventListener('input', refresh);
+    gap.addEventListener('change', refresh);
   } else if (id === 'files') {
     main.innerHTML = fileIndex(anchor);
     fileRows(anchor);

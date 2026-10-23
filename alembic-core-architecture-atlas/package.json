@@ -1,6 +1,6 @@
 {
   "name": "@alembic/core-architecture-atlas",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -20,7 +20,7 @@
     "check:render": "node scripts/atlas.mjs render",
     "check:reader": "node scripts/atlas.mjs reader",
     "check:isolation": "node scripts/atlas.mjs isolation",
-    "check": "npm run test && npm run format:check && npm run typecheck && npm run inventory:check && npm run check:structure && npm run check:current && npm run check:evidence && npm run check:render && npm run check:reader && npm run check:isolation && npm run build && npm run check:build",
+    "check": "npm run test && npm run format:check && npm run typecheck && npm run typecheck:probes && npm run inventory:check && npm run check:structure && npm run check:current && npm run check:evidence && npm run check:render && npm run check:reader && npm run check:isolation && npm run build && npm run check:build",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "preview": "vite preview",
@@ -29,7 +29,8 @@
     "check:evidence": "node scripts/atlas.mjs evidence",
     "review:append": "node scripts/reviews.mjs append",
     "maintenance:probe": "node scripts/maintenance-probe.mjs",
-    "check:portable": "node scripts/check-portable.mjs"
+    "check:portable": "node scripts/check-portable.mjs",
+    "typecheck:probes": "tsc --project probes/tsconfig.json"
   },
   "dependencies": {
     "cytoscape": "3.34.2",

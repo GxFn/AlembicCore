@@ -12,6 +12,7 @@ import {
   markdownNavigation,
   writeReadingProjections,
   checkReadingProjections,
+  runScenarios,
 } from './book.mjs';
 import { validateDeepContent } from '../src/deep-content.ts';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, globSync } from 'node:fs';
@@ -507,8 +508,14 @@ export function inventory(write = false) {
 export function structure() {
   const errors = [],
     paths = productPaths(),
-    analysis = loadAnalysis(paths),
     docs = documents(),
+    analysis = loadAnalysis([
+      ...new Set([
+        ...paths,
+        ...docs.flatMap((d) => d.testPaths),
+        ...runScenarios().flatMap((r) => r.testFiles),
+      ]),
+    ]),
     ownership = readData('topic-ownership');
   const schema = new Ajv({ allErrors: true }).compile(
     getJSON(resolve(atlas, 'schemas/document.schema.json')),
@@ -537,6 +544,9 @@ export function structure() {
       const anchors = [
         ...(d.moduleDetails ?? []).map((m) => m.entry),
         ...(d.failureModes ?? []).map((f) => f.source),
+        ...(d.failureModes ?? []).flatMap((f) =>
+          (f.runbook?.checks ?? []).flatMap((c) => (c.source ? [c.source] : [])),
+        ),
       ];
       for (const anchor of anchors) {
         if (!anchor) continue;
@@ -655,6 +665,9 @@ export function structure() {
   }
   for (const o of book.index.objects)
     errors.push(...inspectSourceAnchor(analysis, o.source).map((e) => `${o.id}:${e}`));
+  for (const r of book.index.runs)
+    for (const c of r.caseEvidence ?? [])
+      errors.push(...inspectEvidence(analysis, c.assertion).map((e) => `${c.id}:${e}`));
   errors.push(...documentLinks());
   return {
     errors,

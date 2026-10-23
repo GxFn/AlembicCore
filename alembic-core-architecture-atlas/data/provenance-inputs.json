@@ -26,5 +26,9 @@
   {
     "path": "architecture-atlas/implementation-2026-10-23/semantic-review.md",
     "sha256": "bc26ee60ea133b2ec289f4cecc52316b868193a7553cf9946bc38d70024cf9e6"
+  },
+  {
+    "path": "architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md",
+    "sha256": "9802fea3e770eaa6d6f0757479a64e6e0f19313d0ee929efe56faff192389689"
   }
 ]

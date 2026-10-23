@@ -5,6 +5,7 @@ import {
   validateBook,
   searchBook,
   affectedBookEntries,
+  caseEvidenceLinks,
 } from '../src/book-model.ts';
 const source = { path: 'src/write.ts', symbol: 'write', excerpt: 'await persist(entry);' };
 const testEvidence = { relation: 'none', reason: '无此分支断言' };
@@ -125,6 +126,48 @@ test('真实搜索投影精确到稳定模块/失败锚点，改标题不改变�
   assert.equal(module.route, book.modules[0].route);
   assert.deepEqual(module.aliases, ['旧模块名']);
   assert.equal(module.journeys[0].route, '#journeys~J01-S1');
+});
+
+test('失败回链精确到case，历史执行不冒充当前恢复；错step/module引用拒绝', () => {
+  const copy = structuredClone(input);
+  copy.runs[0].caseEvidence = [
+    {
+      id: 'V01-C1',
+      testFile: 'test/write.test.ts',
+      caseTitle: 'write recovery',
+      outcome: 'recovered',
+      fixture: 'real-io',
+      claim: '文件与DB一致',
+      fault: 'DB拒绝',
+      action: '显式同步',
+      moduleRefs: ['M10-01'],
+      failureRefs: ['F10-db'],
+      stepRefs: ['J01-S1'],
+      assertion: {
+        path: 'test/write.test.ts',
+        caseTitle: 'recovery',
+        anchorSymbol: 'write',
+        assertionExcerpt: 'expect(saved).toEqual(before);',
+        relation: 'direct',
+      },
+      observationChecks: [],
+      limitations: ['单一输入'],
+    },
+  ];
+  copy.runs[0].caseResults = [{ id: 'V01-C1', status: 'supported', errors: [] }];
+  copy.runs[0].status = 'passed';
+  let book = buildBookIndex(copy);
+  assert.equal(caseEvidenceLinks(book, 'F10-db', 'failureRefs')[0].href, '#runs~case-V01-C1');
+  assert.equal(caseEvidenceLinks(book, 'F10-db', 'failureRefs')[0].verified, true);
+  assert.equal(searchBook(book, 'V01-C1')[0].route, '#runs~case-V01-C1');
+  copy.runs[0].status = 'stale';
+  book = buildBookIndex(copy);
+  assert.equal(caseEvidenceLinks(book, 'F10-db', 'failureRefs')[0].verified, false);
+  for (const field of ['failureRefs', 'stepRefs', 'moduleRefs']) {
+    const wrong = structuredClone(copy);
+    wrong.runs[0].caseEvidence[0][field] = ['missing'];
+    assert.ok(validateBook(wrong).length);
+  }
 });
 test('孤立引用、错入口、重复模块及伪造步骤关系不能进入图谱', () => {
   for (const mutate of [

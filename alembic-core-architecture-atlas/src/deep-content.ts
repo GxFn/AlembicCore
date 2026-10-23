@@ -1,5 +1,8 @@
 import type { AtlasDocument } from '../schemas/model.ts';
+import type { CaseEvidenceLink } from '../schemas/book.ts';
+import { caseLinksMarkdown } from './case-content.ts';
 export interface DeepNavigation {
+  proofs?: Record<string, CaseEvidenceLink[]>;
   links: Record<string, { title: string; href: string }>;
   backlinks: Record<string, Array<{ title: string; route: string }>>;
 }
@@ -46,7 +49,7 @@ export function deepContentMarkdown(
             })
             .join('、')
         : ''
-    }${back.length ? '\n\n返回业务旅程：' + back.join(' · ') : ''}`;
+    }${back.length ? '\n\n返回业务旅程：' + back.join(' · ') : ''}${caseLinksMarkdown(navigation?.proofs?.[id])}`;
   };
   const modules = doc.moduleDetails ?? [],
     failures = doc.failureModes ?? [];
@@ -59,7 +62,7 @@ export function deepContentMarkdown(
   const detail = failures
     .map(
       (f) =>
-        `${anchor(`f-${f.id}`, f.aliases)}### ${f.id} · ${f.trigger}\n\n| 检查项 | 当前代码语义 |\n| --- | --- |\n| 已留下什么 | ${cell(f.remainingState)} |\n| Core自动做什么 | ${cell(f.automaticAction)} |\n| 谁显式恢复 | ${cell(f.explicitRecovery)} |\n| 必须停止的条件 | ${cell(f.stopCondition)} |\n| 源码定位 | \`${cell(f.source.path)}#${cell(f.source.symbol)}\` |\n\n${f.runbook ? `#### 恢复检查顺序\n\n前提：${f.runbook.preconditions}\n\n${f.runbook.checks.map((c, i) => `${i + 1}. ${c.observe} — ${c.meaning}`).join('\n')}\n\n显式动作：${f.runbook.action}\n\n重试身份：${f.runbook.identity}\n\n完成断言：${f.runbook.verify}\n\n停止条件：${f.runbook.stop}\n\n` : ''}${code(f.source.excerpt)}${related(f.id, [...(f.moduleRefs ?? []), ...(f.graphRefs ?? [])], f.apiRefs)}\n\n${f.test.relation === 'none' ? `断言关系：**none**。${f.test.reason}` : `断言关系：**${f.test.relation}**。\`${f.test.path}\` · \`${f.test.caseTitle}\`\n\n${f.test.assertedBehavior}（${f.test.scenarioKind}）。这里只定位断言；实际运行范围见独立运行证据。\n\n${code(f.test.assertionExcerpt ?? '')}`}`,
+        `${anchor(`f-${f.id}`, f.aliases)}### ${f.id} · ${f.trigger}\n\n| 检查项 | 当前代码语义 |\n| --- | --- |\n| 已留下什么 | ${cell(f.remainingState)} |\n| Core自动做什么 | ${cell(f.automaticAction)} |\n| 谁显式恢复 | ${cell(f.explicitRecovery)} |\n| 必须停止的条件 | ${cell(f.stopCondition)} |\n| 源码定位 | \`${cell(f.source.path)}#${cell(f.source.symbol)}\` |\n\n${f.runbook ? `#### 恢复检查顺序\n\n前提：${f.runbook.preconditions}\n\n${f.runbook.checks.map((c, i) => `${i + 1}. ${c.observe} — ${c.meaning}${c.source ? `（观察来源：\`${c.source.path}#${c.source.symbol}\`；字段：${(c.fields ?? []).join('、') || '以观察说明为准'}）` : ''}`).join('\n')}\n\n显式动作：${f.runbook.action}\n\n重试身份：${f.runbook.identity}\n\n完成断言：${f.runbook.verify}\n\n停止条件：${f.runbook.stop}\n\n` : ''}${code(f.source.excerpt)}${related(f.id, [...(f.moduleRefs ?? []), ...(f.graphRefs ?? [])], f.apiRefs)}\n\n${f.test.relation === 'none' ? `断言关系：**none**。${f.test.reason}` : `断言关系：**${f.test.relation}**。\`${f.test.path}\` · \`${f.test.caseTitle}\`\n\n${f.test.assertedBehavior}（${f.test.scenarioKind}）。这里只定位断言；实际运行范围见独立运行证据。\n\n${code(f.test.assertionExcerpt ?? '')}`}`,
     )
     .join('\n\n');
   const moduleSection = `\n\n## 功能单元与调用接缝\n\n各单元按真实入口拆分职责；门面暴露、内部调用和宿主装配是不同关系。关联图提供相邻阅读上下文，故障产生位置以条目源码为准。\n\n${rows}\n`;

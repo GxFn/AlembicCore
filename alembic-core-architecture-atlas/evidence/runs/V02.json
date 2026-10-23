@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "observationsRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/observations.json",
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T16-41-05-963Z/observations.json",
   "observationsSha256": "59c87e1a4f3afb0ecd70c0ef0ad7bf12b58023d275805a25c404ce7e166b95aa",
   "id": "V02",
   "title": "源码索引：内容身份、代际取消与显式追赶",
   "status": "passed",
-  "observedAt": "2026-10-23T13:41:26.237Z",
+  "observedAt": "2026-10-23T16:41:09.590Z",
   "exitCode": 0,
   "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
   "sourceScope": "完整Core产品库存，变化时保守要求重验",
@@ -18,11 +18,23 @@
   "harnessFiles": [
     {
       "path": "scripts/run-evidence.mjs",
-      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
     },
     {
       "path": "scripts/run-contracts.mjs",
-      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
     },
     {
       "path": "scripts/contracts.mjs",
@@ -30,49 +42,64 @@
     },
     {
       "path": "probes/vitest.config.ts",
-      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
     },
     {
       "path": "probes/recovery.test.ts",
-      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
     },
     {
       "path": "evidence/scenarios.json",
-      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
     }
   ],
   "cases": [
     {
       "title": "SourceGraphIndexer detects equal-size content changes with preserved mtime and still noops for metadata-only touches",
       "status": "passed",
-      "duration": 1028.3292090000002
+      "duration": 925.2354159999998,
+      "testFile": "test/SourceGraphIndexer.test.ts"
     },
     {
       "title": "SourceGraphIndexer uses one source text for SDK symbols and hashes even when the live file changes after the read",
       "status": "passed",
-      "duration": 371.31333300000006
+      "duration": 280.0184999999997,
+      "testFile": "test/SourceGraphIndexer.test.ts"
     },
     {
       "title": "SourceGraphIndexer does not publish a generation when the build is cancelled before publication",
       "status": "passed",
-      "duration": 16.58658400000013
+      "duration": 14.869457999999668,
+      "testFile": "test/SourceGraphIndexer.test.ts"
     },
     {
       "title": "SourceGraphIndexer detects stale filesystem changes and builds an incremental generation with deletion cleanup",
       "status": "passed",
-      "duration": 42.300874999999905
+      "duration": 33.050291000000016,
+      "testFile": "test/SourceGraphIndexer.test.ts"
     },
     {
       "title": "SourceGraphIndexer records partial and degraded accounting for large, unsupported, timeout, and parse-failed files",
       "status": "passed",
-      "duration": 34.7052920000001
+      "duration": 25.79233299999987,
+      "testFile": "test/SourceGraphIndexer.test.ts"
     },
     {
       "title": "Atlas Core recovery probe cancelled source generation can recover with a new signal and exact content hash",
       "status": "passed",
-      "duration": 51.44212500000003
+      "duration": 54.987499999999955,
+      "testFile": "alembic-core-architecture-atlas/probes/recovery.test.ts"
     }
   ],
+  "caseResults": [],
   "probeObservations": [
     {
       "scenario": "V02",
@@ -84,10 +111,10 @@
     }
   ],
   "errors": [],
-  "rawRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/report.json",
-  "rawSha256": "138d64924b0a1aeda59670c3cb52187169bfff7a22e8cd4bd1f5e25a05b17477",
-  "consoleRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/console.txt",
-  "consoleSha256": "a603a9c895b2849492b7b8c934565db002f93ede70fbf9411804f2be03026739",
+  "rawRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T16-41-05-963Z/report.json",
+  "rawSha256": "98327dd81c7d1af62db312e66723370a792a1b03eb379ebba3a17f1d46c6a14e",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T16-41-05-963Z/console.txt",
+  "consoleSha256": "e1e5a0cc0dd1b1a0124053f5b613f566b699765a0cef665878d65972bffc4133",
   "command": {
     "executable": "node",
     "args": [
@@ -103,6 +130,6 @@
       "--outputFile=<fixed-atlas-build-report>"
     ]
   },
-  "receiptRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T13-41-21-660Z/receipt.json",
-  "receiptSha256": "213c25a8b278987444e2c67c00bda3a230d24061cfb4a5ff743b3e16446ceaa7"
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v02-2026-10-23T16-41-05-963Z/receipt.json",
+  "receiptSha256": "49ca1de43eac9218a8a2188c1776c2fa4e35437bdfc75097c861087aa55a10a0"
 }

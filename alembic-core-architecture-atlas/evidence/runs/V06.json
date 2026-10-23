@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v06-2026-10-23T16-41-20-171Z/observations.json",
+  "observationsSha256": "3f6f5b73a9dbff97125580b00c67b3e742920bf2935d127e555911605f3f61e8",
+  "id": "V06",
+  "title": "知识删除：文件、目标事务与后置事件分段恢复",
+  "status": "passed",
+  "observedAt": "2026-10-23T16:41:23.370Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
+    }
+  ],
+  "cases": [
+    {
+      "title": "KnowledgeService file-first commands keeps reverse-reference cleanup durable after deleting its target",
+      "status": "passed",
+      "duration": 120.90124999999989,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "KnowledgeService file-first commands delete preserves DB truth on unlink failure",
+      "status": "passed",
+      "duration": 25.707957999999962,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "KnowledgeService file-first commands delete preserves DB truth on ambiguous-owner failure",
+      "status": "passed",
+      "duration": 23.780457999999953,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "KnowledgeService file-first commands delete retains deletion of an index row whose file is already absent",
+      "status": "passed",
+      "duration": 23.85916599999996,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "KnowledgeService file-first commands delete deletes dependent proposal, warning and lifecycle rows in the repository transaction",
+      "status": "passed",
+      "duration": 26.514582999999902,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "KnowledgeService file-first commands delete reports a DB ABORT after file removal and supports retry",
+      "status": "passed",
+      "duration": 25.939415999999937,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "KnowledgeService file-first commands delete reports a DB IGNORE after file removal and supports retry",
+      "status": "passed",
+      "duration": 24.431083999999828,
+      "testFile": "test/KnowledgeServicePersistence.test.ts"
+    },
+    {
+      "title": "Atlas persistence recovery deletion DB failure leaves a retryable identity",
+      "status": "passed",
+      "duration": 43.972166000000016,
+      "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    },
+    {
+      "title": "Atlas persistence recovery deletion listener failure does not restore committed truth",
+      "status": "passed",
+      "duration": 25.818917000000056,
+      "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    }
+  ],
+  "caseResults": [
+    {
+      "id": "V06-D1",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D2",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D3",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D4",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D5",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D6",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D7",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D8",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V06-D9",
+      "status": "supported",
+      "errors": []
+    }
+  ],
+  "probeObservations": [
+    {
+      "fixture": "real-markdown-sqlite",
+      "entryId": "77777777-7777-4777-8777-777777777761",
+      "before": {
+        "rows": 1,
+        "fileExists": true,
+        "fileHash": "sha256:520a9bb13dde955b9bc705a05c85b1e77aa4746a1c3887dce54e88dd7be0cde8",
+        "events": 0
+      },
+      "failed": {
+        "rows": 1,
+        "fileExists": false,
+        "events": 0
+      },
+      "recovered": {
+        "id": "77777777-7777-4777-8777-777777777761",
+        "rows": 0,
+        "fileExists": false,
+        "events": 1,
+        "sameId": true
+      },
+      "scenario": "V06",
+      "caseId": "V06-D7",
+      "observationId": "delete-state"
+    },
+    {
+      "rows": 0,
+      "fileExists": false,
+      "auditAttempts": 1,
+      "listenerAttempts": 1,
+      "retryRejectedAsNotFound": true,
+      "auditFailureWasNonBlocking": true,
+      "scenario": "V06",
+      "caseId": "V06-D8",
+      "observationId": "delete-post"
+    }
+  ],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v06-2026-10-23T16-41-20-171Z/report.json",
+  "rawSha256": "1694004a8ad6b6ca7c9113be98fa9c60ad71c6577b6187120c37f4e838f8fd69",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v06-2026-10-23T16-41-20-171Z/console.txt",
+  "consoleSha256": "a7c772ca495117d0c597a985e98f0e9da2f251cff8a699954ae5581c1ab24e6a",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "test/KnowledgeServicePersistence.test.ts",
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "^(?:KnowledgeService file-first commands delete preserves DB truth on unlink failure|KnowledgeService file-first commands delete preserves DB truth on ambiguous-owner failure|KnowledgeService file-first commands delete retains deletion of an index row whose file is already absent|KnowledgeService file-first commands delete deletes dependent proposal, warning and lifecycle rows in the repository transaction|KnowledgeService file-first commands delete reports a DB ABORT after file removal and supports retry|KnowledgeService file-first commands delete reports a DB IGNORE after file removal and supports retry|Atlas persistence recovery deletion DB failure leaves a retryable identity|Atlas persistence recovery deletion listener failure does not restore committed truth|KnowledgeService file-first commands keeps reverse-reference cleanup durable after deleting its target)$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v06-2026-10-23T16-41-20-171Z/receipt.json",
+  "receiptSha256": "37ad0e053090c7aa41bc3969076a980f83b845ef18ca7ea42ee33017f3a9f20c"
+}

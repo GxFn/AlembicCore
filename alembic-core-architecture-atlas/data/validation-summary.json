@@ -1,6 +1,6 @@
 {
-  "inputObservationDigest": "70565a97b855fbe1d216ff7d0f8afee3dca64aee42ac02a69df5f12ef1055817",
-  "viewDigest": "d153d32616c3826a53e8f9d928fc2cd773c75d47c38318b57300e73ea9702256",
+  "inputObservationDigest": "9af612a61e675af6b4d2f5b3c091ab13d04c8558ec589547ffcd6c689c8ee069",
+  "viewDigest": "566999ba4ec4de54d440d4532eb4c37cb223e075ccd89ab88a55b96dde40baf6",
   "baselineCommit": "35302912ac2efaa6a1bc65fdc112a16da75d845f",
   "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
   "scope": "静态来源快照；不代表产品测试重跑或实时工作树状态",
@@ -9,13 +9,13 @@
   "ownershipCount": 665,
   "apiCount": 68,
   "documentCount": 17,
-  "atlasVersion": "0.2.0",
-  "journeyCount": 4,
-  "objectCount": 8,
-  "runCount": 5,
-  "moduleCount": 119,
-  "failureCount": 116,
-  "diagramCount": 70,
+  "atlasVersion": "0.3.0",
+  "journeyCount": 5,
+  "objectCount": 9,
+  "runCount": 9,
+  "moduleCount": 121,
+  "failureCount": 124,
+  "diagramCount": 74,
   "documents": [
     {
       "path": "maps/01-overall-package-boundaries/README.md",
@@ -104,5 +104,5 @@
     }
   ],
   "originalAvailability": "matched",
-  "checkedAt": "2026-10-23T13:49:39.595Z"
+  "checkedAt": "2026-10-23T16:57:11.901Z"
 }

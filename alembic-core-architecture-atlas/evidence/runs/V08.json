@@ -1,0 +1,168 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v08-2026-10-23T16-41-26-347Z/observations.json",
+  "observationsSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+  "id": "V08",
+  "title": "Strict prepared：同身份端口重放与写前拒绝",
+  "status": "passed",
+  "observedAt": "2026-10-23T16:41:28.384Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
+    }
+  ],
+  "cases": [
+    {
+      "title": "production persistence contracts derives a deterministic prepared Recipe ID from journal-bound identity",
+      "status": "passed",
+      "duration": 1.4766669999999067,
+      "testFile": "test/ProductionPersistenceContracts.test.ts"
+    },
+    {
+      "title": "strict prepared Recipe Gateway path authorizes the internal prepared ID, reads it back, and reports zero UUID allocation",
+      "status": "passed",
+      "duration": 2.920749999999998,
+      "testFile": "test/StrictPreparedRecipeGateway.test.ts"
+    },
+    {
+      "title": "strict prepared Recipe Gateway path recovers an exact persist-before-consumed row without creating a duplicate",
+      "status": "passed",
+      "duration": 0.8499580000000151,
+      "testFile": "test/StrictPreparedRecipeGateway.test.ts"
+    },
+    {
+      "title": "strict prepared Recipe Gateway path replays a persist-before-journal-consumed crash without a second Recipe",
+      "status": "passed",
+      "duration": 1.7571249999999736,
+      "testFile": "test/StrictPreparedRecipeGateway.test.ts"
+    },
+    {
+      "title": "strict prepared Recipe Gateway path fails closed for unauthorized or mismatched revision readback",
+      "status": "passed",
+      "duration": 1.0200419999999895,
+      "testFile": "test/StrictPreparedRecipeGateway.test.ts"
+    },
+    {
+      "title": "strict prepared Recipe Gateway path rejects an item changed after G1 review before journal authorization or write",
+      "status": "passed",
+      "duration": 7.189333000000033,
+      "testFile": "test/StrictPreparedRecipeGateway.test.ts"
+    },
+    {
+      "title": "strict prepared Recipe Gateway path rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write",
+      "status": "passed",
+      "duration": 0.820459000000028,
+      "testFile": "test/StrictPreparedRecipeGateway.test.ts"
+    }
+  ],
+  "caseResults": [
+    {
+      "id": "V08-P1",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V08-P2",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V08-P3",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V08-P4",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V08-P5",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V08-P6",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V08-P7",
+      "status": "supported",
+      "errors": []
+    }
+  ],
+  "probeObservations": [],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v08-2026-10-23T16-41-26-347Z/report.json",
+  "rawSha256": "16a0ffbbd2c0cc6b985ab2e3e72e2ac4dabda6c4c095d01e8ad0eadbee861399",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v08-2026-10-23T16-41-26-347Z/console.txt",
+  "consoleSha256": "70058c7fcaa7d0a8f9223fc25b2bfac0919350616fadc38c30db063ec91460ef",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "test/StrictPreparedRecipeGateway.test.ts",
+      "test/ProductionPersistenceContracts.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "^(?:strict prepared Recipe Gateway path authorizes the internal prepared ID, reads it back, and reports zero UUID allocation|strict prepared Recipe Gateway path recovers an exact persist-before-consumed row without creating a duplicate|strict prepared Recipe Gateway path replays a persist-before-journal-consumed crash without a second Recipe|strict prepared Recipe Gateway path fails closed for unauthorized or mismatched revision readback|strict prepared Recipe Gateway path rejects an item changed after G1 review before journal authorization or write|strict prepared Recipe Gateway path rejects a mismatched G1 → Admission → G2 chain before recovery inspection or write|production persistence contracts derives a deterministic prepared Recipe ID from journal-bound identity)$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v08-2026-10-23T16-41-26-347Z/receipt.json",
+  "receiptSha256": "e7f83fbdae8453e3c82b8ceaede9ef7051ab58cd4dfe58b05d415d78c64226d0"
+}

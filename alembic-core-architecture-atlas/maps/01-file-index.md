@@ -13,8 +13,8 @@
 | `.gitignore` | support | 支持材料 | full | inherited |
 | `AGENTS.md` | support | 支持材料 | full | inherited |
 | `CLAUDE.md` | support | 支持材料 | partial | inherited |
-| `README.md` | support | 支持材料 | partial | source-changed |
-| `README.zh-CN.md` | support | 支持材料 | full | source-changed |
+| `README.md` | support | 支持材料 | full | reviewed |
+| `README.zh-CN.md` | support | 支持材料 | full | reviewed |
 | `RELEASE-PLAYBOOK.md` | support | 支持材料 | full | inherited |
 | `biome.json` | support | 支持材料 | full | inherited |
 | `config/blessed-singletons.json` | config | 支持材料 | partial | inherited |

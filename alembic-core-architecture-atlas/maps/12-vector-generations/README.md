@@ -224,8 +224,7 @@ diagrams:
           caseTitle: leaves the old generation queryable when shadow embedding fails
           anchorSymbol: RecipeVectorGenerationManager
           assertedBehavior: 故障provider使shadow失败并清理，新失败代际不替换旧active
-          assertionExcerpt: "expect(result.active).toEqual({ generationId: 'old-generation', manifestHash:
-            'old-manifest' });"
+          assertionExcerpt: "expect(result.active).toEqual({ generationId: 'old-generation', manifestHash: 'old-manifest' });"
           scenarioKind: negative
       - id: VG-08
         from: failed
@@ -242,8 +241,7 @@ diagrams:
           caseTitle: leaves the old generation queryable when shadow embedding fails
           anchorSymbol: RecipeVectorGenerationManager
           assertedBehavior: 故障provider使shadow失败并清理，新失败代际不替换旧active
-          assertionExcerpt: "expect(result.active).toEqual({ generationId: 'old-generation', manifestHash:
-            'old-manifest' });"
+          assertionExcerpt: "expect(result.active).toEqual({ generationId: 'old-generation', manifestHash: 'old-manifest' });"
           scenarioKind: negative
   - id: r3-file-index-and-wal
     title: 文件索引与WAL确认边界
@@ -397,8 +395,8 @@ configPaths:
 truthKind: current-code
 baselineCommit: 35302912ac2efaa6a1bc65fdc112a16da75d845f
 reviewDepth: L3
-reviewedAt: 2026-10-22
-reviewOrigin: architecture-atlas/reviews/2026-10-22-r3/semantic-review.md
+reviewedAt: 2026-10-23T16:05:54.775Z
+reviewOrigin: architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md
 dependencySelection:
   - src/service/vector/RecipeVectorGeneration.ts
   - src/service/vector/RecipeRegionVectorIndex.ts
@@ -690,7 +688,7 @@ failureModes:
 
 region子集刷新不能删除未列入子集的Recipe；删除全量孤儿需要显式authoritative Recipe IDs。活知识的旧chunk要等replacement写后读回成功再删除。VectorLifecycleCoordinator按事件排队，终态删除不依赖embedding在线，flush/destroy等待清理。普通检索只用reader，不在读取路径隐式重建region。
 
-HNSW存原始向量与图，SQ8用于粗排，最终候选仍用原向量余弦重排；ASVEC快照与CRC32 WAL提供持久恢复。显式flush失败应传播并保留dirty/WAL，兼容destroy和旧JSON后端的best-effort路径承诺较弱。IndexingPipeline只在完整扫描和确证消失时删旧块；dryRun限制store写入，但前序分块/enrichment/embedding仍可能执行。此页对manager边引用内存router测试，不把它冒充磁盘崩溃或宿主路由端到端测试；本轮未重跑产品测试或外部embedding服务。
+HNSW存原始向量与图，SQ8用于粗排，最终候选仍用原向量余弦重排；ASVEC快照与CRC32 WAL提供持久恢复。显式flush失败应传播并保留dirty/WAL，兼容destroy和旧JSON后端的best-effort路径承诺较弱。IndexingPipeline只在完整扫描和确证消失时删旧块；dryRun限制store写入，但前序分块/enrichment/embedding仍可能执行。此页对manager边引用内存router测试，不把它冒充磁盘崩溃或宿主路由端到端测试；2026-10-22内容复核未重跑产品测试；0.2的V04与0.3的V07独立运行范围见[证据记录](../../evidence/README.md)。这些样本没有调用外部embedding服务。
 
 ## 视图与术语
 

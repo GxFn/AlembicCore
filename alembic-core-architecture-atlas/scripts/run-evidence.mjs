@@ -10,7 +10,7 @@ const atlas = resolve(dirname(fileURLToPath(import.meta.url)), '..'),
   core = resolve(atlas, '..'),
   ledger = resolve(core, '../wakeflow-ledger/AlembicCore');
 export { assessRunReport } from './run-contracts.mjs';
-import { assessRunReport, requiredHarnessFiles } from './run-contracts.mjs';
+import { assessRunReport, assessCaseEvidence, requiredHarnessFiles } from './run-contracts.mjs';
 const redact = (s) =>
   s
     .replaceAll(atlas, '<atlas>')
@@ -74,7 +74,12 @@ export function executeScenario(spec) {
     executionErrors.push('report-parse:' + error.message);
   }
   writeFileSync(resolve(rawDir, 'report.json'), reportText);
-  const assessment = assessRunReport(report, spec, command.status);
+  let assessment;
+  try {
+    assessment = assessRunReport(report, spec, command.status);
+  } catch (error) {
+    assessment = { cases: [], errors: [`report-assessment:${error.message}`] };
+  }
   assessment.errors.push(...executionErrors);
   try {
     if (snapshot(core, productPaths()).digest !== before)
@@ -94,6 +99,13 @@ export function executeScenario(spec) {
   }
   if (probeObservations.length !== (spec.expectedProbeCount ?? 0))
     assessment.errors.push('probe-observation-count');
+  let evidence;
+  try {
+    evidence = assessCaseEvidence(spec, assessment.cases, probeObservations);
+  } catch (error) {
+    evidence = { caseResults: [], errors: [`case-assessment:${error.message}`] };
+  }
+  assessment.errors.push(...evidence.errors);
   const observationsText = JSON.stringify(probeObservations, null, 2) + '\n';
   writeFileSync(resolve(rawDir, 'observations.json'), observationsText);
   const rawRef = `architecture-atlas/runs/${stamp.slice(0, 10)}/${runId}/report.json`;
@@ -117,6 +129,7 @@ export function executeScenario(spec) {
     },
     harnessFiles,
     cases: assessment.cases,
+    caseResults: evidence.caseResults,
     probeObservations,
     errors: assessment.errors,
     rawRef,

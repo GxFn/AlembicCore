@@ -1,0 +1,289 @@
+{
+  "schemaVersion": 1,
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v07-2026-10-23T16-41-23-371Z/observations.json",
+  "observationsSha256": "a2ba0e27c4271e283635dd8b225e095efa52b00de4dc95266ae7f917dfb84227",
+  "id": "V07",
+  "title": "syncAll：后置维护拒绝、真实store恢复与返回状态边界",
+  "status": "passed",
+  "observedAt": "2026-10-23T16:41:26.346Z",
+  "exitCode": 0,
+  "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
+  "sourceScope": "完整Core产品库存，变化时保守要求重验",
+  "environment": {
+    "node": "v24.19.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "vitest": "4.1.6"
+  },
+  "harnessFiles": [
+    {
+      "path": "scripts/run-evidence.mjs",
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
+    },
+    {
+      "path": "scripts/run-contracts.mjs",
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
+    },
+    {
+      "path": "scripts/contracts.mjs",
+      "sha256": "ff45f7920b092335025458e539692e9f4bce800d1e4a5c6ef988e3f3c73f5cfe"
+    },
+    {
+      "path": "probes/vitest.config.ts",
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
+    },
+    {
+      "path": "probes/recovery.test.ts",
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
+    },
+    {
+      "path": "evidence/scenarios.json",
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
+    }
+  ],
+  "cases": [
+    {
+      "title": "Knowledge productization lifecycle deprecates an orphan for an empty corpus and awaits authoritative vector maintenance",
+      "status": "passed",
+      "duration": 45.79283300000003,
+      "testFile": "test/KnowledgeProductizationLifecycle.test.ts"
+    },
+    {
+      "title": "Atlas persistence recovery sync maintenance rejection preserves DB changes and recovers the real vector store",
+      "status": "passed",
+      "duration": 71.57645900000011,
+      "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    },
+    {
+      "title": "Atlas persistence recovery sync completed can carry a failed maintenance business report",
+      "status": "passed",
+      "duration": 9.991958000000068,
+      "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    },
+    {
+      "title": "Atlas persistence recovery sync read failure and real file absence produce distinguishable orphan observations",
+      "status": "passed",
+      "duration": 24.488415999999916,
+      "testFile": "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts"
+    }
+  ],
+  "caseResults": [
+    {
+      "id": "V07-S1",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V07-S2",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V07-S3",
+      "status": "supported",
+      "errors": []
+    },
+    {
+      "id": "V07-S4",
+      "status": "supported",
+      "errors": []
+    }
+  ],
+  "probeObservations": [
+    {
+      "fixture": "real-markdown-sqlite-hnsw",
+      "entryId": "77777777-7777-4777-8777-777777777771",
+      "adapterPolicy": "reconcileIndex errors become rejection in fixture only",
+      "before": {
+        "lifecycle": "active",
+        "fileExists": true,
+        "ids": [
+          "entry_77777777-7777-4777-8777-777777777771",
+          "recipe_region_77777777-7777-4777-8777-777777777771_identity_ps1_intent_c711d1e1589b5e5300c232e2"
+        ]
+      },
+      "failed": {
+        "lifecycle": "deprecated",
+        "fileExists": false,
+        "legacyPresent": false,
+        "regionPresent": true,
+        "report": {
+          "orphansRemoved": 1,
+          "recipeRegionOrphansRemoved": 0,
+          "missingSynced": 0,
+          "errors": [
+            "recipe-region-orphan-remove-failed:recipe_region_77777777-7777-4777-8777-777777777771_identity_ps1_intent_c711d1e1589b5e5300c232e2:atlas region remove fault"
+          ],
+          "initialInspection": {
+            "healthy": false,
+            "expectedCount": 0,
+            "presentCount": 1,
+            "missingIds": [],
+            "orphanIds": [
+              "recipe_region_77777777-7777-4777-8777-777777777771_identity_ps1_intent_c711d1e1589b5e5300c232e2"
+            ],
+            "staleIds": [],
+            "staleGenerationIds": [],
+            "duplicateIds": [],
+            "partialIds": [],
+            "hashMismatchIds": [],
+            "dimensionMismatchIds": []
+          },
+          "legacyEntryVectorsRemoved": 1,
+          "degradedReason": "embed-provider-unavailable",
+          "finalInspection": {
+            "healthy": false,
+            "expectedCount": 0,
+            "presentCount": 1,
+            "missingIds": [],
+            "orphanIds": [
+              "recipe_region_77777777-7777-4777-8777-777777777771_identity_ps1_intent_c711d1e1589b5e5300c232e2"
+            ],
+            "staleIds": [],
+            "staleGenerationIds": [],
+            "duplicateIds": [],
+            "partialIds": [],
+            "hashMismatchIds": [],
+            "dimensionMismatchIds": []
+          },
+          "missingDeferred": 0
+        },
+        "syncReturnedReport": false
+      },
+      "recovered": {
+        "lifecycle": "deprecated",
+        "id": "77777777-7777-4777-8777-777777777771",
+        "sameId": true,
+        "maintenanceStatus": "completed",
+        "report": {
+          "orphansRemoved": 0,
+          "recipeRegionOrphansRemoved": 1,
+          "missingSynced": 0,
+          "errors": [],
+          "initialInspection": {
+            "healthy": false,
+            "expectedCount": 0,
+            "presentCount": 1,
+            "missingIds": [],
+            "orphanIds": [
+              "recipe_region_77777777-7777-4777-8777-777777777771_identity_ps1_intent_c711d1e1589b5e5300c232e2"
+            ],
+            "staleIds": [],
+            "staleGenerationIds": [],
+            "duplicateIds": [],
+            "partialIds": [],
+            "hashMismatchIds": [],
+            "dimensionMismatchIds": []
+          },
+          "finalInspection": {
+            "healthy": true,
+            "expectedCount": 0,
+            "presentCount": 0,
+            "missingIds": [],
+            "orphanIds": [],
+            "staleIds": [],
+            "staleGenerationIds": [],
+            "duplicateIds": [],
+            "partialIds": [],
+            "hashMismatchIds": [],
+            "dimensionMismatchIds": []
+          }
+        },
+        "reopenedIds": [],
+        "legacyPresent": false,
+        "regionPresent": false
+      },
+      "scenario": "V07",
+      "caseId": "V07-S1",
+      "observationId": "sync-vector"
+    },
+    {
+      "invocationStatus": "completed",
+      "businessReport": {
+        "status": "failed",
+        "reason": "controlled-report"
+      },
+      "contractOnly": true,
+      "scenario": "V07",
+      "caseId": "V07-S2",
+      "observationId": "sync-result"
+    },
+    {
+      "entryId": "77777777-7777-4777-8777-777777777773",
+      "dryRun": {
+        "skipped": 1,
+        "orphaned": [
+          "77777777-7777-4777-8777-777777777773"
+        ],
+        "maintenanceStatus": "skipped-dry-run"
+      },
+      "failed": {
+        "skipped": 1,
+        "orphaned": [
+          "77777777-7777-4777-8777-777777777773"
+        ],
+        "lifecycle": "deprecated",
+        "fileExists": true,
+        "fileHash": "sha256:67e28143288ff2947d3b0f5b84e8bbfff9ec0f5806f453796f8d7d6b2f2ec2e2"
+      },
+      "recovered": {
+        "skipped": 0,
+        "orphaned": [],
+        "lifecycle": "active",
+        "fileHash": "sha256:67e28143288ff2947d3b0f5b84e8bbfff9ec0f5806f453796f8d7d6b2f2ec2e2"
+      },
+      "absentControl": {
+        "fileExists": false,
+        "orphaned": [
+          "77777777-7777-4777-8777-777777777773"
+        ]
+      },
+      "sameFileHash": true,
+      "scenario": "V07",
+      "caseId": "V07-S3",
+      "observationId": "sync-read-skip"
+    }
+  ],
+  "errors": [],
+  "rawRef": "architecture-atlas/runs/2026-10-23/v07-2026-10-23T16-41-23-371Z/report.json",
+  "rawSha256": "273350e5ca9de4f42d13674a57e4a73db00a84788baa0eae0c78e6565282c30a",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v07-2026-10-23T16-41-23-371Z/console.txt",
+  "consoleSha256": "dba0ae604119ed0dcbbbec61a2d693758a1a3974c56433dddc3b16ff947c8a89",
+  "command": {
+    "executable": "node",
+    "args": [
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "alembic-core-architecture-atlas/probes/persistence-recovery.test.ts",
+      "test/KnowledgeProductizationLifecycle.test.ts",
+      "--config",
+      "alembic-core-architecture-atlas/probes/vitest.config.ts",
+      "--testNamePattern",
+      "^(?:Atlas persistence recovery sync maintenance rejection preserves DB changes and recovers the real vector store|Atlas persistence recovery sync completed can carry a failed maintenance business report|Atlas persistence recovery sync read failure and real file absence produce distinguishable orphan observations|Knowledge productization lifecycle deprecates an orphan for an empty corpus and awaits authoritative vector maintenance)$",
+      "--reporter=json",
+      "--outputFile=<fixed-atlas-build-report>"
+    ]
+  },
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v07-2026-10-23T16-41-23-371Z/receipt.json",
+  "receiptSha256": "034d72bcd1b0af0e3a9e9fc4b808cfbdea0e0bd99a8f131b53895f2277272f62"
+}

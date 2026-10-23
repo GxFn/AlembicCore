@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "observationsRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/observations.json",
+  "observationsRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T16-41-12-845Z/observations.json",
   "observationsSha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
   "id": "V04",
   "title": "向量WAL：快照写失败后显式flush与重开",
   "status": "passed",
-  "observedAt": "2026-10-23T13:41:31.829Z",
+  "observedAt": "2026-10-23T16:41:13.618Z",
   "exitCode": 0,
   "sourceDigest": "703639bb9783aa465b86cfa42f5ae666b0e1efac84c0c37f225f6dcc9a7b9f45",
   "sourceScope": "完整Core产品库存，变化时保守要求重验",
@@ -18,11 +18,23 @@
   "harnessFiles": [
     {
       "path": "scripts/run-evidence.mjs",
-      "sha256": "c25759e2d60f9b5c99e97cb7abbaf2589a50d7e42233f5e2cf0201cf4837f34d"
+      "sha256": "dbff637c0c5ce356a04bba532f18925c812a49dfd93ef96278e4bde12553809d"
     },
     {
       "path": "scripts/run-contracts.mjs",
-      "sha256": "be16769f109f4c08ba009a8c7673a9873fba6d53c68b515527109ab1e7e840a5"
+      "sha256": "e31542b4e15277f81cda8b5a835489b8495b2cd04a2570d022f60e2b71e883ec"
+    },
+    {
+      "path": "scripts/run-records.mjs",
+      "sha256": "a0fcddbce1b344b68fcc9f3ec676db40163fd8d525b78c4487f8ec2cbe1b613c"
+    },
+    {
+      "path": "scripts/book.mjs",
+      "sha256": "c60c55064caa734245f38ff5614bb8fc9b1191587ebef163d304360579b662f6"
+    },
+    {
+      "path": "scripts/atlas.mjs",
+      "sha256": "6e082755d283db73707167455e47317eab2d8d010c0fba2225f84cc8c710ea27"
     },
     {
       "path": "scripts/contracts.mjs",
@@ -30,40 +42,52 @@
     },
     {
       "path": "probes/vitest.config.ts",
-      "sha256": "fc2bf2647e54471774184d64c02dba78d749d91a9c4da5fcbd7692618e59e4e1"
+      "sha256": "bac689fe3c5e6ea4e903d7b2a613f47d0e87d0cfea92396b7b3892f5077bf2a0"
     },
     {
       "path": "probes/recovery.test.ts",
-      "sha256": "c69e0f416bf91d2217264804d0c987a951ad1a4e1943176ae4235dcc09583a71"
+      "sha256": "dfebde7407365135671310124f0452717dca3afba6344863df4ea427106a879d"
+    },
+    {
+      "path": "probes/persistence-recovery.test.ts",
+      "sha256": "93fc9fc0b637247dff6c27182fc09d9d75876250eb83a221e4bd120ff1c53948"
+    },
+    {
+      "path": "probes/observation.ts",
+      "sha256": "9c8b0597005e17a6978eb43422c198e25e46c30648842c593b1396c76fa32ad8"
     },
     {
       "path": "evidence/scenarios.json",
-      "sha256": "6b8223920475a042d06661e71a23a20572b35791b5c8e44b7c6baed4e810b61a"
+      "sha256": "01dce1dca7d8d4bf82896dd2476e7e3e9cb1455871e0e415ea3da4ad8117b449"
     }
   ],
   "cases": [
     {
       "title": "HnswVectorAdapter WAL integration rejects flush and retains WAL when the HNSW snapshot cannot be written",
       "status": "passed",
-      "duration": 13.227332999999987
+      "duration": 11.048333000000014,
+      "testFile": "test/VectorPersistence.test.ts"
     },
     {
       "title": "HnswVectorAdapter WAL integration retains recovered WAL when the first startup snapshot fails",
       "status": "passed",
-      "duration": 4.4802910000000224
+      "duration": 3.530167000000006,
+      "testFile": "test/VectorPersistence.test.ts"
     },
     {
       "title": "HnswVectorAdapter WAL integration replays WAL entries newer than the persisted snapshot",
       "status": "passed",
-      "duration": 7.288374999999974
+      "duration": 4.74716699999999,
+      "testFile": "test/VectorPersistence.test.ts"
     }
   ],
+  "caseResults": [],
   "probeObservations": [],
   "errors": [],
-  "rawRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/report.json",
-  "rawSha256": "c880de8f07a92a128417c19cbce63636637191d7da1e3c31e3125e9e90d82a42",
-  "consoleRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/console.txt",
-  "consoleSha256": "71f4c98ad61ffe9e3d0eeb2e44ccf3c9eda57ce76a6d2773b2660b2198d4fc7e",
+  "rawRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T16-41-12-845Z/report.json",
+  "rawSha256": "5b4b3647bcb9f6a977ed6d7b86d3ce8350976477b184d190493b2d3b4e1edaf0",
+  "consoleRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T16-41-12-845Z/console.txt",
+  "consoleSha256": "4e31041260b04a11e533ce98efd90d5cb427b03bf8d5aaa60e8cd4eabc035f79",
   "command": {
     "executable": "node",
     "args": [
@@ -78,6 +102,6 @@
       "--outputFile=<fixed-atlas-build-report>"
     ]
   },
-  "receiptRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T13-41-30-906Z/receipt.json",
-  "receiptSha256": "0d462deeda9c62430930d516839c6568a7fd33325520c435910e89132c18a8ff"
+  "receiptRef": "architecture-atlas/runs/2026-10-23/v04-2026-10-23T16-41-12-845Z/receipt.json",
+  "receiptSha256": "771eb1834b8c7c4289d7f01351633bba41aae7946b6ae40ee374722e569a6a0b"
 }

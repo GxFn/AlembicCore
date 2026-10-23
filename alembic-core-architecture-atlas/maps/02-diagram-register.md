@@ -44,6 +44,8 @@
 | `knowledge-create` | F1：知识创建的文件优先提交 | [10](10-knowledge-authoring-persistence/README.md) | 6 / 6 |
 | `knowledge-recovery` | R0：文件与数据库分歧的显式恢复 | [10](10-knowledge-authoring-persistence/README.md) | 7 / 6 |
 | `r3-authoring-and-sync-effects` | A1：校验、创建与同步的不同完成边界 | [10](10-knowledge-authoring-persistence/README.md) | 8 / 6 |
+| `knowledge-delete-recovery` | R0：删除失败后先确定哪一段已完成 | [10](10-knowledge-authoring-persistence/README.md) | 10 / 11 |
+| `knowledge-sync-post-maintenance` | R0：syncAll先改变DB，再等待独立维护 | [10](10-knowledge-authoring-persistence/README.md) | 9 / 10 |
 | `dependencies-10` | F0：文件依赖精选 · 静态关系 | [10](10-knowledge-authoring-persistence/README.md) | 9 / 9 |
 | `retrieval-live-truth` | F1：召回、真相过滤与有界补窗 | [11](11-retrieval-recipe-context/README.md) | 6 / 6 |
 | `r3-retrieval-stop-and-degrade` | R0：检索中的降级与停止 | [11](11-retrieval-recipe-context/README.md) | 7 / 6 |
@@ -65,6 +67,8 @@
 | `strict-durable-review` | F1：实际取证、独立host执行与跨进程durable消费 | [15](15-strict-production-authority/README.md) | 8 / 7 |
 | `strict-population-cluster-formation` | V0：执行分母如何变为 population 与机制簇 | [15](15-strict-production-authority/README.md) | 8 / 7 |
 | `strict-induction-falsification-formation` | V0：归纳与反证回执：先保留分母，再作有界判定 | [15](15-strict-production-authority/README.md) | 10 / 10 |
+| `strict-prepared-replay` | R0：Prepared重放：先重验授权，再精确inspect | [15](15-strict-production-authority/README.md) | 10 / 13 |
+| `strict-wal-checkpoint` | R0：WAL checkpoint：已提交不等于主文件可签 | [15](15-strict-production-authority/README.md) | 9 / 9 |
 | `dependencies-15` | F0：文件依赖精选 · 静态关系 | [15](15-strict-production-authority/README.md) | 9 / 17 |
 | `job-terminal-protection` | S0：作业状态与晚到结果保护 | [16](16-runtime-events-lifecycle/README.md) | 6 / 6 |
 | `events-signals-waiting` | F1：信号桥接与事件等待语义 | [16](16-runtime-events-lifecycle/README.md) | 5 / 4 |

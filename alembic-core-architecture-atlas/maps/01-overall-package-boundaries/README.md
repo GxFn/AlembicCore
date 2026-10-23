@@ -112,8 +112,7 @@ diagrams:
         test:
           relation: indirect
           path: test/CorePackage.test.ts
-          caseTitle: routes public project information through ProjectContext instead of root source graph
-            aggregation
+          caseTitle: routes public project information through ProjectContext instead of root source graph aggregation
           anchorSymbol: ProjectContext
           assertedBehavior: ProjectContext.execute 可见，根门面不暴露 SourceGraphQueryService
           assertionExcerpt: expect(ProjectContext.execute).toBeInstanceOf(Function);
@@ -142,7 +141,7 @@ diagrams:
         label: 知识创建/更新文件已写
         role: service
       - id: divergence
-        label: DivergenceError：显式sync指引
+        label: create/update分歧：显式sync指引
         role: failure
       - id: index
         label: 索引发布前取消
@@ -172,8 +171,7 @@ diagrams:
           caseTitle: reports %s as divergence and sync can restore the durable file
           anchorSymbol: run
           assertedBehavior: 通过case内run(command)调用公开KnowledgeService：DB故障导致分歧；移除故障trigger后显式sync可恢复文件对应的DB状态。
-          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia:
-            'KnowledgeSyncService.sync' },"
+          assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia: 'KnowledgeSyncService.sync' },"
           scenarioKind: recovery
       - id: r3-owner-index
         from: index
@@ -222,8 +220,8 @@ configPaths:
 truthKind: current-code
 baselineCommit: 35302912ac2efaa6a1bc65fdc112a16da75d845f
 reviewDepth: L3
-reviewedAt: 2026-10-22
-reviewOrigin: architecture-atlas/reviews/2026-10-22-r3/semantic-review.md
+reviewedAt: 2026-10-23T16:05:54.700Z
+reviewOrigin: architecture-atlas/implementation-2026-10-23-v0.3/semantic-review.md
 dependencySelection:
   - src/index.ts
   - src/knowledge.ts
@@ -401,8 +399,7 @@ failureModes:
       caseTitle: reports %s as divergence and sync can restore the durable file
       anchorSymbol: run
       assertedBehavior: 通过case内run(command)调用公开KnowledgeService：DB故障导致分歧；移除故障trigger后显式sync可恢复文件对应的DB状态。
-      assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia:
-        'KnowledgeSyncService.sync' },"
+      assertionExcerpt: "details: { entryIds: [id], fileOpsCompleted: 1, reconcileVia: 'KnowledgeSyncService.sync' },"
       scenarioKind: recovery
     aliases:
       - f01-file-db-divergence--创建更新的文件操作已完成但db提交或id读回失败
@@ -423,8 +420,7 @@ failureModes:
           meaning: 确认文件真相与 DB 缺失/旧版本/读回异常；不只看调用返回错误。
         - observe: 检查是否已经进入 relations/audit 等衍生动作
           meaning: 本指南只恢复文件→DB 投影，不会补保证所有后置效果。
-      action: 先排除原 DB 连接/锁/迁移故障，再由宿主显式调用 KnowledgeSyncService.sync 或 syncAll。先检查 dryRun
-        报告，再在既有授权下执行写同步；syncAll 另外观察后置向量结果。
+      action: 仅对create/update等persist路径且原文件真相仍在：排除DB故障后显式KnowledgeSyncService.sync/syncAll。若operation为knowledge.delete，按reconcileVia分流到删除清单，不能以sync代替同IDdelete。先dryRun，正式写后仍须读回。
       identity: 复用原 entryId 与原文件，不重新 create 生成新 id，也不因重试更新已保存文件的来源身份。
       verify: 按同 entryId 重读 DB 与 Markdown，核对正文和文件 hash；确认没有同一条目重复行，并记录 sync 的
         updated/created/skipped/orphaned/violations。向量和关系另验。
@@ -559,6 +555,10 @@ AlembicCore 是可运行的 Headless 内核库。它拥有配置与路径解析�
 
 失败恢复同样分属各owner。知识创建/更新可能留下文件真相，索引取消应保留旧代，工作流结果部分保存应保留检查点，严格输入闭包失败则不能发布局部结果。下面将这些独立路径并排展示，供宿主选择正确入口；图中没有一个隐藏的Core总恢复调度器。输出预算又是另一层：overflow只描述交付合同，既不保存原内容，也不能证明宿主已经履行归档。
 
+## 删除不能套用创建恢复
+
+file-first协调器也服务remove，但恢复入口因操作而不同。创建/更新分歧见F01-file-db-divergence；删除的文件/DB/后置事件分流见[知识删除](../10-knowledge-authoring-persistence/README.md#m-M10-06)。
+
 <!-- atlas:generated:start -->
 
 ## 功能单元与调用接缝
@@ -650,7 +650,7 @@ AlembicCore 是可运行的 Headless 内核库。它拥有配置与路径解析�
 
 关联：[知识创建的文件优先提交](../10-knowledge-authoring-persistence/README.md#graph-knowledge-create) · [F01-port-missing · 宿主没有注入fileStore](README.md#f-F01-port-missing) · [F01-file-db-divergence · 创建/更新的文件操作已完成，但DB提交或ID读回失败](README.md#f-F01-file-db-divergence)
 
-返回业务旅程：[一次知识从提交到可查询 · 先持久化文件，再提交 DB 并核对实体 ID](../../journeys/j01.md#J01-03)
+返回业务旅程：[一次知识从提交到可查询 · 先持久化文件，再提交 DB 并核对实体 ID](../../journeys/j01.md#J01-03) · [知识删除与部分完成后的恢复 · 文件先移除，再更新referrer与删除目标事务](../../journeys/j05.md#J05-02)
 
 <a id="m-M01-06" class="stable-anchor"></a>
 <a id="工作流结果快照报告与检查点清理" class="stable-anchor"></a>
@@ -732,7 +732,7 @@ flowchart TD
 accTitle: 不同持久化owner的失败去向
 accDescr: 三个独立组件并排展示；箭头表达各自实现的失败状态，不表示存在一个自动跨模块恢复器。
 n0["知识创建/更新文件已写"]
-n1["DivergenceError：显式sync指引"]
+n1["create/update分歧：显式sync指引"]
 n2["索引发布前取消"]
 n3["旧代保留，新代不发布"]
 n4["snapshot/report未同时耐久"]
@@ -834,7 +834,7 @@ if (!fileStore) {
 2. 检查原 Markdown 是否存在、id/正文/hash，并按同 id 读 DB — 确认文件真相与 DB 缺失/旧版本/读回异常；不只看调用返回错误。
 3. 检查是否已经进入 relations/audit 等衍生动作 — 本指南只恢复文件→DB 投影，不会补保证所有后置效果。
 
-显式动作：先排除原 DB 连接/锁/迁移故障，再由宿主显式调用 KnowledgeSyncService.sync 或 syncAll。先检查 dryRun 报告，再在既有授权下执行写同步；syncAll 另外观察后置向量结果。
+显式动作：仅对create/update等persist路径且原文件真相仍在：排除DB故障后显式KnowledgeSyncService.sync/syncAll。若operation为knowledge.delete，按reconcileVia分流到删除清单，不能以sync代替同IDdelete。先dryRun，正式写后仍须读回。
 
 重试身份：复用原 entryId 与原文件，不重新 create 生成新 id，也不因重试更新已保存文件的来源身份。
 
