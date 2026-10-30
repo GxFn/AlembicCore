@@ -3,3 +3,13 @@ node_modules/
 *.tsbuildinfo
 /reviews/.append.lock
 /reviews/records.json.tmp
+
+# 独立复制本目录时也排除本机环境与包管理日志；正式示例须经人工脱敏审阅。
+.DS_Store
+/.env
+/.env.*
+!/.env.example
+/npm-debug.log*
+/yarn-debug.log*
+/yarn-error.log*
+/pnpm-debug.log*

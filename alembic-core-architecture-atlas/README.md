@@ -2,6 +2,8 @@
 
 独立的中文架构阅读器：17 个问题专题、逐文件来源、公共入口、业务调用、状态恢复与变更影响。正式 Markdown 在 [maps](maps/README.md)，包含从同页正典生成的 Mermaid 与逐边证据表。
 
+维护者入口：[文件分层、生成链与提交规则](MAINTAINING.md)。本目录是独立 private npm 工程，Git 版本仍由 AlembicCore 仓库管理；静态阅读与完整 workspace 维护的依赖不同。
+
 ```sh
 cd alembic-core-architecture-atlas
 npm ci
@@ -81,15 +83,17 @@ npm run dev
 [运行证据](evidence/README.md)与L3断言定位分开。只有实际执行、所有预期case通过、原始报告/console/观察/回执一致、完整产品来源与harness/工具身份匹配时，维护检查才接受通过。缺材料、篡改、零测、全skip、源变或工具变动不会沿用绿色。浏览器只展示生成时快照，不实时连接ledger。
 
 ```sh
-npm run evidence:run -- V01     # 明确执行一个受控场景；all执行五组
+npm run evidence:run -- V01     # 明确执行一个受控场景；all执行当前配置的全部场景
 npm run inventory:write        # 显式刷新派生阅读数据
 npm run check:evidence         # 复验原始材料与来源，不执行测试
 npm run maintenance:probe      # 临时文件系统演练维护闭环，不改产品源
 npm run check:portable         # 缺Core源、ledger和消费者的临时副本构建检查
-npm run review:append -- reviews/output-budget-review.json
+npm run review:append -- .build/review-drafts/review.json  # 先实际复审，再准备本次输入
 ```
 
 新文件复核记录只追加，绑定路径、精确字节、scope、method、结论和原始材料摘要。同ID相同记录重试不重写；冲突先拒绝，旧记录不删除。准备自己的spec前必须实际阅读文件；命令不会替代语义判断。更改源码、测试或消费者后，变更影响页同时列出关联模块、失败、对象、旅程和运行材料。
+
+复审草稿放入 ignored `.build/review-drafts/`。追加成功后的原件归 ledger，仓内保留 `reviews/records.json` 索引；不再额外保留同字节的已发布输入副本，也不要把旧 spec 改日期后当成新复审。
 
 运行回执目前保守绑定完整Core产品库存，因此来源变化可能要求重跑全部选定样本；主要实现路径仅是导航，不冒充完整传递依赖。全量产品测试历史仍单列。八个核心对象说明身份、生产/消费方、持久化、失效和阶段含义，不把所有说明性阶段都称作持久状态机。
 

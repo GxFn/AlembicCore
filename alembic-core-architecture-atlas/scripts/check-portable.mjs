@@ -40,6 +40,7 @@ try {
     'site.config.ts',
     'index.html',
     'README.md',
+    'MAINTAINING.md',
   ];
   for (const name of entries)
     fs.cpSync(path.join(atlas, name), path.join(copy, name), { recursive: true });
