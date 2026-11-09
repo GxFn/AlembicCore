@@ -51,12 +51,13 @@
   "exactEdgeAllowlistContract": "Each entry requires {repo, dependency, owner, reason, cleanupTrigger}; entries without all five fields fail the gate. Empty today — the verified DAG needs no exceptions.",
   "toolchainFloor": {
     "description": "Space toolchain floor derived from CURRENT repo facts (engines fields + pinned/installed gate tooling) — floors record what is already true, never aspirations. Drift note rule: raising or lowering any floor requires a wakeflow-ledger note naming the wave that re-measured it; gates fail below floor with an explicit message.",
-    "node": ">=22.0.0",
+    "node": ">=24.22.2",
     "typescript": "5.9.x",
     "biome": "2.4.6",
     "vitest": ">=4",
     "facts": {
-      "engines.node": ">=22.0.0 in Core/Alembic/Agent/Plugin manifests (Dashboard has no engines field)",
+      "engines.node": ">=24.22.2 in all five repo root manifests (Core/Agent/Plugin/Alembic/Dashboard; Dashboard gains the field in this wave) and in Plugin packages/alembic-runtime",
+      "engines.node.driftNote": "Raised >=22.0.0 -> >=24.22.2 by requirement_5b7944c0-f8a0-489f-ab04-f6d8f00116cd (Demand demand_e6c47a6c-fef8-4fcf-b3ea-a68386f9e8d8), which re-measured the floor across all five repos: Node 20 is end-of-life, Node 22 reaches end-of-life on 2027-04-30, and the 2026-10-21 security release is fixed from 24.22.1 onward; 24.22.2 is the installed and verified 24.x baseline.",
       "typescript": "Core devDependencies ^5.9.3; tsc 5.9.3 runs the build gates",
       "biome": "pinned 2.4.6 in Core",
       "vitest": "Core ^4.0.18 with @vitest/coverage-v8 ^4.1.6"

@@ -93,7 +93,7 @@ src/
 
 ## 技术与代码规则
 
-- 语言：TypeScript，Node.js >= 22。
+- 语言：TypeScript，Node.js >= 24.22.2。
 - 模块系统：ESM (`"type": "module"`)，import 路径必须带 `.js` 后缀。
 - Lint / Format：Biome。
 - 测试框架：Vitest。

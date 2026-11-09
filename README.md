@@ -110,7 +110,7 @@ Knowledge service dependency contracts, nullable writes and host module ownershi
 
 ## Getting started
 
-Requirements: Node.js >= 22, npm.
+Requirements: Node.js >= 24.22.2, npm.
 
 ```bash
 npm ci

@@ -93,7 +93,7 @@ import { runHostAgentDimensionCompletionWorkflow } from '@alembic/core/host-agen
 
 ## 快速开始
 
-要求：Node.js >= 22、npm。
+要求：Node.js >= 24.22.2、npm。
 
 ```bash
 npm ci

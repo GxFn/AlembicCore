@@ -319,7 +319,7 @@
     "lint:retired-symbols": "node scripts/lint-retired-symbols.mjs . --dirs=src,test"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=24.22.2"
   },
   "license": "MIT",
   "dependencies": {
